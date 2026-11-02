@@ -385,6 +385,7 @@ impl RuntimeConfig {
         let exit_slippage = values.remove("BSC_EXEC_EXIT_SLIPPAGE_BPS");
         let operator_exit = values.remove("BSC_EXEC_LIVE_OPERATOR_EXIT");
         let nonce_burn = values.remove("BSC_EXEC_LIVE_NONCE_BURN");
+        let public_only = values.remove("BSC_EXEC_LIVE_PUBLIC_ONLY");
         let live_key = values.remove("BSC_LIVE_KEY");
         let live_buyer = values.remove("BSC_LIVE_BUYER");
         let live_route = values.remove("BSC_LIVE_ROUTE");
@@ -569,6 +570,9 @@ impl RuntimeConfig {
                 if nonce_burn.is_some() {
                     return Err("BSC_EXEC_LIVE_NONCE_BURN needs BSC_EXEC_PAPER_IDENTITY".into());
                 }
+                if public_only.is_some() {
+                    return Err("BSC_EXEC_LIVE_PUBLIC_ONLY needs BSC_EXEC_PAPER_IDENTITY".into());
+                }
                 None
             }
             Some(_) if canonical.is_none() => {
@@ -660,6 +664,21 @@ impl RuntimeConfig {
                             }
                             None => return Err("BSC_EXEC_LIVE_NONCE_BURN is required".into()),
                         },
+                        live_public_only: match public_only {
+                            Some("ON") => true,
+                            Some("OFF") => false,
+                            Some(v) => {
+                                return Err(format!(
+                                    "BSC_EXEC_LIVE_PUBLIC_ONLY={v} is neither ON nor OFF"
+                                ));
+                            }
+                            None => return Err("BSC_EXEC_LIVE_PUBLIC_ONLY is required".into()),
+                        },
+                        live_grant_max_duration_ms: take(
+                            "BSC_EXEC_LIVE_GRANT_MAX_DURATION_MS",
+                            0,
+                            31_536_000_000,
+                        )?,
                         sender_paths: crate::paper_exec::SenderPaths::parse(
                             sender_paths.ok_or("BSC_EXEC_SENDER_PATHS is required")?,
                         )?,
@@ -4623,6 +4642,14 @@ mod tests {
             // R3b: the nonce burn switch, required and exact.
             CONFIG.replace("BSC_EXEC_LIVE_NONCE_BURN=OFF\n", ""),
             CONFIG.replace("BSC_EXEC_LIVE_NONCE_BURN=OFF", "BSC_EXEC_LIVE_NONCE_BURN=1"),
+            // R4: the public-only switch and the grant's longest, required and exact.
+            CONFIG.replace("BSC_EXEC_LIVE_PUBLIC_ONLY=OFF\n", ""),
+            CONFIG.replace("BSC_EXEC_LIVE_PUBLIC_ONLY=OFF", "BSC_EXEC_LIVE_PUBLIC_ONLY=yes"),
+            CONFIG.replace("BSC_EXEC_LIVE_GRANT_MAX_DURATION_MS=0\n", ""),
+            CONFIG.replace(
+                "BSC_EXEC_LIVE_GRANT_MAX_DURATION_MS=0",
+                "BSC_EXEC_LIVE_GRANT_MAX_DURATION_MS=31536000001",
+            ),
             CONFIG.replace("BSC_STATE_WATCHED=\n", ""),
             CONFIG.replace("BSC_STATE_WATCHED=\n", "BSC_STATE_WATCHED=0x12\n"),
             CONFIG.replace(
@@ -4677,6 +4704,26 @@ mod tests {
             "BSC_EXEC_LIVE_NONCE_BURN=OFF",
             "BSC_EXEC_LIVE_NONCE_BURN=ON"
         )));
+        // R4: a public source alone triggers no C3 BUY unless ON; no
+        // grant's duration is bounded unless the operator names one.
+        let exec = |text: &str| RuntimeConfig::parse(text).unwrap().exec.unwrap().exec;
+        assert!(!exec(CONFIG).live_public_only);
+        assert!(
+            exec(&CONFIG.replace(
+                "BSC_EXEC_LIVE_PUBLIC_ONLY=OFF",
+                "BSC_EXEC_LIVE_PUBLIC_ONLY=ON"
+            ))
+            .live_public_only
+        );
+        assert_eq!(exec(CONFIG).live_grant_max_duration_ms, 0);
+        assert_eq!(
+            exec(&CONFIG.replace(
+                "BSC_EXEC_LIVE_GRANT_MAX_DURATION_MS=0",
+                "BSC_EXEC_LIVE_GRANT_MAX_DURATION_MS=3600000"
+            ))
+            .live_grant_max_duration_ms,
+            3_600_000
+        );
     }
 
     /// REV.1.0 R3: a lot the operator resumed is stranded no more and is

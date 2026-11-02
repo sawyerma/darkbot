@@ -585,6 +585,9 @@ fn exec_setup() -> ExecSetup {
             live_lease_blocks: 200,
             live_operator_exit: false,
             live_nonce_burn: false,
+            // The rig's sources are public: the variant ON.
+            live_public_only: true,
+            live_grant_max_duration_ms: 0,
             sender_paths: SenderPaths::Both,
         },
         reprobe: Duration::from_secs(3_600),

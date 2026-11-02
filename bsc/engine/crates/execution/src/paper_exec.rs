@@ -185,6 +185,14 @@ pub struct ExecConfig {
     /// transaction burns its nonce (`BSC_EXEC_LIVE_NONCE_BURN`, OFF by
     /// default: held back, the CLI refuses it).
     pub live_nonce_burn: bool,
+    /// REV.1.0 R4 (PHASENPLAN §20): a public WSS source may be a C3 BUY's
+    /// only LIVE signal (`BSC_EXEC_LIVE_PUBLIC_ONLY`, OFF by default: a C3
+    /// BUY needs a LIVE source that is not public).
+    pub live_public_only: bool,
+    /// REV.1.0 R4 (BSC3-059): the longest a grant may still run for a BUY
+    /// to go (`BSC_EXEC_LIVE_GRANT_MAX_DURATION_MS`; 0: no bound); its
+    /// exits go on.
+    pub live_grant_max_duration_ms: u64,
     /// Phase I gate M2: the PAPER paths that take the sender.
     pub sender_paths: SenderPaths,
 }
@@ -2406,6 +2414,9 @@ pub(crate) mod tests {
             live_lease_blocks: 200,
             live_operator_exit: false,
             live_nonce_burn: false,
+            // The test rigs' sources are public: the variant ON (R4 tests OFF).
+            live_public_only: true,
+            live_grant_max_duration_ms: 0,
             sender_paths: SenderPaths::Both,
         }
     }

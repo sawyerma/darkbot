@@ -68,6 +68,15 @@ impl SourceId {
         }
     }
 
+    /// REV.1.0 R4 (PHASENPLAN §5a.2, §20): a public WSS endpoint (anyone's
+    /// view of the mempool), never a production BUY's only signal.
+    pub const fn public(self) -> bool {
+        matches!(
+            self,
+            SourceId::PublicNode | SourceId::Drpc | SourceId::BlockReq
+        )
+    }
+
     pub const ALL: [SourceId; 5] = [
         SourceId::Geth,
         SourceId::PublicNode,
@@ -212,7 +221,10 @@ pub const ECONOMIC_LIVE_NOT_AUTHORIZED: &str = "ECONOMIC_LIVE_NOT_AUTHORIZED";
 /// the first missing condition (plan v9 §2.5).
 pub const ECONOMIC_LIVE_DISABLED: &str = "ECONOMIC_LIVE_DISABLED";
 /// C2 may only run operationally after a real G0.8 acquisition PASS and the
-/// evaluated G0.4 measurement (PHASENPLAN §10 offline override).
+/// evaluated G0.4 measurement (PHASENPLAN §10 offline override). R4: a
+/// requested C2 LIVE stays BLOCKED; the economic LIVE path reads C2 in
+/// SHADOW (its nonces and inclusions), its authority is the grant with the
+/// LIVE acquisition (G0.8) and source (G0.4) conditions.
 pub const C2_OPERATIONAL_NOT_AUTHORIZED: &str = "C2_OPERATIONAL_NOT_AUTHORIZED";
 pub const SOURCE_ACCESS_UNQUALIFIED: &str = "SOURCE_ACCESS_UNQUALIFIED";
 /// Four.meme Classic and OpenFour are recognized and decoded (Phase E), but
@@ -340,6 +352,9 @@ pub const LIVE_RECOVERY_LEASE_WINDOW_UNKNOWN: &str = "RECOVERY_LEASE_WINDOW_UNKN
 /// REV.1.0 R3b: the operator wants a nonce burnt: no BUY takes the next
 /// nonce before it (an exit may: it replaces the transaction as well).
 pub const LIVE_NONCE_BURN_FIRST: &str = "LIVE_NONCE_BURN_FIRST";
+/// REV.1.0 R4 (BSC3-059): the grant runs longer than
+/// `BSC_EXEC_LIVE_GRANT_MAX_DURATION_MS` admits for a BUY (exits go on).
+pub const LIVE_GRANT_DURATION_ABOVE_MAX: &str = "LIVE_GRANT_DURATION_ABOVE_MAX";
 /// BSC3-012: the running `bsc_runtime` is not the build the LIVE
 /// qualification names (or it names none, or this one is unreadable).
 pub const LIVE_BUILD_UNQUALIFIED: &str = "LIVE_BUILD_UNQUALIFIED";

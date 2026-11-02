@@ -380,6 +380,8 @@ pub struct LiveRuntime {
     /// Launches first seen by a granted source that is not effective LIVE
     /// (the operator holds it in SHADOW, say).
     source_not_live: u64,
+    /// R4 (PHASENPLAN §20): launches while every LIVE source is public.
+    public_only_refused: u64,
     /// The grant's sources effective LIVE at the last tick (the owner's
     /// [`crate::sources::LiveNow::sources_live`]); none before a tick.
     sources_live: Vec<SourceId>,
@@ -562,6 +564,7 @@ impl LiveRuntime {
             next_nonce: None,
             source_refused: 0,
             source_not_live: 0,
+            public_only_refused: 0,
             sources_live: Vec::new(),
             exit_deciders: None,
             strategy_buys_refused: 0,
@@ -1553,7 +1556,8 @@ impl LiveRuntime {
         let grant = x.end().armed().grant();
         let generation = x.end().armed().grant_generation();
         let c3 = !grant.exit_only
-            && matches!(grant.strategies, LiveStrategies::C3 | LiveStrategies::Both);
+            && matches!(grant.strategies, LiveStrategies::C3 | LiveStrategies::Both)
+            && !self.public_only_locked();
         let next = owner.and_then(|o| self.free_nonce(o));
         let head = owner.and_then(|o| o.head()).map(|h| h.number);
         let may_buy = self.buy_refusal(self.one_buy(), owner, next).is_none();
@@ -1940,28 +1944,38 @@ impl LiveRuntime {
         let held = self
             .held_attempt(generation)
             .map(alloy_primitives::hex::encode);
-        let live_now =
-            match store.live_now_holding(&components, &verified.view, now_ms, held.as_deref()) {
-                Ok(n) => {
-                    self.buys_closed = None;
-                    n
+        // R4 (BSC3-059): a grant beyond the runtime's longest admits no
+        // BUY; its exits go on.
+        let max = self.exec.exec.live_grant_max_duration_ms;
+        let live_now = store
+            .live_now_holding(&components, &verified.view, now_ms, held.as_deref())
+            .and_then(|n| {
+                match max > 0 && n.grant().expires_unix_ms.saturating_sub(now_ms) > max {
+                    true => Err(crate::sources::LIVE_GRANT_DURATION_ABOVE_MAX.into()),
+                    false => Ok(n),
                 }
-                // BSC3-071: what only a BUY needs (its attempts, the grant's
-                // room for another input) does not end the exits of open
-                // positions under the same grant; BUYs stay refused.
-                // R3b review MEDIUM-3: a burn wanted is an exit step's
-                // admission too: the path arms for it.
-                Err(why) if self.positions_open() || self.burn_target().is_some() => {
-                    match store.live_now_exits(&components, &verified.view, now_ms) {
-                        Ok(n) => {
-                            self.buys_closed = Some(why);
-                            n
-                        }
-                        Err(why) => return self.close(why),
+            });
+        let live_now = match live_now {
+            Ok(n) => {
+                self.buys_closed = None;
+                n
+            }
+            // BSC3-071: what only a BUY needs (its attempts, the grant's
+            // room for another input) does not end the exits of open
+            // positions under the same grant; BUYs stay refused.
+            // R3b review MEDIUM-3: a burn wanted is an exit step's
+            // admission too: the path arms for it.
+            Err(why) if self.positions_open() || self.burn_target().is_some() => {
+                match store.live_now_exits(&components, &verified.view, now_ms) {
+                    Ok(n) => {
+                        self.buys_closed = Some(why);
+                        n
                     }
+                    Err(why) => return self.close(why),
                 }
-                Err(why) => return self.close(why),
-            };
+            }
+            Err(why) => return self.close(why),
+        };
         self.sources_live = live_now.sources_live().to_vec();
         if self.executor.is_some()
             && let Some(why) = self.ledger_fault()
@@ -2393,6 +2407,10 @@ impl LiveRuntime {
                 }
                 self.awaiting_granted.push_back(hash);
             }
+            return None;
+        }
+        if self.public_only_locked() {
+            self.public_only_refused += 1;
             return None;
         }
         self.poll_responses(clock);
@@ -2868,6 +2886,14 @@ impl LiveRuntime {
         Some(handed)
     }
 
+    /// R4 (PHASENPLAN §20): every LIVE source is public and
+    /// `BSC_EXEC_LIVE_PUBLIC_ONLY` is OFF: a sighting is no C3 BUY's signal.
+    fn public_only_locked(&self) -> bool {
+        !self.exec.exec.live_public_only
+            && !self.sources_live.is_empty()
+            && self.sources_live.iter().all(|s| s.public())
+    }
+
     /// Review LOW-2: a transaction of the buyer (one written before its
     /// sender was recorded counts as the buyer's).
     fn buyers(&self, t: &crate::live_ledger::Tx) -> bool {
@@ -3175,6 +3201,7 @@ impl LiveRuntime {
         for (name, n) in [
             ("SOURCE_NOT_GRANTED", self.source_refused),
             ("SOURCE_NOT_LIVE", self.source_not_live),
+            ("SOURCE_PUBLIC_ONLY", self.public_only_refused),
             ("STRATEGY_BUYS_NOT_GRANTED", self.strategy_buys_refused),
             ("EXIT_FIRST", self.exit_first),
             ("BUYS_CLOSED", self.buys_refused),
@@ -6504,6 +6531,96 @@ mod tests {
         // The path goes on at the next nonce: nothing unresolved holds it.
         assert!(x.armed(), "{:?}", reason(&x));
         assert!(x.book().unresolved().next().is_none());
+        x.shutdown();
+        r.clean();
+    }
+
+    /// REV.1.0 R4 (PHASENPLAN §20): with every LIVE source public and
+    /// `BSC_EXEC_LIVE_PUBLIC_ONLY` OFF, a sighting triggers no C3 BUY
+    /// (counted SOURCE_PUBLIC_ONLY) and the arm holds no lease for one;
+    /// ON, the same sighting is its signal.
+    #[test]
+    fn a_public_source_alone_triggers_no_c3_buy() {
+        let mut r = Rig::new("live-public-only", LiveStrategies::C3);
+        r.exec.exec.live_public_only = false;
+        let leased = |x: &LiveRuntime| x.executor.as_ref().unwrap().end().lease().is_some();
+        let mut x = r.runtime("boot-1");
+        let mut c2 = c2_at(&r.d, r.buyer, 5);
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
+        assert!(!leased(&x), "no lease for a BUY that may not come");
+        let (hash, raw, launcher) = launch();
+        c2.pending(hash, launcher, 3, 0, 10);
+        assert!(
+            x.on_launch(SourceId::PublicNode, hash, &raw, 10, &c2, &a_clock())
+                .is_none()
+        );
+        assert!(refused_by(&x, "SOURCE_PUBLIC_ONLY"), "{:?}", reason(&x));
+        x.shutdown();
+        r.exec.exec.live_public_only = true;
+        let mut x = r.runtime("boot-1");
+        settle(&mut x, &c2);
+        assert!(leased(&x));
+        assert!(
+            x.on_launch(SourceId::PublicNode, hash, &raw, 10, &c2, &a_clock())
+                .is_some()
+        );
+        x.shutdown();
+        r.clean();
+    }
+
+    /// REV.1.0 R4 (BSC3-059): a grant running longer than
+    /// `BSC_EXEC_LIVE_GRANT_MAX_DURATION_MS` admits no BUY (nothing to exit:
+    /// nothing arms, LIVE_GRANT_DURATION_ABOVE_MAX; a lot open: the path arms
+    /// for its exit only); within it the path arms.
+    #[test]
+    fn a_grant_beyond_the_longest_duration_admits_no_buy() {
+        let mut r = Rig::new("live-grant-duration", LiveStrategies::C3);
+        // The rig's grant runs an hour.
+        r.exec.exec.live_grant_max_duration_ms = 3_599_000;
+        let mut x = r.runtime("boot-1");
+        let c2 = c2_at(&r.d, r.buyer, 5);
+        settle(&mut x, &c2);
+        assert!(!x.armed());
+        let (_, why) = reason(&x);
+        assert_eq!(
+            why.as_deref(),
+            Some(crate::sources::LIVE_GRANT_DURATION_ABOVE_MAX)
+        );
+        x.shutdown();
+        // A lot open: the path arms for its exit, no BUY (review LOW).
+        let buy = Fact {
+            max_block: Some(HEAD),
+            ..unknown_window([0x7c; 32], 3, ComponentId::ExecC3)
+        };
+        let ledger = Ledger::open(&r.state);
+        ledger.append(&buy, 1).unwrap();
+        ledger
+            .append(
+                &Fact {
+                    block: Some((HEAD - 1, [0x41; 32], NOW)),
+                    gas_wei: Some(U256::from(1u64)),
+                    tokens: Some(U256::from(7u64)),
+                    eth_wei: Some(U256::from(1u64)),
+                    ..Fact::about(&buy, FactKind::Included)
+                },
+                2,
+            )
+            .unwrap();
+        let mut x = r.runtime("boot-1");
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
+        assert_eq!(
+            x.buys_closed.as_deref(),
+            Some(crate::sources::LIVE_GRANT_DURATION_ABOVE_MAX)
+        );
+        assert!(x.buy_refusal(U256::ZERO, Some(&c2), Some(5)).is_some());
+        x.shutdown();
+        r.exec.exec.live_grant_max_duration_ms = 3_600_000;
+        let mut x = r.runtime("boot-1");
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
+        assert_eq!(x.buys_closed, None, "exactly the longest admits BUYs");
         x.shutdown();
         r.clean();
     }

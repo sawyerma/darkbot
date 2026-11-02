@@ -189,6 +189,9 @@ fn strategy_paper_path_latency() {
             live_lease_blocks: 200,
             live_operator_exit: false,
             live_nonce_burn: false,
+            // The test rigs' sources are public: the variant ON (R4 tests OFF).
+            live_public_only: true,
+            live_grant_max_duration_ms: 0,
             sender_paths: darkbot_bsc_execution::paper_exec::SenderPaths::StrategyC,
         },
         Arming {
