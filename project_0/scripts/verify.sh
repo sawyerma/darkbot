@@ -2,18 +2,11 @@
 # Read-only historical verification. No signer, build, wallet or trading process.
 set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# DEC-18: the providers are the project's registry selection (bound at the tool's start).
-export P0_PROJECT_DIR="$(cd "$DIR/.." && pwd)"
-if [[ " ${*} " != *" --help "* && " ${*} " != *" --self-test "* && " ${*} " != *" --offline "* ]]; then
-  ENV_FILE="${P0_ENV_FILE:-$DIR/../.env}"
-  if [[ -f "$ENV_FILE" ]]; then
-    MODE="$(stat -c '%a' "$ENV_FILE" 2>/dev/null || stat -f '%Lp' "$ENV_FILE")"
-    [[ "$MODE" == 600 ]] || { echo 'env permissions must be 600' >&2; exit 2; }
-    set -a
-    source "$ENV_FILE"
-    set +a
-  fi
-fi
+# R-PY (Nutzerentscheidung 01.11.2026): the pinned historical readers run offline only — no
+# credential and no endpoint reaches them (none from a .env, none inherited), so no reader can
+# make an RPC call; online reads are the native tools' (p0ctl verify, the provider registry).
+for v in ${!HELIUS_@}; do unset "$v"; done
+unset P0_RPC_URL P0_AUDIT_RPC_URL P0_OPERATIONAL_CONFIG_FILE P0_PROFILE
 if [[ " ${*} " == *" --self-test "* ]]; then
   exec python3 "$DIR/../operations/verification/audit_market_quick.py" "$@"
 fi

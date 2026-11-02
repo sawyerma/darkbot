@@ -437,6 +437,83 @@ class ReaderCli(unittest.TestCase):
         p=subprocess.run(['bash',str(SCRIPTS/'verify.sh'),'--self-test'],env=clean_env(),capture_output=True,text=True,timeout=300,cwd=tempfile.gettempdir())
         self.assertEqual(p.returncode,0,p.stderr[-2000:]);self.assertIn('Ran 29 tests',p.stderr)
 
+    def test_rpy_productive_launchers_start_the_pinned_readers_offline_only(self):
+        # R-PY (Nutzerentscheidung 01.11.2026): verify.sh and report.sh hand the pinned historical
+        # readers no credential and no endpoint, neither from a .env nor inherited, so no reader
+        # process (the launcher's interpreter or the one run_store execs) can reach the network;
+        # the pinned readers and their hashes stay unchanged.
+        import http.server,socketserver,threading
+        hits=[]
+        class Sink(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):
+                hits.append(self.path);self.send_response(500);self.end_headers()
+            def log_message(self,*_):pass
+        server=socketserver.TCPServer(('127.0.0.1',0),Sink)
+        threading.Thread(target=server.serve_forever,daemon=True).start()
+        url=f'http://127.0.0.1:{server.server_address[1]}'
+        sources=('HELIUS_API_KEY','P0_RPC_URL','P0_AUDIT_RPC_URL','P0_OPERATIONAL_CONFIG_FILE','P0_PROFILE')
+        secret='RPY-SENTINEL-KEY-0123'
+        try:
+            with tempfile.TemporaryDirectory() as folder:
+                tmp=Path(folder);project=self.project(tmp)
+                manifest_run(project/'data/runs','r1','v1','r1');manifest_run(project/'data/econ4h','e1','v1','e1')
+                envfile=project/'.env'
+                envfile.write_text(f'HELIUS_API_KEY={secret}\nP0_RPC_URL={url}\nP0_AUDIT_RPC_URL={url}\n');envfile.chmod(0o600)
+                config=tmp/'operational.json';config.write_text(json.dumps({'rpc_endpoints':[url]}))
+                # The control: every endpoint source is one the contract reads, and the sink sees a
+                # reader's RPC call (so an empty sink below means none was made).
+                for k,v in (('HELIUS_API_KEY',secret),('P0_RPC_URL',url),('P0_AUDIT_RPC_URL',url),('P0_OPERATIONAL_CONFIG_FILE',str(config))):
+                    with patch.dict(os.environ,{k:v}):
+                        for other in sources:
+                            if other!=k:os.environ.pop(other,None)
+                        self.assertTrue(c.endpoint(),k)
+                with self.assertRaises(Exception):a.RPC(url,attempts=1).call('getSignaturesForAddress',['11111111111111111111111111111111',{}])
+                self.assertEqual(len(hits),1,'the sink sees a reader RPC call');hits.clear()
+                # Every interpreter start (the launcher's and the one it execs) records the
+                # endpoint sources it sees.
+                site=tmp/'site';site.mkdir();log=tmp/'interpreters.log'
+                (site/'sitecustomize.py').write_text(
+                    'import os\n'
+                    f'w={sources!r}\n'
+                    'p=os.environ.get("RPY_ENVLOG")\n'
+                    'if p:open(p,"a").write(repr([k for k in w if os.environ.get(k)])+"\\n")\n')
+                env={**clean_env(),'P0_ENV_FILE':str(envfile),'HELIUS_API_KEY':secret,'P0_RPC_URL':url,'P0_AUDIT_RPC_URL':url,
+                     'P0_OPERATIONAL_CONFIG_FILE':str(config),'P0_PROFILE':'default','PYTHONPATH':str(site),'RPY_ENVLOG':str(log)}
+                def launch(script,*args):
+                    p=subprocess.run(['bash',str(project/'scripts'/script),*args],env=env,capture_output=True,text=True,timeout=300,cwd=tempfile.gettempdir())
+                    self.assertNotIn(secret,p.stdout+p.stderr);self.assertNotIn(url,p.stdout+p.stderr)
+                    return p
+                online=launch('verify.sh','--run=e1','--mode','index')
+                off=launch('verify.sh','--run=e1','--mode','off')
+                report=launch('report.sh','--run','r1','--format','json')
+                selftest=subprocess.run(['bash',str(SCRIPTS/'verify.sh'),'--self-test'],env=env,capture_output=True,text=True,timeout=300,cwd=tempfile.gettempdir())
+                self.assertEqual(hits,[],'no reader reached the network')
+                seen=[eval(line) for line in log.read_text().splitlines()]
+                self.assertGreaterEqual(len(seen),7,'the launchers and the readers they exec')
+                self.assertEqual([k for k in seen if k],[],'no interpreter saw an endpoint source')
+                # Offline outcomes: an online mode is refused for want of RPC access, never read.
+                self.assertEqual(online.returncode,2,online.stderr[-2000:])
+                self.assertIn('RPC_ACCESS_MISSING',online.stdout)
+                self.assertEqual(off.returncode,0,off.stderr[-2000:])
+                self.assertEqual(report.returncode,0,report.stderr[-2000:])
+                self.assertEqual(selftest.returncode,0,selftest.stderr[-2000:])
+                for name in ('cli/measurement_contract.py','verification/audit_market_quick.py','reporting/market_report.py','capture/run_store.py'):
+                    self.assertEqual(c.file_hash(project/'operations'/name),c.file_hash(p0_paths.OPERATIONS/name))
+        finally:
+            server.shutdown();server.server_close()
+        # Statically: only these two launchers start an online-capable pinned reader, each clears
+        # every endpoint source first; run_store.py (also run by capture.sh) has no network code.
+        readers=('measurement_verify','audit_market_quick','market_report')
+        starting=sorted(f.name for f in SCRIPTS.glob('*.sh') if any(r in f.read_text() for r in readers))
+        self.assertEqual(starting,['report.sh','verify.sh'])
+        for name in starting:
+            text=(SCRIPTS/name).read_text()
+            self.assertLess(text.index('unset P0_RPC_URL P0_AUDIT_RPC_URL P0_OPERATIONAL_CONFIG_FILE P0_PROFILE'),text.index('exec python3'),name)
+            self.assertIn('for v in ${!HELIUS_@}; do unset "$v"; done',text)
+            self.assertNotIn('source "$ENV_FILE"',text)
+        store=RUN_STORE.read_text()
+        self.assertFalse(any(m in store for m in ('urllib','socket','http.client','requests')),'run_store.py reads nothing from the network')
+
     def test_verify_resume_and_report_by_id_keep_identities(self):
         with tempfile.TemporaryDirectory() as folder:
             project=self.project(Path(folder))
