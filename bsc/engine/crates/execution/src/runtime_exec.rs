@@ -455,6 +455,7 @@ impl ExecRuntime {
             owner,
             next_nonce,
             None,
+            None,
             clock,
             now_unix_ms,
         ))
@@ -628,13 +629,15 @@ pub fn launch_to<E: End>(
 /// One Strategy C decision through `executor`, whichever its end: the
 /// intents that reached it (an exit's approval even when its SELL was
 /// refused) and the refusal. `next_nonce` and `exit_reserve_wei` as in
-/// [`launch_to`].
+/// [`launch_to`]; `exit_gas_price_wei` an exit's own price (R5).
+#[allow(clippy::too_many_arguments)]
 pub fn strategy_to<E: End>(
     executor: &mut Executor<E>,
     action: &crate::runtime_strategy::StrategyAction,
     owner: &StateOwner,
     next_nonce: Option<u64>,
     exit_reserve_wei: Option<U256>,
+    exit_gas_price_wei: Option<u64>,
     clock: &dyn Clock,
     now_unix_ms: u64,
 ) -> (Vec<ExecIntent<E::Handoff>>, Option<Refusal>) {
@@ -646,6 +649,7 @@ pub fn strategy_to<E: End>(
         now_unix_ms,
         next_nonce,
         exit_reserve_wei,
+        exit_gas_price_wei,
     };
     match *action {
         StrategyAction::Buy {
@@ -684,6 +688,7 @@ pub fn burn_to<E: End>(
         now_unix_ms,
         next_nonce,
         exit_reserve_wei: None,
+        exit_gas_price_wei: None,
     };
     executor.on_burn(&c2, clock)
 }
@@ -743,6 +748,9 @@ pub(crate) mod tests {
                 live_risk_outlier: false,
                 live_c3_rearm: false,
                 live_builder_policy: crate::builder_policy::TEST_POLICY.into(),
+                live_exit_reprice_bps: 0,
+                live_public_exit: false,
+                live_public_exit_rpc: String::new(),
                 sender_paths: crate::paper_exec::SenderPaths::Both,
             },
             reprobe,

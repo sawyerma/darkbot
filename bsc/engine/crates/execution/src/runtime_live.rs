@@ -330,6 +330,18 @@ fn wall_ms() -> u64 {
     crate::runtime::wall_or_expired(darkbot_bsc_record::observed_now())
 }
 
+/// R5 (BSC3-030): a lost exit step's price `prior` raised by `bps`, at most
+/// `max`: the re-price, when above both `prior` and the arm's price `arm`
+/// (a higher arm price, or another gas limit, are new bytes already; the
+/// prior is derived with today's limits).
+fn repriced(prior: u64, bps: u16, arm: u64, max: u64) -> Option<u64> {
+    let raise = (u128::from(prior) * u128::from(bps)).div_ceil(10_000);
+    let price = u64::try_from(u128::from(prior) + raise)
+        .unwrap_or(u64::MAX)
+        .min(max);
+    (price > prior && price > arm).then_some(price)
+}
+
 /// Whether an armed path is renewed at the buyer's free nonce `free`
 /// (BSC3-048), its strategy's next nonce being `cursor`: an earlier arm's
 /// transaction took nonces this arm did not plan (`free` above `cursor`);
@@ -392,6 +404,12 @@ pub struct LiveRuntime {
     /// BSC3-056: the runtime's last verdict of the second source, handed to
     /// every end armed (`None`: no second source).
     confirmation: Option<crate::canonical_confirm::Confirmation>,
+    /// R5 (BSC3-030): the public exit route's worker (started at its first
+    /// exit step), the follower's bounds it is started with (the last
+    /// tick's), and its counts across workers.
+    public_exit: Option<crate::public_exit::PublicExit>,
+    follower_limits: Option<FollowerLimits>,
+    public_counts: crate::public_exit::PublicCounts,
     disarm_errors: u64,
     next_nonce: Option<u64>,
     /// Launches first seen by a source the grant does not name.
@@ -579,6 +597,9 @@ impl LiveRuntime {
             build: live_qualification::running_build(),
             probes: 0,
             confirmation: None,
+            public_exit: None,
+            follower_limits: None,
+            public_counts: crate::public_exit::PublicCounts::default(),
             disarm_errors: 0,
             next_nonce: None,
             source_refused: 0,
@@ -1717,15 +1738,38 @@ impl LiveRuntime {
         U256::from(x.input_wei) + U256::from(x.gas_price_wei) * U256::from(x.gas_limit)
     }
 
-    /// One position's exit at the signed gas price, as the executor
-    /// charges it: its approval's gas and its SELL's.
+    /// The most an exit step may go at: the signed gas price, or with the
+    /// exit re-price ON (R5) the armed grant's risk maximum.
+    fn exit_price(&self) -> u64 {
+        let x = &self.exec.exec;
+        let max = self
+            .executor
+            .as_ref()
+            .and_then(|e| e.end().armed().grant().risk)
+            .map(|r| r.max_gas_price_wei);
+        match (x.live_exit_reprice_bps, max) {
+            (0, _) | (_, None) => x.gas_price_wei,
+            (_, Some(max)) => max.max(x.gas_price_wei),
+        }
+    }
+
+    /// One position's exit at the most it may go at ([`Self::exit_price`]):
+    /// its approval's gas and its SELL's.
     fn exit_gas(&self) -> (U256, U256) {
         let x = &self.exec.exec;
-        let price = U256::from(x.gas_price_wei);
+        let price = U256::from(self.exit_price());
         (
             price * U256::from(x.approve_gas_limit),
             price * U256::from(x.sell_gas_limit),
         )
+    }
+
+    /// What the executor's own count of a new BUY's exit (at the signed
+    /// price) leaves out of [`Self::exit_gas`] (R5: a re-priced exit).
+    fn own_exit_excess(&self) -> U256 {
+        let x = &self.exec.exec;
+        let excess = U256::from(self.exit_price() - x.gas_price_wei);
+        excess * U256::from(x.approve_gas_limit) + excess * U256::from(x.sell_gas_limit)
     }
 
     /// The most the exits of the ledger's lots may still cost
@@ -1919,6 +1963,12 @@ impl LiveRuntime {
         session: u64,
         now_ms: u64,
     ) {
+        if let Some((_, limits)) = canonical {
+            self.follower_limits = Some(*limits);
+        }
+        for o in self.public_exit.iter().flat_map(|p| p.poll()) {
+            self.public_counts.count(o);
+        }
         // BSC3-025: an end being connected waits across passes that do not
         // come back to arming (review LOW-3: a flapping precondition never
         // restarts it), at most as long as Q5A lets its connections take
@@ -2492,7 +2542,10 @@ impl LiveRuntime {
         {
             return None;
         }
-        let reserve = Some(self.exit_reserve_besides(next.and_then(|n| self.buyer_key(n))));
+        let reserve = Some(
+            self.exit_reserve_besides(next.and_then(|n| self.buyer_key(n)))
+                + self.own_exit_excess(),
+        );
         let x = self.executor.as_mut()?;
         let before = x.end().released().len();
         let buy = launch_to(x, hash, raw, ingress_ns, owner, next, reserve, clock);
@@ -2931,7 +2984,16 @@ impl LiveRuntime {
         {
             self.yield_lease();
         }
-        let reserve = Some(self.exit_reserve_besides(next.and_then(|n| self.buyer_key(n))));
+        let reserve = Some(
+            self.exit_reserve_besides(next.and_then(|n| self.buyer_key(n)))
+                + self.own_exit_excess(),
+        );
+        let repriced = match *action {
+            crate::runtime_strategy::StrategyAction::Exit { token, .. } => {
+                self.exit_repriced(&token, next, owner.head().map(|h| h.number))
+            }
+            crate::runtime_strategy::StrategyAction::Buy { .. } => None,
+        };
         let before = self.executor.as_ref()?.end().released().len();
         let handed = strategy_to(
             self.executor.as_mut()?,
@@ -2939,11 +3001,24 @@ impl LiveRuntime {
             owner,
             next,
             reserve,
+            repriced,
             clock,
             now_unix_ms,
         );
         if let crate::runtime_strategy::StrategyAction::Exit { token, .. } = *action {
             self.want_exit(token);
+        }
+        // R5 (BSC3-030): with the public exit route ON, the exit steps
+        // handed to the builders also go to the public endpoint.
+        if self.exec.exec.live_public_exit {
+            for i in handed.0.iter().filter(|i| {
+                matches!(
+                    i.kind,
+                    crate::paper_exec::IntentKind::Approve | crate::paper_exec::IntentKind::Sell
+                )
+            }) {
+                self.public_send(i.handoff.tx_hash, &i.raw);
+            }
         }
         if handed
             .0
@@ -2955,6 +3030,80 @@ impl LiveRuntime {
         }
         self.record_responses();
         Some(handed)
+    }
+
+    /// R5 (BSC3-030): hands an exit step's signed bytes to the public route,
+    /// its worker started at the first (on the loopback route the
+    /// stand-in, else the configured endpoint).
+    fn public_send(&mut self, tx_hash: [u8; 32], raw: &[u8]) {
+        use crate::public_exit::{PublicExit, PublicTarget};
+        if self.public_exit.is_none() {
+            let target = match &self.setup.route {
+                LiveRouteConfig::Loopback { port } => PublicTarget::Loopback(*port),
+                LiveRouteConfig::Builders { .. } => {
+                    PublicTarget::Https(self.exec.exec.live_public_exit_rpc.clone())
+                }
+            };
+            self.public_exit = self
+                .follower_limits
+                .and_then(|limits| PublicExit::spawn(&target, &limits).ok());
+        }
+        match self
+            .public_exit
+            .as_ref()
+            .is_some_and(|p| p.send(tx_hash, raw))
+        {
+            true => self.public_counts.sent += 1,
+            false => {
+                self.public_exit = None;
+                self.public_counts.unstarted += 1;
+            }
+        }
+    }
+
+    /// R5 (BSC3-030): the gas price `token`'s exit goes at from the buyer's
+    /// free nonce `next` when not the arm's: with
+    /// BSC_EXEC_LIVE_EXIT_REPRICE_BPS above 0, an exit step of it released
+    /// at that nonce before, its window over at `head` and unresolved, goes
+    /// at the highest such step's price raised by the bps, at most the
+    /// grant's risk maximum (at it already: none, its same bytes are
+    /// refused as LIVE_INTENT_SEEN).
+    fn exit_repriced(&self, token: &[u8; 20], next: Option<u64>, head: Option<u64>) -> Option<u64> {
+        let x = &self.exec.exec;
+        let (next, head) = (next?, head?);
+        if x.live_exit_reprice_bps == 0 {
+            return None;
+        }
+        let max = self
+            .executor
+            .as_ref()?
+            .end()
+            .armed()
+            .grant()
+            .risk?
+            .max_gas_price_wei;
+        let prior = self
+            .book
+            .unresolved()
+            .filter(|t| {
+                t.released.token == *token
+                    && t.released.intent.exit_step()
+                    && t.released.nonce == next
+                    && t.window_over(head)
+            })
+            .filter_map(|t| {
+                let limit = U256::from(match t.released.intent {
+                    LiveIntentKind::Approve => x.approve_gas_limit,
+                    _ => x.sell_gas_limit,
+                });
+                let paid = t
+                    .released
+                    .max_wei?
+                    .saturating_sub(t.released.input_wei.unwrap_or_default());
+                u64::try_from((paid + limit - U256::from(1u8)) / limit).ok()
+            })
+            .max()?;
+        repriced(prior, x.live_exit_reprice_bps, x.gas_price_wei, max)
     }
 
     /// R4 (PHASENPLAN §20): every LIVE source is public and
@@ -3325,6 +3474,12 @@ impl LiveRuntime {
             d.push(l::REFUSALS, format!("{}={n}", r.name()).as_str());
         }
         for (name, n) in x.map(|x| x.end().responses().named()).unwrap_or_default() {
+            if n > 0 {
+                d.push(l::RESPONSES, format!("{name}={n}").as_str());
+            }
+        }
+        // R5: the public exit route's answers beside the builders'.
+        for (name, n) in self.public_counts.named() {
             if n > 0 {
                 d.push(l::RESPONSES, format!("{name}={n}").as_str());
             }
@@ -6033,6 +6188,257 @@ mod tests {
         // Every attempt stays in the ledger: A, B, the replaced approval,
         // the new one.
         assert_eq!(x.book().txs.len(), 4);
+        x.shutdown();
+        r.clean();
+    }
+
+    /// R5 review M1: the re-price is above the step's price and the arm's,
+    /// at most the grant's maximum.
+    #[test]
+    fn a_reprice_is_above_the_step_and_the_arm_at_most_the_maximum() {
+        assert_eq!(
+            repriced(50_000_000, 1_000, 50_000_000, 55_000_000),
+            Some(55_000_000)
+        );
+        assert_eq!(
+            repriced(50_000_000, 1_000, 50_000_000, 52_000_000),
+            Some(52_000_000)
+        );
+        assert_eq!(repriced(55_000_000, 1_000, 50_000_000, 55_000_000), None);
+        // A higher arm price is new bytes already.
+        assert_eq!(repriced(50_000_000, 1_000, 60_000_000, 100_000_000), None);
+        // A prior derived low (a raised gas limit) never goes below the arm.
+        assert_eq!(repriced(33_333_334, 1_000, 50_000_000, 100_000_000), None);
+        assert_eq!(repriced(1, 1, 0, u64::MAX), Some(2));
+        assert_eq!(repriced(u64::MAX - 1, 9_999, 0, u64::MAX), Some(u64::MAX));
+        assert_eq!(repriced(50_000_000, 0, 0, u64::MAX), None);
+    }
+
+    /// R5 (BSC3-030): with BSC_EXEC_LIVE_EXIT_REPRICE_BPS a lost exit step
+    /// (an approval, then a SELL) goes again at its nonce at its price
+    /// raised by the bps (another transaction the owner admits), at most
+    /// the grant's maximum; at it, the arm's price again: the same bytes,
+    /// refused (LIVE_INTENT_SEEN). Every lot's exit is reserved at that
+    /// maximum (review LOW 3).
+    #[test]
+    fn a_lost_exit_step_is_repriced_up_to_the_grants_maximum() {
+        use crate::paper_exec::{IntentKind, Refusal};
+        use crate::sources::GrantRisk;
+        use crate::sources::tests::TEST_RISK;
+        let mut r = Rig::granting("live-exit-reprice", LiveStrategies::StrategyC, |now| {
+            LiveGrant {
+                risk: Some(GrantRisk {
+                    max_gas_price_wei: 55_000_000,
+                    ..TEST_RISK
+                }),
+                ..rig_grant(now + 3_600_000, LiveStrategies::StrategyC)
+            }
+        });
+        assert_eq!(r.exec.exec.gas_price_wei, 50_000_000);
+        r.exec.exec.live_exit_reprice_bps = 1_000;
+        let sc = Sc::new(r.buyer);
+        let mut x = r.runtime("boot-1");
+        let mut c2 = c2_at(&r.d, r.buyer, 0);
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
+        let t = Cell::new(5_000_000_000u64);
+        let clock = FnClock {
+            id: 1,
+            now: || {
+                t.set(t.get() + 3);
+                t.get()
+            },
+        };
+        let now_ms = 1_793_000_000_500;
+        let wait = Duration::from_secs(2);
+        let a = [0xA1; 20];
+        let signed = |raw: &[u8]| {
+            let tx = darkbot_bsc_trading::transactions::legacy::decode_signed(raw)
+                .unwrap()
+                .tx;
+            (tx.nonce, tx.gas_price)
+        };
+        let empty = |x: &mut LiveRuntime, c2: &mut StateOwner, n: u64, h: u8| {
+            feed(
+                x,
+                c2,
+                vec![block_of(n, h, h - 1, Vec::new()), complete_of(n, h)],
+            );
+            settle(x, c2);
+        };
+        let (out, _) = x.on_strategy(&sc.buy(a), &c2, &clock, now_ms).unwrap();
+        let a_tx = out[0].handoff.tx_hash;
+        r.requests.recv_timeout(wait).unwrap();
+        feed(
+            &mut x,
+            &mut c2,
+            vec![
+                block_of(HEAD + 1, 0xb2, 0xb1, vec![sc.receipt(a_tx, 0)]),
+                sc.trade(a_tx, HEAD + 1, 0xb2, a),
+                complete_of(HEAD + 1, 0xb2),
+            ],
+        );
+        // Every lot's exit reserved at the grant's maximum: the open one's,
+        // and the BUY's own in its admission (review LOW 3).
+        let e = &r.exec.exec;
+        let at_max = U256::from(55_000_000u64) * U256::from(e.approve_gas_limit + e.sell_gas_limit);
+        assert_eq!(x.exit_reserve(), at_max);
+        {
+            use darkbot_bsc_record::schema::bsc_runtime::live_spend as ls;
+            let entry = r
+                .state
+                .join("live-spend")
+                .join(format!("{}.dbrec", alloy_primitives::hex::encode(a_tx)));
+            let entry = darkbot_bsc_record::decode(&ls::SCHEMA, &fs::read(entry).unwrap()).unwrap();
+            assert_eq!(
+                U256::from_be_bytes(entry.u256(ls::EXIT_RESERVE_WEI).unwrap()),
+                at_max
+            );
+        }
+        // The approval P1 at nonce 1, the arm's price, is lost.
+        reconnect(&mut x);
+        let (out, refused) = x.on_strategy(&sc.exit(a), &c2, &clock, now_ms).unwrap();
+        assert_eq!((out.len(), refused), (1, None));
+        assert_eq!(signed(&out[0].raw), (1, 50_000_000));
+        let p1 = out[0].handoff.tx_hash;
+        r.requests.recv_timeout(wait).unwrap();
+        for (n, h) in [(HEAD + 2, 0xb3), (HEAD + 3, 0xb4), (HEAD + 4, 0xb5)] {
+            empty(&mut x, &mut c2, n, h);
+        }
+        assert!(x.armed(), "{:?}", reason(&x));
+        assert_eq!(x.exits_to_continue(&c2), vec![a]);
+        // P2: nonce 1 again at 10 % more, another transaction.
+        reconnect(&mut x);
+        let (out, refused) = x.on_strategy(&sc.exit(a), &c2, &clock, now_ms).unwrap();
+        assert_eq!((out.len(), refused), (1, None));
+        assert_eq!(out[0].kind, IntentKind::Approve);
+        assert_eq!(signed(&out[0].raw), (1, 55_000_000));
+        assert_ne!(out[0].handoff.tx_hash, p1);
+        let p2 = out[0].handoff.tx_hash;
+        r.requests.recv_timeout(wait).unwrap();
+        // P2 lands: the SELL S1 at nonce 2, the arm's price, is lost.
+        feed(
+            &mut x,
+            &mut c2,
+            vec![
+                block_of(HEAD + 5, 0xb6, 0xb5, vec![sc.receipt(p2, 1)]),
+                complete_of(HEAD + 5, 0xb6),
+            ],
+        );
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
+        reconnect(&mut x);
+        let (out, refused) = x.on_strategy(&sc.exit(a), &c2, &clock, now_ms).unwrap();
+        assert_eq!((out.len(), refused), (1, None));
+        assert_eq!(out[0].kind, IntentKind::Sell);
+        assert_eq!(signed(&out[0].raw), (2, 50_000_000));
+        r.requests.recv_timeout(wait).unwrap();
+        for (n, h) in [(HEAD + 6, 0xb7), (HEAD + 7, 0xb8), (HEAD + 8, 0xb9)] {
+            empty(&mut x, &mut c2, n, h);
+        }
+        assert!(x.armed(), "{:?}", reason(&x));
+        assert_eq!(x.exits_to_continue(&c2), vec![a]);
+        // S2: nonce 2 again at 10 % more (its SELL's own gas limit).
+        reconnect(&mut x);
+        let (out, refused) = x.on_strategy(&sc.exit(a), &c2, &clock, now_ms).unwrap();
+        assert_eq!((out.len(), refused), (1, None));
+        assert_eq!(out[0].kind, IntentKind::Sell);
+        assert_eq!(signed(&out[0].raw), (2, 55_000_000));
+        r.requests.recv_timeout(wait).unwrap();
+        // S2 lost too: at the grant's maximum, nothing higher; the arm's
+        // price is S1's bytes, refused.
+        for (n, h) in [(HEAD + 9, 0xba), (HEAD + 10, 0xbb), (HEAD + 11, 0xbc)] {
+            empty(&mut x, &mut c2, n, h);
+        }
+        assert!(x.armed(), "{:?}", reason(&x));
+        assert_eq!(x.exits_to_continue(&c2), vec![a]);
+        reconnect(&mut x);
+        let (out, refused) = x.on_strategy(&sc.exit(a), &c2, &clock, now_ms).unwrap();
+        assert_eq!((out.len(), refused), (0, Some(Refusal::Owner)));
+        assert_eq!(
+            x.executor.as_ref().unwrap().end().last_refusal(),
+            Some(crate::sources::LIVE_INTENT_SEEN)
+        );
+        x.shutdown();
+        r.clean();
+    }
+
+    /// R5 (BSC3-030): with the public exit route ON (on the loopback route
+    /// the stand-in), an exit step handed to the builders also goes as
+    /// `eth_sendRawTransaction` of its own bytes, counted; a BUY never; OFF:
+    /// nothing public.
+    #[test]
+    fn the_public_exit_route_takes_exit_steps_only() {
+        for on in [true, false] {
+            public_exit_route(on);
+        }
+    }
+
+    fn public_exit_route(on: bool) {
+        let mut r = Rig::new(&format!("live-public-exit-{on}"), LiveStrategies::StrategyC);
+        r.exec.exec.live_public_exit = on;
+        let sc = Sc::new(r.buyer);
+        let mut x = r.runtime("boot-1");
+        let mut c2 = c2_at(&r.d, r.buyer, 0);
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
+        let t = Cell::new(5_000_000_000u64);
+        let clock = FnClock {
+            id: 1,
+            now: || {
+                t.set(t.get() + 3);
+                t.get()
+            },
+        };
+        let now_ms = 1_793_000_000_500;
+        let a = [0xA1; 20];
+        // Every request the stand-in reads within `d`, and the public ones.
+        let public = |d: Duration| {
+            let mut all = Vec::new();
+            while let Ok(req) = r.requests.recv_timeout(d) {
+                all.push(String::from_utf8_lossy(&req).to_string());
+            }
+            let public: Vec<String> = all
+                .iter()
+                .filter(|q| q.contains("eth_sendRawTransaction"))
+                .cloned()
+                .collect();
+            (all.len(), public)
+        };
+        let (out, _) = x.on_strategy(&sc.buy(a), &c2, &clock, now_ms).unwrap();
+        let a_tx = out[0].handoff.tx_hash;
+        let (requests, publics) = public(Duration::from_millis(500));
+        assert!(
+            requests > 0 && publics.is_empty(),
+            "a BUY never goes public"
+        );
+        feed(
+            &mut x,
+            &mut c2,
+            vec![
+                block_of(HEAD + 1, 0xb2, 0xb1, vec![sc.receipt(a_tx, 0)]),
+                sc.trade(a_tx, HEAD + 1, 0xb2, a),
+                complete_of(HEAD + 1, 0xb2),
+            ],
+        );
+        reconnect(&mut x);
+        let (out, refused) = x.on_strategy(&sc.exit(a), &c2, &clock, now_ms).unwrap();
+        assert_eq!((out.len(), refused), (1, None));
+        let raw = alloy_primitives::hex::encode(&out[0].raw);
+        let (requests, publics) = public(Duration::from_millis(500));
+        assert!(requests > 0);
+        let sent = record(&x)
+            .texts(l::RESPONSES)
+            .unwrap()
+            .contains(&"PUBLIC_EXIT_SENT=1");
+        match on {
+            true => {
+                assert_eq!(publics.len(), 1, "{publics:?}");
+                assert!(publics[0].contains(&format!(r#""params":["0x{raw}"]"#)));
+                assert!(sent);
+            }
+            false => assert!(publics.is_empty() && !sent),
+        }
         x.shutdown();
         r.clean();
     }

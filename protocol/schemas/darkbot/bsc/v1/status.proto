@@ -583,6 +583,12 @@ message BscLiveState {
   // Why it admits no LIVE BUY at the report's clock (stale, unverified, the signed gas price below
   // its floor); absent while it holds or without a readable runtime configuration or clock.
   optional string builder_policy_refusal = 52;
+  // REV.1.0 R5 (BSC3-030, BSC_EXEC_LIVE_EXIT_REPRICE_BPS): a lost exit step goes again at its nonce at
+  // its price raised by these bps, at most the grant's max gas price; 0: never re-priced.
+  optional uint32 exit_reprice_bps = 53;
+  // REV.1.0 R5 (BSC3-030, BSC_EXEC_LIVE_PUBLIC_EXIT): true sends every exit step, once handed to the
+  // builders, also to the configured public JSON-RPC endpoint (the public mempool); never a BUY.
+  optional bool public_exit = 54;
 }
 // One cell of the LIVE campaign (REV.1.0 R2), as the verdict record holds it.
 message LiveCampaignCell {

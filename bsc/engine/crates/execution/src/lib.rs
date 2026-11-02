@@ -120,6 +120,9 @@ pub mod paper;
 /// The C3 production path in PAPER mode, ending at the PAPER sink.
 #[cfg(feature = "runtime")]
 pub mod paper_exec;
+/// The exit-only public route (REV.1.0 R5, BSC3-030; locked by default).
+#[cfg(feature = "runtime")]
+pub mod public_exit;
 /// The read-only startup probe of the live Flap deployment and venue terms.
 #[cfg(feature = "runtime")]
 pub mod venue_probe;

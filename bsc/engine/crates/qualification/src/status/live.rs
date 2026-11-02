@@ -167,6 +167,9 @@ fn owner_tab(
                 out.risk_outlier = Some(x.live_risk_outlier);
                 // R4: the C3 re-arm switch; the bound builder policy.
                 out.c3_rearm = Some(x.live_c3_rearm);
+                // R5: the exit re-price and the public exit route.
+                out.exit_reprice_bps = Some(u32::from(x.live_exit_reprice_bps));
+                out.public_exit = Some(x.live_public_exit);
                 use darkbot_bsc_execution::builder_policy as bp;
                 out.builder_policy_fresh_until_unix_ms = bp::read(root, &x.live_builder_policy)
                     .ok()

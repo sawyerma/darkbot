@@ -213,6 +213,17 @@ pub struct ExecConfig {
     /// arm rests on: fresh, its builders verified, the signed gas price at
     /// its floor or above (`BSC_EXEC_LIVE_BUILDER_POLICY`).
     pub live_builder_policy: String,
+    /// REV.1.0 R5 (BSC3-030): an exit step released at a nonce whose window
+    /// is over unresolved goes again at its price raised by these bps, at
+    /// most the grant's risk maximum (`BSC_EXEC_LIVE_EXIT_REPRICE_BPS`; 0,
+    /// the default: never re-priced, the same bytes are refused).
+    pub live_exit_reprice_bps: u16,
+    /// REV.1.0 R5 (BSC3-030): a LIVE exit step, once handed to the
+    /// builders, also goes to the public JSON-RPC endpoint
+    /// `live_public_exit_rpc` (`BSC_EXEC_LIVE_PUBLIC_EXIT`, OFF by default;
+    /// `BSC_EXEC_LIVE_PUBLIC_EXIT_RPC`, an `https://` URL or empty).
+    pub live_public_exit: bool,
+    pub live_public_exit_rpc: String,
     /// Phase I gate M2: the PAPER paths that take the sender.
     pub sender_paths: SenderPaths,
 }
@@ -475,6 +486,9 @@ pub struct CanonicalContext<'a> {
     /// The most the exits of the sender's open positions may still cost,
     /// when the end's ledger knows it ([`Executor::exits_after_buy`]).
     pub exit_reserve_wei: Option<U256>,
+    /// REV.1.0 R5: the gas price an exit goes at when not the arm's (a
+    /// stalled step re-priced by the LIVE path).
+    pub exit_gas_price_wei: Option<u64>,
 }
 
 impl CanonicalContext<'_> {
@@ -2043,10 +2057,29 @@ impl<E: End> Executor<E> {
         // At most what the handed-off BUY is bound to have bought.
         let amount = tokens.min(held.min_tokens);
         let amount = approved.map_or(amount, |a| amount.min(a));
+        // R5: a re-priced exit is signed and budgeted at its own price.
+        let price = c2.exit_gas_price_wei.unwrap_or(self.config.gas_price_wei);
+        let repriced = match price == self.config.gas_price_wei {
+            true => None,
+            false => Some(
+                ExitPolicy::new(
+                    self.config.policy_generation,
+                    self.config.exit_slippage_bps,
+                    price,
+                    self.config.approve_gas_limit,
+                    self.config.sell_gas_limit,
+                )
+                .map_err(|_| Refusal::Intent)?,
+            ),
+        };
+        let exit_policy = repriced.unwrap_or(self.exit_policy);
         let admitted =
-            admit_curve_sell(&state, amount, &self.exit_policy).map_err(|_| Refusal::Admission)?;
+            admit_curve_sell(&state, amount, &exit_policy).map_err(|_| Refusal::Admission)?;
         let admitted_ns = clock.now_ns();
-        let (approval_gas, sell_gas) = self.exit_gas();
+        let (approval_gas, sell_gas) = (
+            U256::from(price) * U256::from(self.config.approve_gas_limit),
+            U256::from(price) * U256::from(self.config.sell_gas_limit),
+        );
         let approve_gas = if approved.is_some() {
             U256::ZERO
         } else {
@@ -2108,13 +2141,9 @@ impl<E: End> Executor<E> {
             return Err(Refusal::Intent);
         };
         let sender = Address::from(self.end.address());
-        let Ok(expected) = ExpectedExit::from_admitted(
-            &self.deployment,
-            &admitted,
-            &self.exit_policy,
-            sender,
-            base,
-        ) else {
+        let Ok(expected) =
+            ExpectedExit::from_admitted(&self.deployment, &admitted, &exit_policy, sender, base)
+        else {
             self.strategy_refused(first, false);
             return Err(Refusal::Intent);
         };
@@ -2455,6 +2484,9 @@ pub(crate) mod tests {
             live_risk_outlier: false,
             live_c3_rearm: false,
             live_builder_policy: crate::builder_policy::TEST_POLICY.into(),
+            live_exit_reprice_bps: 0,
+            live_public_exit: false,
+            live_public_exit_rpc: String::new(),
             sender_paths: SenderPaths::Both,
         }
     }
@@ -2963,6 +2995,7 @@ pub(crate) mod tests {
             now_unix_ms: NOW_MS,
             next_nonce: None,
             exit_reserve_wei: None,
+            exit_gas_price_wei: None,
         }
     }
 
@@ -2975,6 +3008,7 @@ pub(crate) mod tests {
         CanonicalContext {
             next_nonce: Some(next),
             exit_reserve_wei: None,
+            exit_gas_price_wei: None,
             ..strategy_c2(head)
         }
     }
@@ -3155,6 +3189,7 @@ pub(crate) mod tests {
             now_unix_ms: NOW_MS,
             next_nonce: None,
             exit_reserve_wei: None,
+            exit_gas_price_wei: None,
         };
         assert_eq!(
             exec.on_strategy_buy([1; 20], [0; 20], curve, input, &none, &clock(1, 1), 1),
@@ -3180,6 +3215,7 @@ pub(crate) mod tests {
             now_unix_ms: HEAD.timestamp * 1_000 + 30_001,
             next_nonce: None,
             exit_reserve_wei: None,
+            exit_gas_price_wei: None,
         };
         assert_eq!(
             exec.on_strategy_buy([1; 20], [0; 20], curve, input, &late, &clock(1, 1), 1),

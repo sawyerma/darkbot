@@ -1950,6 +1950,14 @@ fn the_live_tab_shows_the_exit_deciders_the_recovery_and_the_quarantine() {
             )
             .replace("BSC_EXEC_LIVE_C3_REARM=OFF\n", "BSC_EXEC_LIVE_C3_REARM=ON\n")
             .replace(
+                "BSC_EXEC_LIVE_EXIT_REPRICE_BPS=0\n",
+                "BSC_EXEC_LIVE_EXIT_REPRICE_BPS=250\n",
+            )
+            .replace(
+                "BSC_EXEC_LIVE_PUBLIC_EXIT=OFF\nBSC_EXEC_LIVE_PUBLIC_EXIT_RPC=\n",
+                "BSC_EXEC_LIVE_PUBLIC_EXIT=ON\nBSC_EXEC_LIVE_PUBLIC_EXIT_RPC=https://rpc.example.test/\n",
+            )
+            .replace(
                 "BSC_STATE_WATCHED=\n",
                 &format!("BSC_STATE_WATCHED={buyer}\n"),
             )
@@ -1980,6 +1988,8 @@ fn the_live_tab_shows_the_exit_deciders_the_recovery_and_the_quarantine() {
         assert!(r.starts_with(why), "{r}");
     };
     assert_eq!(l.c3_rearm, Some(true));
+    // R5: the exit re-price and the public exit route as configured.
+    assert_eq!((l.exit_reprice_bps, l.public_exit), (Some(250), Some(true)));
     assert_eq!(l.builder_policy_fresh_until_unix_ms, None);
     refusal(&l, "LIVE_BUILDER_POLICY_UNVERIFIED");
     let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../..");
@@ -3176,6 +3186,8 @@ fn the_campaign_section_takes_only_what_the_rest_of_the_live_tab_leaves() {
         c3_rearm: Some(true),
         builder_policy_fresh_until_unix_ms: Some(u64::MAX),
         builder_policy_refusal: Some(text.clone()),
+        exit_reprice_bps: Some(u32::MAX),
+        public_exit: Some(true),
         ..Default::default()
     };
     let mut l = full.clone();

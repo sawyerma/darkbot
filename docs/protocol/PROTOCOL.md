@@ -328,6 +328,8 @@ transactions and the net result. A view of the native owner and ledger, never a 
 | c3_rearm | [bool](#bool) | optional | REV.1.0 R4 (BSC3-042, BSC_EXEC_LIVE_C3_REARM): true renews the arm after a C3 BUY whose nonce the chain took; false: one C3 BUY per arm. |
 | builder_policy_fresh_until_unix_ms | [uint64](#uint64) | optional | REV.1.0 R4: until when the bound builder policy (BSC_EXEC_LIVE_BUILDER_POLICY) is fresh (unix ms); absent for an import, an unreadable one or without a readable runtime configuration. |
 | builder_policy_refusal | [string](#string) | optional | Why it admits no LIVE BUY at the report&#39;s clock (stale, unverified, the signed gas price below its floor); absent while it holds or without a readable runtime configuration or clock. |
+| exit_reprice_bps | [uint32](#uint32) | optional | REV.1.0 R5 (BSC3-030, BSC_EXEC_LIVE_EXIT_REPRICE_BPS): a lost exit step goes again at its nonce at its price raised by these bps, at most the grant&#39;s max gas price; 0: never re-priced. |
+| public_exit | [bool](#bool) | optional | REV.1.0 R5 (BSC3-030, BSC_EXEC_LIVE_PUBLIC_EXIT): true sends every exit step, once handed to the builders, also to the configured public JSON-RPC endpoint (the public mempool); never a BUY. |
 
 
 

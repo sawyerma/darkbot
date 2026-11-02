@@ -52,6 +52,8 @@ export function LivePanel() {
       </> : <Line label="Grant" value="NONE" hint="LIVE needs the operator's grant of one confirmed scope" />}
       {l?.riskSoftGasPriceWei !== undefined ? <Line label="Risk soft bounds" value={`slippage BUY ≤ ${l.riskSoftBuySlippageBps} bps · exit ≤ ${l.riskSoftExitSlippageBps} bps · gas price ≤ ${l.riskSoftGasPriceWei.toString()} wei · outlier grants ${l.riskOutlier ? "allowed when confirmed" : "locked"}`} hint="BSC3-069: a grant above them is an outlier; it admits BUYs only confirmed as one and with BSC_EXEC_LIVE_RISK_OUTLIER ON (exits go on)" /> : null}
       {l?.c3Rearm !== undefined ? <Line label="C3 re-arm" value={l.c3Rearm ? "ON · a new arm after each C3 BUY whose nonce the chain took" : "OFF · one C3 BUY per arm"} hint="BSC3-042: BSC_EXEC_LIVE_C3_REARM" /> : null}
+      {l?.exitRepriceBps !== undefined ? <Line label="Exit re-price" value={l.exitRepriceBps > 0 ? `+${l.exitRepriceBps} bps per lost exit step, at most the grant's max gas price` : "OFF · a lost exit step waits for the operator"} hint="BSC3-030: BSC_EXEC_LIVE_EXIT_REPRICE_BPS" /> : null}
+      {l?.publicExit !== undefined ? <Line label="Public exit route" value={l.publicExit ? "ON · exit steps also to the public mempool (never a BUY)" : "OFF · exit steps to the builders only"} hint="BSC3-030: BSC_EXEC_LIVE_PUBLIC_EXIT" /> : null}
       {builder !== undefined ? <Line label="Builder policy" value={builder} hint="R4: BSC_EXEC_LIVE_BUILDER_POLICY, checked every pass; while it does not hold, BUYs close and exits go on" /> : null}
       {l?.grant ? <>
         <Line label="Grant scope SHA-256" value={l.grant.scopeSha256} />

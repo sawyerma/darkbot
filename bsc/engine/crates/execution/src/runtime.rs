@@ -389,6 +389,8 @@ impl RuntimeConfig {
         let risk_outlier = values.remove("BSC_EXEC_LIVE_RISK_OUTLIER");
         let c3_rearm = values.remove("BSC_EXEC_LIVE_C3_REARM");
         let builder_policy = values.remove("BSC_EXEC_LIVE_BUILDER_POLICY");
+        let public_exit = values.remove("BSC_EXEC_LIVE_PUBLIC_EXIT");
+        let public_exit_rpc = values.remove("BSC_EXEC_LIVE_PUBLIC_EXIT_RPC");
         let live_key = values.remove("BSC_LIVE_KEY");
         let live_buyer = values.remove("BSC_LIVE_BUYER");
         let live_route = values.remove("BSC_LIVE_ROUTE");
@@ -585,6 +587,9 @@ impl RuntimeConfig {
                 if builder_policy.is_some() {
                     return Err("BSC_EXEC_LIVE_BUILDER_POLICY needs BSC_EXEC_PAPER_IDENTITY".into());
                 }
+                if public_exit.is_some() || public_exit_rpc.is_some() {
+                    return Err("BSC_EXEC_LIVE_PUBLIC_EXIT needs BSC_EXEC_PAPER_IDENTITY".into());
+                }
                 None
             }
             Some(_) if canonical.is_none() => {
@@ -732,6 +737,44 @@ impl RuntimeConfig {
                                 ));
                             }
                             None => return Err("BSC_EXEC_LIVE_C3_REARM is required".into()),
+                        },
+                        live_exit_reprice_bps: u16::try_from(take(
+                            "BSC_EXEC_LIVE_EXIT_REPRICE_BPS",
+                            0,
+                            9_999,
+                        )?)
+                        .map_err(|_| "BSC_EXEC_LIVE_EXIT_REPRICE_BPS out of range")?,
+                        live_public_exit: match (public_exit, public_exit_rpc) {
+                            (Some("OFF"), Some(_)) => false,
+                            (Some("ON"), Some(url)) if !url.is_empty() => true,
+                            (Some("ON"), Some(_)) => {
+                                return Err(
+                                    "BSC_EXEC_LIVE_PUBLIC_EXIT=ON needs BSC_EXEC_LIVE_PUBLIC_EXIT_RPC"
+                                        .into(),
+                                );
+                            }
+                            (Some(v), Some(_)) => {
+                                return Err(format!(
+                                    "BSC_EXEC_LIVE_PUBLIC_EXIT={v} is neither ON nor OFF"
+                                ));
+                            }
+                            _ => {
+                                return Err("BSC_EXEC_LIVE_PUBLIC_EXIT and BSC_EXEC_LIVE_PUBLIC_EXIT_RPC are required".into());
+                            }
+                        },
+                        live_public_exit_rpc: match public_exit_rpc {
+                            Some(url) if !url.is_empty() => {
+                                match crate::chain_follower::https_endpoint(url) {
+                                    // Never the endpoint in an error (it may hold a key).
+                                    Err(e) => {
+                                        return Err(format!(
+                                            "BSC_EXEC_LIVE_PUBLIC_EXIT_RPC is refused: {e:?}"
+                                        ));
+                                    }
+                                    Ok(_) => url.to_string(),
+                                }
+                            }
+                            url => url.unwrap_or_default().to_string(),
                         },
                         live_builder_policy: match builder_policy {
                             Some(p)
@@ -4751,6 +4794,20 @@ mod tests {
             // R4: the C3 re-arm switch and the bound builder policy,
             // required and exact (a repository-relative path).
             CONFIG.replace("BSC_EXEC_LIVE_C3_REARM=OFF\n", ""),
+            CONFIG.replace("BSC_EXEC_LIVE_EXIT_REPRICE_BPS=0\n", ""),
+            // R5: the public exit route, required and exact; ON only with
+            // an https:// endpoint.
+            CONFIG.replace("BSC_EXEC_LIVE_PUBLIC_EXIT=OFF\n", ""),
+            CONFIG.replace("BSC_EXEC_LIVE_PUBLIC_EXIT_RPC=\n", ""),
+            CONFIG.replace("BSC_EXEC_LIVE_PUBLIC_EXIT=OFF", "BSC_EXEC_LIVE_PUBLIC_EXIT=ON"),
+            CONFIG.replace(
+                "BSC_EXEC_LIVE_PUBLIC_EXIT_RPC=\n",
+                "BSC_EXEC_LIVE_PUBLIC_EXIT_RPC=http://rpc.example.test/\n",
+            ),
+            CONFIG.replace(
+                "BSC_EXEC_LIVE_EXIT_REPRICE_BPS=0",
+                "BSC_EXEC_LIVE_EXIT_REPRICE_BPS=10000",
+            ),
             CONFIG.replace("BSC_EXEC_LIVE_C3_REARM=OFF", "BSC_EXEC_LIVE_C3_REARM=off"),
             CONFIG.replace(&format!("BSC_EXEC_LIVE_BUILDER_POLICY={POLICY}\n"), ""),
             CONFIG.replace(POLICY, ""),
@@ -4845,6 +4902,28 @@ mod tests {
         assert_eq!(
             (x.live_c3_rearm, x.live_builder_policy.as_str()),
             (false, POLICY)
+        );
+        // R5: a stalled exit is never re-priced in the repository; no
+        // public exit route.
+        assert_eq!(x.live_exit_reprice_bps, 0);
+        assert_eq!(
+            (x.live_public_exit, x.live_public_exit_rpc.as_str()),
+            (false, "")
+        );
+        let on = exec(
+            &CONFIG
+                .replace(
+                    "BSC_EXEC_LIVE_PUBLIC_EXIT=OFF",
+                    "BSC_EXEC_LIVE_PUBLIC_EXIT=ON",
+                )
+                .replace(
+                    "BSC_EXEC_LIVE_PUBLIC_EXIT_RPC=\n",
+                    "BSC_EXEC_LIVE_PUBLIC_EXIT_RPC=https://rpc.example.test/\n",
+                ),
+        );
+        assert_eq!(
+            (on.live_public_exit, on.live_public_exit_rpc.as_str()),
+            (true, "https://rpc.example.test/")
         );
         assert_eq!(
             exec(&CONFIG.replace(
