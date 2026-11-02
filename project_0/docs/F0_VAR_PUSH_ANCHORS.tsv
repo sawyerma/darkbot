@@ -15,8 +15,8 @@ project_0/native/crates/reporter/src/bin/p0_market_capture_reported.rs	50	let re
 project_0/native/crates/reporter/src/bin/p0_reporter_fixture.rs	46	tap.publish_transport(TransportSnapshot {
 project_0/native/crates/reporter/src/bin/p0_reporter_fixture.rs	54	tap.publish_market(MarketSnapshot {
 project_0/native/crates/reporter/src/bin/p0_reporter_fixture.rs	65	tap.publish_storage(darkbot_runner::storage::writer::StorageStatus {
-project_0/native/crates/reporter/src/lib.rs	2843	tap.publish_transport(TransportSnapshot {
-project_0/native/crates/reporter/src/lib.rs	2864	tap.publish_transport(TransportSnapshot::default());
+project_0/native/crates/reporter/src/lib.rs	2877	tap.publish_transport(TransportSnapshot {
+project_0/native/crates/reporter/src/lib.rs	2898	tap.publish_transport(TransportSnapshot::default());
 project_0/native/crates/reporter/tests/socket.rs	88	tap.publish_market(MarketSnapshot {
 project_0/native/crates/reporter/tests/socket.rs	139	tap.publish_market(MarketSnapshot {
 project_0/native/crates/reporter/tests/socket.rs	154	tap.publish_market(MarketSnapshot {
@@ -52,7 +52,7 @@ project_0/native/crates/runtime/src/market/observer_tests.rs	2981	core.on_ingres
 project_0/native/crates/runtime/src/orchestration/boot_network.rs	197	cancelled: super::control::stop_requested,
 project_0/native/crates/runtime/src/orchestration/control.rs	44	pub fn stop_requested() -> bool {
 project_0/native/crates/runtime/src/orchestration/control.rs	301	assert!(stop_requested());
-project_0/native/crates/runtime/src/orchestration/startup.rs	383	run_econ4h_stopped_by(cfg, market, clock, owner, &super::control::stop_requested)
+project_0/native/crates/runtime/src/orchestration/startup.rs	391	run_econ4h_stopped_by(cfg, market, clock, owner, &super::control::stop_requested)
 project_0/native/crates/runtime/src/orchestration/state_owner/setup.rs	196	crate::orchestration::control::stop_requested
 project_0/native/crates/runtime/src/status_tap.rs	773	pub fn publish_transport(&self, s: TransportSnapshot) {
 project_0/native/crates/runtime/src/status_tap.rs	801	pub fn publish_market(&self, s: MarketSnapshot) {

@@ -1,15 +1,15 @@
 {
   "schema": "F0_VAR_STATIC_CENSUS_V1",
   "project": "project_0",
-  "source_head": "618f858286860341f8d7d69bbeec8a7f13e79419",
+  "source_head": "9ef6d2c00d86e9e86beb23e2e77d2e7b227cf1fa",
   "file_count": 384,
   "frontend_files": 83,
   "p0_rust_files": 252,
   "proto_files": 12,
-  "type_declarations": 1287,
+  "type_declarations": 1288,
   "field_declarations": 6611,
   "gui_entries": 462,
-  "environment_references": 809,
+  "environment_references": 816,
   "push_anchors": 67,
   "limitations": [
     "Lexical source census, not a Rust AST or verified field-to-topic mapping.",
