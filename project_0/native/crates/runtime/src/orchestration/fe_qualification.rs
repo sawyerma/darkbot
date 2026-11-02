@@ -97,34 +97,49 @@ impl WireMultipleAccounts {
     /// The typed outcome saved as the FE01_READ frame; an owner or encoding the wire type
     /// cannot carry is a failed read, never a guessed account.
     pub fn outcome(self) -> Fe01ReadOutcome {
+        use crate::analytics::journal::{MAX_ACCOUNT_DATA, MAX_FRAME};
+        use std::io::Read;
+        // The decoded bytes of one answer stay within one journal frame, each account within the
+        // largest account Solana permits; zstd is decoded as it streams (nothing reserved ahead),
+        // so a small compressed answer cannot inflate beyond either bound.
+        let mut room = MAX_FRAME;
+        let mut decode = |a: WireAccount| -> Result<Fe01Account, String> {
+            let bad = || "FE_ACCOUNT_ENCODING".to_string();
+            let raw = base64::engine::general_purpose::STANDARD
+                .decode(&a.data.0)
+                .map_err(|_| bad())?;
+            let limit = MAX_ACCOUNT_DATA.min(room);
+            let data = match a.data.1.as_str() {
+                "base64" => raw,
+                "base64+zstd" => {
+                    let mut out = Vec::new();
+                    zstd::stream::read::Decoder::new(raw.as_slice())
+                        .map_err(|_| bad())?
+                        .take(limit as u64 + 1)
+                        .read_to_end(&mut out)
+                        .map_err(|_| bad())?;
+                    out
+                }
+                _ => return Err(bad()),
+            };
+            if data.len() > MAX_ACCOUNT_DATA {
+                return Err(bad());
+            }
+            if data.len() > limit {
+                return Err("FE_RESPONSE_TOO_LARGE".into());
+            }
+            room -= data.len();
+            Ok(Fe01Account {
+                owner: key(&a.owner)?,
+                lamports: a.lamports,
+                executable: a.executable,
+                data,
+            })
+        };
         let accounts = self
             .value
             .into_iter()
-            .map(|a| {
-                a.map(|a| {
-                    let bad = || "FE_ACCOUNT_ENCODING".to_string();
-                    let raw = base64::engine::general_purpose::STANDARD
-                        .decode(&a.data.0)
-                        .map_err(|_| bad())?;
-                    let data = match a.data.1.as_str() {
-                        "base64" => raw,
-                        // Never beyond the largest account Solana permits.
-                        "base64+zstd" => zstd::bulk::decompress(
-                            &raw,
-                            crate::analytics::journal::MAX_ACCOUNT_DATA,
-                        )
-                        .map_err(|_| bad())?,
-                        _ => return Err(bad()),
-                    };
-                    Ok(Fe01Account {
-                        owner: key(&a.owner)?,
-                        lamports: a.lamports,
-                        executable: a.executable,
-                        data,
-                    })
-                })
-                .transpose()
-            })
+            .map(|a| a.map(&mut decode).transpose())
             .collect::<Result<Vec<_>, String>>();
         match accounts {
             Ok(accounts) => Fe01ReadOutcome::Accounts {
@@ -750,6 +765,21 @@ pub(crate) mod tests {
         // Beyond the largest account, truncated, not zstd, an unknown encoding: refused, never
         // guessed. (A flipped data byte inside a frame without a checksum decodes, as it would in
         // plain base64: transport integrity is TLS's; each journal frame hashes the bytes kept.)
+        // Two accounts of the largest size: the second exceeds what one answer may decode.
+        let zeros =
+            zstd::bulk::compress(&vec![0u8; crate::analytics::journal::MAX_ACCOUNT_DATA], 3)
+                .unwrap();
+        let text = base64::engine::general_purpose::STANDARD.encode(&zeros);
+        let two = serde_json::from_value::<WireMultipleAccounts>(
+            serde_json::json!({"context":{"slot":9},"value":[
+            {"owner":k.to_string(),"lamports":1,"executable":false,"data":[text,"base64+zstd"]},
+            {"owner":k.to_string(),"lamports":1,"executable":false,"data":[text,"base64+zstd"]}]}),
+        )
+        .unwrap()
+        .outcome();
+        assert!(
+            matches!(two, Fe01ReadOutcome::Failed { ref reason } if reason == "FE_RESPONSE_TOO_LARGE")
+        );
         for (data, encoding) in [
             (bomb.as_slice(), "base64+zstd"),
             (&compressed[..compressed.len() / 2], "base64+zstd"),

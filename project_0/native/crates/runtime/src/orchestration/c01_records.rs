@@ -134,17 +134,20 @@ impl Payload for C01Reads {
     const KIND: u16 = journal::kind::C01_READS;
 }
 
-/// A reproducible build of the pinned source (the BUILD gate, `p0ctl c01 build`): the source
-/// checkout's commit as git reports it, the ELF's hash computed from the file (its trailing zero
-/// padding trimmed, as deployed), and how it was built.
+/// A reproducible build of the pinned source (the BUILD gate, `p0ctl c01 build`), run by the step
+/// itself on a clean clone: the clone's commit as git reports it, the verifier and the image (by
+/// digest) it ran with, the exact command, and the hash of the ELF that build produced (its
+/// trailing zero padding trimmed, as deployed).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct C01Build {
     pub plan_id: String,
-    /// `HEAD` of the source checkout and whether a tracked file differs from it.
+    /// `HEAD` of the source clone; whether a file differed from it (always refused before).
     pub source_commit: String,
     pub source_modified: bool,
-    /// The build as the operator ran it: the toolchain image and the command.
+    /// The build image by digest, the verifier's SHA-256 and version, the command as run.
     pub image: String,
+    pub verifier_sha256: String,
+    pub verifier_version: String,
     pub command: String,
     pub elf_sha256: String,
     pub elf_len: u64,
@@ -159,6 +162,11 @@ impl Payload for C01Build {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct C01Fe01 {
     pub plan_id: String,
+    /// The approved FE-01 plan it ran, its group and targets, its evidence record's SHA-256.
+    pub fe01_plan_id: String,
+    pub group: String,
+    pub scope_targets: Vec<String>,
+    pub evidence_sha256: String,
     /// SHA-256 of the observation's journal (hex); whether its manifest sealed it complete.
     pub journal_sha256: String,
     pub sealed_complete: bool,

@@ -160,12 +160,17 @@ fn run() -> Result<(), String> {
     }
     let approve =
         approve.ok_or("FE_PLAN_APPROVAL_REQUIRED: --approve TOKEN of the plan in --output")?;
+    // An earlier freeze to compare with is read now: a bad one never costs the plan its run.
+    if let Some(earlier) = &against {
+        fe_freeze::load(earlier)?;
+    }
     let approved = fe01_plan::approve(&project, &mut resolved, &output, &approve)?;
     let funding_class = fe_replay::first_class(&approved.plan.funding_class)?;
     let url = approved.url;
     let config = resolved.config.clone();
     // DEC-18: the bound providers' credentials, read once, after the plan and evidence passed.
     provider_registry::install_credentials(&approved.registry, &config)?;
+    fe01_plan::start(&output)?;
     // PERSIST-01/JFI-04: configuration, every saved read and the result are typed frames of one
     // binary journal beside the plan; each frame is fsynced before the read is used or the next
     // one is made.

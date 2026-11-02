@@ -235,6 +235,45 @@ fn wss_probes(program: Pubkey, group: &Pubkey) -> Vec<(Read, Value)> {
     probes
 }
 
+/// The probes of `order`: each RPC method's params, each subscription as its session sends it,
+/// bound to the SHA-256 of its exact messages (method and params, request id aside) — a changed
+/// subscription is another probe (review 02.11.2026).
+fn probe_spec(order: &[Read], messages: &[Value], program: &Pubkey, group: &Pubkey) -> Vec<Probe> {
+    order
+        .iter()
+        .map(|read| Probe {
+            read: read.clone(),
+            params: match read {
+                Read::Rpc(m) => rpc_params(m, program, group),
+                Read::Wss(m, c) => {
+                    let own: Vec<Value> = messages
+                        .iter()
+                        .filter(|v| wss_read(v) == *read)
+                        .map(|v| json!([v["method"], v["params"]]))
+                        .collect();
+                    let note = if m == "accountSubscribe" {
+                        ", the Clock sysvar (an owner dependency, notified every slot)".to_string()
+                    } else if own.len() > 1 {
+                        format!(
+                            ", its {} messages one after another (SUPPORTED once one delivers an event and none is refused)",
+                            own.len()
+                        )
+                    } else {
+                        String::new()
+                    };
+                    format!(
+                        "as its session sends it, commitment {c}{note}; messages sha256 {}",
+                        &sha(Value::Array(own).to_string().as_bytes())[..16]
+                    )
+                }
+            },
+        })
+        .collect()
+}
+
+/// A subscription acknowledged without an event in its window.
+const NO_EVENT: &str = "NO_EVENT_IN_WINDOW";
+
 fn subscription_types(reads: &[Read]) -> usize {
     let mut types: Vec<&str> = reads
         .iter()
@@ -288,26 +327,7 @@ pub fn plan(
             limits.text()
         ));
     }
-    let probes = order
-        .iter()
-        .map(|read| Probe {
-            read: read.clone(),
-            params: match read {
-                Read::Rpc(m) => rpc_params(m, &program, &group),
-                Read::Wss(m, c) => {
-                    let n = messages.iter().filter(|v| wss_read(v) == *read).count();
-                    let note = if m == "accountSubscribe" {
-                        ", the Clock sysvar (an owner dependency, notified every slot)".to_string()
-                    } else if n > 1 {
-                        format!(", its {n} messages one after another (SUPPORTED once one delivers an event)")
-                    } else {
-                        String::new()
-                    };
-                    format!("as its session sends it, commitment {c}{note}")
-                }
-            },
-        })
-        .collect();
+    let probes = probe_spec(&order, &messages, &program, &group);
     let plan_id =
         sha(crate::orchestration::provider_registry::fresh_nonce()?.as_bytes())[..16].to_string();
     let plan = ProbePlan {
@@ -609,7 +629,7 @@ fn measure(
     for (k, ((read, _), o)) in probes.iter().zip(&report.outcomes).enumerate() {
         let outcome = match (o, report.connect_error) {
             (W::Supported { .. }, _) => Outcome::Supported,
-            (W::AckOnly { .. }, _) => Outcome::NotProven("NO_EVENT_IN_WINDOW".into()),
+            (W::AckOnly { .. }, _) => Outcome::NotProven(NO_EVENT.into()),
             (W::Refused { code: -32601 }, _) => {
                 Outcome::MethodUnsupported("WSS -32601 method not found".into())
             }
@@ -642,11 +662,15 @@ fn measure(
             report.probe_bytes.get(k).copied().unwrap_or(0),
         );
         match wss.iter_mut().find(|p| &p.read == read) {
-            // A further message of the read: SUPPORTED once one delivers, timed by that one.
+            // A further message of the read. The session sends every one: a refusal, a missing
+            // acknowledgement, a transport error or a stop of any is the read's verdict; only no
+            // event in the window yields to another message's event (SUPPORTED, timed by it).
             Some(p) => {
                 p.attempts += attempts;
                 p.bytes += bytes;
-                if p.outcome != Outcome::Supported && outcome == Outcome::Supported {
+                let quiet = |o: &Outcome| *o == Outcome::NotProven(NO_EVENT.into());
+                let soft = |o: &Outcome| *o == Outcome::Supported || quiet(o);
+                if soft(&p.outcome) && (!soft(&outcome) || outcome == Outcome::Supported) {
                     p.outcome = outcome;
                     p.elapsed_ms = elapsed_ms;
                 }
@@ -808,7 +832,9 @@ pub fn admits(
     }
     let program = Pubkey::from_str(darkbot_project0::protocol::PROGRAM_ID_MAINNET)
         .map_err(|_| "MEASURE_PROGRAM")?;
-    let (current, _, _) = reads_of(program, group);
+    let (current, order, messages) = reads_of(program, group);
+    let spec = probe_spec(&order, &messages, &program, group);
+    let (measured_plan, _) = load_plan(project, &m.plan_id)?;
     for mode in [Mode::Boot, run] {
         let reads = |of: &[ModeReads]| {
             of.iter()
@@ -822,6 +848,14 @@ pub fn admits(
                 "PROVIDER_MEASUREMENT_STALE: {} now reads {} the measurement did not probe",
                 mode.name(),
                 read.text()
+            ));
+        }
+        if let Some(probe) = stale_probe(&measured_plan.probes, &spec, &reads(&current)) {
+            return Err(format!(
+                "PROVIDER_MEASUREMENT_STALE: {} now probes {} as {} (measured otherwise)",
+                mode.name(),
+                probe.read.text(),
+                probe.params
             ));
         }
         match m.verdict(mode) {
@@ -842,6 +876,14 @@ pub fn admits(
         }
     }
     Ok(())
+}
+
+/// The first current probe of `reads` the measured plan probed otherwise (or not at all).
+fn stale_probe<'a>(measured: &[Probe], current: &'a [Probe], reads: &[Read]) -> Option<&'a Probe> {
+    current
+        .iter()
+        .filter(|p| reads.contains(&p.read))
+        .find(|p| !measured.contains(p))
 }
 
 /// The operator's view of a plan.
@@ -1059,6 +1101,35 @@ mod tests {
             let spec: BTreeSet<String> = rpc_methods(mode).iter().map(|m| m.to_string()).collect();
             assert_eq!(called, spec, "{}", mode.name());
         }
+    }
+
+    /// Review 02.11.2026: a probe the measured plan made otherwise (another message, another
+    /// count) or not at all is stale for exactly the modes that read it.
+    #[test]
+    fn p0_022_a_changed_probe_is_stale_for_its_modes() {
+        let program = Pubkey::new_unique();
+        let group = Pubkey::new_unique();
+        let (modes, order, messages) = reads_of(program, &group);
+        let spec = probe_spec(&order, &messages, &program, &group);
+        let of = |mode| modes.iter().find(|m| m.mode == mode).unwrap().reads.clone();
+        assert!(stale_probe(&spec, &spec, &of(Mode::Econ4h)).is_none());
+        // The former probe: one program filter only.
+        let mut former = messages.clone();
+        let first = former
+            .iter()
+            .position(|m| m["method"] == "programSubscribe")
+            .unwrap();
+        former.remove(first);
+        let measured = probe_spec(&order, &former, &program, &group);
+        let stale = stale_probe(&measured, &spec, &of(Mode::Econ4h)).unwrap();
+        assert_eq!(stale.read.text(), "programSubscribe@confirmed");
+        assert!(stale_probe(&measured, &spec, &of(Mode::Boot)).is_none());
+        assert!(stale_probe(&measured, &spec, &of(Mode::C0Mo)).is_none());
+        // Another filter, same count: another digest.
+        let mut other = messages.clone();
+        other[first]["params"][1]["filters"] = json!([]);
+        let measured = probe_spec(&order, &other, &program, &group);
+        assert!(stale_probe(&measured, &spec, &of(Mode::Econ4h)).is_some());
     }
 
     /// DEC-18 §3.2/§3.5: the subscriptions are the modes' own messages — five types in all (the

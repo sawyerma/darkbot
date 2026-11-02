@@ -307,22 +307,28 @@ fn load_reads(dir: &Path) -> Result<(C01Reads, String), String> {
     Ok((reads, sha(&bytes)))
 }
 
-/// `p0ctl c01 build --plan ID --elf FILE --source DIR --image IMAGE --command TEXT`: offline —
-/// records, once per plan, the ELF a reproducible build of the pinned source produced and
-/// derives the parity again. Refused before anything is recorded: a source checkout whose `HEAD`
-/// is not the pinned commit or whose tracked files differ from it, a file that is no ELF, an
-/// image not named by its digest. The ELF's hash is computed here; a hash that is not the
-/// deployed one is a recorded BUILD FAIL.
+/// `p0ctl c01 build --plan ID --source DIR --verifier PATH --image NAME@sha256:DIGEST`: offline —
+/// runs, once per plan, the pinned source's Mainnet build recipe (`protocol::SOURCE_LIBRARY`,
+/// `SOURCE_BUILD_FEATURES`, `SOURCE_BUILD_ENV`) through the verifier in the image named by its
+/// digest, on a clean clone of the source, hashes the ELF that build produced and derives the
+/// parity again. Refused before anything runs: a clone whose `HEAD` is not the pinned commit or
+/// that holds any other file (tracked change, untracked or ignored — no ELF planted beside the
+/// build), an image not named by its digest. A build whose ELF is not the deployed one is a
+/// recorded BUILD FAIL; a failed build records nothing.
 pub fn build(
     project: &Path,
     plan_id: &str,
-    elf: &Path,
     source: &Path,
+    verifier: &Path,
     image: &str,
-    command: &str,
 ) -> Result<(C01Reads, P1aParity), String> {
     let dir = plan_dir(project, plan_id)?;
     let (reads, reads_sha) = load_reads(&dir)?;
+    if dir.join(BUILD).exists() {
+        return Err(format!(
+            "C01_STEP_RECORDED: {BUILD} of this plan is recorded (a new one is a new plan)"
+        ));
+    }
     let git = |args: &[&str]| -> Result<String, String> {
         let out = std::process::Command::new("git")
             .arg("-C")
@@ -346,10 +352,15 @@ pub fn build(
             protocol::SOURCE_TAG
         ));
     }
-    if !git(&["status", "--porcelain", "--untracked-files=no"])?.is_empty() {
-        return Err(
-            "C01_BUILD_SOURCE_MODIFIED: a tracked file differs from the pinned commit".into(),
-        );
+    if !git(&[
+        "status",
+        "--porcelain",
+        "--ignored",
+        "--untracked-files=all",
+    ])?
+    .is_empty()
+    {
+        return Err("C01_BUILD_SOURCE_NOT_CLEAN: build from a clean clone of the pinned commit (no changed, untracked or ignored file)".into());
     }
     let digest = image.rsplit_once("@sha256:").map(|(_, d)| d);
     if !digest.is_some_and(|d| d.len() == 64 && d.bytes().all(|b| b.is_ascii_hexdigit())) {
@@ -357,12 +368,49 @@ pub fn build(
             "C01_BUILD_IMAGE: the build image by its digest (<name>@sha256:<64 hex>)".into(),
         );
     }
-    if command.trim().is_empty() {
-        return Err("C01_BUILD_COMMAND: the build command as it was run".into());
+    let verifier_bytes = std::fs::read(verifier).map_err(|e| format!("C01_BUILD_VERIFIER: {e}"))?;
+    let run = |args: &[&str]| {
+        let mut c = std::process::Command::new(verifier);
+        c.args(args).env_clear();
+        // The verifier drives docker: its search path, home and docker settings, nothing else.
+        for k in ["PATH", "HOME", "TMPDIR", "DOCKER_HOST", "DOCKER_CONFIG"] {
+            if let Some(v) = std::env::var_os(k) {
+                c.env(k, v);
+            }
+        }
+        c.envs(protocol::SOURCE_BUILD_ENV);
+        c.output().map_err(|e| format!("C01_BUILD_VERIFIER: {e}"))
+    };
+    let version = run(&["--version"])?;
+    let verifier_version = String::from_utf8_lossy(&version.stdout).trim().to_string();
+    let source_arg = source.to_string_lossy().to_string();
+    let args = [
+        "build",
+        "-b",
+        image,
+        "--library-name",
+        protocol::SOURCE_LIBRARY,
+        source_arg.as_str(),
+        "--",
+        "--features",
+        protocol::SOURCE_BUILD_FEATURES,
+    ];
+    let out = run(&args)?;
+    if !out.status.success() {
+        let tail = String::from_utf8_lossy(&out.stderr);
+        let tail: String = tail.lines().rev().take(5).collect::<Vec<_>>().join(" | ");
+        return Err(format!(
+            "C01_BUILD_FAILED: the verifier exited {} ({tail}); nothing recorded",
+            out.status
+        ));
     }
-    let bytes = std::fs::read(elf).map_err(|e| format!("C01_BUILD_ELF: {e}"))?;
+    let elf = source
+        .join("target/deploy")
+        .join(format!("{}.so", protocol::SOURCE_LIBRARY));
+    let bytes =
+        std::fs::read(&elf).map_err(|e| format!("C01_BUILD_ELF: {}: {e}", elf.display()))?;
     if !bytes.starts_with(b"\x7fELF") {
-        return Err("C01_BUILD_ELF: the file is no ELF".into());
+        return Err("C01_BUILD_ELF: the build produced no ELF".into());
     }
     let built = protocol::trimmed_elf(&bytes);
     let record = C01Build {
@@ -370,7 +418,18 @@ pub fn build(
         source_commit: head,
         source_modified: false,
         image: image.into(),
-        command: command.trim().into(),
+        verifier_sha256: sha(&verifier_bytes),
+        verifier_version,
+        command: format!(
+            "{} {} {}",
+            protocol::SOURCE_BUILD_ENV
+                .iter()
+                .map(|(k, v)| format!("{k}={v}"))
+                .collect::<Vec<_>>()
+                .join(" "),
+            verifier.display(),
+            args.join(" ")
+        ),
         elf_sha256: sha(built),
         elf_len: built.len() as u64,
         recorded_unix_ms: now_ms(),
@@ -415,9 +474,33 @@ pub fn fe01(
             report.reason.as_deref().unwrap_or("-")
         ));
     }
+    // The observation of an approved FE-01 plan of this C-01 scope: the plan beside it, started,
+    // its evidence and its configuration exactly the journal's.
+    let fe01_plan: super::fe01_plan::Fe01Plan =
+        journal::read_typed_value(&observation.join(super::fe01_plan::PLAN)).map_err(|_| {
+            "C01_FE01_UNPLANNED: no FE-01 plan beside the observation; nothing recorded"
+        })?;
+    if !super::fe01_plan::started(observation)
+        || config.qualification_sha256.as_deref() != Some(fe01_plan.evidence_sha256.as_str())
+        || sha(&bincode::serialize(&config.effective).map_err(|_| "C01_FE01_CONFIG")?)
+            != fe01_plan.config_digest
+    {
+        return Err("C01_FE01_UNPLANNED: the observation is not its plan's (start, evidence or configuration differ); nothing recorded".into());
+    }
+    let (c01_plan, _) = load_plan(project, plan_id)?;
+    if fe01_plan.group != c01_plan.group {
+        return Err(format!(
+            "C01_FE01_SCOPE: the observation's group {} is not the C-01 plan's {}; nothing recorded",
+            fe01_plan.group, c01_plan.group
+        ));
+    }
     let o = report.observation.as_ref();
     let record = C01Fe01 {
         plan_id: plan_id.into(),
+        fe01_plan_id: fe01_plan.plan_id.clone(),
+        group: fe01_plan.group.clone(),
+        scope_targets: fe01_plan.targets.clone(),
+        evidence_sha256: fe01_plan.evidence_sha256.clone(),
         journal_sha256: sha(&bytes),
         sealed_complete: complete,
         execution: config.execution,
@@ -1191,6 +1274,8 @@ mod tests {
                 source_commit: protocol::SOURCE_COMMIT.into(),
                 source_modified: false,
                 image: "i@sha256:0".into(),
+                verifier_sha256: "v".into(),
+                verifier_version: "solana-verify 0".into(),
                 command: "c".into(),
                 elf_sha256: sha.into(),
                 elf_len: len,
@@ -1240,6 +1325,10 @@ mod tests {
         r.deployment.account_hash = Some(hash.to_string());
         let observed = C01Fe01 {
             plan_id: "p".into(),
+            fe01_plan_id: "f".into(),
+            group: "g".into(),
+            scope_targets: vec!["t".into()],
+            evidence_sha256: "e".into(),
             journal_sha256: "j".into(),
             sealed_complete: true,
             execution: crate::orchestration::fe_qualification::READ_ONLY.into(),
@@ -1258,6 +1347,8 @@ mod tests {
             source_commit: protocol::SOURCE_COMMIT.into(),
             source_modified: false,
             image: "i".into(),
+            verifier_sha256: "v".into(),
+            verifier_version: "solana-verify 0".into(),
             command: "c".into(),
             elf_sha256: "e".into(),
             elf_len: 1,

@@ -8,6 +8,7 @@ use crate::analytics::payload::{
     Fe01Read, Fe01ReadOutcome, Fe01Replay, Fe01ReplayRead, Fe01Report, Fe01Scope,
 };
 use darkbot_project0::funding::FundingClass;
+use darkbot_project0::protocol;
 use darkbot_solana::runtime_config::RuntimeConfig;
 #[cfg(feature = "historical")]
 use serde_json::Value;
@@ -269,6 +270,18 @@ pub fn decode_saved(
     fe::observed(read)
 }
 
+/// FE-01 02.11.2026: whether saved reads follow the former sequence — the ProgramData among the
+/// keys of a round batch (it is read only alone now, before and after the rounds).
+fn former_sequence(reads: &[(Fe01Read, Fe01ReplayRead)]) -> bool {
+    let Ok(program) = protocol::PROGRAM_ID_MAINNET.parse::<Pubkey>() else {
+        return false;
+    };
+    let pd = protocol::program_data_address(&program);
+    reads
+        .iter()
+        .any(|(r, _)| r.keys.len() > 1 && r.keys.contains(&pd))
+}
+
 /// The byte bound of an FE-01 journal, the replay's limit: the observation's `fe_max_mib` (within
 /// `max_total_mib`). The decoded accounts count, not the (compressed) wire bytes.
 pub fn journal_limit(config: &RuntimeConfig) -> Result<u64, String> {
@@ -325,6 +338,9 @@ pub fn replay_frozen(
         limit,
         config.limits.fe_calls.min(config.limits.max_requests),
     )?;
+    if saved.as_deref().is_some_and(former_sequence) {
+        return Err("FE_REPLAY_FORMER_SEQUENCE: saved under the former read sequence (the ProgramData read in every round); this build replays only its own (the ProgramData before and after the rounds)".into());
+    }
     if saved.is_none() && !legacy_reads {
         return Err(format!(
             "FE_REPLAY_JOURNAL_MISSING: no {FE01_JOURNAL} (a pre-PERSIST-01 read_NNNNNN.json observation is read only with --legacy-reads)"
@@ -516,7 +532,16 @@ mod archive_tests {
         Foreign,
     }
     fn archive(events: &[Event], seal: Option<bool>) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("p0-fe-archive-{}", Pubkey::new_unique()));
+        // Unique across processes: `Pubkey::new_unique` restarts in every test binary run.
+        let dir = std::env::temp_dir().join(format!(
+            "p0-fe-archive-{}-{}-{}",
+            Pubkey::new_unique(),
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
         fs::create_dir(&dir).unwrap();
         let mut w = Writer::create(&dir.join(FE01_JOURNAL)).unwrap();
         let effective = darkbot_solana::runtime_config::Resolved::parse(&[], &|_| None)
@@ -574,6 +599,35 @@ mod archive_tests {
             Event::Read(3),
             Event::Result(fe::OBSERVED, 1),
         ]
+    }
+    /// A journal of the former sequence (the ProgramData in a round batch) is refused by name.
+    #[test]
+    fn a_journal_of_the_former_read_sequence_is_refused_by_name() {
+        let program = protocol::PROGRAM_ID_MAINNET.parse::<Pubkey>().unwrap();
+        let pd = protocol::program_data_address(&program);
+        let read = |keys: Vec<Pubkey>| {
+            (
+                Fe01Read {
+                    keys,
+                    min_context_slot: 0,
+                    outcome: Fe01ReadOutcome::Failed { reason: "x".into() },
+                },
+                Fe01ReplayRead {
+                    origin: String::new(),
+                    sha256: String::new(),
+                    bytes: 0,
+                },
+            )
+        };
+        let current = vec![
+            read(vec![program]),
+            read(vec![pd]),
+            read(vec![program, Pubkey::new_unique()]),
+            read(vec![pd]),
+        ];
+        assert!(!former_sequence(&current));
+        let former = vec![read(vec![program]), read(vec![pd]), read(vec![program, pd])];
+        assert!(former_sequence(&former));
     }
     #[test]
     fn fe_replay_requires_complete_ordered_archive_and_exact_read_count() {

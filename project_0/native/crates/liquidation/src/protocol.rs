@@ -326,6 +326,18 @@ pub const BPF_LOADER_UPGRADEABLE_ID: &str = "BPFLoaderUpgradeab1e111111111111111
 /// (UPCOMING_0_1_12.md P1B-03): the checked RC2 candidate of the upgraded Mainnet deployment.
 pub const SOURCE_TAG: &str = "mrgn-0.1.12-rc2";
 pub const SOURCE_COMMIT: &str = "9fcb729ae3a6de67544fe6f8147da8d86bdf3692";
+/// The pinned source's Mainnet build recipe (its `scripts/build-program-verifiable.sh marginfi
+/// mainnet`): `solana-verify build --library-name SOURCE_LIBRARY -- --features
+/// SOURCE_BUILD_FEATURES` under SOURCE_BUILD_ENV (C-01 BUILD gate, `p0ctl c01 build`).
+pub const SOURCE_LIBRARY: &str = "marginfi";
+pub const SOURCE_BUILD_FEATURES: &str = "mainnet-beta,custom-heap";
+pub const SOURCE_BUILD_ENV: [(&str, &str); 5] = [
+    ("CARGO_PROFILE_RELEASE_OVERFLOW_CHECKS", "true"),
+    ("CARGO_PROFILE_RELEASE_LTO", "fat"),
+    ("CARGO_PROFILE_RELEASE_CODEGEN_UNITS", "1"),
+    ("CARGO_PROFILE_RELEASE_OPT_LEVEL", "3"),
+    ("CARGO_PROFILE_RELEASE_INCREMENTAL", "false"),
+];
 /// SHA-256 (base58) of the complete Mainnet ProgramData account recorded by the qualified 0.1.11
 /// Shadow upgrade watch (c0e1_4h_20261008T222326Z). Continuity evidence for its source
 /// (`PROGRAM_DATA_REFERENCE_SOURCE_TAG`), not a reproducible-build proof; historical captures of

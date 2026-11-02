@@ -445,8 +445,15 @@ fn p0_023_the_full_observation_takes_the_typed_record_by_its_id() {
             None,
         )
     };
-    // Refused before any read: another token, no plan, the evidence or class at execution.
+    // Refused before any read: another token, no plan, the evidence or class at execution, an
+    // unreadable earlier freeze — none of them uses the plan.
     for (dir, approve, extra, code) in [
+        (
+            output.as_path(),
+            token.as_str(),
+            &["--against", "/nonexistent/fe01"][..],
+            "FE_FREEZE",
+        ),
         (
             output.as_path(),
             "0000000000000000",

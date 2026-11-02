@@ -304,7 +304,13 @@ fn plan(p: &Project, env: &[(&str, &str)]) -> (String, String, String) {
 const BUDGET: [(&str, &str); 1] = [("P0_FE_CALLS", "20")];
 
 /// A sealed FE-01 full observation (`p0-fe-qualify` journal layout) of the read deployment.
-fn fe01_journal(dir: &std::path::Path, reads: &c01::C01Reads, complete: bool) {
+/// `plan_group`: the approved FE-01 plan beside it (started) and its group; `None`: no plan.
+fn fe01_journal(
+    dir: &std::path::Path,
+    reads: &c01::C01Reads,
+    complete: bool,
+    plan_group: Option<&str>,
+) {
     use darkbot_runner::analytics::journal::{self, Provenance, Writer};
     use darkbot_runner::analytics::payload::{Fe01Config, Fe01Observation};
     use darkbot_runner::orchestration::fe_qualification as fe;
@@ -312,6 +318,36 @@ fn fe01_journal(dir: &std::path::Path, reads: &c01::C01Reads, complete: bool) {
     let effective = darkbot_solana::runtime_config::Resolved::parse(&[], &|_| None)
         .unwrap()
         .effective();
+    let evidence = "e".repeat(64);
+    if let Some(group) = plan_group {
+        let plan = c01::Fe01Plan {
+            plan_id: "0123456789abcdef".into(),
+            created_unix_ms: None,
+            registry_version: 1,
+            rpc: darkbot_runner::orchestration::provider_measurement::ProviderRef {
+                id: "loop-rpc".into(),
+                binding: "b".into(),
+            },
+            evidence_id: "fedcba9876543210".into(),
+            evidence_sha256: evidence.clone(),
+            config_digest: fe::sha(&bincode::serialize(&effective).unwrap()),
+            binary_sha256: "x".into(),
+            funding_class: "ZERO_PREFUND_SAME_TX".into(),
+            group: group.into(),
+            targets: vec![],
+            calls: 12,
+            seconds: 120,
+            mib: 48,
+            rps: 1,
+            batch: 100,
+            rounds: 8,
+            required_reads: 11,
+            worst_case_reads: 35,
+        };
+        journal::create_typed_value(&dir.join("fe01_plan.p0j"), journal::source::FE01, &plan)
+            .unwrap();
+        std::fs::write(dir.join("run.started"), b"").unwrap();
+    }
     let mut w = Writer::create(&dir.join("fe01.p0j")).unwrap();
     let at = || Provenance {
         source: journal::source::FE01,
@@ -322,7 +358,7 @@ fn fe01_journal(dir: &std::path::Path, reads: &c01::C01Reads, complete: bool) {
         &Fe01Config {
             requested: effective.clone(),
             effective,
-            qualification_sha256: None,
+            qualification_sha256: Some(evidence),
             execution: fe::READ_ONLY.into(),
         },
     )
@@ -458,17 +494,36 @@ fn p0_025_the_deployment_read_records_every_layer_and_never_declares_parity() {
     let parity: c01::P1aParity =
         darkbot_runner::analytics::journal::read_typed_value(&dir.join("parity.p0j")).unwrap();
     assert!(parity.overall.starts_with("BLOCKED"));
-    // The BUILD step, offline: refused before anything is recorded on a source that is not the
-    // pinned checkout, an image without its digest, a file that is no ELF; then the build of the
-    // deployed ELF (padding trimmed) passes its gate, once.
-    let elf = p.base.join("marginfi.so");
-    std::fs::write(&elf, b"\x7fELF marginfi\0\0\0").unwrap();
+    // The BUILD step, offline: the step itself runs the pinned recipe through the verifier (here
+    // a stand-in writing the deployed ELF, padded) on a clean clone, in the image by digest.
+    // Refused before it runs: no checkout, an image without its digest, a clone holding an
+    // ignored file (a planted ELF); a failing build records nothing; then the gate passes, once.
     let image = format!(
         "solanafoundation/solana-verifiable-build@sha256:{}",
         "a".repeat(64)
     );
-    let checkout = pinned_checkout();
-    let build = |elf: &std::path::Path, source: &std::path::Path, image: &str| {
+    let clone = p.base.join("source");
+    assert!(Command::new("cp")
+        .arg("-R")
+        .arg(pinned_checkout())
+        .arg(&clone)
+        .status()
+        .unwrap()
+        .success());
+    let _ = std::fs::remove_file(clone.join(".cargo-ok"));
+    let verifier = |name: &str, body: &str| {
+        let path = p.base.join(name);
+        std::fs::write(&path, format!("#!/bin/sh\nif [ \"$1\" = --version ]; then echo solana-verify-stand-in; exit 0; fi\nprintf '%s\\n' \"$@\" > \"$(dirname \"$0\")/{name}.args\"\n{body}\n")).unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        path
+    };
+    let good = verifier(
+        "verifier-good",
+        "mkdir -p \"$6/target/deploy\" && printf '\\177ELF marginfi\\000\\000\\000' > \"$6/target/deploy/marginfi.so\"",
+    );
+    let failing = verifier("verifier-failing", "echo docker unavailable >&2; exit 1");
+    let build = |source: &std::path::Path, verifier: &std::path::Path, image: &str| {
         run(
             &p,
             &[
@@ -476,33 +531,53 @@ fn p0_025_the_deployment_read_records_every_layer_and_never_declares_parity() {
                 "build",
                 "--plan",
                 &plan_id,
-                "--elf",
-                elf.to_str().unwrap(),
                 "--source",
                 source.to_str().unwrap(),
+                "--verifier",
+                verifier.to_str().unwrap(),
                 "--image",
                 image,
-                "--command",
-                "solana-verify build --library-name marginfi -- --features mainnet-beta,custom-heap",
             ],
             &[],
             None,
         )
     };
-    let (ok, text) = build(&elf, &p.project, &image);
+    let (ok, text) = build(&p.project, &good, &image);
     assert!(!ok && text.contains("C01_BUILD_SOURCE"), "{text}");
     let (ok, text) = build(
-        &elf,
-        &checkout,
+        &clone,
+        &good,
         "solanafoundation/solana-verifiable-build:3.1.13",
     );
     assert!(!ok && text.contains("C01_BUILD_IMAGE"), "{text}");
-    let (ok, text) = build(&dir.join("plan.p0j"), &checkout, &image);
-    assert!(!ok && text.contains("C01_BUILD_ELF"), "{text}");
+    let planted = clone.join("target/deploy");
+    std::fs::create_dir_all(&planted).unwrap();
+    std::fs::write(planted.join("marginfi.so"), b"\x7fELF marginfi").unwrap();
+    let (ok, text) = build(&clone, &good, &image);
+    assert!(!ok && text.contains("C01_BUILD_SOURCE_NOT_CLEAN"), "{text}");
+    std::fs::remove_dir_all(clone.join("target")).unwrap();
+    let (ok, text) = build(&clone, &failing, &image);
+    assert!(!ok && text.contains("C01_BUILD_FAILED"), "{text}");
     assert!(!dir.join("build.p0j").exists());
-    let (ok, text) = build(&elf, &checkout, &image);
+    let (ok, text) = build(&clone, &good, &image);
     assert!(!ok, "the 0.1.11 bank still fails: {text}");
     assert!(text.contains("gate BUILD PASS built elf_sha256="), "{text}");
+    let args = std::fs::read_to_string(p.base.join("verifier-good.args")).unwrap();
+    let args: Vec<&str> = args.lines().collect();
+    assert_eq!(
+        args,
+        [
+            "build",
+            "-b",
+            image.as_str(),
+            "--library-name",
+            "marginfi",
+            clone.to_str().unwrap(),
+            "--",
+            "--features",
+            "mainnet-beta,custom-heap"
+        ]
+    );
     // The stale IDL is informational once the bytecode is proven (user decision 02.11.2026).
     assert!(text.contains("gate IDL FAIL (informational)"), "{text}");
     assert!(text.contains("P1A_PARITY BLOCKED: BANKS FAIL"), "{text}");
@@ -513,35 +588,53 @@ fn p0_025_the_deployment_read_records_every_layer_and_never_declares_parity() {
         .gates
         .iter()
         .any(|g| g.name == "BUILD" && g.verdict == "PASS"));
-    let (ok, text) = build(&elf, &checkout, &image);
+    let (ok, text) = build(&clone, &good, &image);
     assert!(
         !ok && text.contains("C01_STEP_RECORDED: build.p0j"),
         "{text}"
     );
     // Step 6 offline: the FE-01 full observation of the read deployment, from its sealed journal.
     // An incomplete observation is refused, nothing recorded.
-    let incomplete = p.base.join("fe01_incomplete");
-    fe01_journal(&incomplete, &reads, false);
-    let (ok, text) = run(
-        &p,
-        &[
-            "c01",
-            "fe01",
-            "--plan",
-            &plan_id,
-            "--observation",
-            incomplete.to_str().unwrap(),
-        ],
-        &[],
-        None,
-    );
-    assert!(
-        !ok && text.contains("C01_FE01_INCOMPLETE: INCOMPLETE"),
-        "{text}"
-    );
-    assert!(!dir.join("fe01.p0j").exists());
+    // Refused, nothing recorded: an incomplete observation, one without its approved plan, one
+    // of another group than the C-01 plan's.
+    let c01_plan: c01::C01Plan =
+        darkbot_runner::analytics::journal::read_typed_value(&dir.join("plan.p0j")).unwrap();
+    let other_group = Pubkey::new_unique().to_string();
+    for (name, complete, group, code) in [
+        (
+            "incomplete",
+            false,
+            Some(c01_plan.group.as_str()),
+            "C01_FE01_INCOMPLETE: INCOMPLETE",
+        ),
+        ("unplanned", true, None, "C01_FE01_UNPLANNED"),
+        (
+            "foreign",
+            true,
+            Some(other_group.as_str()),
+            "C01_FE01_SCOPE",
+        ),
+    ] {
+        let refused = p.base.join(format!("fe01_{name}"));
+        fe01_journal(&refused, &reads, complete, group);
+        let (ok, text) = run(
+            &p,
+            &[
+                "c01",
+                "fe01",
+                "--plan",
+                &plan_id,
+                "--observation",
+                refused.to_str().unwrap(),
+            ],
+            &[],
+            None,
+        );
+        assert!(!ok && text.contains(code), "{name}: {text}");
+        assert!(!dir.join("fe01.p0j").exists(), "{name}");
+    }
     let observation = p.base.join("fe01_full");
-    fe01_journal(&observation, &reads, true);
+    fe01_journal(&observation, &reads, true, Some(&c01_plan.group));
     let fe01 = || {
         run(
             &p,

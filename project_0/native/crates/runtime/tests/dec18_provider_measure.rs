@@ -37,6 +37,8 @@ struct Behaviour {
     /// The first subscription of this method is acknowledged but never notified (the owner's
     /// first program filter matches nothing in the window).
     silent_first: Option<&'static str>,
+    /// The first subscription of this method is refused (-32602, invalid params).
+    refuse_first: Option<&'static str>,
 }
 
 /// What the loopback provider saw.
@@ -196,6 +198,14 @@ fn wss(b: Behaviour, seen: Arc<Mutex<Seen>>) -> String {
                     let mut s = seen.lock().unwrap();
                     s.subscribed.push(method.clone());
                     if b.unacknowledged == Some(method.as_str()) {
+                        continue;
+                    }
+                    let nth = s.subscribed.iter().filter(|m| **m == method).count();
+                    if nth == 1 && b.refuse_first == Some(method.as_str()) {
+                        drop(s);
+                        let _ = ws.send(tungstenite::Message::Text(
+                            serde_json::json!({"jsonrpc":"2.0","error":{"code":-32602,"message":"invalid params"},"id":id}).to_string(),
+                        ));
                         continue;
                     }
                     next += 1;
@@ -714,6 +724,33 @@ fn p0_022_a_read_of_two_messages_is_supported_once_either_delivers() {
     assert!(text.contains("mode econ4h SUPPORTED"), "{text}");
     assert_eq!(s_count(&p.seen, "programSubscribe"), 2);
     admit(&p, &evidence_id(&text), "econ4h", "1").unwrap();
+    let _ = std::fs::remove_dir_all(&p.base);
+}
+
+/// Review 02.11.2026: a refused filter is the read's verdict even when the other delivers — the
+/// session sends both.
+#[test]
+fn p0_022_a_refused_message_of_a_read_is_its_verdict() {
+    let p = setup(
+        "refused-filter",
+        Behaviour {
+            refuse_first: Some("programSubscribe"),
+            ..Default::default()
+        },
+    );
+    let env = [("P0_MEASURE_SUBSCRIPTION_SECONDS", "2")];
+    let (_, plan_id, token, _) = plan(&p, &env);
+    let (ok, text) = measure_with(&p, &plan_id, &token, &env);
+    assert!(!ok, "{text}");
+    assert!(
+        text.contains("read programSubscribe@confirmed NOT_PROVEN WSS_ERROR -32602"),
+        "{text}"
+    );
+    assert!(text.contains("mode econ4h NOT_PROVEN"), "{text}");
+    assert_eq!(s_count(&p.seen, "programSubscribe"), 2);
+    let id = evidence_id(&text);
+    admit(&p, &id, "market", "1").unwrap();
+    assert!(admit(&p, &id, "econ4h", "1").is_err());
     let _ = std::fs::remove_dir_all(&p.base);
 }
 

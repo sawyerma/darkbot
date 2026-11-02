@@ -134,8 +134,8 @@ pub struct Approved {
     pub proof: ProviderEvidence,
 }
 
-/// `--execute --approve TOKEN`: exactly the approved plan, once; `resolved` is shaped as
-/// planned.
+/// `--execute --approve TOKEN`: the checks of exactly the approved plan; `resolved` is shaped as
+/// planned. [`start`] then marks it used.
 pub fn approve(
     project: &Path,
     resolved: &mut Resolved,
@@ -177,16 +177,9 @@ pub fn approve(
     if fe::sha(&record) != plan.evidence_sha256 {
         return Err(drift("the evidence record"));
     }
-    std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(output.join(STARTED))
-        .map_err(|e| match e.kind() {
-            std::io::ErrorKind::AlreadyExists => {
-                "FE_PLAN_USED: this plan ran before (a new attempt is a new plan)".to_string()
-            }
-            _ => format!("FE_PLAN_STORE: {e}"),
-        })?;
+    if output.join(STARTED).exists() {
+        return Err(used());
+    }
     Ok(Approved {
         plan,
         registry,
@@ -195,6 +188,29 @@ pub fn approve(
         record,
         proof,
     })
+}
+
+/// Whether the plan in `output` started reading.
+pub fn started(output: &Path) -> bool {
+    output.join(STARTED).is_file()
+}
+
+fn used() -> String {
+    "FE_PLAN_USED: this plan ran before (a new attempt is a new plan)".into()
+}
+
+/// The approved plan starts reading: once (of concurrent starts exactly one wins), after every
+/// check and the credentials, right before the first read.
+pub fn start(output: &Path) -> Result<(), String> {
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(output.join(STARTED))
+        .map(|_| ())
+        .map_err(|e| match e.kind() {
+            std::io::ErrorKind::AlreadyExists => used(),
+            _ => format!("FE_PLAN_STORE: {e}"),
+        })
 }
 
 /// The operator's view of a plan.
