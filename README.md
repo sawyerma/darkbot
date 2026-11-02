@@ -8,6 +8,8 @@ darkbot/
 ├── project_0/   Solana Project 0 liquidator
 ├── solana/      Solana / Pump.fun and shared Solana Python infrastructure
 ├── frontend/    one shared React control-plane/dashboard
+├── darknode/    DarkNode – Bitget 24/7 rule trading (Gate 1, Konzept)
+├── shared/      [REV.2.0, geplant] gemeinsame Credential-Crates (Abschnitt unten)
 └── README.md
 ```
 
@@ -63,6 +65,71 @@ BSC Rust: DBREC / DBJNL (intern)       Project_0 Rust: P0J (intern)
 
 Verbindlich: [frontend/README.md](frontend/README.md) (F0-VAR, Storage-/Wire-Grenze, Retention, FRAME_TOO_LARGE, Topic-Recovery, Stop All, RTT, phasengebundene Aufgaben). [Wire V1.3](frontend/docs/GATEWAY_WIRE_PROTOCOL_V1_3.md) bleibt Transportautorität; die beiden nativen Phasenpläne bleiben fachliche Autorität. **Keine neue Architektur oder Änderung der internen Dateiformate.**
 
+## Gemeinsamer Credential-Store (Schlüsselbund) – wie die Projekte zusammenspielen (verbindlich, Nutzerentscheidung 02.11.2026)
+
+**Status: `REV.2.0 / DEFERRED`.** Heute hat nur Project_0 einen Schlüsselbund-Store (DEC-18); BSC liest sein Builder-Token aus Datei bzw. Umgebung. Die Umstellung aller Projekte auf **einen** gemeinsamen Store ist REV.2.0 und beginnt erst nach dem Auslöser (Project_0-REV.1.0-Softwareabnahme **und** BSC-REV.1.0-Abschluss) per Nutzerauftrag „Phasenplan Rev2.0 umsetzen“. **Bis dahin gilt ab sofort die Einfrier-Regel:** kein Projekt baut neuen eigenen Credential-Store-Code (Details unten). Technischer Vertrag: [frontend/docs/FRONTEND_PHASENPLAN.md §14](frontend/docs/FRONTEND_PHASENPLAN.md); Ausführung: [project_0/docs/PHASENPLAN_REV2.0.md](project_0/docs/PHASENPLAN_REV2.0.md) (mit vollständigem Code-Entwurf in Anhang A) und [bsc/docs/1_PLAN/Phasenplan Rev2.0.md](bsc/docs/1_PLAN/Phasenplan%20Rev2.0.md) Anhang B.
+
+### Das Prinzip: eine Bibliothek, ein Service je Projekt, Fachlogik bleibt im Projekt
+
+```text
+                      shared/   (eigener kleiner Cargo-Workspace, nur Bibliothek, kein Programm)
+   ┌──────────────────────────────────────────────────────────────────────────────┐
+   │ darkbot-credentials  CredentialStore (put/get/delete/list) · Secret (zeroisiert,│
+   │                      nie druckbar) · ServiceId · feste Fehlercodes ·          │
+   │                      DirectoryStore (nur Debug-Tests, nie Release)            │
+   │ darkbot-keychain     open_store(service) → macOS-Login-Schlüsselbund          │
+   │                      jedes andere System → CREDENTIAL_STORE_UNAVAILABLE       │
+   └───────────▲────────────────────▲────────────────────▲────────────────────▲─────┘
+               │ Path-Dependency    │                    │                    │
+        project_0/native        bsc/engine          darknode/ (später)   weitere Projekte
+   Service …project0.provider  …bsc.provider      …darknode.<zweck>     …<projekt>.<zweck>
+   eigene Registry, Accounts,  Account aus der     eigene Registry,     eigene Registry,
+   Revisionen, Receipts,       Owner-Konfig,       IO-Executor als      eigene Gates
+   p0ctl/GUI-Eingang           Lesen am Arm-Punkt  einziger Halter
+               │                    │                    │                    │
+               └──────── nur Referenz/Revision/Status, nie das Secret ────────┘
+                                         │
+                       Protobuf → EIN Gateway → EIN Dashboard (redigiert)
+```
+
+Alle Service-Namen beginnen mit `de.darkma.darkbot.`; Project_0 behält exakt `de.darkma.darkbot.project0.provider`, damit vorhandene Einträge lesbar bleiben.
+
+| Gemeinsam (`shared/`) | Bleibt im jeweiligen Projekt |
+|---|---|
+| Speichern, Lesen, Löschen, Auflisten von Secret-Bytes im OS-Speicher | welcher Provider, welches Konto, welche Revision gilt (Registry, Account-Schema, CAS, Receipts) |
+| `Secret`-Typ (zeroisiert, Debug redigiert) und feste Fehlertexte | Eingabe, Rotation, Widerruf (CLI/GUI-Controller, nichtpersistierender Credential-Eingang) |
+| Service-Namensprüfung `[A-Za-z0-9._-]{1,128}` | wann gelesen wird (Start/Arm), wofür das Secret benutzt werden darf (Freigabegates) |
+| ein Offline-Teststore für alle Projekte | Journale, Ledger, Protobuf-Projektionen, Frontend-Anzeige |
+
+### Drei Klassen von Geheimnissen – nie vermischen
+
+| Klasse | Project_0 | BSC | DarkNode (später) | Gemeinsamer Store? |
+|---|---|---|---|---|
+| **Wallet-/Signierschlüssel** | Keypair-Datei, P8-CTRL-Gates | Launcher/Buyer `bsc/secrets.env`, `LiveKey` | keiner (CEX, kein eigenes Wallet) | **nein**, bleibt projekteigen |
+| **Provider-/API-Credential** | RPC/WSS/Geyser/Jupiter/Jito-Keys (DEC-18) | BlockRazor-Authorization | Bitget Trade-/Read-Key **ohne Withdrawal** (Key, Secret, Passphrase) | **ja**, ab REV.2.0 |
+| **Operator-Freigabe** | DEC-17a Secure Enclave mit userPresence | BSC3-001 (offen) | eigener Entscheid | **nein**, bleibt projekteigen |
+
+Ein Exchange-Key mit Handelsrecht ist ein Provider-Credential, aber wertberechtigt: Er wird nur über die Freigabegates seines Projekts benutzt; ein Lesen aus dem Store ist **nie** eine LIVE- oder Handelsfreigabe.
+
+### Regeln für jedes Projekt (heutige und künftige)
+
+1. **Kein eigener Credential-Store.** Ab REV.2.0 ausschließlich `shared/credentials` + `shared/keychain`. Bis dahin Einfrier-Regel: kein neuer Store-Code in irgendeinem Projekt; der Project_0-DEC-18-Store nur als Bugfix; BSC behält `.token`-Datei/Umgebung. Ausgenommen: Operator-Freigabeschlüssel (eigene Klasse) und eine Lösung für P0-029. Jede zulässige Änderung am Store-Code zieht §14 im selben Commit nach.
+2. **Nie Klartext** in Git, Dateien, Umgebung, CLI-Argumenten, Logs, Journalen, Receipts, Protobuf, Gateway-Ledger oder Browser. Im Journal stehen nur Referenz, Revision und redigierter Zustand.
+3. **Ein Service je Projekt, aber keine Prozess-Isolation:** Der Service-Name trennt nur Namen. Ob ein anderes Programm desselben macOS-Kontos lesen darf, entscheidet die macOS-ACL mit Dialog. Behauptungen wie „Projekt X kann Y nicht lesen“ nur mit echtem Negativtest (SHC-T05).
+4. **Lesen nur kontrolliert** bei Provisionierung, Start oder Arm im Owner-Prozess der Benutzersitzung – **nie** im Hotpath (BUY/SELL/Order/Race). Fehlt ein Eintrag oder wird der Zugriff verweigert: fail-closed mit `CREDENTIAL_UNAVAILABLE`, ohne Store `CREDENTIAL_STORE_UNAVAILABLE`; kein Fallback auf Umgebung, Datei oder bezahlte Anbieter. Linux hat keinen qualifizierten Store.
+5. **Gateway und Browser sehen nie ein Secret.** Eingabe über den nichtpersistierenden Credential-Eingang des Projekt-Controllers; Vorbild DEC-18: der Gateway trennt das Secret vor jedem Ledger-Eintrag und reicht es per stdin an den Controller weiter.
+6. **macOS-Betriebsrealität** (Evidence [BKC_KEYCHAIN_20261102](project_0/docs/evidence/BKC_KEYCHAIN_20261102.md)): Nur das anlegende Programm liest ohne Dialog; jedes andere fragt je Start nach, eine dauerhafte Freigabe wird nicht erteilt, jeder Rebuild ändert die Code-Identität (cdhash). Hintergrunddienste scheitern mit `-25308`. **Unbeaufsichtigter 24/7-Betrieb** (Project_0-Autostart, DarkNode-Dauerbetrieb) braucht deshalb die offene Entscheidung zum Zugriffsmodell (P0-029). Diese Lösung wird **einmal zentral** getroffen und gilt für alle Projekte, nicht je Projekt neu erfunden.
+7. **Nur die Project_0-Session ändert `shared/**`** (ein Integrator, nur `main`). Andere Projekte ändern nur ihren eigenen Adapter. Jede Änderung unter `shared/**` löst die CI aller angeschlossenen Projekte aus.
+
+### Ein neues Projekt anschließen (DarkNode und alle weiteren)
+
+1. **Service-ID festlegen** nach dem Muster `de.darkma.darkbot.<projekt>.<zweck>` und im Projektplan eintragen; Eintrag in der Consumer-Tabelle von §14 (SHC-08) im selben Commit.
+2. **Abhängigkeiten:** Path-Dependency auf `shared/credentials` und `shared/keychain` (relativer Pfad je nach Crate-Tiefe); `zeroize` und `security-framework` exakt auf die Pins aus §14 SHC-03; Lockfile kontrolliert aktualisieren, danach nur `--locked`; Versions-Tripwire (SHC-06) für den eigenen Lockfile-Graphen.
+3. **Eigener schmaler Adapter** (Vorbild BSC `credentials.rs`): `open_store(SERVICE)`, daraus den projekteigenen Token-/Key-Typ bauen. Das Konto kommt aus der eigenen validierten, versionierten Konfiguration, nie aus Browser oder Umgebung, nie als statischer Default. Mehrteilige Credentials (z. B. Bitget Key/Secret/Passphrase) kodiert das Projekt selbst (eigenes Account-Schema oder ein binärer Datensatz); der Store speichert nur Bytes.
+4. **Tests nach der Abnahmematrix §14 SHC-07:** Signaturen/Fehlertexte, kein Dateistore im Release, Denial/Fehlend/Widerruf/Restart/Rotation mit echten `-25300`/`-25308`, Negativtest gegen fremde Services, keine Secrets in Logs/Journal/Protobuf/GUI, kein Store-Zugriff im Hotpath. Echte Schlüsselbund-Tests nur mit Dummy-Credential, ohne Netz, nach Ankündigung des macOS-Dialogs; Eintrag danach löschen.
+5. **CI:** eigener Workflow mit `shared/**`-Auslöser und den Shared-Schritten `fmt`/`clippy`/`test` (`--manifest-path shared/Cargo.toml`); Pfad→Job-Zuordnung im Projektplan ergänzen.
+6. **Braucht ein Projekt ein Credential vor dem REV.2.0-Auslöser**, ist das der vorgezogene Auslöser: Nutzerentscheidung einholen. Nie einen eigenen Übergangs-Store bauen.
+
 ## Project entry points
 
 - `bsc/README.md`
@@ -70,6 +137,7 @@ Verbindlich: [frontend/README.md](frontend/README.md) (F0-VAR, Storage-/Wire-Gre
 - `project_0/docs/PHASENPLAN.md`
 - `solana/README.md`
 - `frontend/README.md`
+- `darknode/README.md`
 
 ## Fable ZIP fast path — default procedure
 

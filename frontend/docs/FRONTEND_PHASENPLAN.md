@@ -348,3 +348,178 @@ Project process state requires its OWN supervisor-owned, authenticated, timestam
 **Ein Datentransport, korrekte fachliche Rollen:** Zulässige diagnostische Leaf-Werte dürfen über das vorhandene `PublicField`-Format mit belegter Herkunft und Einheit gruppiert werden; Identitäten, Prozesszustände, Zeiten, Beträge und Gate-Verdicts brauchen nachweislich passende typisierte, additive Protobuf-Felder. Durchgängig Native-Record/Owner → redigierte native Projektion → Protobuf/Golden → Gateway STATE → vorhandener `bscAdapter`/`bscStore` → zugeordnete Zeile im bestehenden Panel → E2E-Test. Fehlendes Feld bleibt `UNKNOWN`/`—` bzw. `SOLL_MISSING`; nicht als null, null BNB, historische LIVE-Aussage oder aus TypeScript berechnete Native-Entscheidung ersetzen. Original-G0.7/G0.8-Evidence nur mit korrekter Candidate-/Attempt-/Chain-Bindung aggregieren.
 
 **Ablauf und Abnahme:** Paket 0 vollständig inventarisieren und verbindlich gruppieren; Paket 1 die bestätigten Status-/Readiness-/Clock-/Controller-/Receipt-/CAS-/No-Polling-Integrationsfehler nach [Astra §E](ASTRA_BSC_FRONTEND_IMPLEMENTATION_ORDER.md) beheben; Pakete 2–5 die bestehenden Panels feldweise in oben definierter Reihenfolge vervollständigen; Paket 6 Feldabdeckung **Native→Bildschirm**, Goldens, Secret-/Source-Security, ursprüngliche Sicherheitszustände, Reconnect/No-Polling, A11y und bestehende Graphite-/Project_0-Regression testen. Für jeden Abschnitt müssen tatsächliche Felder, Source-SHA, Tests und explizit offene native Produktionsgates dokumentiert werden. **Kein neues BSC-Gate, keine zusätzliche Runtime-Architektur, keine Mainnet-/LIVE-Freigabe.**
+
+## 14. SHARED-KEYCHAIN-CREDENTIALS-V1 — gemeinsamer Credential-Store (REV.2.0, DEFERRED; Nutzerentscheidung 02.11.2026)
+
+**Status:** `REV.2.0 / DEFERRED` — SOLL, nicht implementiert; vor dem Auslöser (§14.0) wird nichts umgebaut. **Vertragsbasis:** GitHub `sawyerma/darkbot`, `main` bei Review `d57e1a19`, erneut geprüft an `0338f72c` (02.11.2026). **Code-Pin:** `project_0/native/crates/solana/src/providers.rs` Stand `02ed04a8` (letzte Änderung der Datei). **Dokumentort:** Dieser Abschnitt ist der einzige zentrale Vertrag; die Erklärung für alle Projekte steht in der [Haupt-README](../../README.md), Abschnitt „Gemeinsamer Credential-Store“. Ausführung: Project_0 [`PHASENPLAN_REV2.0.md`](../../project_0/docs/PHASENPLAN_REV2.0.md) (Pakete, Prüfpunkte, Auftrag an Claude, **Anhang A = einmaliger Code-Entwurf aller `shared/**`-Dateien**); BSC [`Phasenplan Rev2.0.md`](../../bsc/docs/1_PLAN/Phasenplan%20Rev2.0.md) Anhang B (BSC-Adapter, geführt von der BSC-Session). Nach der Implementierung ist die Rust-API ausschließlich über Rustdoc in `shared/credentials/src/lib.rs` und `shared/keychain/src/lib.rs` verbindlich.
+
+### 14.0 Einordnung, Auslöser, Einfrier-Regel
+
+- **Warum REV.2.0:** Die Umstellung liegt auf keinem kritischen Pfad. Project_0 betreibt Smoke, Pilot und FE-07 mit dem vorhandenen DEC-18-Store; BSC bezieht das BlockRazor-Token für LIVE aus der `.token`-Datei und für G0.7 aus der Umgebung. Die Umstellung bringt einen dritten Cargo-Workspace sowie Lockfile-, CI- und Gate-Änderungen in beide Projekte; das gehört nicht in die laufende REV.1.0-Fertigstellung. Solange die Einfrier-Regel gilt, bleibt die spätere Extraktion ein reines Verschieben von rund 200 Zeilen ohne Verhaltensänderung.
+- **Auslöser (beide Bedingungen):** (a) Project_0-REV.1.0-Softwareabnahme abgeschlossen **und** (b) BSC-REV.1.0 abgeschlossen (R14-Abschlussmatrix). Früher nur durch ausdrückliche Nutzerentscheidung, wenn ein zweites Projekt nachweislich ein Credential im Schlüsselbund braucht. Start immer per Nutzerauftrag („Phasenplan Rev2.0 umsetzen“), nie automatisch.
+- **Einfrier-Regel (gilt ab 02.11.2026 bis zur Umsetzung):**
+  1. Kein neuer Provider-Credential-Store-Code in irgendeinem Projekt: kein zweites `CredentialStore`/`Secret`/`Keychain`/`DirectoryStore`/`system_store()`, kein weiterer Keychain- oder Secret-Speicher. Project_0 nutzt den DEC-18-Store unverändert (Service `de.darkma.darkbot.project0.provider`); Änderungen daran nur als Bugfix.
+  2. BSC baut keinen eigenen Schlüsselbund-Zugriff für Provider-Credentials; `runtime_live.rs::token_from()` (`.token`-Datei) und `DARKBOT_G07_BLOCKRAZOR_AUTHORIZATION` bleiben wie heute.
+  3. **Nicht eingefroren:** der Operator-Freigabeschlüssel (Project_0 DEC-17a/P8-CTRL-02, Secure Enclave mit userPresence; BSC3-001-Präsenzanker) als eigene Klasse außerhalb dieses Stores, und eine Lösung für P0-029 (Zugriffsmodell des unbeaufsichtigten Starts), die den Store-Code ändern darf.
+  4. Jede zulässige Änderung am Keychain-Teil von `providers.rs` zieht im selben Commit den Code-Pin dieses Abschnitts und Anhang A des Project_0-REV.2.0-Plans nach.
+- **Drei Klassen von Geheimnissen, nie vermischen:**
+
+| Klasse | Project_0 | BSC | Speicher | Durch SHC |
+|---|---|---|---|---|
+| Wallet-Schlüssel | Keypair-Datei (`P0_KEYPAIR_PATH`), nur über die P8-CTRL-Wallet-/SIGN-Gates | Launcher/Buyer: `bsc/secrets.env` (D1), `paper.rs::load_private_key()`, `live_key.rs::LiveKey::load()` | projekteigen | unverändert, nie migriert |
+| Provider-Credential | API-Keys RPC/WSS/Geyser/Jupiter/Jito (DEC-18) | BlockRazor-Authorization (LIVE, G0.7) | heute: Project_0 Schlüsselbund (DEC-18), BSC `.token`-Datei/ENV; ab REV.2.0 gemeinsamer Store mit eigenem Service je Projekt | Gegenstand dieses Vertrags |
+| Operator-Freigabe | DEC-17a: Secure Enclave, userPresence | BSC3-001: offene Betreiberentscheidung | projekteigen | nicht Teil |
+
+- **Betriebsregel aus der Evidence** [`BKC_KEYCHAIN_20261102.md`](../../project_0/docs/evidence/BKC_KEYCHAIN_20261102.md): Nur das anlegende Binary liest ohne Dialog; jedes andere Binary braucht je Start den macOS-Dialog. Eine dauerhafte Berechtigung („Immer erlauben“) erteilt der Nutzer nicht; jeder Rebuild ändert den cdhash und damit den Zugriff. Ein Background-launchd-Kontext scheitert fail-closed mit `-25308`, ein `gui`-LaunchAgent liest nach Bestätigung. Der Gateway liest den Store nie selbst (das Secret geht per stdin an den Controller). Die gemeinsamen Crates ändern daran nichts; P0-029 bleibt offen.
+
+### SHC-01 – Repository und Verantwortungsgrenzen
+
+```text
+DarkBot/
+├── shared/
+│   ├── Cargo.toml                 # Workspace nur für gemeinsame Crates
+│   ├── Cargo.lock                 # reproduzierbarer Shared-Crate-Testbuild
+│   ├── credentials/
+│   │   ├── Cargo.toml
+│   │   └── src/
+│   │       ├── lib.rs
+│   │       ├── store.rs
+│   │       ├── secret.rs
+│   │       ├── identity.rs
+│   │       ├── errors.rs
+│   │       └── directory.rs      # ausschließlich Offline-Tests
+│   └── keychain/
+│       ├── Cargo.toml
+│       └── src/
+│           ├── lib.rs
+│           └── macos.rs
+├── project_0/                    # bleibt separater fachlicher Cargo-Workspace
+├── bsc/                          # bleibt separater fachlicher Cargo-Workspace
+├── darknode/                     # künftiger Consumer, ohne Vorabimplementierung
+├── frontend/                     # bestehende Graphite-Reiter
+├── gateway/                      # bestehender Protobuf-/Command-Weg
+└── weitere Projekte/             # konsumieren dieselben Shared-Crates
+```
+
+Die gemeinsame Bibliothek verwaltet **nur** das Betriebssystem-Secret-Storage und die generische Store-/Secret-API. Keine Wallet-Signatur, kein RPC-Budget, keine Provider-Registry, keine Operator-Freigabe und keine neue Dashboard-/Gateway-Architektur. Projekt-Owner behalten ihre Credentials-Identitäts-/Revisionsschemata, Controller, Journale, Ledger und Freigabegates. Abhängigkeitsrichtung: `keychain → credentials`; Projekt-Crates → beide. Kein Root-Workspace in `DarkBot/` und keine Engine-Verschiebung. Ein eigener kleiner Workspace unter `shared/` ermöglicht es, **genau diese beiden extern referenzierten Path-Crates selbst mit `--locked` zu testen**, ohne sie gleichzeitig zu Mitgliedern zweier fremder Workspaces zu machen. Der zusätzliche `shared/Cargo.lock` ist ausschließlich ein Test-/Build-Lock; die beiden bestehenden Projekt-Lockfiles werden beim Anschluss ebenfalls aktualisiert.
+
+**Der geprüfte Bestand (am Code-Pin `02ed04a8`):** `project_0/native/crates/solana/src/providers.rs` enthält `Secret` (145–161), `CredentialStore` (1003–1013), `Keychain`/`security-framework` (1015–1064), `DirectoryStore` (1066–1115), `system_store()` (1120–1136). `provider_registry.rs::decide()` und `ProviderRegistry::account()` bleiben **in Project_0**. BSC behält die bestehenden Signer in `paper.rs`, `live_key.rs` und den separaten G0.7-Startup-Pfad.
+
+### SHC-02 – Sicherheit, Namespace, Betrieb
+
+- Jeder Projekt-Owner übergibt ausschließlich seine validierte, nichtgeheime Service-ID; **Service-Namen sind keine Betriebssystem-Zugriffsgrenze**. macOS-ACL, Code-Signaturidentität, Dialogverhalten und Background-Zugriff müssen separat bewiesen werden.
+- Im Schlüsselbund liegen Secret-Bytes; im typisierten Binärjournal nur Referenz, Version, Nonce/Account-ID und redigierte Zustände. Kein Geheimnis in Git, Protobuf-STATE, Browser, Commands, Logs, Receipts, URLs oder CLI-Argumenten.
+- Fehlende/gesperrte Einträge führen zu `CREDENTIAL_UNAVAILABLE`, fehlender OS-Backend zu `CREDENTIAL_STORE_UNAVAILABLE`. Kein automatischer ENV-/Datei-/Paid-Provider-Fallback, keine stille Schlüsselrotation.
+- Externe API- und Builder-Credentials werden kontrolliert bei Provisionierung/Start/Arm gelesen; **kein Keychain-Aufruf während BUY/SELL/Race**. Wallet-Private-Keys und Signierer werden nicht migriert.
+- `P0-029` (anderes Binary verlangt nachweislich macOS-Dialog; Background `-25308`) und `BSC3-001` (zweiter Autorisierungsanker) bleiben **offen**. Die gemeinsamen Crates lösen keinen der beiden Fehler durch bloße Existenz.
+- Linux: **kein qualifizierter Store implementiert**. Diese Revision liefert für Linux ausdrücklich `CREDENTIAL_STORE_UNAVAILABLE`, niemals Klartextdateien. Ein künftiger Linux-Backend benötigt separate Spezifikation/Qualifikation.
+- `DirectoryStore` verbleibt allein in `shared/credentials`, ausschließlich unter `#[cfg(any(test, all(feature = "test-support", debug_assertions)))]`; in Release-Binaries gibt es keinen produktiven Dateistore. Bestehende P0-Fehlertexte bleiben bytegleich.
+
+### SHC-03 – Versionen und Lockfile-Parität
+
+Am geprüften Repository: `project_0/native/crates/solana/Cargo.toml` hat `zeroize = "1.9"`, `security-framework = { version = "=3.7.0", default-features = false }`; `bsc/engine/crates/execution/Cargo.toml` hat `zeroize = "=1.9.0"` optional. **Beide Lockfiles enthalten `zeroize 1.9.0`, das Project_0-Lockfile zusätzlich `security-framework 3.7.0`.** Deshalb werden die Shared-Crates auf diese Versionen gebunden, nicht `zeroize = "1"` / `security-framework = "3"` als unkontrollierter Bereich. Vor dem ersten `--locked`-Gate: `cargo generate-lockfile --manifest-path shared/Cargo.toml` und die beiden vorhandenen Consumer-Lockfiles einmal regulär aktualisieren; danach konsistent `--locked`/CI. Keine neue zufällige Dependency-Version hinzufügen.
+
+### SHC-04 – Dateien und verbindliche Schnittstellen
+
+Der einmalige Implementierungsentwurf aller `shared/**`-Dateien (Manifeste, Rust, Tests) steht **ausschließlich** in [`PHASENPLAN_REV2.0.md`, Anhang A](../../project_0/docs/PHASENPLAN_REV2.0.md); er wird weder hier noch in einem Projektplan kopiert. Er ist ein reines Verschieben aus `providers.rs` am Code-Pin; einzige fachliche Änderung: der Service ist ein Feld statt einer Konstante. Bei einer Abweichung zwischen Entwurf und Pin-Code gilt das Verhalten des Pin-Codes. Verbindliche Schnittstellen:
+
+| Datei/Crate | Inhalt | Regel |
+|---|---|---|
+| `shared/Cargo.toml` | Workspace `resolver = "2"`, Mitglieder `credentials`, `keychain` | kein Root-Workspace in `DarkBot/` |
+| `shared/credentials` (`darkbot-credentials`) | `CredentialStore` (`put`/`get`/`delete`/`list`, Signaturen unverändert), `Secret` (`Zeroizing<Vec<u8>>`, `new`, `expose`, Debug `Secret(<redacted>)`), `identity::ServiceId`, `errors`, `DirectoryStore` | `#![forbid(unsafe_code)]`, `#![deny(missing_docs)]`; einzige Dependency `zeroize = "=1.9.0"`; Feature `test-support` |
+| `identity::ServiceId` | `parse(&'static str)`: 1–128 Bytes `[A-Za-z0-9._-]`, Ablehnung `CREDENTIAL_SERVICE_INVALID ([A-Za-z0-9._-]{1,128})` ohne Echo der Eingabe; `as_str()` | ein Service je Projekt, nie Secret, nie Nutzereingabe |
+| `errors` | `os_error(op, account, code)`: `CREDENTIAL_STORE_WRITE: {code}`, `CREDENTIAL_UNAVAILABLE: {account} ({code})`, `CREDENTIAL_STORE_DELETE: {code}`, `CREDENTIAL_STORE_LIST: {code}`; `STORE_UNAVAILABLE` = `CREDENTIAL_STORE_UNAVAILABLE: no approved credential store on this system` | bytegleich mit den heutigen Project_0-Texten |
+| `DirectoryStore` | eine Datei je Account (`/` → `%`), `get`-Fehler `CREDENTIAL_UNAVAILABLE: {account}`, `delete` idempotent, `list` sortiert | nur `#[cfg(any(test, all(feature = "test-support", debug_assertions)))]`, nie im Release |
+| `shared/keychain` (`darkbot-keychain`) | `open_store(service: &'static str) -> Result<Box<dyn CredentialStore>, String>`; macOS: `KeychainStore::new(ServiceId)` (Login-Keychain, generic passwords); jedes andere System: `STORE_UNAVAILABLE` | Dependencies `darkbot-credentials`, `zeroize = "=1.9.0"`, nur macOS `security-framework = { version = "=3.7.0", default-features = false }`; `-25300` bei `delete`/`list` ist kein Fehler |
+| Live-Test | `#[ignore]`, nur mit `DARKBOT_KEYCHAIN_LIVE_TEST=1`, Service `de.darkma.darkbot.test` | nur auf dem Betreiber-Mac nach Ankündigung (macOS-Dialog) |
+
+**Korrigierte Entwurfsfehler (02.11.2026):** (1) Der Kommentar in `shared/credentials/Cargo.toml` nannte `zeroize` einen „compatible range, not a pin“; `=1.9.0` ist ein Pin (SHC-03). (2) Der Verweis „checked by gate.sh, section 4“ hatte kein Ziel; gemeint ist der Versions-Tripwire aus SHC-06.
+
+### SHC-05 – Compile-/Laufzeit-Gates: ausdrücklich zu korrigierende Entwurfsfehler
+
+**BSC-Feature-Korrektur (zusätzlich):** `submission/tls/config.rs` ist auch ohne die BSC-Features `runtime` und `g07-mainnet` aktiv. Der bisher optionale direkte `zeroize`-Dependency muss daher im BSC-Execution-Manifest nichtoptional werden; `dep:zeroize` aus beiden Featurelisten entfernen. Sonst kompiliert der Default-Build nicht.
+
+**Keine Änderung am BSC-`AuthorizationToken`-API-Vertrag:** Der angehängte Ausgangsentwurf wechselte `TargetError` nach `&'static str`, `expose()` nach `as_str()`, verbot Spaces und änderte die Debug-Ausgabe. Das ist ein **nachgewiesener Bruch** von `bsc/engine/crates/execution/src/submission/tls/config.rs`. BSC muss `new(String) -> Result<Self, TargetError>`, `expose() -> &str`, `#[derive(Clone)]`, ASCII-Regel `0x21..=0x7e` **oder Space** und Debug `AuthorizationToken(redacted)` exakt bewahren. **Nur** intern `Zeroizing<String>`, einschließlich ungültiger Eingaben: siehe BSC Anhang B.
+
+**P0-`DirectoryStore`-Sonderfall:** Bei Projekt-Tests wird `darkbot-credentials/test-support` als dev-dependency aktiv, damit der ausgelagerte `DirectoryStore` auch aus einem abhängigen Crate erreichbar ist. Bisherige `cfg(test)`-Nutzer, `NoCredentialStore` und Feature-Tests anhand der konkreten Callsite prüfen. Im Release ist kein Dateistore enthalten, auch mit `--all-features`; `cargo test --release` mit Test-Store-nutzenden abhängigen Tests braucht eine gesonderte Test-Konfiguration und darf nicht als bereits bestanden ausgegeben werden.
+
+**Keychain Unit-Struct:** Die bisherige `providers::Keychain` ist ein Unit-Struct, `KeychainStore::new(ServiceId)` nicht. Vor Umstellung alle direkten Aufrufstellen suchen. Nur bei tatsächlich vorhandenem direktem Nutzer einen kleinen P0-Wrapper/kompatiblen Konstruktor ergänzen; Typ-Alias ist **kein** Konstruktor. Bestehender `providers::system_store()` bleibt als stabiler öffentlicher Einstieg.
+
+**Fehlerbehandlung:** `STORE_UNAVAILABLE` trägt exakt den bisherigen Text. Unter macOS dürfen nicht gebrauchte `#[cfg(not(target_os = "macos"))]`-Imports keine `-D warnings` auslösen. Weder Keychain-Account noch Secret darf in einen neu entwickelten unredigierten Fehler- oder Debugpfad gelangen.
+
+### SHC-06 – CI-Wiring und getrennte Cargo-Workspaces
+
+Die gegenwärtigen Workflows heißen `.github/workflows/project0-status.yml`, `.github/workflows/bsc.yml` und `.github/workflows/gateway.yml`. **Wirkliche `paths`-Zeilen ergänzen**; kein Platzhalter `paths: [same list]` und keine Ersetzung bestehender Filter. Beide eigentlichen Consumer-Gates müssen bei **jeder** Änderung unter `shared/**` auslösen. Weil N-4 bislang für `shared/**` keine Zuordnung enthält, wird im Project_0-Phasenplan die Pfad→Job-Tabelle ergänzt: `shared/**` → `Project 0 status contract` (alle Pflichtmatrizen) **und** `bsc` (alle Pflichtjobs). Der gemeinsame Gateway-Workflow wird vorsorglich ebenfalls unter `shared/**` ausgelöst, solange N-4 für diesen neuen Pfad alle gemeinsam genutzten Jobs fordert; der Effekt ist explizit, nicht aus einer Abhängigkeit abgeleitet. Die neue N-4-Zeile wird erst im Code-Commit mit der echten Workflow-Änderung eingetragen (die Tabelle beschreibt den tatsächlichen CI-Stand). **Zuständigkeit:** `project0-status.yml`, `gateway.yml` und `gate.sh` in Paket A+B (Project_0-Session); `bsc.yml` in Paket C (BSC-Session, BSC Anhang B).
+
+**Konkrete Ergänzungen (keine vollständigen Workflow-Replacements):**
+
+```yaml
+# .github/workflows/project0-status.yml
+# In BEIDEN bestehenden on.pull_request.paths und on.push.paths ergänzen:
+      - 'shared/**'
+# Die Datei nutzt derzeit Flow-Arrays. Dort das Element 'shared/**' ergänzen,
+# nicht diese Listenformatierung wörtlich hineinkopieren.
+
+# .github/workflows/bsc.yml, on.push.paths ergänzen:
+      - 'shared/**'
+
+# .github/workflows/gateway.yml, on.push.paths ergänzen:
+      - 'shared/**'
+```
+
+**Project_0 `project_0/scripts/gate.sh`:** Die bestehende Funktion `step()` bleibt; `SHARED` liegt neben `$PROJECT`. Drei neue benannte Schritte integrieren:
+
+```bash
+SHARED="$(cd "$PROJECT/../shared" && pwd)"
+step shared_fmt cargo fmt --manifest-path "$SHARED/Cargo.toml" --all -- --check
+step shared_clippy cargo clippy --manifest-path "$SHARED/Cargo.toml" --locked --workspace --all-targets --all-features -- -D warnings
+step shared_test cargo test --manifest-path "$SHARED/Cargo.toml" --locked --workspace --all-features
+```
+
+Die Matrix `.github/workflows/project0-status.yml` führt `shared_fmt shared_clippy` in der vorhandenen Lint-Matrixzeile und `shared_test` in einer vorhandenen Test-Matrixzeile aus. **Der bestehende Gate-Exitcode/Log-Rundweg bleibt erhalten.**
+
+**BSC `.github/workflows/bsc.yml`:** Den vorhandenen macOS-/Ubuntu-Regression-Job um Shared-`fmt`, `clippy` und `test` mit eigenem `--manifest-path` ergänzen, Rust-Toolchain-Komponenten `rustfmt, clippy` sicherstellen. Die bestehenden Release-, Runtime-, E2E-, Browser- und Tool-Zahlen nicht abschwächen:
+
+```yaml
+      - name: shared crates fmt + clippy + tests
+        run: |
+          cargo fmt --manifest-path "$GITHUB_WORKSPACE/shared/Cargo.toml" --all -- --check
+          cargo clippy --manifest-path "$GITHUB_WORKSPACE/shared/Cargo.toml" --locked --workspace --all-targets --all-features -- -D warnings
+          cargo test --manifest-path "$GITHUB_WORKSPACE/shared/Cargo.toml" --locked --workspace --all-features
+```
+
+**Wichtig:** Die Shared-Crates liegen außerhalb beider Consumer-Workspaces. Ein bloßes `cargo test --workspace` oder `cargo clippy --workspace` aus `project_0/native` beziehungsweise `bsc/engine` prüft deren **eigene** Unit-/Rustdoc-Tests und Lints nicht zwingend. Daher der eigene kleine `shared/`-Workspace mit Lockfile, der von beiden CI-Pfaden explizit geprüft wird. Die jeweiligen Consumer-Projekttests beweisen zusätzlich die Adapterintegration. <https://doc.rust-lang.org/cargo/reference/workspaces.html>.
+
+**Versions-Tripwire für jeden betroffenen Lockfile-Graphen:** `cargo metadata --locked --format-version 1 --manifest-path ...`, die tatsächlich aufgelösten `packages[]` nach `name in {"zeroize", "security-framework"}` gruppieren und **mehr als eine** jeweilige Version verweigern. `cargo tree -i --depth 0` ist hierfür keine belastbare Dublettenprüfung. Gate-Implementierung muss mit den realen Cargo-Metadaten getestet werden; kein vorgetäuschter PASS.
+
+**Kein Git-Race:** Paket A+B (zentrale Extraktion + Project_0-Adapter + CI) **in einem finalen Codecommit**. Ausschließlich die Project_0-Session schreibt `shared/**`. Die BSC-Session ergänzt danach ausschließlich ihre Adapter-/BSC-Gate-Dateien und integriert direkt in `main`; laufende Worktree-/`HEAD`-Änderungen vor Commit prüfen. Kein Branch/Force-Push. `shared/**` ist nicht vom BSC-Worktree parallel zu ändern.
+
+### SHC-07 – Abnahmematrix und Statuswahrheit
+
+| Kennung | Technischer Nachweis | Ergebnis vor Implementierung |
+|---|---|---|
+| SHC-T01 | Alte P0-`CredentialStore`-Signaturen, Secret-Redaktion und originale Fehlerstrings unverändert | NOT_RUN |
+| SHC-T02 | Ein **wirklich vor der Extraktion erzeugter** macOS-Keychain-Eintrag unter originalem Service-/Account lesbar, ohne Import/Rotation | NOT_RUN |
+| SHC-T03 | `DirectoryStore` ausschließlich Debug/Test, auch bei `--release --all-features` kein Produktiv-Fallback | NOT_RUN |
+| SHC-T04 | `P0`-Registry: `decide`, `sweep`, CAS, noncegebundene Revision, Receipt, `NoCredentialStore` | NOT_RUN |
+| SHC-T05 | BSC kann P0-Secret trotz Service-Namen nicht ohne zulässige macOS-ACL/Dialogentscheidung lesen, umgekehrt ebenso; kein bloß syntaktischer Namespace-Test | NOT_RUN |
+| SHC-T06 | BSC `AuthorizationToken`-API, gültige/ungültige Eingaben, exakte Header-Bytes, `Clone` und Zeroization unverändert | NOT_RUN |
+| SHC-T07 | BSC G0.7 und LIVE Tokenquellen einzeln geprüft; Wallet-Private-Key-Dateien unverändert | NOT_RUN |
+| SHC-T08 | P0/BSC: denied/missing/revoked, Restart, rotated Revision, `-25300`, `-25308`, falsche Prozessidentität | NOT_RUN |
+| SHC-T09 | Keine Secrets in Logs/Proto/DBREC/DBJNL/P0J/GUI; kein Keychain-Aufruf im Hotpath | NOT_RUN |
+| SHC-T10 | Alle drei Cargo-Lockgraphen geprüft, Shared-Crates unter `--locked` fmt/clippy/test, alle betroffenen Projekt-Gates | NOT_RUN |
+| SHC-T11 | Alle erforderlichen Pflichtjobs/CI auf exakt gepushtem `main`-SHA grün; keine BSC/Project_0-Gate-Abschwächung | NOT_RUN |
+
+`SHARED-KEYCHAIN-CREDENTIALS-V1` wird erst `OFFLINE_VERIFIED`, wenn alle für den tatsächlich implementierten Scope relevanten lokalen und CI-Nachweise vorliegen; bis zum Auslöser bleibt der Status `REV.2.0 / DEFERRED`. `P0-029` und `BSC3-001` bleiben separat offen; auch ein grün getesteter Shared-Store ist keine Freigabe von unbeaufsichtigtem Betrieb oder Echtgeldhandel.
+
+### SHC-08 – Angeschlossene und künftige Projekte
+
+Erklärung und Anschlussregeln für jedes Projekt: [README.md, Abschnitt „Gemeinsamer Credential-Store“](../../README.md). Jeder neue Consumer wird hier im selben Commit eingetragen, in dem er angeschlossen wird; kein Projekt baut einen eigenen Store (Einfrier-Regel §14.0).
+
+| Projekt | Service-ID | Credential im Store | Stand 02.11.2026 |
+|---|---|---|---|
+| Project_0 | `de.darkma.darkbot.project0.provider` | RPC/WSS/Geyser/Jupiter/Jito-Keys (DEC-18) | IST: eigener DEC-18-Store; REV.2.0 Paket A+B |
+| BSC | `de.darkma.darkbot.bsc.provider` | BlockRazor-Authorization (LIVE, G0.7) | IST: `.token`-Datei/Umgebung; REV.2.0 Paket C |
+| DarkNode | im DarkNode-Plan festzulegen (Muster `de.darkma.darkbot.darknode.<zweck>`) | Bitget Trade-/Read-Key ohne Withdrawal (Key, Secret, Passphrase) | Gate 1 (Konzept), kein Code; Anschluss nach README |
+
+**Dokumentationsdisziplin:** Dieser Abschnitt ist die einzige zentrale gemeinsame Planung. Project_0-Ausführung und Code-Entwurf stehen in `project_0/docs/PHASENPLAN_REV2.0.md`, der BSC-Adapter in BSC `Phasenplan Rev2.0.md` Anhang B; die bestehenden Projektphasenpläne enthalten nur Verweise. Keine Parallel-Master, keine pauschalen Re-Pins, keine Reproduktion der Shared-Rust-API an weiteren Stellen. Bei der tatsächlichen Code-Implementierung liegt die autoritative API-Rustdoc allein in `shared/**`.

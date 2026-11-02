@@ -13,6 +13,8 @@ REV.2.0 ist ein **Folgeplan**. Die aktuell laufende BSC-REV.1-Fertigstellung und
 
 **REV.2.0-Implementierungsziel:** Der Bot überprüft dauerhaft und nachweisbar, ob die für einen konkret freigegebenen Handelsweg qualifizierten Abhängigkeiten weiterhin gelten, erkennt Änderungen an Contracts, Launchpads, Signalquellen, RPC/WSS- und Builder-Schnittstellen und trifft daraufhin eine korrekte, dauerhaft dokumentierte BUY-/Exit-Entscheidung. Die vollständige Anzeige und die vorgesehenen Betreiberaktionen reichen bis ins Frontend.
 
+Zusätzlich gehört zu REV.2.0 der Anschluss an den gemeinsamen Credential-Store (Anhang B, Paket C); er hat einen eigenen Auslöser und eine ab 02.11.2026 geltende Einfrier-Regel und läuft unabhängig von WATCH.
+
 Die Reihenfolge **für diese Iteration** lautet: Freeze und Beweise → WATCH-Kern → Chain-/Source-/Adapter-Integration → Requalifikation und Exit-Regeln → komplette Frontend-Durchleitung → Test-, Latenz- und Gesamtabnahme. REV.2.0 erteilt keine automatische Freigabe für BUY, SELL, SIGN, ARM, SEND, Builder-Probes oder kostenpflichtige Anbieter. Der gesondert vereinbarte reale BUY-/SELL-Testablauf von REV.1 wird durch dieses Zukunftsdokument nicht eigenmächtig verändert.
 
 ### 2. Verbindlicher Funktionsumfang
@@ -2036,3 +2038,128 @@ Setze BSC-WATCH V0.4 (dieses Dokument) um. Es ersetzt V0.3; wo V0.2 genauer ist,
 5. Frische nach §10: Start mit 0, messen und berichten, nicht stillschweigend lockern.
 6. Keine Echtgeldaktion, kein SIGN, ARM oder SEND, keine Builder-Probe ohne meine Freigabe.
 ```
+
+---
+
+# Anhang B" unten unverändert am Dateiende (nach Anhang A) anhängen.
+2. In "### 1. Einordnung und Reihenfolge" nach dem Absatz "REV.2.0-Implementierungsziel: …" diesen Satz ergänzen:
+   "Zusätzlich gehört zu REV.2.0 der Anschluss an den gemeinsamen Credential-Store (Anhang B, Paket C); er hat einen eigenen Auslöser und eine ab 02.11.2026 geltende Einfrier-Regel und läuft unabhängig von WATCH."
+3. Eigener BSC-Doku-Commit nach der laufenden BSC-Arbeit; nichts unter shared/** und project_0/** ändern.
+Zentraler Vertrag: frontend/docs/FRONTEND_PHASENPLAN.md §14 (Project_0-Doku-Commit vom 02.11.2026).
+-->
+
+# Anhang B – BSC-SHC: Anschluss an den gemeinsamen Credential-Store (REV.2.0, DEFERRED; Nutzerentscheidung 02.11.2026)
+
+**Zentrale Autorität:** [`frontend/docs/FRONTEND_PHASENPLAN.md` §14 `SHARED-KEYCHAIN-CREDENTIALS-V1`](../../../frontend/docs/FRONTEND_PHASENPLAN.md). Shared-Store, macOS-Keychain, Fehler- und Testvertrag **nur dort**; dieser Anhang enthält ausschließlich die produktiven BSC-Consumer und Integrationsdiffs. **Status:** `REV.2.0 / DEFERRED` – SOLL, nicht implementiert. BSC3-001 bleibt ein gesonderter Betreiberentscheid.
+
+**Auslöser (wie §14.0):** Project_0-REV.1.0-Softwareabnahme abgeschlossen **und** BSC-REV.1.0 abgeschlossen (R14-Abschlussmatrix); früher nur durch ausdrückliche Nutzerentscheidung bei nachgewiesenem Bedarf. Dieser Anhang ist **Paket C**: Er beginnt erst, wenn das Project_0-Paket A+B (`shared/`-Crates, Project_0-Adapter, Project_0-/Gateway-CI) auf `main` liegt.
+
+**Einfrier-Regel BSC (gilt ab 02.11.2026 bis zur Umsetzung):** BSC baut keinen eigenen Schlüsselbund- oder Secret-Speicher-Code für Provider-Credentials. `runtime_live.rs::token_from()` (`.token`-Datei) und `DARKBOT_G07_BLOCKRAZOR_AUTHORIZATION` bleiben wie heute. **Nicht eingefroren:** ein Präsenz-/Operator-Anker für BSC3-001 (Klasse Operator-Freigabe, nicht Teil des Credential-Stores).
+
+**Drei Klassen von Geheimnissen, nie vermischen:**
+
+| Klasse | BSC heute | Speicher | Durch Anhang B |
+|---|---|---|---|
+| Wallet-Schlüssel | Launcher/Buyer: `bsc/secrets.env` (Scoping nach D1), `paper.rs::load_private_key()`, `live_key.rs::LiveKey::load()`, G0.7 `inputs.rs::read_and_clear_keys()` | projekteigen | unverändert, nie migriert |
+| Provider-Credential | BlockRazor-Authorization: LIVE `runtime_live.rs::token_from()`, G0.7 `DARKBOT_G07_BLOCKRAZOR_AUTHORIZATION` | ab REV.2.0 gemeinsamer Store, Service `de.darkma.darkbot.bsc.provider`; Account aus der validierten Owner-Konfiguration (BSC-SHC-02), kein statischer Default | Gegenstand; weitere Provider-Credentials (z. B. 48Club, RPC-Keys) nur nach eigener Entscheidung |
+| Operator-Freigabe | BSC3-001: offene Betreiberentscheidung | projekteigen | nicht Teil |
+
+Lesen nur am Start-/Arm-Punkt des Owners in der Benutzersitzung, nie während BUY/SELL/Pending-Entscheidung. Der Service-Name trennt nur Namen, keine Prozesse (§14 SHC-02): keine Behauptung „BSC kann Project_0-Einträge nicht lesen“ ohne den macOS-Negativtest SHC-T05. Betriebsregel aus der Project_0-Evidence `BKC_KEYCHAIN_20261102.md`: Dialog je Start für jedes nicht anlegende Binary, keine dauerhafte Berechtigung, jeder Rebuild ändert den cdhash, Background-launchd-Kontext `-25308` fail-closed. B4/C4 bleibt: keine Credential-URL auf argv, keine Secrets in Journal, Status, Logs oder Receipts.
+
+#### BSC-SHC-01 – Exakte Callsite-Matrix, kein Signerumbau
+
+| IST-Callsite | SOLL-Pfad | Pflichterhalt |
+|---|---|---|
+| `execution/src/runtime_live.rs::token_from()` | Am **Arm-/Startpunkt**, nicht beim SEND, den über die Owner-Konfiguration gebundenen BlockRazor-Credential-Account aus dem BSC-Service lesen | gleiche `AuthorizationToken`-Bytes, kein Datei-Fallback im gewählten Keychain-Modus |
+| `runtime_live.rs` → `LiveRouteConfig::Builders` → `LiveRoute::Builders` | vorbereiteten Token an `ProviderTarget` übergeben | Q5A, TLS, Receipt-/Budget-/LIVE-Gates unverändert |
+| `execution/src/submission/tls/config.rs::AuthorizationToken` | `String` intern durch `Zeroizing<String>` ersetzen | `new(String)->Result<Self,TargetError>`, `expose`, ASCII + Spaces, Clone, Debug **unverändert** |
+| `bin/g07_mainnet_self_launch_buy/main.rs` | `DARKBOT_G07_BLOCKRAZOR_AUTHORIZATION` eigener G0.7-Consumer, **gesonderter** Cutover | eigener G0.7-Acceptance-/Startup-Test, keine stillschweigende Migration |
+| `bin/g07_mainnet_self_launch_buy/inputs.rs::read_and_clear_keys()` | **Unverändert** | Launcher-/Buyer-ENV werden vor Threads geleert, kein neuer Keychain-Wallet-Leser |
+| `execution/src/paper.rs::load_private_key()` / `live_key.rs::LiveKey::load()` | **Unverändert** | Owner-only, 32-Byte, Inode/Link, Signer-Identitäts-/LIVE-Gates |
+
+Weitere bekannte Leser derselben Umgebungsvariable (am 02.11.2026: `bin/g07_builder_probe/main.rs`) beim Cutover mitprüfen; keiner wird stillschweigend migriert.
+
+#### BSC-SHC-02 – Bestehende Cargo-Struktur und neuer Adapter
+
+Die bestehenden `[dependencies]` von `bsc/engine/crates/execution/Cargo.toml` erweitern und die bereits bestehende `zeroize`-Zeile korrigieren:
+
+```toml
+darkbot-credentials = { path = "../../../../shared/credentials" }
+darkbot-keychain = { path = "../../../../shared/keychain" }
+# Bestehende Zeile ersetzen, NICHT zusätzlich einfügen:
+zeroize = "=1.9.0"
+```
+
+`zeroize = { version = "=1.9.0", optional = true }` ist **bereits vorhanden**, muss für die Änderung von `submission/tls/config.rs` aber zu `zeroize = "=1.9.0"` (**nicht optional**) werden: `submission::tls` wird auch ohne `runtime`/`g07-mainnet` kompiliert. Deshalb die bisherigen `"dep:zeroize"`-Einträge aus den `runtime`- und `g07-mainnet`-Featurelisten entfernen; sonst scheitert die Cargo-Feature-Auflösung. Keinen zweiten `zeroize`-Eintrag anlegen. Die neue BSC-Credential-Funktion muss nur in den zugelassenen `runtime`-/`g07-mainnet`-Consumer-Features aktiv sein. Dev-Tests der Shared-`DirectoryStore`-API aktivieren `darkbot-credentials/test-support` explizit, ohne den Dateistore für Release freizuschalten. Das bisherige `Cargo.lock` wird kontrolliert aktualisiert und danach nur mit `--locked` verwendet.
+
+In die vorhandene `[dev-dependencies]`-Sektion ergänzen, damit abhängige BSC-Debugtests den **einzigen** Shared-`DirectoryStore` verwenden können:
+
+```toml
+darkbot-credentials = { path = "../../../../shared/credentials", features = ["test-support"] }
+```
+
+**Feature-Diff:** Die bereits vorhandenen `runtime = [...]` und `g07-mainnet = [...]` bleiben fachlich unverändert, **nur** die jeweilige Zeichenfolge `"dep:zeroize"` wird aus ihren Listen entfernt, nachdem die Haupt-Dependency nichtoptional ist. Damit baut auch `cargo build --locked -p darkbot-bsc-execution` ohne Features den gemeinsam verwendeten Token-Typ.
+
+**SOLL-Datei `bsc/engine/crates/execution/src/credentials.rs`:**
+
+```rust
+use crate::submission::tls::AuthorizationToken;
+use darkbot_credentials::CredentialStore;
+
+pub const KEYCHAIN_SERVICE: &str = "de.darkma.darkbot.bsc.provider";
+
+/// `account` wurde zuvor aus der nativen, versionierten Owner-Konfiguration
+/// inklusive Projektinstallation/Provider und Credential-Revision validiert.
+/// Keine ungeprüfte Browser-/ENV-Angabe und kein automatisch geteilter Account.
+pub fn authorization_token(
+    store: &dyn CredentialStore,
+    account: &str,
+) -> Result<AuthorizationToken, String> {
+    let secret = store.get(account)?;
+    let token = std::str::from_utf8(secret.expose())
+        .map_err(|_| "BSC_CREDENTIAL_ENCODING")?;
+    AuthorizationToken::new(token.trim().to_owned())
+        .map_err(|_| "BSC_CREDENTIAL_INVALID".to_string())
+}
+```
+
+Diese Funktion wird von der bestehenden BSC-Owner-Start-/Arm-Autorität aufgerufen, nachdem diese eine **dauerhaft gespeicherte, revisionsgebundene Credential-Referenz** (fachlich zugehöriger Provider/Installation) aus der vorhandenen typisierten BSC-Konfiguration validiert hat. Den Store öffnet der Owner über `darkbot_keychain::open_store(KEYCHAIN_SERVICE)`. Vor der Implementierung exakte vorhandene Record-/Config-Felder und deren Revisionen gegen den realen Code prüfen; falls ein passendes nichtgeheimes Feld fehlt, im selben bereits vorhandenen Binärschema ergänzen. **Kein neues paralleles Provider-Registry-System, keine erfundene bestehende CLI und kein statischer Account `<provider>@1` als Default.** Provider-Wechsel/Rotation nach dem BSC-Control-/Restart-Vertrag, nicht mitten in einem laufenden Arm.
+
+**Bestehenden BSC-Header-Typ minimal härten** (`execution/src/submission/tls/config.rs`):
+
+```rust
+use zeroize::Zeroizing;
+
+#[derive(Clone)]
+pub struct AuthorizationToken(Zeroizing<String>);
+
+impl AuthorizationToken {
+    pub fn new(value: String) -> Result<Self, TargetError> {
+        // Zeroize auch bei ungültigem Token, nicht erst auf dem Ok-Pfad.
+        let value = Zeroizing::new(value);
+        let usable = !value.is_empty()
+            && value.bytes().all(|b| (0x21..=0x7e).contains(&b) || b == b' ');
+        if usable { Ok(Self(value)) } else { Err(TargetError::InvalidAuthorization) }
+    }
+
+    pub fn expose(&self) -> &str { &self.0 }
+}
+
+impl std::fmt::Debug for AuthorizationToken {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("AuthorizationToken(redacted)")
+    }
+}
+```
+
+**Verifizierter Ausgang (02.11.2026, `origin/main` `0338f72c`):** Der Altcode `AuthorizationToken(String)` akzeptiert sichtbares ASCII **und Leerzeichen**, liefert `TargetError`, heißt `expose()` und schreibt `AuthorizationToken(redacted)`. Diese API/Validierung/Debug-Zeichenfolge werden **nicht** geändert. Die früher vorgeschlagene `as_str()`-API und Graphical-only-Validierung waren falsch. Der vorbereitete TLS-Builder-Token muss danach identische Authorization-Header-Bytes erzeugen; `Clone`, Fehler- und Debug-Pfade testen. Die produktive Framing-Funktion bleibt `ProviderTarget::frame_endpoint()`.
+
+#### BSC-SHC-03 – Migrationsphasen und Nachweise
+
+1. **BSC LIVE zuerst:** bestehende `.token`-Datei behalten, bis der vorab provisionierte Keychain-Token im **tatsächlich kontrollierten Arm** nachgewiesen ist. Ein optionaler, explizit ausgewählter Legacy-Datei-Modus darf bis Cutover für bestehende freigegebene Starts erhalten bleiben; im Keychain-Modus ist bei Denial **kein** stiller Datei-/ENV-Fallback zulässig. Nach bewiesenem Cutover aus produktiven Startpfaden entfernen statt dauerhafte Doppelarchitektur.
+2. **G0.7 separat:** Existierendes `DARKBOT_G07_BLOCKRAZOR_AUTHORIZATION` am eigenen Startup-Cutover umstellen; Launcher-/Buyer-Private-Keys und G0.7-Acceptance-Contract bleiben unverändert. Keine neue Wallet-Signier- oder Secret-Übertragung in `shared/`.
+3. **Unveränderte Safety:** `BSC3-001` zweiter Betreiber-/Präsenzanker, Wallet-ENABLE, ECON_SIGN/ARM/SEND/ATTEMPT/LIVE, Owner-Admission, Builder-Qualifikation, Nonce-/Ledger-/Crash-/Exit-Safety bleiben getrennt; ein Keychain-Read ist keine LIVE-Autorisierung.
+4. **Tests:** BSC-Keychain-Service ungleich P0; tatsächliche macOS-ACL/Prozessisolation mit Negativtest (SHC-T05), keine Secret-Ausgaben; Token-Rotation/Denial/Restart, G0.7-LIVE getrennter Cutover (SHC-T07), bytegleicher Authorization-Header (SHC-T06), keine Keychain-Abfrage im BUY-/SELL-Hotpath und unveränderte Wallet-Datei-Prüfungen. `-25300`/`-25308` tatsächlich aus OS-Test statt nur gefälschter Fehlermeldung; sonst `NOT_RUN`. Echte Keychain-Tests nur mit Dummy-Credential nach Ankündigung des macOS-Dialogs.
+5. **CI:** `.github/workflows/bsc.yml` `shared/**`-Trigger und echte Shared-crate-fmt/clippy/test-Schritte nach §14 SHC-06 ergänzen; Project_0-N-4/Shared-Job-Mapping berücksichtigen. Finale BSC-Gesamtabnahme auf finalem SHA; keine wiederholten Gates bei Zwischenänderungen.
+
+**Priorität:** REV.2.0 Paket C, als zusammenhängendes BSC-Credential-/Operations-Paket nach dem Project_0-Paket A+B auf `main`; die laufende BSC-REV.1.0-Arbeit wird dadurch nicht unterbrochen. Die BSC-Session schreibt nicht unter `shared/**`; nur der BSC-Adapter, `bsc.yml` und der Phasenplan werden integriert. **Status** bleibt `REV.2.0 / DEFERRED` bis zum Auslöser und danach `NOT_IMPLEMENTED` bis zu Gate-/CI-Nachweisen. BSC3-001 bleibt separat offen.
