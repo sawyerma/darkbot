@@ -60,6 +60,7 @@ export function scopeText(s: LiveGrantScope): string {
     + `max_buy_slippage_bps=${s.risk.maxBuySlippageBps}\nmax_exit_slippage_bps=${s.risk.maxExitSlippageBps}\n`
     + `max_gas_price_wei=${s.risk.maxGasPriceWei.toString()}\nmax_buy_gas_limit=${s.risk.maxBuyGasLimit.toString()}\n`
     + `max_approve_gas_limit=${s.risk.maxApproveGasLimit.toString()}\nmax_sell_gas_limit=${s.risk.maxSellGasLimit.toString()}\n`
+    + (s.risk.outlierAck ? "risk_outlier_ack=YES\n" : "")
     + `max_open_positions=${s.limits.maxOpenPositions}\nmax_realized_loss_wei=${s.limits.maxRealizedLossWei}\n`
     + `max_daily_realized_loss_wei=${s.limits.maxDailyRealizedLossWei}\nmin_buy_interval_ms=${s.limits.minBuyIntervalMs.toString()}\n`
     + (s.exitOnly ? "exit_only=true\n" : "");
@@ -85,6 +86,8 @@ export interface GrantForm {
   /** BSC3-069: the execution risk, as typed. */
   buySlippageBps: string; exitSlippageBps: string; gasPriceWei: string;
   buyGasLimit: string; approveGasLimit: string; sellGasLimit: string;
+  /** REV.1.0 R4: the risk confirmed as an outlier (above the runtime's soft bounds). */
+  outlierAck: boolean;
   /** 31.10. order: the positions and losses, as typed. */
   maxOpenPositions: string; maxRealizedLossWei: string; maxDailyRealizedLossWei: string; minBuyIntervalMs: string;
 }
@@ -136,6 +139,7 @@ export function grantScope(f: GrantForm, nowMs: number, grantable: readonly stri
         maxBuySlippageBps: Number(f.buySlippageBps), maxExitSlippageBps: Number(f.exitSlippageBps),
         maxGasPriceWei: BigInt(f.gasPriceWei), maxBuyGasLimit: BigInt(f.buyGasLimit),
         maxApproveGasLimit: BigInt(f.approveGasLimit), maxSellGasLimit: BigInt(f.sellGasLimit),
+        outlierAck: f.outlierAck,
       },
       limits: {
         maxOpenPositions: Number(f.maxOpenPositions), maxRealizedLossWei: f.maxRealizedLossWei,
@@ -205,6 +209,12 @@ const MAX_DATE_MS = 8_640_000_000_000_000n;
 export function unixMs(v: bigint | undefined): string {
   if (v === undefined) return "—";
   return v <= MAX_DATE_MS ? new Date(Number(v)).toISOString() : `${v.toString()} ms`;
+}
+/** REV.1.0 R4: the bound builder policy's line: why it refuses LIVE BUYs, else that it holds; until when it is fresh (none: unknown). */
+export function builderPolicyText(l: BscLiveView | null): string | undefined {
+  if (!l || (l.builderPolicyRefusal === undefined && l.builderPolicyFreshUntilUnixMs === undefined)) return undefined;
+  const until = l.builderPolicyFreshUntilUnixMs === undefined ? "" : ` · fresh until ${unixMs(l.builderPolicyFreshUntilUnixMs)}`;
+  return `${l.builderPolicyRefusal === undefined ? "holds" : `BUYs refused: ${l.builderPolicyRefusal}`}${until}`;
 }
 /** What an attempt's counters count (REV.1.0 R2b review L8): counts, not rates of the attempts. */
 export const COUNTERS_MEANING = "Je Versuch bis einschließlich ihm: acquired von allen LIVE-BUYs (C3 und Strategy C, auch vor dem Commitment); passed · failed · undecided zählen nur die Verdikte der C3-BUYs (ein Strategy-C-BUY hat keins, NOT_APPLICABLE)";

@@ -997,6 +997,13 @@ pub(crate) mod tests {
         fs::write(root.join("ev/g08.dbrec"), g08).unwrap();
         let other = filled(&darkbot_bsc_record::schema::bsc_runtime::buy_attempt_slot::SCHEMA);
         fs::write(root.join("ev/measure.dbrec"), other.encode().unwrap()).unwrap();
+        // R4: the bound builder policy, fetched an hour before the LIVE
+        // tests' clock.
+        fs::write(
+            root.join(crate::builder_policy::TEST_POLICY),
+            crate::builder_policy::native_bytes(&[1_793_055_600_000]),
+        )
+        .unwrap();
         root
     }
 

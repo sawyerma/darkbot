@@ -238,6 +238,41 @@ fn write_evidence(root: &Path, ev: &str, verdict: &str) {
     fs::write(root.join(ev).join("g08.dbrec"), g.encode().unwrap()).unwrap();
     let m = filled(&bsc_runtime::buy_attempt_slot::SCHEMA);
     fs::write(root.join(ev).join("measure.dbrec"), m.encode().unwrap()).unwrap();
+    write_builder_policy(root);
+}
+
+/// R4: the bound builder policy the LIVE arms rest on.
+const BUILDER_POLICY: &str = "ev/builder_policy.dbrec";
+
+/// A native re-determination of the frozen builder policy import under
+/// `root` ([`BUILDER_POLICY`]), its one source fetched now.
+fn write_builder_policy(root: &Path) {
+    use darkbot_bsc_record::schema::g06a::builder_policy as b;
+    use darkbot_bsc_record::schema::{PROVENANCE_OBSERVED_UNIX_MS, PROVENANCE_TOOL};
+    let frozen = fs::read(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../native/evidence/g06a/g07_binary_import_20261016/builder_policy.dbrec"
+    ))
+    .unwrap();
+    let import = darkbot_bsc_record::decode(&b::SCHEMA, &frozen).unwrap();
+    let mut d = Draft::new(&b::NATIVE);
+    for (tag, value) in import.fields() {
+        if *tag > 2 && b::NATIVE.field(*tag).is_some() {
+            d.push(*tag, value.clone());
+        }
+    }
+    d.set(PROVENANCE_TOOL, "live-e2e")
+        .set(PROVENANCE_OBSERVED_UNIX_MS, 1u64);
+    let mut s = Draft::new(&b::source::SCHEMA);
+    s.set(b::source::URL, "https://example.test/")
+        .set(b::source::HTTP_STATUS, 200u64)
+        .set(b::source::FETCHED_UNIX_MS, now_ms())
+        .set(b::source::BODY_SHA256, Value::B256([5; 32]))
+        .set(b::source::BODY_BYTES, 1u64)
+        .set(b::source::FINDING, "live-e2e");
+    d.push(b::SOURCES, s.into_nested());
+    fs::create_dir_all(root.join("ev")).unwrap();
+    fs::write(root.join(BUILDER_POLICY), d.encode().unwrap()).unwrap();
 }
 
 /// A synthetic evidence root: a G0.8 result of `verdict`, one measurement.
@@ -589,6 +624,13 @@ fn exec_setup() -> ExecSetup {
             live_public_only: true,
             live_grant_max_duration_ms: 0,
             live_spend_total_wei: u128::from(u64::MAX),
+            // No test grant is an outlier.
+            live_risk_soft_buy_slippage_bps: 9_999,
+            live_risk_soft_exit_slippage_bps: 9_999,
+            live_risk_soft_gas_price_wei: u64::MAX,
+            live_risk_outlier: false,
+            live_c3_rearm: false,
+            live_builder_policy: BUILDER_POLICY.into(),
             sender_paths: SenderPaths::Both,
         },
         reprobe: Duration::from_secs(3_600),

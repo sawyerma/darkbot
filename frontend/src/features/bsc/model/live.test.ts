@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ATTEMPT_COLUMNS, COUNTERS_MEANING, NO_EVALUATION, evaluationOf, attemptCells, campaignBeyondState, campaignRows, exitDeciderRows, operatorDecisions, recoveryRows, conditionRows, grantScope, liveIndicator, liveRequestOf, scopeSha256, scopeText, signedBnb, totalInputOk, weiOk } from "./live";
+import { ATTEMPT_COLUMNS, COUNTERS_MEANING, NO_EVALUATION, builderPolicyText, evaluationOf, attemptCells, campaignBeyondState, campaignRows, exitDeciderRows, operatorDecisions, recoveryRows, conditionRows, grantScope, liveIndicator, liveRequestOf, scopeSha256, scopeText, signedBnb, totalInputOk, weiOk } from "./live";
 import type { BscLiveView, LiveAttemptView, LiveCampaignView } from "./types";
 
 // The native owner's own output (`bsc_runtime live scope` with these flags): text and digest.
@@ -24,7 +24,7 @@ describe("BSC LIVE tab (plan 28.10.)", () => {
       maxAttempts: 2, expiresUnixMs: 1793000000000n, exitOnly: false,
       risk: {
         maxBuySlippageBps: 300, maxExitSlippageBps: 500, maxGasPriceWei: 1000000000n,
-        maxBuyGasLimit: 3000000n, maxApproveGasLimit: 100000n, maxSellGasLimit: 1500000n,
+        maxBuyGasLimit: 3000000n, maxApproveGasLimit: 100000n, maxSellGasLimit: 1500000n, outlierAck: false,
       },
       limits: {
         maxOpenPositions: 3, maxRealizedLossWei: "5000000000000000",
@@ -36,16 +36,20 @@ describe("BSC LIVE tab (plan 28.10.)", () => {
     const exits = { ...scope, exitOnly: true };
     expect(scopeText(exits)).toBe(`${OWNER_TEXT}exit_only=true\n`);
     expect(await scopeSha256(scopeText(exits))).toBe(OWNER_EXIT_SHA);
+    // REV.1.0 R4: a risk confirmed as an outlier says so after its bounds, as the owner's text does.
+    const acked = { ...scope, risk: { ...scope.risk, outlierAck: true } };
+    expect(scopeText(acked)).toBe(OWNER_TEXT.replace("max_sell_gas_limit=1500000\n", "max_sell_gas_limit=1500000\nrisk_outlier_ack=YES\n"));
   });
 
   it("checks a grant form as the owner does and dates its expiry", () => {
     const form = { strategies: "C3", sources: ["BSC_INGRESS_PUBLICNODE"], adapters: ["CLUB48_BUILDER_V1"], maxInputWei: "1000", maxSpendWei: "5000", maxAttempts: "2", hours: "4", exitOnly: false,
-      buySlippageBps: "300", exitSlippageBps: "500", gasPriceWei: "1000000000", buyGasLimit: "3000000", approveGasLimit: "100000", sellGasLimit: "1500000",
+      buySlippageBps: "300", exitSlippageBps: "500", gasPriceWei: "1000000000", buyGasLimit: "3000000", approveGasLimit: "100000", sellGasLimit: "1500000", outlierAck: true,
       maxOpenPositions: "3", maxRealizedLossWei: "5000", maxDailyRealizedLossWei: "2000", minBuyIntervalMs: "0" };
     const grantable = ["BSC_INGRESS_PUBLICNODE", "BSC_INGRESS_DRPC"];
     const ok = grantScope(form, 1_000, grantable);
     expect("scope" in ok && ok.scope.expiresUnixMs).toBe(1_000n + 4n * 3_600_000n);
     expect("scope" in ok && ok.scope.venue).toBe("BSC_VENUE_FLAP");
+    expect("scope" in ok && ok.scope.risk.outlierAck).toBe(true);
     for (const bad of [
       { ...form, strategies: "ALL" },
       { ...form, sources: [] },
@@ -130,6 +134,16 @@ describe("BSC LIVE tab (plan 28.10.)", () => {
     expect([unknown.version, unknown.exitNow.locked, unknown.burn.locked]).toEqual([undefined, true, true]);
     expect(unknown.exitNow.why).toContain("unbekannt");
     expect(unknown.row.value).toBe("ledger version — (unknown) · exit-now locked · nonce burn locked");
+  });
+
+  it("shows why the bound builder policy refuses LIVE BUYs and until when it is fresh (REV.1.0 R4)", () => {
+    const l = (builderPolicyRefusal: string | undefined, builderPolicyFreshUntilUnixMs: bigint | undefined) =>
+      ({ builderPolicyRefusal, builderPolicyFreshUntilUnixMs }) as unknown as BscLiveView;
+    expect(builderPolicyText(l(undefined, 1_793_000_000_000n))).toBe("holds · fresh until 2026-10-26T07:33:20.000Z");
+    expect(builderPolicyText(l("LIVE_BUILDER_POLICY_STALE: x", 1_793_000_000_000n))).toBe("BUYs refused: LIVE_BUILDER_POLICY_STALE: x · fresh until 2026-10-26T07:33:20.000Z");
+    // An import: never fresh, no time made up.
+    expect(builderPolicyText(l("LIVE_BUILDER_POLICY_STALE: y", undefined))).toBe("BUYs refused: LIVE_BUILDER_POLICY_STALE: y");
+    expect([builderPolicyText(l(undefined, undefined)), builderPolicyText(null)]).toEqual([undefined, undefined]);
   });
 
   it("is the one LIVE indicator: the owner's gate and the LIVE path from bsc.live.state (Audit E 4.10)", () => {

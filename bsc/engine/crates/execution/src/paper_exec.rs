@@ -197,6 +197,22 @@ pub struct ExecConfig {
     /// BUY with its exits is admitted within, all grants together
     /// (`BSC_EXEC_LIVE_SPEND_TOTAL_WEI`; 0: no BUY).
     pub live_spend_total_wei: u128,
+    /// REV.1.0 R4 (BSC3-069): the soft bounds of a grant's risk (its BUY's
+    /// and its exits' slippage, its gas price); a grant above them is an
+    /// outlier: it admits BUYs only confirmed as one and with
+    /// `BSC_EXEC_LIVE_RISK_OUTLIER` ON (exits go on).
+    pub live_risk_soft_buy_slippage_bps: u16,
+    pub live_risk_soft_exit_slippage_bps: u16,
+    pub live_risk_soft_gas_price_wei: u64,
+    pub live_risk_outlier: bool,
+    /// REV.1.0 R4 (BSC3-042): a C3 BUY whose nonce the chain took renews
+    /// the arm for the next C3 BUY (`BSC_EXEC_LIVE_C3_REARM`, OFF by
+    /// default: one C3 BUY per arm).
+    pub live_c3_rearm: bool,
+    /// REV.1.0 R4: the bound builder policy (repository-relative) a LIVE
+    /// arm rests on: fresh, its builders verified, the signed gas price at
+    /// its floor or above (`BSC_EXEC_LIVE_BUILDER_POLICY`).
+    pub live_builder_policy: String,
     /// Phase I gate M2: the PAPER paths that take the sender.
     pub sender_paths: SenderPaths,
 }
@@ -1712,6 +1728,16 @@ impl<E: End> Executor<E> {
         known.unwrap_or_else(|| self.held_exit_reserve()) + approval + sell
     }
 
+    /// Whether a C3 BUY of this arm was disclosed at the arm's nonce.
+    pub fn c3_took_nonce(&self) -> bool {
+        self.c3_took_nonce
+    }
+
+    /// The arm's nonce: every C3 lane's.
+    pub fn c3_nonce(&self) -> u64 {
+        self.first_nonce
+    }
+
     /// The nonce the next strategy lane is at.
     pub fn strategy_next_nonce(&self) -> u64 {
         let skip = self.strategy_used == 0 && self.c3_took_nonce;
@@ -2422,6 +2448,13 @@ pub(crate) mod tests {
             live_public_only: true,
             live_grant_max_duration_ms: 0,
             live_spend_total_wei: u128::from(u64::MAX),
+            // No test grant is an outlier.
+            live_risk_soft_buy_slippage_bps: 9_999,
+            live_risk_soft_exit_slippage_bps: 9_999,
+            live_risk_soft_gas_price_wei: u64::MAX,
+            live_risk_outlier: false,
+            live_c3_rearm: false,
+            live_builder_policy: crate::builder_policy::TEST_POLICY.into(),
             sender_paths: SenderPaths::Both,
         }
     }

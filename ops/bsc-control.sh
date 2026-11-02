@@ -170,7 +170,7 @@ BSC_REQUEST_USAGE="bsc source request <ID> OFF|SHADOW|PAPER|LIVE|DISABLED|ENABLE
 # LIVE scope. `scope` prints the canonical scope text and its SHA-256, the
 # value `grant` must confirm; `revoke` withdraws it; `status` names every
 # condition LIVE still misses. A grant is a permission, never an order.
-BSC_LIVE_USAGE="bsc live scope <venue> <strategies> <sources,...> <adapters,...> <max_input_wei> <max_spend_wei> <max_attempts> <expires_unix_ms> <ALL|EXIT_ONLY> <max_buy_slippage_bps> <max_exit_slippage_bps> <max_gas_price_wei> <max_buy_gas_limit> <max_approve_gas_limit> <max_sell_gas_limit> <max_open_positions> <max_realized_loss_wei> <max_daily_realized_loss_wei> <min_buy_interval_ms>; bsc live grant <the same nineteen> <scope_sha256> <generation> <request_id>; bsc live revoke <generation> <request_id>; bsc live status; bsc live lot <0x lot> RESUME|WRITE_OFF|EXIT_NOW <ledger_version> <request_id>; bsc live nonce-burn <0x tx> <ledger_version> <request_id>; bsc live ledger-quarantine <seq> <generation> <request_id>"
+BSC_LIVE_USAGE="bsc live scope <venue> <strategies> <sources,...> <adapters,...> <max_input_wei> <max_spend_wei> <max_attempts> <expires_unix_ms> <ALL|EXIT_ONLY> <max_buy_slippage_bps> <max_exit_slippage_bps> <max_gas_price_wei> <max_buy_gas_limit> <max_approve_gas_limit> <max_sell_gas_limit> <max_open_positions> <max_realized_loss_wei> <max_daily_realized_loss_wei> <min_buy_interval_ms> <OUTLIER_ACK|NO_OUTLIER_ACK>; bsc live grant <the same twenty> <scope_sha256> <generation> <request_id>; bsc live revoke <generation> <request_id>; bsc live status; bsc live lot <0x lot> RESUME|WRITE_OFF|EXIT_NOW <ledger_version> <request_id>; bsc live nonce-burn <0x tx> <ledger_version> <request_id>; bsc live ledger-quarantine <seq> <generation> <request_id>"
 bsc_live_flags() {
   for v in "$1" "$2" "$3" "$4"; do case "$v" in ''|*[!A-Z0-9_+,]*) die "unknown LIVE scope value" ;; esac; done
   for v in "$5" "$6" "$7" "$8"; do case "$v" in ''|*[!0-9]*) die "LIVE limits are unsigned integers" ;; esac; done
@@ -190,6 +190,9 @@ bsc_live_flags() {
   done
   LIVE_FLAGS+=(--max-open-positions "${16}" --max-realized-loss-wei "${17}" \
     --max-daily-realized-loss-wei "${18}" --min-buy-interval-ms "${19}")
+  # R4 (BSC3-069): the operator confirms a risk above the runtime's soft bounds as an outlier.
+  case "${20}" in OUTLIER_ACK) LIVE_FLAGS+=(--risk-outlier-ack) ;; NO_OUTLIER_ACK) ;;
+    *) die "the grant's risk is OUTLIER_ACK or NO_OUTLIER_ACK" ;; esac
 }
 # REV.1.0 R3b (Audit A): the operator's decisions of the LIVE ledger, once per request, each with
 # the state it was decided on as the CAS: a lot's RESUME, WRITE_OFF or EXIT_NOW and an unresolved
@@ -222,14 +225,14 @@ bsc_live() {
   local rt="$APP_HOME/current/bsc_runtime" cmd="${1:-}"
   [ "$#" -gt 0 ] && shift
   case "$cmd" in
-    scope) [ "$#" -eq 19 ] || die "$BSC_LIVE_USAGE"; bsc_live_flags "$@"
+    scope) [ "$#" -eq 20 ] || die "$BSC_LIVE_USAGE"; bsc_live_flags "$@"
       /usr/bin/env -i PATH=/usr/bin:/bin "$rt" live scope "${LIVE_FLAGS[@]}" ;;
-    grant) [ "$#" -eq 22 ] || die "$BSC_LIVE_USAGE"; bsc_live_flags "$@"
-      case "${20}" in ''|*[!$BSC_HEX]*) die "scope_sha256 is 64 lowercase hex digits" ;; esac
-      [ "${#20}" -eq 64 ] || die "scope_sha256 is 64 lowercase hex digits"
-      case "${21}" in ''|*[!0-9]*) die "generation must be an unsigned integer" ;; esac
-      /usr/bin/env -i PATH=/usr/bin:/bin "$rt" live grant "${LIVE_FLAGS[@]}" --scope-sha256 "${20}" \
-        --expect-generation "${21}" --request-id "${22}" --state "$RUNDIR/bsc-sources" ;;
+    grant) [ "$#" -eq 23 ] || die "$BSC_LIVE_USAGE"; bsc_live_flags "$@"
+      case "${21}" in ''|*[!$BSC_HEX]*) die "scope_sha256 is 64 lowercase hex digits" ;; esac
+      [ "${#21}" -eq 64 ] || die "scope_sha256 is 64 lowercase hex digits"
+      case "${22}" in ''|*[!0-9]*) die "generation must be an unsigned integer" ;; esac
+      /usr/bin/env -i PATH=/usr/bin:/bin "$rt" live grant "${LIVE_FLAGS[@]}" --scope-sha256 "${21}" \
+        --expect-generation "${22}" --request-id "${23}" --state "$RUNDIR/bsc-sources" ;;
     revoke) [ "$#" -eq 2 ] || die "$BSC_LIVE_USAGE"
       case "$1" in ''|*[!0-9]*) die "generation must be an unsigned integer" ;; esac
       /usr/bin/env -i PATH=/usr/bin:/bin "$rt" live revoke --expect-generation "$1" --request-id "$2" \

@@ -321,6 +321,13 @@ transactions and the net result. A view of the native owner and ledger, never a 
 | first_unreadable | [uint64](#uint64) | optional | The lowest sequence number of the ledger&#39;s entries that do not decode: the one the operator may quarantine next (bsc.live.ledger.quarantine); the warning LIVE_LEDGER_INVALID counts them all. Absent while every entry decodes. |
 | campaign_spent_wei | [string](#string) | optional | REV.1.0 R4: what the campaign has spent at most, every grant&#39;s admissions (decimal wei); absent while the spend is unreadable. |
 | campaign_spend_max_wei | [string](#string) | optional | The campaign&#39;s cumulative budget every LIVE BUY with its exits is admitted within (BSC_EXEC_LIVE_SPEND_TOTAL_WEI, decimal wei; 0: no BUY); absent without a readable runtime configuration with an executor. |
+| risk_soft_buy_slippage_bps | [uint32](#uint32) | optional | REV.1.0 R4 (BSC3-069): the runtime&#39;s soft bound of a grant&#39;s BUY slippage (bps, BSC_EXEC_LIVE_RISK_SOFT_BUY_SLIPPAGE_BPS): above it a grant is an outlier; absent without a readable runtime configuration with an executor. |
+| risk_soft_exit_slippage_bps | [uint32](#uint32) | optional | The soft bound of a grant&#39;s exit slippage (bps, BSC_EXEC_LIVE_RISK_SOFT_EXIT_SLIPPAGE_BPS). |
+| risk_soft_gas_price_wei | [uint64](#uint64) | optional | The soft bound of a grant&#39;s gas price (wei, BSC_EXEC_LIVE_RISK_SOFT_GAS_PRICE_WEI). |
+| risk_outlier | [bool](#bool) | optional | BSC_EXEC_LIVE_RISK_OUTLIER: a grant confirmed as an outlier admits BUYs only while true. |
+| c3_rearm | [bool](#bool) | optional | REV.1.0 R4 (BSC3-042, BSC_EXEC_LIVE_C3_REARM): true renews the arm after a C3 BUY whose nonce the chain took; false: one C3 BUY per arm. |
+| builder_policy_fresh_until_unix_ms | [uint64](#uint64) | optional | REV.1.0 R4: until when the bound builder policy (BSC_EXEC_LIVE_BUILDER_POLICY) is fresh (unix ms); absent for an import, an unreadable one or without a readable runtime configuration. |
+| builder_policy_refusal | [string](#string) | optional | Why it admits no LIVE BUY at the report&#39;s clock (stale, unverified, the signed gas price below its floor); absent while it holds or without a readable runtime configuration or clock. |
 
 
 
@@ -798,6 +805,7 @@ The execution risk of a LIVE grant (BSC3-069): the executor arms only within it.
 | max_buy_gas_limit | [uint64](#uint64) |  | Most gas limit of a BUY. |
 | max_approve_gas_limit | [uint64](#uint64) |  | Most gas limit of an approval. |
 | max_sell_gas_limit | [uint64](#uint64) |  | Most gas limit of a SELL. |
+| outlier_ack | [bool](#bool) |  | REV.1.0 R4 (BSC3-069): the operator confirmed these bounds as an outlier (above the runtime&#39;s soft bounds); without it a grant above them never arms. |
 
 
 

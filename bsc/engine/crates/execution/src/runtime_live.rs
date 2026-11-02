@@ -306,6 +306,25 @@ fn risk_refusal(
     .err()
 }
 
+/// R4 (BSC3-069): why `grant` admits no BUY of the executor configured as
+/// `x` as an outlier: its risk above a soft bound, not confirmed as one in
+/// its scope, or confirmed with BSC_EXEC_LIVE_RISK_OUTLIER OFF. An
+/// exit-only grant (no BUY) is none; exits go on either way.
+fn outlier_refusal(
+    grant: &crate::sources::LiveGrant,
+    x: &crate::paper_exec::ExecConfig,
+) -> Option<String> {
+    let risk = grant.risk.filter(|_| !grant.exit_only)?;
+    let outlier = risk.max_buy_slippage_bps > x.live_risk_soft_buy_slippage_bps
+        || risk.max_exit_slippage_bps > x.live_risk_soft_exit_slippage_bps
+        || risk.max_gas_price_wei > x.live_risk_soft_gas_price_wei;
+    match (outlier, risk.outlier_ack, x.live_risk_outlier) {
+        (true, false, _) => Some(crate::sources::LIVE_RISK_OUTLIER_UNACKED.into()),
+        (true, true, false) => Some(crate::sources::LIVE_RISK_OUTLIER_LOCKED.into()),
+        _ => None,
+    }
+}
+
 fn wall_ms() -> u64 {
     // Unreadable: every grant counts as expired (BSC3-015: counted).
     crate::runtime::wall_or_expired(darkbot_bsc_record::observed_now())
@@ -1555,10 +1574,13 @@ impl LiveRuntime {
         };
         let grant = x.end().armed().grant();
         let generation = x.end().armed().grant_generation();
+        let next = owner.and_then(|o| self.free_nonce(o));
+        // R4 (BSC3-042): only while this arm's C3 lanes can take the free
+        // nonce (taken, the next C3 BUY waits for a new arm).
         let c3 = !grant.exit_only
             && matches!(grant.strategies, LiveStrategies::C3 | LiveStrategies::Both)
-            && !self.public_only_locked();
-        let next = owner.and_then(|o| self.free_nonce(o));
+            && !self.public_only_locked()
+            && next == Some(x.c3_nonce());
         let head = owner.and_then(|o| o.head()).map(|h| h.number);
         let may_buy = self.buy_refusal(self.one_buy(), owner, next).is_none();
         let (true, true, Some(nonce), Some(head)) = (c3, may_buy, next, head) else {
@@ -1969,6 +1991,17 @@ impl LiveRuntime {
                     }
                     Ok(_) => Ok(n),
                 }
+            })
+            // R4: a BUY rests on the bound builder policy as it holds at
+            // this pass: fresh, its builders verified, the signed gas
+            // price at its floor or above (a refresh applies at the next
+            // pass); its exits go on.
+            .and_then(|n| self.builder_bound(now_ms).map(|()| n))
+            // R4 (BSC3-069): an outlier grant admits BUYs only confirmed
+            // and unlocked; its exits go on.
+            .and_then(|n| match outlier_refusal(n.grant(), &self.exec.exec) {
+                Some(why) => Err(why),
+                None => Ok(n),
             });
         let live_now = match live_now {
             Ok(n) => {
@@ -2021,13 +2054,25 @@ impl LiveRuntime {
             // landed late): a new arm takes it (an unresolved transaction
             // stays so in the ledger, its spend counted, until its nonce
             // is taken; the new arm settles this arm's fence).
+            // R4 (BSC3-042): with BSC_EXEC_LIVE_C3_REARM ON, a C3 BUY the
+            // chain included at the arm's nonce (not reverted; the free
+            // nonce past it, nothing unresolved) renews the arm for the
+            // next C3 BUY.
             let reuse = owner.and_then(|o| self.free_nonce(o)).filter(|n| {
                 rearm_due(
                     *n,
                     x.strategy_next_nonce(),
                     x.strategy_lanes().4,
                     self.book.unresolved().any(|t| t.released.nonce == *n),
-                )
+                ) || (self.exec.exec.live_c3_rearm
+                    && x.c3_took_nonce()
+                    && *n > x.c3_nonce()
+                    && self.book.txs.iter().any(|t| {
+                        t.released.nonce == x.c3_nonce()
+                            && t.released.intent == LiveIntentKind::Buy
+                            && t.state == FactKind::Included
+                    })
+                    && self.book.unresolved().next().is_none())
             });
             match reuse {
                 None => {
@@ -2303,6 +2348,17 @@ impl LiveRuntime {
 
     /// The gate is closed: an armed path ends with the reason, an unarmed
     /// one shows it.
+    /// [`crate::builder_policy::live_bound`] of the configured policy.
+    fn builder_bound(&self, now_ms: u64) -> Result<(), String> {
+        let x = &self.exec.exec;
+        crate::builder_policy::live_bound(
+            &self.repo_root,
+            &x.live_builder_policy,
+            x.gas_price_wei,
+            now_ms,
+        )
+    }
+
     fn close(&mut self, why: String) {
         self.probe = None;
         self.connecting = None;
@@ -3064,6 +3120,18 @@ impl LiveRuntime {
         }
         (reverted.len() as u64 >= self.exec.exec.live_exit_reverts_max)
             .then_some(crate::sources::LIVE_EXIT_REVERTS_EXHAUSTED)
+    }
+
+    /// Review of R4: an exit the strategy decided while this path is not
+    /// armed (a re-arm, a reconnect) of a lot the ledger holds open stays
+    /// wanted for the next arm ([`LiveRuntime::exits_to_continue`]), never
+    /// PAPER's (the strategy decides it once). Whether it was this path's.
+    pub fn want_unarmed_exit(&mut self, token: [u8; 20]) -> bool {
+        if self.executor.is_some() || !self.position_open(&token) {
+            return false;
+        }
+        self.want_exit(token);
+        true
     }
 
     /// The wanted exits that may go on now (BSC3-055): armed, and the
@@ -3920,11 +3988,29 @@ mod tests {
     /// spend entry), no bytes on the wire.
     #[test]
     fn a_second_c3_launch_after_inclusion_takes_nothing_under_a_raised_cap() {
-        let (state, store, now) = live_ready_granting("live-rt-cap", |now| {
-            rig_grant(now + 3_600_000, LiveStrategies::C3)
-        });
+        second_c3_launch("live-rt-cap", false, true);
+    }
+
+    /// R4 (BSC3-042): with BSC_EXEC_LIVE_C3_REARM ON, A's inclusion renews
+    /// the arm at the next pass: B goes at the buyer's next nonce, admitted
+    /// by the owner (its own slot and spend entry).
+    #[test]
+    fn a_c3_rearm_takes_the_second_c3_launch_at_the_next_nonce() {
+        second_c3_launch("live-rt-rearm", true, true);
+    }
+
+    /// Review of R4: a reverted C3 BUY renews no arm (ON): the second C3
+    /// launch is refused at the buyer's nonce as with OFF.
+    #[test]
+    fn a_reverted_c3_buy_renews_no_arm() {
+        second_c3_launch("live-rt-reverted", true, false);
+    }
+
+    fn second_c3_launch(tag: &str, rearm: bool, lands: bool) {
+        let (state, store, now) =
+            live_ready_granting(tag, |now| rig_grant(now + 3_600_000, LiveStrategies::C3));
         assert_eq!(now, NOW);
-        let root = fixture("live-rt-cap", "PASS");
+        let root = fixture(tag, "PASS");
         let spec = rig_spec(
             Some(crate::live_qualification::running_build().unwrap()),
             LiveStrategies::C3,
@@ -3935,7 +4021,7 @@ mod tests {
             build(&root, &spec, 1).unwrap(),
         )
         .unwrap();
-        let d = std::env::temp_dir().join(format!("bsc-live-rt-cap-{}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("bsc-{tag}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&d);
         fs::create_dir_all(&d).unwrap();
         let (key, buyer) = loopback_key(&state);
@@ -3948,6 +4034,7 @@ mod tests {
         };
         let mut exec = setup(d.join("unused.key"), Duration::from_secs(3_600));
         exec.exec.session_cap_wei *= 10;
+        exec.exec.live_c3_rearm = rearm;
         let mut x = LiveRuntime::with_prober(
             live_setup,
             exec,
@@ -4019,7 +4106,7 @@ mod tests {
                     index: 1,
                     sender: buyer,
                     nonce: 5,
-                    succeeded: true,
+                    succeeded: lands,
                     cost: None,
                 },
             ],
@@ -4028,19 +4115,25 @@ mod tests {
         let evidence = c2.take_evidence();
         assert_eq!(
             x.apply_evidence(&evidence),
-            vec![Some(IntentState::Included)]
+            vec![Some(if lands {
+                IntentState::Included
+            } else {
+                IntentState::Reverted
+            })]
         );
         // Right behind its launch in the block (R2: placed FIRST).
         let _ = x.on_canonical(&included);
         let _ = x.on_canonical(&launch_event(HEAD + 1, 0xb2, 0, buy.token, launcher));
-        let _ = x.on_canonical(&buy_trade(
-            HEAD + 1,
-            0xb2,
-            1,
-            buy.handoff.tx_hash,
-            buy.token,
-            buyer,
-        ));
+        let _ = lands
+            && x.on_canonical(&buy_trade(
+                HEAD + 1,
+                0xb2,
+                1,
+                buy.handoff.tx_hash,
+                buy.token,
+                buyer,
+            ))
+            .is_empty();
         let _ = x.on_canonical(&CanonicalEvent::BlockComplete {
             number: HEAD + 1,
             hash: [0xb2; 32],
@@ -4053,7 +4146,32 @@ mod tests {
         assert_eq!((used, spent.len()), (1, 1));
         let (hash_b, raw_b, launcher_b) = crate::runtime::exec::tests::launch_n(1);
         c2.pending(hash_b, launcher_b, 4, 0, 20);
+        // The next pass: renewed (ON), or no lease for a C3 BUY this arm
+        // cannot take (OFF).
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
         let second = x.on_launch(SourceId::PublicNode, hash_b, &raw_b, 20, &c2, &clock);
+        if rearm && lands {
+            let second = second.expect("B goes after the renewed arm");
+            assert!(requests.recv_timeout(Duration::from_secs(2)).is_ok());
+            let facts = crate::live_ledger::Ledger::open(&state).facts().unwrap();
+            assert!(
+                facts
+                    .iter()
+                    .any(|f| f.tx_hash == second.handoff.tx_hash && f.nonce == 6),
+                "{facts:?}"
+            );
+            assert_eq!(buy_usage(&state, NOW).unwrap().used, used + 1);
+            assert_eq!(
+                crate::sources::admitted_intents(&state).unwrap().len(),
+                spent.len() + 1
+            );
+            drop(store);
+            fs::remove_dir_all(d).unwrap();
+            fs::remove_dir_all(root).unwrap();
+            fs::remove_dir_all(state).unwrap();
+            return;
+        }
         assert!(second.is_none(), "{:?}", reason(&x));
         assert_eq!(buy_usage(&state, NOW).unwrap().used, used);
         assert_eq!(crate::sources::admitted_intents(&state).unwrap(), spent);
@@ -6673,6 +6791,94 @@ mod tests {
             x.lease_error
         );
         x.shutdown();
+        r.clean();
+    }
+
+    /// REV.1.0 R4 (BSC3-069): a grant whose risk is above the runtime's soft
+    /// bounds is an outlier: unconfirmed in its scope it admits no BUY
+    /// (nothing open: nothing arms, LIVE_RISK_OUTLIER_UNACKED); confirmed,
+    /// only with BSC_EXEC_LIVE_RISK_OUTLIER ON (LIVE_RISK_OUTLIER_LOCKED).
+    #[test]
+    fn an_outlier_risk_arms_only_confirmed_and_unlocked() {
+        use crate::sources::tests::TEST_RISK;
+        use crate::sources::{GrantRisk, LIVE_RISK_OUTLIER_LOCKED, LIVE_RISK_OUTLIER_UNACKED};
+        let mut r = Rig::new("live-outlier", LiveStrategies::C3);
+        r.exec.exec.live_risk_soft_buy_slippage_bps = 100;
+        let c2 = c2_at(&r.d, r.buyer, 5);
+        let mut x = r.runtime("boot-1");
+        settle(&mut x, &c2);
+        assert!(!x.armed());
+        assert_eq!(reason(&x).1.as_deref(), Some(LIVE_RISK_OUTLIER_UNACKED));
+        x.shutdown();
+        r.clean();
+        let mut r = Rig::granting("live-outlier-ack", LiveStrategies::C3, |now| LiveGrant {
+            risk: Some(GrantRisk {
+                outlier_ack: true,
+                ..TEST_RISK
+            }),
+            ..rig_grant(now + 3_600_000, LiveStrategies::C3)
+        });
+        r.exec.exec.live_risk_soft_buy_slippage_bps = 100;
+        let c2 = c2_at(&r.d, r.buyer, 5);
+        let mut x = r.runtime("boot-1");
+        settle(&mut x, &c2);
+        assert!(!x.armed());
+        assert_eq!(reason(&x).1.as_deref(), Some(LIVE_RISK_OUTLIER_LOCKED));
+        x.shutdown();
+        r.exec.exec.live_risk_outlier = true;
+        let mut x = r.runtime("boot-1");
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
+        x.shutdown();
+        r.clean();
+    }
+
+    /// R4 review M1: each soft bound makes an outlier on its own; equal is
+    /// none; an exit-only grant (no BUY) none; an ack without an outlier
+    /// changes nothing; an acked outlier only with the switch ON.
+    #[test]
+    fn every_soft_bound_makes_an_outlier_on_its_own() {
+        use crate::sources::tests::TEST_RISK;
+        use crate::sources::{GrantRisk, LIVE_RISK_OUTLIER_LOCKED, LIVE_RISK_OUTLIER_UNACKED};
+        let r = Rig::new("live-soft-bounds", LiveStrategies::C3);
+        let mut x = r.exec.exec.clone();
+        x.live_risk_soft_buy_slippage_bps = TEST_RISK.max_buy_slippage_bps;
+        x.live_risk_soft_exit_slippage_bps = TEST_RISK.max_exit_slippage_bps;
+        x.live_risk_soft_gas_price_wei = TEST_RISK.max_gas_price_wei;
+        let grant = |risk: GrantRisk, exit_only: bool| LiveGrant {
+            risk: Some(risk),
+            exit_only,
+            ..rig_grant(NOW + 3_600_000, LiveStrategies::C3)
+        };
+        let acked = GrantRisk {
+            outlier_ack: true,
+            ..TEST_RISK
+        };
+        let unacked = Some(LIVE_RISK_OUTLIER_UNACKED.to_string());
+        assert_eq!(outlier_refusal(&grant(TEST_RISK, false), &x), None);
+        assert_eq!(outlier_refusal(&grant(acked, false), &x), None);
+        let below = |f: &dyn Fn(&mut crate::paper_exec::ExecConfig)| {
+            let mut y = x.clone();
+            f(&mut y);
+            y
+        };
+        let buy = below(&|y| y.live_risk_soft_buy_slippage_bps -= 1);
+        let exit = below(&|y| y.live_risk_soft_exit_slippage_bps -= 1);
+        let gas = below(&|y| y.live_risk_soft_gas_price_wei -= 1);
+        for y in [&buy, &exit, &gas] {
+            assert_eq!(outlier_refusal(&grant(TEST_RISK, false), y), unacked);
+        }
+        assert_eq!(outlier_refusal(&grant(TEST_RISK, true), &buy), None);
+        assert_eq!(outlier_refusal(&grant(TEST_RISK, true), &exit), None);
+        assert_eq!(
+            outlier_refusal(&grant(acked, false), &gas),
+            Some(LIVE_RISK_OUTLIER_LOCKED.to_string())
+        );
+        let on = below(&|y| {
+            y.live_risk_soft_gas_price_wei -= 1;
+            y.live_risk_outlier = true;
+        });
+        assert_eq!(outlier_refusal(&grant(acked, false), &on), None);
         r.clean();
     }
 
@@ -11694,6 +11900,124 @@ mod tests {
                 Some(crate::sources::LIVE_QUALIFICATION_CHANGED.to_string())
             )
         );
+        r.clean();
+    }
+
+    /// R4: a LIVE BUY rests on the bound builder policy as it holds at each
+    /// pass: under the repository's frozen import nothing arms; with a fresh
+    /// one the path arms; its age past 24 h ends a path that holds nothing
+    /// open (with a lot open: `with_a_lot_open_r4_refusals_close_only_buys`).
+    #[test]
+    fn a_live_arm_rests_on_a_fresh_bound_builder_policy() {
+        let r = Rig::new("live-builder-policy", LiveStrategies::C3);
+        let c2 = c2_at(&r.d, r.buyer, 5);
+        let path = r.root.join(crate::builder_policy::TEST_POLICY);
+        let fresh = fs::read(&path).unwrap();
+        // The repository's: the frozen import, never fresh.
+        fs::write(
+            &path,
+            fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join(
+                "../../../native/evidence/g06a/g07_binary_import_20261016/builder_policy.dbrec",
+            ))
+            .unwrap(),
+        )
+        .unwrap();
+        let mut x = r.runtime("boot-1");
+        settle(&mut x, &c2);
+        assert!(!x.armed());
+        let why = reason(&x).1.unwrap_or_default();
+        assert!(
+            why.starts_with(crate::sources::LIVE_BUILDER_POLICY_STALE),
+            "{why}"
+        );
+        fs::write(&path, &fresh).unwrap();
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
+        let old = NOW - crate::builder_policy::MAX_AGE_S * 1000 - 1000;
+        fs::write(&path, crate::builder_policy::native_bytes(&[old])).unwrap();
+        settle(&mut x, &c2);
+        assert!(!x.armed());
+        let why = reason(&x).1.unwrap_or_default();
+        assert!(
+            why.starts_with(crate::sources::LIVE_BUILDER_POLICY_STALE),
+            "{why}"
+        );
+        x.shutdown();
+        r.clean();
+    }
+
+    /// The tests' lot open from before: a C3 BUY at nonce 3 included.
+    fn r4_lot(state: &Path) -> [u8; 20] {
+        let buy = Fact {
+            max_block: Some(HEAD),
+            ..unknown_window([0x7c; 32], 3, ComponentId::ExecC3)
+        };
+        let ledger = Ledger::open(state);
+        ledger.append(&buy, 1).unwrap();
+        ledger
+            .append(
+                &Fact {
+                    block: Some((HEAD - 1, [0x41; 32], NOW)),
+                    gas_wei: Some(U256::from(1u64)),
+                    tokens: Some(U256::from(7u64)),
+                    eth_wei: Some(U256::from(1u64)),
+                    ..Fact::about(&buy, FactKind::Included)
+                },
+                2,
+            )
+            .unwrap();
+        buy.token
+    }
+
+    /// Review of R4: with a lot open, an outlier grant and a stale builder
+    /// policy close BUYs only: the path arms for its exit (BSC3-071).
+    #[test]
+    fn with_a_lot_open_r4_refusals_close_only_buys() {
+        let mut r = Rig::new("live-r4-exits", LiveStrategies::C3);
+        r4_lot(&r.state);
+        let c2 = c2_at(&r.d, r.buyer, 5);
+        let closed = |r: &Rig, why: &str| {
+            let mut x = r.runtime("boot-1");
+            settle(&mut x, &c2);
+            assert!(x.armed(), "{:?}", reason(&x));
+            let b = x.buys_closed.clone().unwrap_or_default();
+            assert!(b.starts_with(why), "{b}");
+            x.shutdown();
+        };
+        r.exec.exec.live_risk_soft_buy_slippage_bps = 100;
+        closed(&r, crate::sources::LIVE_RISK_OUTLIER_UNACKED);
+        r.exec.exec.live_risk_soft_buy_slippage_bps = 9_999;
+        let old = NOW - crate::builder_policy::MAX_AGE_S * 1000 - 1000;
+        fs::write(
+            r.root.join(crate::builder_policy::TEST_POLICY),
+            crate::builder_policy::native_bytes(&[old]),
+        )
+        .unwrap();
+        closed(&r, crate::sources::LIVE_BUILDER_POLICY_STALE);
+        r.clean();
+    }
+
+    /// Review of R4 (MEDIUM): an exit the strategy decides while the LIVE
+    /// path is not armed (a re-arm, a reconnect), of a lot the ledger holds,
+    /// stays wanted and goes on at the next arm; armed, or another token's,
+    /// it is not held back.
+    #[test]
+    fn an_exit_decided_while_unarmed_goes_on_at_the_next_arm() {
+        let r = Rig::new("live-unarmed-exit", LiveStrategies::C3);
+        let token = r4_lot(&r.state);
+        let c2 = c2_at(&r.d, r.buyer, 5);
+        let mut x = r.runtime("boot-1");
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
+        assert!(!x.want_unarmed_exit(token));
+        x.disarm();
+        assert!(!x.want_unarmed_exit([0xee; 20]));
+        assert!(x.want_unarmed_exit(token));
+        assert!(x.exits_wanted.contains(&token));
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
+        assert_eq!(x.exits_to_continue(&c2), vec![token]);
+        x.shutdown();
         r.clean();
     }
 

@@ -299,6 +299,18 @@ pub const LIVE_GRANT_EXIT_ONLY: &str = "LIVE_GRANT_EXIT_ONLY";
 /// BSC3-069: a grant without the execution risk the operator confirmed
 /// (written before it): it admits nothing.
 pub const LIVE_GRANT_RISK_MISSING: &str = "LIVE_GRANT_RISK_MISSING";
+/// REV.1.0 R4 (BSC3-069): the grant's risk is above the runtime's soft
+/// bounds and its scope does not confirm it as an outlier.
+pub const LIVE_RISK_OUTLIER_UNACKED: &str = "LIVE_RISK_OUTLIER_UNACKED";
+/// The grant confirms an outlier risk, `BSC_EXEC_LIVE_RISK_OUTLIER` is OFF.
+pub const LIVE_RISK_OUTLIER_LOCKED: &str = "LIVE_RISK_OUTLIER_LOCKED";
+/// REV.1.0 R4: the bound builder policy (`BSC_EXEC_LIVE_BUILDER_POLICY`)
+/// is unreadable or its builders are not both verified.
+pub const LIVE_BUILDER_POLICY_UNVERIFIED: &str = "LIVE_BUILDER_POLICY_UNVERIFIED";
+/// Its oldest fetched source is over 24 h old (an import is never fresh).
+pub const LIVE_BUILDER_POLICY_STALE: &str = "LIVE_BUILDER_POLICY_STALE";
+/// The signed gas price is below its strictest verified builder floor.
+pub const LIVE_GAS_PRICE_BELOW_BUILDER_FLOOR: &str = "LIVE_GAS_PRICE_BELOW_BUILDER_FLOOR";
 /// 31.10. order: a grant without its positions and losses bounds (one
 /// written before them) arms nothing; exits of open positions go on.
 pub const LIVE_GRANT_LIMITS_MISSING: &str = "LIVE_GRANT_LIMITS_MISSING";
@@ -1033,6 +1045,10 @@ pub struct GrantRisk {
     pub max_buy_gas_limit: u64,
     pub max_approve_gas_limit: u64,
     pub max_sell_gas_limit: u64,
+    /// REV.1.0 R4 (BSC3-069): the operator confirmed these bounds as an
+    /// outlier (above the runtime's soft bounds); part of the risk scope
+    /// only when set.
+    pub outlier_ack: bool,
 }
 
 /// The risk of a stored grant: all six bounds, or none (a grant written
@@ -1049,8 +1065,11 @@ fn grant_risk_of(row: &Record) -> Result<Option<GrantRisk>, String> {
         row.opt_u64(k::MAX_SELL_GAS_LIMIT).map_err(e)?,
     ];
     let bps = |v: u64| u16::try_from(v).map_err(|_| "a granted slippage out of range".to_string());
+    let ack = row.opt_bool(k::RISK_OUTLIER_ACK).map_err(e)?;
     match values {
-        [None, None, None, None, None, None] => Ok(None),
+        // R4: an outlier's confirmation without the bounds it confirms is
+        // no grant's.
+        [None, None, None, None, None, None] if ack.is_none() => Ok(None),
         [
             Some(buy),
             Some(exit),
@@ -1065,6 +1084,7 @@ fn grant_risk_of(row: &Record) -> Result<Option<GrantRisk>, String> {
             max_buy_gas_limit: gas,
             max_approve_gas_limit: approve,
             max_sell_gas_limit: sell,
+            outlier_ack: ack == Some(true),
         })),
         _ => Err("a LIVE grant names its risk whole or not at all".into()),
     }
@@ -1279,7 +1299,11 @@ impl LiveGrant {
                 r.max_buy_gas_limit,
                 r.max_approve_gas_limit,
                 r.max_sell_gas_limit
-            )
+            ) + if r.outlier_ack {
+                "risk_outlier_ack=YES\n"
+            } else {
+                ""
+            }
         }) + &self.limits.map_or(String::new(), |l| {
             format!(
                 "max_open_positions={}\nmax_realized_loss_wei={}\nmax_daily_realized_loss_wei={}\nmin_buy_interval_ms={}\n",
@@ -1991,7 +2015,8 @@ impl Generation {
                             .set(k::MAX_GAS_PRICE_WEI, r.max_gas_price_wei)
                             .set(k::MAX_BUY_GAS_LIMIT, r.max_buy_gas_limit)
                             .set(k::MAX_APPROVE_GAS_LIMIT, r.max_approve_gas_limit)
-                            .set(k::MAX_SELL_GAS_LIMIT, r.max_sell_gas_limit);
+                            .set(k::MAX_SELL_GAS_LIMIT, r.max_sell_gas_limit)
+                            .set_opt(k::RISK_OUTLIER_ACK, r.outlier_ack.then_some(true));
                     }
                     if let Some(l) = &g.limits {
                         e.set(k::MAX_OPEN_POSITIONS, u64::from(l.max_open_positions))
@@ -5867,6 +5892,7 @@ pub(crate) mod tests {
         max_buy_gas_limit: 10_000_000,
         max_approve_gas_limit: 1_000_000,
         max_sell_gas_limit: 5_000_000,
+        outlier_ack: false,
     };
 
     /// Evidence for exactly that scope ([`grant`]'s).
@@ -7474,6 +7500,41 @@ pub(crate) mod tests {
             .unwrap();
         assert!(other.try_lock().is_err());
         drop(g);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// REV.1.0 R4 (BSC3-069): a risk confirmed as an outlier says so in
+    /// both scopes (a line only then: every other grant's scope stays the
+    /// same) and is kept by the owner's record.
+    #[test]
+    fn an_outlier_risk_is_confirmed_in_its_scope_and_kept() {
+        let plain = grant(1);
+        let acked = LiveGrant {
+            risk: Some(GrantRisk {
+                outlier_ack: true,
+                ..TEST_RISK
+            }),
+            ..plain.clone()
+        };
+        let line = "max_sell_gas_limit=5000000\n";
+        assert_eq!(
+            acked.scope_text(),
+            plain
+                .scope_text()
+                .replace(line, &format!("{line}risk_outlier_ack=YES\n"))
+        );
+        assert!(acked.risk_scope_text().contains("risk_outlier_ack=YES\n"));
+        assert!(!plain.risk_scope_text().contains("risk_outlier_ack"));
+        assert_ne!(acked.risk_scope_sha256(), plain.risk_scope_sha256());
+        let (dir, s, _) = live_ready_limited("outlier-ack", (2, 2), |now| LiveGrant {
+            risk: Some(GrantRisk {
+                outlier_ack: true,
+                ..TEST_RISK
+            }),
+            ..grant_of(now + 3_600_000, LiveStrategies::C3)
+        });
+        let kept = s.current().unwrap().live.unwrap().risk.unwrap();
+        assert!(kept.outlier_ack);
         fs::remove_dir_all(dir).unwrap();
     }
 

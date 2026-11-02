@@ -6,7 +6,7 @@ import { selectLive, useBscStore } from "../store/bscStore";
 import { ValueState } from "./EvidenceRows";
 import { PlacedSection } from "./PlacedSection";
 import { useNativeRecords } from "./useNativeRecords";
-import { conditionRows, exitDeciderRows, operatorDecisions, recoveryRows, signedBnb } from "../model/live";
+import { builderPolicyText, conditionRows, exitDeciderRows, operatorDecisions, recoveryRows, signedBnb } from "../model/live";
 import { buyLimitRow, switchRow } from "../model/switches";
 import { formatNative } from "../model/format";
 import { BuyLimitActions } from "../BuyLimitActions";
@@ -28,6 +28,7 @@ export function LivePanel() {
   const econLive = switchRow("BSC_ECON_LIVE", l?.economicLive);
   const recovery = recoveryRows(l);
   const decisions = operatorDecisions(l);
+  const builder = builderPolicyText(l);
   return <>
     <Line label="LIVE source quality" value={<ValueState state={quality} />} hint="bsc.live.state transport" />
     <PlacedSection panel="live" section={1} records={records}>
@@ -43,14 +44,19 @@ export function LivePanel() {
     <PlacedSection panel="live" section={2} records={records}>
       {l?.grant ? <>
         <Line label="Grant" value={`${l.grant.strategies} · ${l.grant.venue}${l.grant.exitOnly ? " · EXIT-ONLY" : ""}`} hint={`request ${l.grant.requestId} @ generation ${l.grant.setGeneration.toString()}`} />
-        <Line label="Granted risk" value={l.grant.risk ? `slippage BUY ≤ ${l.grant.risk.maxBuySlippageBps} bps · exit ≤ ${l.grant.risk.maxExitSlippageBps} bps · gas price ≤ ${l.grant.risk.maxGasPriceWei.toString()} wei` : "none (the grant admits nothing)"}
+        <Line label="Granted risk" value={l.grant.risk ? `slippage BUY ≤ ${l.grant.risk.maxBuySlippageBps} bps · exit ≤ ${l.grant.risk.maxExitSlippageBps} bps · gas price ≤ ${l.grant.risk.maxGasPriceWei.toString()} wei${l.grant.risk.outlierAck ? " · confirmed as an outlier" : ""}` : "none (the grant admits nothing)"}
           hint={l.grant.risk ? `gas limits BUY ≤ ${l.grant.risk.maxBuyGasLimit.toString()} · approval ≤ ${l.grant.risk.maxApproveGasLimit.toString()} · SELL ≤ ${l.grant.risk.maxSellGasLimit.toString()}` : "BSC3-069"} />
         <Line label="Granted limits" value={l.grant.limits ? `open positions ≤ ${l.grant.limits.maxOpenPositions} · realized loss ≤ ${signedBnb(l.grant.limits.maxRealizedLossWei)} (grant) · ${signedBnb(l.grant.limits.maxDailyRealizedLossWei)} (UTC day)` : "none (the grant arms nothing)"}
           hint={l.grant.limits ? `BUY interval ≥ ${l.grant.limits.minBuyIntervalMs.toString()} ms` : "31.10. order"} />
         <Line label="Grant expiry" value={new Date(Number(l.grant.expiresUnixMs)).toISOString()} />
+      </> : <Line label="Grant" value="NONE" hint="LIVE needs the operator's grant of one confirmed scope" />}
+      {l?.riskSoftGasPriceWei !== undefined ? <Line label="Risk soft bounds" value={`slippage BUY ≤ ${l.riskSoftBuySlippageBps} bps · exit ≤ ${l.riskSoftExitSlippageBps} bps · gas price ≤ ${l.riskSoftGasPriceWei.toString()} wei · outlier grants ${l.riskOutlier ? "allowed when confirmed" : "locked"}`} hint="BSC3-069: a grant above them is an outlier; it admits BUYs only confirmed as one and with BSC_EXEC_LIVE_RISK_OUTLIER ON (exits go on)" /> : null}
+      {l?.c3Rearm !== undefined ? <Line label="C3 re-arm" value={l.c3Rearm ? "ON · a new arm after each C3 BUY whose nonce the chain took" : "OFF · one C3 BUY per arm"} hint="BSC3-042: BSC_EXEC_LIVE_C3_REARM" /> : null}
+      {builder !== undefined ? <Line label="Builder policy" value={builder} hint="R4: BSC_EXEC_LIVE_BUILDER_POLICY, checked every pass; while it does not hold, BUYs close and exits go on" /> : null}
+      {l?.grant ? <>
         <Line label="Grant scope SHA-256" value={l.grant.scopeSha256} />
         <pre data-testid="bsc-live-grant-scope">{l.grant.scopeText}</pre>
-      </> : <Line label="Grant" value="NONE" hint="LIVE needs the operator's grant of one confirmed scope" />}
+      </> : null}
       <LiveGrantActions generation={generation} available={owner} grantable={l?.grantableSources ?? []} />
     </PlacedSection>
     <PlacedSection panel="live" section={3} records={records}>

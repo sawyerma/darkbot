@@ -158,6 +158,24 @@ fn owner_tab(
             // R3b: the switches that lock an operator's exit-now and nonce burn.
             out.operator_exit = c.exec.as_ref().map(|x| x.exec.live_operator_exit);
             out.nonce_burn = c.exec.as_ref().map(|x| x.exec.live_nonce_burn);
+            // R4 (BSC3-069): the soft bounds of a grant's risk, the outlier switch.
+            if let Some(x) = c.exec.as_ref().map(|x| &x.exec) {
+                out.risk_soft_buy_slippage_bps = Some(u32::from(x.live_risk_soft_buy_slippage_bps));
+                out.risk_soft_exit_slippage_bps =
+                    Some(u32::from(x.live_risk_soft_exit_slippage_bps));
+                out.risk_soft_gas_price_wei = Some(x.live_risk_soft_gas_price_wei);
+                out.risk_outlier = Some(x.live_risk_outlier);
+                // R4: the C3 re-arm switch; the bound builder policy.
+                out.c3_rearm = Some(x.live_c3_rearm);
+                use darkbot_bsc_execution::builder_policy as bp;
+                out.builder_policy_fresh_until_unix_ms = bp::read(root, &x.live_builder_policy)
+                    .ok()
+                    .and_then(|p| bp::oldest_fetch_s(&p))
+                    .and_then(|t| t.checked_add(bp::MAX_AGE_S)?.checked_mul(1000));
+                out.builder_policy_refusal = now_ms.and_then(|now| {
+                    bp::live_bound(root, &x.live_builder_policy, x.gas_price_wei, now).err()
+                });
+            }
             // R4: the campaign's cumulative budget.
             out.campaign_spend_max_wei = c
                 .exec
@@ -379,6 +397,7 @@ fn owner_tab(
                 max_buy_gas_limit: r.max_buy_gas_limit,
                 max_approve_gas_limit: r.max_approve_gas_limit,
                 max_sell_gas_limit: r.max_sell_gas_limit,
+                outlier_ack: r.outlier_ack,
             }),
             limits: grant.limits.map(|l| LiveGrantLimits {
                 max_open_positions: l.max_open_positions,

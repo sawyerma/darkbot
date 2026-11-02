@@ -27,8 +27,9 @@ pub mod submission;
 pub mod acceptance_contract;
 #[cfg(feature = "acceptance-guard")]
 pub mod acceptance_guard;
-/// The 24-h freshness of the bound builder policy (BSC-004).
-#[cfg(feature = "acceptance-guard")]
+/// The 24-h freshness of the bound builder policy (BSC-004); a LIVE BUY's
+/// (R4).
+#[cfg(any(feature = "acceptance-guard", feature = "runtime"))]
 pub mod builder_policy;
 /// The one definition of the G0.7 bundle semantics and wire bodies (BSC-003).
 #[cfg(feature = "acceptance-guard")]

@@ -386,6 +386,9 @@ impl RuntimeConfig {
         let operator_exit = values.remove("BSC_EXEC_LIVE_OPERATOR_EXIT");
         let nonce_burn = values.remove("BSC_EXEC_LIVE_NONCE_BURN");
         let public_only = values.remove("BSC_EXEC_LIVE_PUBLIC_ONLY");
+        let risk_outlier = values.remove("BSC_EXEC_LIVE_RISK_OUTLIER");
+        let c3_rearm = values.remove("BSC_EXEC_LIVE_C3_REARM");
+        let builder_policy = values.remove("BSC_EXEC_LIVE_BUILDER_POLICY");
         let live_key = values.remove("BSC_LIVE_KEY");
         let live_buyer = values.remove("BSC_LIVE_BUYER");
         let live_route = values.remove("BSC_LIVE_ROUTE");
@@ -573,6 +576,15 @@ impl RuntimeConfig {
                 if public_only.is_some() {
                     return Err("BSC_EXEC_LIVE_PUBLIC_ONLY needs BSC_EXEC_PAPER_IDENTITY".into());
                 }
+                if risk_outlier.is_some() {
+                    return Err("BSC_EXEC_LIVE_RISK_OUTLIER needs BSC_EXEC_PAPER_IDENTITY".into());
+                }
+                if c3_rearm.is_some() {
+                    return Err("BSC_EXEC_LIVE_C3_REARM needs BSC_EXEC_PAPER_IDENTITY".into());
+                }
+                if builder_policy.is_some() {
+                    return Err("BSC_EXEC_LIVE_BUILDER_POLICY needs BSC_EXEC_PAPER_IDENTITY".into());
+                }
                 None
             }
             Some(_) if canonical.is_none() => {
@@ -684,6 +696,59 @@ impl RuntimeConfig {
                             0,
                             u64::MAX,
                         )?),
+                        live_risk_soft_buy_slippage_bps: u16::try_from(take(
+                            "BSC_EXEC_LIVE_RISK_SOFT_BUY_SLIPPAGE_BPS",
+                            0,
+                            9_999,
+                        )?)
+                        .map_err(|_| "BSC_EXEC_LIVE_RISK_SOFT_BUY_SLIPPAGE_BPS out of range")?,
+                        live_risk_soft_exit_slippage_bps: u16::try_from(take(
+                            "BSC_EXEC_LIVE_RISK_SOFT_EXIT_SLIPPAGE_BPS",
+                            0,
+                            9_999,
+                        )?)
+                        .map_err(|_| "BSC_EXEC_LIVE_RISK_SOFT_EXIT_SLIPPAGE_BPS out of range")?,
+                        live_risk_soft_gas_price_wei: take(
+                            "BSC_EXEC_LIVE_RISK_SOFT_GAS_PRICE_WEI",
+                            1,
+                            u64::MAX,
+                        )?,
+                        live_risk_outlier: match risk_outlier {
+                            Some("ON") => true,
+                            Some("OFF") => false,
+                            Some(v) => {
+                                return Err(format!(
+                                    "BSC_EXEC_LIVE_RISK_OUTLIER={v} is neither ON nor OFF"
+                                ));
+                            }
+                            None => return Err("BSC_EXEC_LIVE_RISK_OUTLIER is required".into()),
+                        },
+                        live_c3_rearm: match c3_rearm {
+                            Some("ON") => true,
+                            Some("OFF") => false,
+                            Some(v) => {
+                                return Err(format!(
+                                    "BSC_EXEC_LIVE_C3_REARM={v} is neither ON nor OFF"
+                                ));
+                            }
+                            None => return Err("BSC_EXEC_LIVE_C3_REARM is required".into()),
+                        },
+                        live_builder_policy: match builder_policy {
+                            Some(p)
+                                if !p.is_empty()
+                                    && std::path::Path::new(p)
+                                        .components()
+                                        .all(|c| matches!(c, std::path::Component::Normal(_))) =>
+                            {
+                                p.to_string()
+                            }
+                            Some(p) => {
+                                return Err(format!(
+                                    "BSC_EXEC_LIVE_BUILDER_POLICY={p} is not a repository-relative path"
+                                ));
+                            }
+                            None => return Err("BSC_EXEC_LIVE_BUILDER_POLICY is required".into()),
+                        },
                         sender_paths: crate::paper_exec::SenderPaths::parse(
                             sender_paths.ok_or("BSC_EXEC_SENDER_PATHS is required")?,
                         )?,
@@ -1049,6 +1114,14 @@ fn strategy_to_paper(
             if let Some((intents, _refused)) = l.on_strategy(&action, o, &clk, now_unix_ms) {
                 journal_live(journal, &intents);
             }
+            continue;
+        }
+        // Review of R4: a LIVE lot's exit waits for the LIVE path's next
+        // arm, never PAPER's.
+        if let (Some(l), crate::runtime_strategy::StrategyAction::Exit { token, .. }) =
+            (live.as_mut(), &action)
+            && l.want_unarmed_exit(*token)
+        {
             continue;
         }
         let handed = match (exec.as_mut(), owner.as_ref()) {
@@ -4049,6 +4122,8 @@ mod tests {
     }
 
     const CONFIG: &str = include_str!("../../../../config/ingress.public.env");
+    /// R4: the repository's bound builder policy, the frozen import.
+    const POLICY: &str = "bsc/native/evidence/g06a/g07_binary_import_20261016/builder_policy.dbrec";
     /// The shipped refused accounts: the frozen G0.7 launcher and buyer.
     const REFUSED: &str = "BSC_EXEC_REFUSED_ACCOUNTS=0x3e7B487Ae5e1c49aB1cF6222BDb5cf016e86aacd,0x9c8a0Db41914beEE52Dd49790c4F087E252743DE\n";
 
@@ -4652,10 +4727,36 @@ mod tests {
             CONFIG.replace("BSC_EXEC_LIVE_PUBLIC_ONLY=OFF", "BSC_EXEC_LIVE_PUBLIC_ONLY=yes"),
             CONFIG.replace("BSC_EXEC_LIVE_GRANT_MAX_DURATION_MS=0\n", ""),
             CONFIG.replace("BSC_EXEC_LIVE_SPEND_TOTAL_WEI=0\n", ""),
+            CONFIG.replace("BSC_EXEC_LIVE_RISK_OUTLIER=OFF\n", ""),
+            CONFIG.replace("BSC_EXEC_LIVE_RISK_OUTLIER=OFF", "BSC_EXEC_LIVE_RISK_OUTLIER=On"),
+            CONFIG.replace("BSC_EXEC_LIVE_RISK_SOFT_BUY_SLIPPAGE_BPS=100\n", ""),
+            CONFIG.replace(
+                "BSC_EXEC_LIVE_RISK_SOFT_BUY_SLIPPAGE_BPS=100",
+                "BSC_EXEC_LIVE_RISK_SOFT_BUY_SLIPPAGE_BPS=10000",
+            ),
+            CONFIG.replace("BSC_EXEC_LIVE_RISK_SOFT_EXIT_SLIPPAGE_BPS=100\n", ""),
+            CONFIG.replace(
+                "BSC_EXEC_LIVE_RISK_SOFT_EXIT_SLIPPAGE_BPS=100",
+                "BSC_EXEC_LIVE_RISK_SOFT_EXIT_SLIPPAGE_BPS=-1",
+            ),
+            CONFIG.replace("BSC_EXEC_LIVE_RISK_SOFT_GAS_PRICE_WEI=50000000\n", ""),
+            CONFIG.replace(
+                "BSC_EXEC_LIVE_RISK_SOFT_GAS_PRICE_WEI=50000000",
+                "BSC_EXEC_LIVE_RISK_SOFT_GAS_PRICE_WEI=0",
+            ),
             CONFIG.replace(
                 "BSC_EXEC_LIVE_SPEND_TOTAL_WEI=0",
                 "BSC_EXEC_LIVE_SPEND_TOTAL_WEI=18446744073709551616",
             ),
+            // R4: the C3 re-arm switch and the bound builder policy,
+            // required and exact (a repository-relative path).
+            CONFIG.replace("BSC_EXEC_LIVE_C3_REARM=OFF\n", ""),
+            CONFIG.replace("BSC_EXEC_LIVE_C3_REARM=OFF", "BSC_EXEC_LIVE_C3_REARM=off"),
+            CONFIG.replace(&format!("BSC_EXEC_LIVE_BUILDER_POLICY={POLICY}\n"), ""),
+            CONFIG.replace(POLICY, ""),
+            CONFIG.replace(POLICY, "/tmp/builder_policy.dbrec"),
+            CONFIG.replace(POLICY, "bsc/../builder_policy.dbrec"),
+            CONFIG.replace(POLICY, "./builder_policy.dbrec"),
             CONFIG.replace(
                 "BSC_EXEC_LIVE_GRANT_MAX_DURATION_MS=0",
                 "BSC_EXEC_LIVE_GRANT_MAX_DURATION_MS=31536000001",
@@ -4728,6 +4829,23 @@ mod tests {
         assert_eq!(exec(CONFIG).live_grant_max_duration_ms, 0);
         // The campaign's budget: none in the repository (no BUY).
         assert_eq!(exec(CONFIG).live_spend_total_wei, 0);
+        // R4 (BSC3-069): the soft bounds are the qualified values; an
+        // outlier never arms in the repository.
+        let x = exec(CONFIG);
+        assert_eq!(
+            (
+                x.live_risk_soft_buy_slippage_bps,
+                x.live_risk_soft_exit_slippage_bps,
+                x.live_risk_soft_gas_price_wei,
+                x.live_risk_outlier
+            ),
+            (100, 100, 50_000_000, false)
+        );
+        // R4: one C3 BUY per arm; the frozen import: no BUY.
+        assert_eq!(
+            (x.live_c3_rearm, x.live_builder_policy.as_str()),
+            (false, POLICY)
+        );
         assert_eq!(
             exec(&CONFIG.replace(
                 "BSC_EXEC_LIVE_GRANT_MAX_DURATION_MS=0",

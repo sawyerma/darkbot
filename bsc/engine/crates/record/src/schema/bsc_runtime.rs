@@ -202,6 +202,9 @@ pub mod source_modes {
         pub const MAX_REALIZED_LOSS_WEI: u16 = 21;
         pub const MAX_DAILY_REALIZED_LOSS_WEI: u16 = 22;
         pub const MIN_BUY_INTERVAL_MS: u16 = 23;
+        /// REV.1.0 R4 (BSC3-069): the operator confirmed a risk above the
+        /// runtime's soft bounds (an outlier); absent: not confirmed.
+        pub const RISK_OUTLIER_ACK: u16 = 24;
 
         pub const SCHEMA: Schema = Schema {
             name: "darkbot.bsc.source-modes.live",
@@ -235,6 +238,7 @@ pub mod source_modes {
                     U256,
                 ),
                 Field::opt(MIN_BUY_INTERVAL_MS, "min_buy_interval_ms", U64),
+                Field::opt(RISK_OUTLIER_ACK, "risk_outlier_ack", Bool),
             ],
         };
     }

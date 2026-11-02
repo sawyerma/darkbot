@@ -736,6 +736,13 @@ pub(crate) mod tests {
                 live_public_only: true,
                 live_grant_max_duration_ms: 0,
                 live_spend_total_wei: u128::from(u64::MAX),
+                // No test grant is an outlier.
+                live_risk_soft_buy_slippage_bps: 9_999,
+                live_risk_soft_exit_slippage_bps: 9_999,
+                live_risk_soft_gas_price_wei: u64::MAX,
+                live_risk_outlier: false,
+                live_c3_rearm: false,
+                live_builder_policy: crate::builder_policy::TEST_POLICY.into(),
                 sender_paths: crate::paper_exec::SenderPaths::Both,
             },
             reprobe,

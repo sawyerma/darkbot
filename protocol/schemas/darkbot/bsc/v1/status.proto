@@ -399,6 +399,9 @@ message LiveGrantRisk {
   uint64 max_approve_gas_limit = 5;
   // Most gas limit of a SELL.
   uint64 max_sell_gas_limit = 6;
+  // REV.1.0 R4 (BSC3-069): the operator confirmed these bounds as an outlier (above the runtime's
+  // soft bounds); without it a grant above them never arms.
+  bool outlier_ack = 7;
 }
 // One LIVE position of the ledger: its BUY, exit and native result.
 message LivePosition {
@@ -561,6 +564,25 @@ message BscLiveState {
   // (BSC_EXEC_LIVE_SPEND_TOTAL_WEI, decimal wei; 0: no BUY); absent without a readable runtime
   // configuration with an executor.
   optional string campaign_spend_max_wei = 45;
+  // REV.1.0 R4 (BSC3-069): the runtime's soft bound of a grant's BUY slippage (bps,
+  // BSC_EXEC_LIVE_RISK_SOFT_BUY_SLIPPAGE_BPS): above it a grant is an outlier; absent without a
+  // readable runtime configuration with an executor.
+  optional uint32 risk_soft_buy_slippage_bps = 46;
+  // The soft bound of a grant's exit slippage (bps, BSC_EXEC_LIVE_RISK_SOFT_EXIT_SLIPPAGE_BPS).
+  optional uint32 risk_soft_exit_slippage_bps = 47;
+  // The soft bound of a grant's gas price (wei, BSC_EXEC_LIVE_RISK_SOFT_GAS_PRICE_WEI).
+  optional uint64 risk_soft_gas_price_wei = 48;
+  // BSC_EXEC_LIVE_RISK_OUTLIER: a grant confirmed as an outlier admits BUYs only while true.
+  optional bool risk_outlier = 49;
+  // REV.1.0 R4 (BSC3-042, BSC_EXEC_LIVE_C3_REARM): true renews the arm after a C3 BUY whose nonce
+  // the chain took; false: one C3 BUY per arm.
+  optional bool c3_rearm = 50;
+  // REV.1.0 R4: until when the bound builder policy (BSC_EXEC_LIVE_BUILDER_POLICY) is fresh (unix
+  // ms); absent for an import, an unreadable one or without a readable runtime configuration.
+  optional uint64 builder_policy_fresh_until_unix_ms = 51;
+  // Why it admits no LIVE BUY at the report's clock (stale, unverified, the signed gas price below
+  // its floor); absent while it holds or without a readable runtime configuration or clock.
+  optional string builder_policy_refusal = 52;
 }
 // One cell of the LIVE campaign (REV.1.0 R2), as the verdict record holds it.
 message LiveCampaignCell {

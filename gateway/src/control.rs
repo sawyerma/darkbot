@@ -577,6 +577,13 @@ fn grant_request(req: &CommandRequest) -> Option<Vec<String>> {
             limits.max_realized_loss_wei,
             limits.max_daily_realized_loss_wei,
             limits.min_buy_interval_ms.to_string(),
+            // R4 (BSC3-069): the operator confirmed the risk as an outlier.
+            if risk.outlier_ack {
+                "OUTLIER_ACK"
+            } else {
+                "NO_OUTLIER_ACK"
+            }
+            .into(),
             c.scope_sha256,
             generation.to_string(),
         ]
@@ -3500,6 +3507,7 @@ mod tests {
                 max_buy_gas_limit: 3_000_000,
                 max_approve_gas_limit: 100_000,
                 max_sell_gas_limit: 1_500_000,
+                outlier_ack: false,
             }),
             limits: Some(LiveGrantLimits {
                 max_open_positions: 3,
@@ -3538,10 +3546,19 @@ mod tests {
                 "5000000000000000",
                 "2000000000000000",
                 "60000",
+                "NO_OUTLIER_ACK",
                 &"ab".repeat(32),
                 "9",
             ]
         );
+        // R4 (BSC3-069): a risk confirmed as an outlier says so to the owner.
+        let mut acked = scope.clone();
+        acked.risk = Some(LiveGrantRisk {
+            outlier_ack: true,
+            ..scope.risk.unwrap()
+        });
+        let args = grant_request(&grant(&acked, "BSC_LIVE_GRANT", ConfigVersion(9))).unwrap();
+        assert_eq!(args[22], "OUTLIER_ACK");
         // BSC3-058: an EXIT-ONLY grant says so to the owner.
         let exits = BscLiveGrantCommand {
             exit_only: true,

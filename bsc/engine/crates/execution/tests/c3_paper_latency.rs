@@ -296,6 +296,13 @@ fn c3_paper_path_latency() {
             live_public_only: true,
             live_grant_max_duration_ms: 0,
             live_spend_total_wei: u128::from(u64::MAX),
+            // No test grant is an outlier.
+            live_risk_soft_buy_slippage_bps: 9_999,
+            live_risk_soft_exit_slippage_bps: 9_999,
+            live_risk_soft_gas_price_wei: u64::MAX,
+            live_risk_outlier: false,
+            live_c3_rearm: false,
+            live_builder_policy: String::new(),
             sender_paths: darkbot_bsc_execution::paper_exec::SenderPaths::C3,
         },
         Arming {

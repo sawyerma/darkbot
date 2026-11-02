@@ -224,6 +224,8 @@ export interface LiveGrantLimitsScope {
 export interface LiveGrantRiskScope {
   maxBuySlippageBps: number; maxExitSlippageBps: number; maxGasPriceWei: bigint;
   maxBuyGasLimit: bigint; maxApproveGasLimit: bigint; maxSellGasLimit: bigint;
+  /** REV.1.0 R4: the operator confirms these bounds as an outlier (above the runtime's soft bounds). */
+  outlierAck: boolean;
 }
 /** `bsc.live.grant`: the confirmed scope with the SHA-256 of its canonical text the operator was
  *  shown, at the owner generation; the native owner recomputes the digest. */

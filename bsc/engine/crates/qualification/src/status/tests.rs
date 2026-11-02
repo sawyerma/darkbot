@@ -1684,6 +1684,7 @@ fn the_tabs_count_the_running_paths_held_attempt_as_its_own() {
             max_buy_gas_limit: 3_000_000,
             max_approve_gas_limit: 100_000,
             max_sell_gas_limit: 1_500_000,
+            outlier_ack: false,
         }),
         limits: Some(darkbot_bsc_execution::sources::GrantLimits {
             max_open_positions: 4,
@@ -1947,6 +1948,7 @@ fn the_live_tab_shows_the_exit_deciders_the_recovery_and_the_quarantine() {
                 "BSC_EXEC_LIVE_NONCE_BURN=OFF\n",
                 "BSC_EXEC_LIVE_NONCE_BURN=ON\n",
             )
+            .replace("BSC_EXEC_LIVE_C3_REARM=OFF\n", "BSC_EXEC_LIVE_C3_REARM=ON\n")
             .replace(
                 "BSC_STATE_WATCHED=\n",
                 &format!("BSC_STATE_WATCHED={buyer}\n"),
@@ -1959,6 +1961,44 @@ fn the_live_tab_shows_the_exit_deciders_the_recovery_and_the_quarantine() {
     let l = tab();
     assert_eq!((l.operator_exit, l.nonce_burn), (Some(false), Some(true)));
     assert_eq!(l.campaign_spend_max_wei.as_deref(), Some("0"));
+    // R4 (BSC3-069): the repository's soft bounds and switch.
+    assert_eq!(
+        (
+            l.risk_soft_buy_slippage_bps,
+            l.risk_soft_exit_slippage_bps,
+            l.risk_soft_gas_price_wei,
+            l.risk_outlier
+        ),
+        (Some(100), Some(100), Some(50_000_000), Some(false))
+    );
+    // R4: the C3 re-arm as configured (ON here). The bound builder policy: none at the
+    // configured path (unreadable), the repository's frozen import (never
+    // fresh), a native one of 27.10. (fresh 24 h after its oldest source).
+    use darkbot_bsc_execution::builder_policy as bp;
+    let refusal = |l: &super::wire::bsc::BscLiveState, why: &str| {
+        let r = l.builder_policy_refusal.clone().unwrap_or_default();
+        assert!(r.starts_with(why), "{r}");
+    };
+    assert_eq!(l.c3_rearm, Some(true));
+    assert_eq!(l.builder_policy_fresh_until_unix_ms, None);
+    refusal(&l, "LIVE_BUILDER_POLICY_UNVERIFIED");
+    let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../..");
+    let policy = "bsc/native/evidence/g06a/g07_binary_import_20261016/builder_policy.dbrec";
+    let native = "bsc/native/evidence/g06a/g06a_prepare_20261027T082739Z/builder_policy.dbrec";
+    fs::create_dir_all(root.join(policy).parent().unwrap()).unwrap();
+    fs::copy(repo.join(policy), root.join(policy)).unwrap();
+    let l = tab();
+    assert_eq!(l.builder_policy_fresh_until_unix_ms, None);
+    refusal(&l, "LIVE_BUILDER_POLICY_STALE");
+    fs::copy(repo.join(native), root.join(policy)).unwrap();
+    let l = tab();
+    let fetched = bp::oldest_fetch_s(&bp::read(&repo, native).unwrap()).unwrap();
+    assert!(fetched > 1_793_000_000);
+    assert_eq!(
+        l.builder_policy_fresh_until_unix_ms,
+        Some((fetched + bp::MAX_AGE_S) * 1000)
+    );
+    refusal(&l, "LIVE_BUILDER_POLICY_STALE");
     assert_eq!(
         l.transactions
             .iter()
@@ -2041,6 +2081,7 @@ fn the_live_tab_projects_the_gate_grant_and_ledger() {
             max_buy_gas_limit: 3_000_000,
             max_approve_gas_limit: 100_000,
             max_sell_gas_limit: 1_500_000,
+            outlier_ack: false,
         }),
         limits: Some(darkbot_bsc_execution::sources::GrantLimits {
             max_open_positions: 4,
@@ -3128,6 +3169,13 @@ fn the_campaign_section_takes_only_what_the_rest_of_the_live_tab_leaves() {
         first_unreadable: Some(u64::MAX),
         campaign_spent_wei: Some(word.clone()),
         campaign_spend_max_wei: Some(word.clone()),
+        risk_soft_buy_slippage_bps: Some(u32::MAX),
+        risk_soft_exit_slippage_bps: Some(u32::MAX),
+        risk_soft_gas_price_wei: Some(u64::MAX),
+        risk_outlier: Some(true),
+        c3_rearm: Some(true),
+        builder_policy_fresh_until_unix_ms: Some(u64::MAX),
+        builder_policy_refusal: Some(text.clone()),
         ..Default::default()
     };
     let mut l = full.clone();

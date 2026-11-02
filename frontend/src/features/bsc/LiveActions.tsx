@@ -27,7 +27,7 @@ function Confirm({ open, title, children, onConfirm, onClose, testId }: { open: 
 
 const GRANT = "bsc-live-grant";
 const EMPTY: GrantForm = { strategies: "C3", sources: null, adapters: ["CLUB48_BUILDER_V1"], maxInputWei: "", maxSpendWei: "", maxAttempts: "1", hours: "1", exitOnly: false,
-  buySlippageBps: "", exitSlippageBps: "", gasPriceWei: "", buyGasLimit: "", approveGasLimit: "", sellGasLimit: "",
+  buySlippageBps: "", exitSlippageBps: "", gasPriceWei: "", buyGasLimit: "", approveGasLimit: "", sellGasLimit: "", outlierAck: false,
   maxOpenPositions: "", maxRealizedLossWei: "", maxDailyRealizedLossWei: "", minBuyIntervalMs: "" };
 /** BSC3-069: the execution risk's inputs, each a bound the executor must stay within. */
 const RISK_INPUTS: { key: "buySlippageBps" | "exitSlippageBps" | "gasPriceWei" | "buyGasLimit" | "approveGasLimit" | "sellGasLimit"; label: string; test: string }[] = [
@@ -75,6 +75,7 @@ export function LiveGrantActions({ generation, available, grantable }: { generat
       {RISK_INPUTS.map(r => <input key={r.key} inputMode="numeric" aria-label={r.label} placeholder={r.label} value={form[r.key]} onChange={e => setForm({ ...form, [r.key]: e.target.value.trim() })} data-testid={`${GRANT}-${r.test}`} />)}
       {LIMIT_INPUTS.map(r => <input key={r.key} inputMode="numeric" aria-label={r.label} placeholder={r.label} value={form[r.key]} onChange={e => setForm({ ...form, [r.key]: e.target.value.trim() })} data-testid={`${GRANT}-${r.test}`} />)}
       <label title="BSC3-058: only the exits of open positions, no BUY"><input type="checkbox" checked={form.exitOnly} onChange={() => setForm({ ...form, exitOnly: !form.exitOnly })} data-testid={`${GRANT}-exit-only`} />EXIT-ONLY</label>
+      <label title="REV.1.0 R4 (BSC3-069): bounds above the runtime's soft bounds arm only confirmed as an outlier and with BSC_EXEC_LIVE_RISK_OUTLIER ON"><input type="checkbox" checked={form.outlierAck} onChange={() => setForm({ ...form, outlierAck: !form.outlierAck })} data-testid={`${GRANT}-outlier-ack`} />Confirm the risk as an outlier</label>
       <button className="g-secondary" disabled={!available || busy || "error" in checked} title={"error" in checked ? checked.error : `Grant at generation ${generation.toString()}`}
         data-testid={`${GRANT}-review`} onClick={() => void review()}>Grant LIVE…</button>
     </div>
