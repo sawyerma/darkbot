@@ -306,7 +306,7 @@ transactions and the net result. A view of the native owner and ledger, never a 
 | scope | [ControlSwitch](#darkbot-bsc-v1-ControlSwitch) | repeated | Every entity the grant names (runtime, components, venue, sources) as requested and as it holds now under the gate: LIVE only while the gate is clear and the scope names it. |
 | grantable_sources | [string](#string) | repeated | The ingress sources a grant can name: those the runtime configuration gives an adapter endpoint (BSC_INGRESS_&lt;ID&gt;_WSS); a source without one never sights a launch and can never be qualified. In source order; empty without a readable runtime configuration. |
 | campaign | [LiveCampaign](#darkbot-bsc-v1-LiveCampaign) |  | REV.1.0 R2b: the LIVE campaign verdict as its record (bsc_runtime live attempts) holds it; absent before any evaluation. Campaign evidence only, never a release or a permission. |
-| attempts | [LiveAttempt](#darkbot-bsc-v1-LiveAttempt) | repeated | The evaluated LIVE BUY attempts in their order, as their records hold them; at most the campaign&#39;s total BUY attempt limit (MAX_BUY_ATTEMPTS_TOTAL), more is a warning. |
+| attempts | [LiveAttempt](#darkbot-bsc-v1-LiveAttempt) | repeated | The evaluated LIVE BUY attempts in their order, as their records hold them; at most the campaign&#39;s total BUY attempt limit (MAX_BUY_ATTEMPTS_TOTAL), more is a warning. Beyond it, the shown ones are the first by ordinal of the limit plus one first by transaction. |
 
 
 
@@ -556,7 +556,7 @@ Supervisor-owned read-only job lifecycle.
 
 ### LiveAttempt
 One evaluated LIVE BUY attempt (REV.1.0 R2), unchanged from its record. T0 is never the
-producer&#39;s here: without its witness the timing verdict is UNKNOWN.
+producer&#39;s unless the record says t0_exact: without its witness the timing verdict is UNKNOWN.
 
 
 | Field | Type | Label | Description |
@@ -574,9 +574,8 @@ producer&#39;s here: without its witness the timing verdict is UNKNOWN.
 | capture | [string](#string) |  | The capture&#39;s verdict. |
 | local | [string](#string) |  | The local start deadline and a qualified send time. |
 | economics | [string](#string) |  | The economics&#39; verdict. |
-| reasons | [string](#string) | repeated | Why, in the evaluator&#39;s order. |
-| window_complete | [bool](#bool) |  | Whether the 15-s market window from the launch&#39;s block is complete. |
-| window_why | [string](#string) |  | Why it is not; empty when complete. |
+| reasons | [string](#string) | repeated | Why, in the evaluator&#39;s order; at most the attempt&#39;s share of the state (LIVE_ATTEMPT_REASONS_BEYOND_LIMIT counts the rest). |
+| window_why | [string](#string) |  | Why the window is not complete; empty when complete. |
 | trades | [uint64](#uint64) |  | Trades of the token in the window. |
 | buys | [uint64](#uint64) |  | Of them BUYs. |
 | sells | [uint64](#uint64) |  | Of them SELLs. |
@@ -585,12 +584,46 @@ producer&#39;s here: without its witness the timing verdict is UNKNOWN.
 | ingress_to_send_ns | [uint64](#uint64) | optional | Local timing on the runtime&#39;s clock, ingress (or decision) to the first qualified send, ns. |
 | select_to_send_ns | [uint64](#uint64) | optional | Selection to the first qualified send, ns. |
 | send_to_ack_ns | [uint64](#uint64) | optional | The first qualified send to the first acknowledgement, ns. |
-| attempts | [uint64](#uint64) |  | Counters of every attempt up to this one: the attempts (every rate&#39;s denominator). |
+| attempts | [uint64](#uint64) |  | Counters of every attempt up to this one: the LIVE BUYs (C3 and Strategy C, before the commitment too), the acquisition rate&#39;s denominator. |
 | acquired | [uint64](#uint64) |  | Of them acquired. |
-| passed | [uint64](#uint64) |  | Of them passed. |
-| failed | [uint64](#uint64) |  | Of them failed. |
-| undecided | [uint64](#uint64) |  | Of them undecided. |
+| passed | [uint64](#uint64) |  | C3 BUYs among them whose verdict is PASS (a count, not a rate: a Strategy C BUY has no verdict, NOT_APPLICABLE). |
+| failed | [uint64](#uint64) |  | C3 BUYs among them whose verdict is FAIL. |
+| undecided | [uint64](#uint64) |  | C3 BUYs among them whose verdict is UNKNOWN. |
 | adapters | [LiveAttemptAdapter](#darkbot-bsc-v1-LiveAttemptAdapter) | repeated | The adapters of its dispatch. |
+| window | [string](#string) |  | The 15-s market window from the launch&#39;s block as written: COMPLETE or INCOMPLETE. |
+| attempt | [string](#string) |  | The attempt&#39;s identity (its lease attempt, or its hash), 0x hex. |
+| run | [uint64](#uint64) | optional | The run whose journal holds its release; absent without a release record. |
+| token | [string](#string) |  | The token, 0x hex. |
+| launch_hash | [string](#string) |  | The launch&#39;s transaction hash, 0x hex; empty without a launch (Strategy C). |
+| trigger | [string](#string) |  | The source whose sighting triggered it (a C3 BUY); empty without one. |
+| block_number | [uint64](#uint64) | optional | Its block&#39;s number; absent while not included. |
+| block_hash | [string](#string) |  | Its block&#39;s hash, 0x hex; empty while not included. |
+| block_ms | [uint64](#uint64) | optional | Its block&#39;s header time, unix ms; absent while not included. |
+| tokens | [string](#string) | optional | Tokens its own Portal BUY acquired, decimal token units; absent when unknown. |
+| eth_wei | [string](#string) | optional | The native amount its included BUY spent, decimal wei; absent when unknown. |
+| gas_wei | [string](#string) | optional | Gas its inclusion paid, decimal wei; absent when unknown. |
+| own_price | [string](#string) | optional | Its own price, native wei per 10^18 token units, decimal; absent without its own trade. |
+| placed | [string](#string) |  | The ledger&#39;s PLACED fact: FIRST, LATE, OTHER_BLOCK or NO_TOKENS; empty without one. |
+| launch_index | [uint64](#uint64) | optional | The launch&#39;s transaction index in its block; absent when the launch is not in it. |
+| own_index | [uint64](#uint64) | optional | Its own transaction index in its block; absent without a PLACED fact. |
+| buys_before | [uint64](#uint64) | optional | Other traders&#39; BUYs of the token between the launch and it; absent without a PLACED fact. |
+| clock_id | [uint64](#uint64) | optional | The runtime clock the local times are on; absent without a release record. |
+| t_ingress_ns | [uint64](#uint64) | optional | Ingress (C3) or decision (Strategy C) on that clock, ns; absent without a release record. |
+| t_select_ns | [uint64](#uint64) | optional | Selection on that clock, ns; absent without a release record. |
+| t_send_ns | [uint64](#uint64) | optional | The first qualified send among its adapters on that clock, ns; absent without one. |
+| t_ack_ns | [uint64](#uint64) | optional | The first acknowledgement on that clock, ns; absent without one. |
+| deadline_misses | [uint64](#uint64) | optional | Local start deadlines it missed; absent without a release record. |
+| window_ms | [uint64](#uint64) |  | The market window&#39;s length, ms. |
+| launch_block | [uint64](#uint64) | optional | The launch&#39;s block; absent without one. |
+| launch_ms | [uint64](#uint64) | optional | The launch block&#39;s header time, unix ms (the window&#39;s start); absent without one. |
+| window_end_block | [uint64](#uint64) | optional | The last block inside the window; absent while the window is not over. |
+| t0_exact | [bool](#bool) |  | Whether T0 is the producer&#39;s exact time (never so without its witness). |
+| first_external_buy_tx | [string](#string) |  | The first other trader&#39;s BUY in the window, 0x hex; empty without one. |
+| first_external_buy_block | [uint64](#uint64) | optional | Its block; absent without one. |
+| first_external_buy_index | [uint64](#uint64) | optional | Its transaction index in that block; absent without one. |
+| buy_wei | [string](#string) |  | The native volume of the token&#39;s BUYs in the window (its own too), decimal wei. |
+| sell_wei | [string](#string) |  | The native volume of the token&#39;s SELLs in the window, decimal wei. |
+| evaluated_unix_ms | [uint64](#uint64) |  | When its evaluation wrote the record, unix ms: the campaign verdict&#39;s evaluated_unix_ms when both are of one evaluation. |
 
 
 
@@ -608,6 +641,13 @@ One adapter of a LIVE attempt&#39;s dispatch and its answer.
 | builder | [string](#string) |  | The granted builder, e.g. CLUB48_BUILDER_V1; empty when the record names none. |
 | outcome | [string](#string) |  | The dispatch outcome at this adapter. |
 | answer | [string](#string) |  | The builder&#39;s answer; empty without one. |
+| adapter | [uint64](#uint64) |  | The adapter&#39;s index in the runtime&#39;s dispatch. |
+| boundary | [string](#string) |  | The boundary its send time is taken at. |
+| qualified | [bool](#bool) |  | Whether its record and its transport qualify that boundary as the send time. |
+| t_write_check_ns | [uint64](#uint64) | optional | Its write check on the runtime&#39;s clock, ns; absent without one. |
+| t_boundary_ns | [uint64](#uint64) | optional | Its boundary on the runtime&#39;s clock, ns; absent without one. |
+| t_queue_ns | [uint64](#uint64) | optional | Its queueing on the runtime&#39;s clock, ns; absent without one. |
+| t_answer_ns | [uint64](#uint64) | optional | Its answer on the runtime&#39;s clock, ns; absent without one. |
 
 
 
@@ -625,7 +665,7 @@ evaluator decides, the reporter only reads. Every count&#39;s denominator is ano
 | ----- | ---- | ----- | ----------- |
 | verdict | [string](#string) |  | CAMPAIGN_NOT_READY, CAMPAIGN_OPEN, CAMPAIGN_FAIL or CAMPAIGN_PASS. |
 | release_evidence | [string](#string) |  | RELEASE_EVIDENCE_NOT_READY or RELEASE_EVIDENCE_PASS: the campaign evidence only; a release also needs the implementation matrix, runtime enforcement and LIVE authorization. |
-| reasons | [string](#string) | repeated | Why the verdict is not a pass, in the evaluator&#39;s order. |
+| reasons | [string](#string) | repeated | Why the verdict is not a pass, in the evaluator&#39;s order; with skip_reasons at most the verdict&#39;s share of the state (LIVE_CAMPAIGN_REASONS_BEYOND_LIMIT counts the rest). |
 | planned | [uint64](#uint64) |  | The enabled cells&#39; minimum attempts, summed. |
 | observed | [uint64](#uint64) |  | The canonical C1-scope Flap launches since the commitment. |
 | selected | [uint64](#uint64) |  | Of them seen in full before their block (actionable). |

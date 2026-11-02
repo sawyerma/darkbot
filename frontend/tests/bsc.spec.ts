@@ -120,19 +120,22 @@ test("the campaign verdict and its attempts as recorded, evidence only (REV.1.0 
   const attempt = (ordinal: bigint, verdict: string) => ({
     ordinal, tx: `0x${ordinal.toString(16).padStart(64, "0")}`, kind: "C3_BUY", cell: "EXTERNAL_FULL_LAUNCH", state: "INCLUDED", verdict,
     acquisition: "PASS", canonical: "PASS", timing: "UNKNOWN", placement: "PASS", capture: "PASS", local: "PASS", economics: "PASS",
-    reasons: ["TIMING_WITNESS_MISSING"], windowComplete: true, trades: 7n, buys: 5n, sells: 2n, priceVsFirstExternalPpm: 800000n,
+    reasons: ["TIMING_WITNESS_MISSING"], window: "COMPLETE", trades: 7n, buys: 5n, sells: 2n, priceVsFirstExternalPpm: 800000n,
     firstExternalPrice: "250000000000000000", ingressToSendNs: 900n, attempts: ordinal, acquired: ordinal, undecided: ordinal,
-    adapters: [{ builder: "CLUB48_BUILDER_V1", outcome: "SENT", answer: "ACCEPTED" }],
+    adapters: [{ builder: "CLUB48_BUILDER_V1", outcome: "SENT", answer: "ACCEPTED", adapter: 0n, boundary: "WRITE", qualified: true }],
+    attempt: `0x${"a0".repeat(32)}`, token: `0x${"ab".repeat(20)}`, launchHash: `0x${"1a".repeat(32)}`, trigger: "BSC_INGRESS_PUBLICNODE",
+    blockNumber: 130000010n + ordinal, blockHash: `0x${"b1".repeat(32)}`, blockMs: 1793000000000n, tokens: "5000", ethWei: "1000", gasWei: "21",
+    ownPrice: "200000000000000000", placed: "FIRST", windowMs: 15000n, evaluatedUnixMs: 1793000050000n,
   });
-  const live = toBinary(BscLiveStateSchema, create(BscLiveStateSchema, {
+  const live = (attempts: ReturnType<typeof attempt>[]) => toBinary(BscLiveStateSchema, create(BscLiveStateSchema, {
     gate: "BLOCKED", pathState: "NOT_CONFIGURED", generation: 5n, qualification: "NONE",
     campaign: { verdict: "CAMPAIGN_OPEN", releaseEvidence: "RELEASE_EVIDENCE_NOT_READY", reasons: ["SAMPLES_MISSING: EXTERNAL_FULL_LAUNCH 2/10"],
       planned: 10n, observed: 40n, selected: 30n, admitted: 2n, skipped: 38n, written: 2n, acquired: 2n, undecided: 2n, consecutiveMisses: 12n,
       coveredS: 3600n, uncoveredS: 400n, coveredPpm: 900000n, skipReasons: ["HASH_ONLY=7"], evaluatedUnixMs: 1793000050000n, recordSha256: "ab".repeat(32),
       cells: [{ cell: "EXTERNAL_FULL_LAUNCH", enabled: true, minAttempts: 10n, attempts: 2n, undecided: 2n, durationS: 3600n, verdict: "CAMPAIGN_OPEN" }] },
-    attempts: [attempt(1n, "UNKNOWN"), attempt(2n, "UNKNOWN")],
+    attempts,
   }));
-  await feed(page, live);
+  await feed(page, live([attempt(1n, "UNKNOWN"), { ...attempt(2n, "UNKNOWN"), evaluatedUnixMs: 1793000060000n }]));
   await page.goto("/bsc");
   await tab(page, "LIVE").click();
   await expect(line(page, "Campaign verdict")).toContainText("CAMPAIGN_OPEN");
@@ -149,7 +152,63 @@ test("the campaign verdict and its attempts as recorded, evidence only (REV.1.0 
   await expect(rows).toHaveCount(2);
   await expect(rows.first()).toContainText("timing UNKNOWN");
   await expect(rows.first()).toContainText("800000 ppm");
-  await expect(rows.last()).toContainText("acquired 2/2");
+  // Review H1: the token, its block, what it acquired and cost, its own price.
+  await expect(rows.first()).toContainText(`0x${"ab".repeat(20)}`);
+  await expect(rows.first()).toContainText(`130000011 · 0x${"b1".repeat(32)}`);
+  await expect(rows.first()).toContainText("tokens 5000 · input 1000 wei · gas 21 wei");
+  await expect(rows.first()).toContainText("own 200000000000000000");
+  await expect(rows.first()).toContainText("FIRST · launch index");
+  // Review L8: counts of the C3 verdicts, not a share of the attempts.
+  await expect(rows.last()).toContainText("acquired 2/2 LIVE BUYs · C3 verdicts so far: 0 passed · 0 failed · 2 undecided");
+  // Review M4: a record of another evaluation than the verdict's is marked.
+  await expect(rows.last()).toContainText("of another evaluation");
+  await expect(rows.first()).not.toContainText("another evaluation");
   await expect(page.getByTestId("bsc-live-campaign-none")).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
+
+test("a campaign section beyond the state is INVALID, never no evaluation or no attempt (REV.1.0 R2b re-check F3)", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  // TEST_ONLY values: they test the display, they are no campaign.
+  const beyond = "LIVE_CAMPAIGN_BEYOND_STATE 3 records, 2 warnings";
+  const live = toBinary(BscLiveStateSchema, create(BscLiveStateSchema, {
+    gate: "BLOCKED", pathState: "NOT_CONFIGURED", generation: 5n, qualification: "NONE", warnings: [beyond],
+  }));
+  await feed(page, live);
+  await page.goto("/bsc");
+  await tab(page, "LIVE").click();
+  await expect(page.getByTestId("bsc-live-campaign-invalid")).toHaveText("INVALID");
+  await expect(line(page, "Campaign verdict")).toContainText(beyond);
+  await expect(page.getByTestId("bsc-live-campaign-none")).toHaveCount(0);
+  await expect(page.getByTestId("bsc-live-attempts-beyond")).toHaveText("INVALID");
+  await expect(line(page, "Attempts")).toContainText(beyond);
+  await expect(line(page, "Attempts")).not.toContainText("no attempt record");
+  expect(errors).toEqual([]);
+});
+
+test("an unreadable campaign verdict is INVALID, an exact T0 leaves only the local-times notice (REV.1.0 R2b review L7)", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  // TEST_ONLY values: they test the display, they are no campaign.
+  const live = toBinary(BscLiveStateSchema, create(BscLiveStateSchema, {
+    gate: "BLOCKED", pathState: "NOT_CONFIGURED", generation: 5n, qualification: "NONE", warnings: ["LIVE_CAMPAIGN_VERDICT_INVALID"],
+    attempts: [1n, 2n].map(ordinal => ({ ordinal, tx: `0x${ordinal.toString(16).padStart(64, "0")}`, kind: "C3_BUY", state: "INCLUDED", verdict: "UNKNOWN", window: "COMPLETE",
+      t0Exact: true, windowMs: 15000n, evaluatedUnixMs: 1793000040000n + ordinal * 10000n })),
+  }));
+  await feed(page, live);
+  await page.goto("/bsc");
+  await tab(page, "LIVE").click();
+  await expect(page.getByTestId("bsc-live-campaign-invalid")).toHaveText("INVALID");
+  await expect(line(page, "Campaign verdict")).toContainText("LIVE_CAMPAIGN_VERDICT_INVALID");
+  await expect(page.getByTestId("bsc-live-campaign-none")).toHaveCount(0);
+  await expect(page.getByText("T0→T_buy bleibt UNKNOWN ohne Producer-Witness", { exact: false })).toHaveCount(0);
+  // The local times are never T0→T_buy, whatever T0 is.
+  await expect(page.getByText("Die lokalen Zeiten sind die Uhr der Runtime (Ingress→Send), nie T0→T_buy", { exact: false })).toBeVisible();
+  // Without a verdict, a record of another evaluation than the newest attempt's is marked.
+  const rows = page.getByTestId("bsc-live-attempts").locator("tbody tr");
+  await expect(rows.first()).toContainText("of another evaluation");
+  await expect(rows.last()).not.toContainText("of another evaluation");
+  await expect(rows.first()).toContainText("T0 exact (recorded)");
   expect(errors).toEqual([]);
 });

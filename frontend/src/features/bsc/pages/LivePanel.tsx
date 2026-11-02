@@ -65,7 +65,7 @@ export function LivePanel() {
       <Line label="Campaign BUY attempts" value={`${(l?.totalUsed ?? 0n).toString()} of ${(l?.totalLimit ?? 0n).toString()} (at most 10)`} />
       <Line label="This grant's attempts" value={`${(l?.grantAttemptsUsed ?? 0n).toString()} of ${l?.grant?.maxAttempts ?? 0}`} />
       <TotalLimitActions generation={generation} available={owner} limit={l?.totalLimit ?? 0n} />
-      <LiveCampaign campaign={l?.campaign} attempts={l?.attempts ?? []} />
+      <LiveCampaign campaign={l?.campaign} attempts={l?.attempts ?? []} warnings={l?.warnings ?? []} />
     </PlacedSection>
     <PlacedSection panel="live" section={5} records={records}>
       <Line label="Spent by this grant" value={wei(l?.spentWei)} hint="The most every admitted intent may cost (input and gas)" />

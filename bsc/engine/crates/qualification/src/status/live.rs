@@ -104,7 +104,21 @@ fn path(rundir: &Path, out: &mut BscLiveState) {
 
 /// The LIVE tab at `now_ms` (none: the clock is unreadable, the gate is
 /// UNKNOWN) under the snapshot's runtime configuration ([`runtime_config`]).
+/// The campaign section comes last: it takes only what the rest of the tab
+/// leaves of the state bound (review L-1).
 pub fn live_state(
+    root: &Path,
+    rundir: &Path,
+    config: Result<&RuntimeConfig, &str>,
+    now_ms: Option<u64>,
+) -> BscLiveState {
+    let mut out = owner_tab(root, rundir, config, now_ms);
+    super::campaign::project(rundir, &mut out);
+    out
+}
+
+/// The LIVE tab without its campaign section.
+fn owner_tab(
     root: &Path,
     rundir: &Path,
     config: Result<&RuntimeConfig, &str>,
@@ -119,7 +133,6 @@ pub fn live_state(
         Err(why) => out.warnings.push(why.into()),
     }
     path(rundir, &mut out);
-    super::campaign::project(rundir, &mut out);
     let (verified, invalid) = live_qualification::view(root);
     (out.qualification, out.qualification_detail) = match invalid {
         Some(why) => ("INVALID".into(), why),

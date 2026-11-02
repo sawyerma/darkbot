@@ -506,6 +506,7 @@ message BscLiveState {
   LiveCampaign campaign = 30;
   // The evaluated LIVE BUY attempts in their order, as their records hold them; at most the
   // campaign's total BUY attempt limit (MAX_BUY_ATTEMPTS_TOTAL), more is a warning.
+  // Beyond it, the shown ones are the first by ordinal of the limit plus one first by transaction.
   repeated LiveAttempt attempts = 31;
 }
 // One cell of the LIVE campaign (REV.1.0 R2), as the verdict record holds it.
@@ -539,7 +540,8 @@ message LiveCampaign {
   // RELEASE_EVIDENCE_NOT_READY or RELEASE_EVIDENCE_PASS: the campaign evidence only; a release
   // also needs the implementation matrix, runtime enforcement and LIVE authorization.
   string release_evidence = 2;
-  // Why the verdict is not a pass, in the evaluator's order.
+  // Why the verdict is not a pass, in the evaluator's order; with skip_reasons at most the
+  // verdict's share of the state (LIVE_CAMPAIGN_REASONS_BEYOND_LIMIT counts the rest).
   repeated string reasons = 3;
   // The enabled cells' minimum attempts, summed.
   uint64 planned = 4;
@@ -604,10 +606,27 @@ message LiveAttemptAdapter {
   string outcome = 2;
   // The builder's answer; empty without one.
   string answer = 3;
+  // The adapter's index in the runtime's dispatch.
+  uint64 adapter = 4;
+  // The boundary its send time is taken at.
+  string boundary = 5;
+  // Whether its record and its transport qualify that boundary as the send time.
+  bool qualified = 6;
+  // Its write check on the runtime's clock, ns; absent without one.
+  optional uint64 t_write_check_ns = 7;
+  // Its boundary on the runtime's clock, ns; absent without one.
+  optional uint64 t_boundary_ns = 8;
+  // Its queueing on the runtime's clock, ns; absent without one.
+  optional uint64 t_queue_ns = 9;
+  // Its answer on the runtime's clock, ns; absent without one.
+  optional uint64 t_answer_ns = 10;
 }
 // One evaluated LIVE BUY attempt (REV.1.0 R2), unchanged from its record. T0 is never the
-// producer's here: without its witness the timing verdict is UNKNOWN.
+// producer's unless the record says t0_exact: without its witness the timing verdict is UNKNOWN.
 message LiveAttempt {
+  // 15 was window_complete, a reading of the window state; window (31) is the state as written.
+  reserved 15;
+  reserved "window_complete";
   // Its place among the evaluated BUYs, from 1.
   uint64 ordinal = 1;
   // The BUY's transaction hash, 0x hex.
@@ -634,11 +653,10 @@ message LiveAttempt {
   string local = 12;
   // The economics' verdict.
   string economics = 13;
-  // Why, in the evaluator's order.
+  // Why, in the evaluator's order; at most the attempt's share of the state
+  // (LIVE_ATTEMPT_REASONS_BEYOND_LIMIT counts the rest).
   repeated string reasons = 14;
-  // Whether the 15-s market window from the launch's block is complete.
-  bool window_complete = 15;
-  // Why it is not; empty when complete.
+  // Why the window is not complete; empty when complete.
   string window_why = 16;
   // Trades of the token in the window.
   uint64 trades = 17;
@@ -656,18 +674,89 @@ message LiveAttempt {
   optional uint64 select_to_send_ns = 23;
   // The first qualified send to the first acknowledgement, ns.
   optional uint64 send_to_ack_ns = 24;
-  // Counters of every attempt up to this one: the attempts (every rate's denominator).
+  // Counters of every attempt up to this one: the LIVE BUYs (C3 and Strategy C, before the
+  // commitment too), the acquisition rate's denominator.
   uint64 attempts = 25;
   // Of them acquired.
   uint64 acquired = 26;
-  // Of them passed.
+  // C3 BUYs among them whose verdict is PASS (a count, not a rate: a Strategy C BUY has no
+  // verdict, NOT_APPLICABLE).
   uint64 passed = 27;
-  // Of them failed.
+  // C3 BUYs among them whose verdict is FAIL.
   uint64 failed = 28;
-  // Of them undecided.
+  // C3 BUYs among them whose verdict is UNKNOWN.
   uint64 undecided = 29;
   // The adapters of its dispatch.
   repeated LiveAttemptAdapter adapters = 30;
+  // The 15-s market window from the launch's block as written: COMPLETE or INCOMPLETE.
+  string window = 31;
+  // The attempt's identity (its lease attempt, or its hash), 0x hex.
+  string attempt = 32;
+  // The run whose journal holds its release; absent without a release record.
+  optional uint64 run = 33;
+  // The token, 0x hex.
+  string token = 34;
+  // The launch's transaction hash, 0x hex; empty without a launch (Strategy C).
+  string launch_hash = 35;
+  // The source whose sighting triggered it (a C3 BUY); empty without one.
+  string trigger = 36;
+  // Its block's number; absent while not included.
+  optional uint64 block_number = 37;
+  // Its block's hash, 0x hex; empty while not included.
+  string block_hash = 38;
+  // Its block's header time, unix ms; absent while not included.
+  optional uint64 block_ms = 39;
+  // Tokens its own Portal BUY acquired, decimal token units; absent when unknown.
+  optional string tokens = 40;
+  // The native amount its included BUY spent, decimal wei; absent when unknown.
+  optional string eth_wei = 41;
+  // Gas its inclusion paid, decimal wei; absent when unknown.
+  optional string gas_wei = 42;
+  // Its own price, native wei per 10^18 token units, decimal; absent without its own trade.
+  optional string own_price = 43;
+  // The ledger's PLACED fact: FIRST, LATE, OTHER_BLOCK or NO_TOKENS; empty without one.
+  string placed = 44;
+  // The launch's transaction index in its block; absent when the launch is not in it.
+  optional uint64 launch_index = 45;
+  // Its own transaction index in its block; absent without a PLACED fact.
+  optional uint64 own_index = 46;
+  // Other traders' BUYs of the token between the launch and it; absent without a PLACED fact.
+  optional uint64 buys_before = 47;
+  // The runtime clock the local times are on; absent without a release record.
+  optional uint64 clock_id = 48;
+  // Ingress (C3) or decision (Strategy C) on that clock, ns; absent without a release record.
+  optional uint64 t_ingress_ns = 49;
+  // Selection on that clock, ns; absent without a release record.
+  optional uint64 t_select_ns = 50;
+  // The first qualified send among its adapters on that clock, ns; absent without one.
+  optional uint64 t_send_ns = 51;
+  // The first acknowledgement on that clock, ns; absent without one.
+  optional uint64 t_ack_ns = 52;
+  // Local start deadlines it missed; absent without a release record.
+  optional uint64 deadline_misses = 53;
+  // The market window's length, ms.
+  uint64 window_ms = 54;
+  // The launch's block; absent without one.
+  optional uint64 launch_block = 55;
+  // The launch block's header time, unix ms (the window's start); absent without one.
+  optional uint64 launch_ms = 56;
+  // The last block inside the window; absent while the window is not over.
+  optional uint64 window_end_block = 57;
+  // Whether T0 is the producer's exact time (never so without its witness).
+  bool t0_exact = 58;
+  // The first other trader's BUY in the window, 0x hex; empty without one.
+  string first_external_buy_tx = 59;
+  // Its block; absent without one.
+  optional uint64 first_external_buy_block = 60;
+  // Its transaction index in that block; absent without one.
+  optional uint64 first_external_buy_index = 61;
+  // The native volume of the token's BUYs in the window (its own too), decimal wei.
+  string buy_wei = 62;
+  // The native volume of the token's SELLs in the window, decimal wei.
+  string sell_wei = 63;
+  // When its evaluation wrote the record, unix ms: the campaign verdict's evaluated_unix_ms
+  // when both are of one evaluation.
+  uint64 evaluated_unix_ms = 64;
 }
 // The parameters of `bsc.live.grant`: the scope the operator confirmed and its digest.
 message BscLiveGrantCommand {

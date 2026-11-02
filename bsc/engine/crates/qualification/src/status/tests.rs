@@ -2052,8 +2052,9 @@ fn an_unreadable_snapshot_identity_is_unknown() {
     assert!(!s.warnings.iter().any(|w| w.ends_with("_UNKNOWN")));
     fs::remove_dir_all(&root).unwrap();
 }
-/// REV.1.0 R2b: an attempt as `bsc_runtime live attempts` writes it (synthetic values; they test
-/// the projection only, no acquisition sample).
+/// REV.1.0 R2b: an attempt as `bsc_runtime live attempts` writes it. Synthetic values, every
+/// field its own (a swapped field is visible); they test the projection only, no acquisition
+/// sample.
 fn evaluated_attempt(ordinal: u64) -> darkbot_bsc_execution::live_attempts::Attempt {
     use alloy_primitives::U256;
     use darkbot_bsc_execution::live_attempts::{
@@ -2070,47 +2071,47 @@ fn evaluated_attempt(ordinal: u64) -> darkbot_bsc_execution::live_attempts::Atte
         token: [0xAB; 20],
         launch_hash: Some([0x1A; 32]),
         trigger: Some(SourceId::PublicNode),
-        run: Some(3),
+        run: Some(100 + ordinal),
         state: "INCLUDED",
-        block: Some((130_000_000, [0xB1; 32], 1_793_000_000_000)),
+        block: Some((130_000_010, [0xB1; 32], 1_793_000_000_000)),
         tokens: Some(U256::from(5_000u64)),
         eth_wei: Some(U256::from(1_000u64)),
         gas_wei: Some(U256::from(21u64)),
         input_wei: Some(U256::from(1_000u64)),
         placement: Some(Placement {
-            verdict: PlacementVerdict::First,
+            verdict: PlacementVerdict::Late,
             launch_index: Some(4),
-            own_index: 5,
-            buys_before: 0,
+            own_index: 6,
+            buys_before: 1,
         }),
         chain_id: Some(56),
         written_ms: 1_793_000_000_100,
         local: Some(Local {
-            clock_id: 1,
+            clock_id: 2,
             ingress_ns: 1_000,
             select_ns: 1_400,
             send_ns: Some(1_900),
             ack_ns: Some(9_900),
-            deadline_misses: 0,
+            deadline_misses: 3,
         }),
         adapters: vec![AdapterRow {
-            adapter: 0,
+            adapter: 7,
             builder: Some(LiveAdapter::Club48BuilderV1),
             outcome: "SENT",
             boundary: "WRITE",
             qualified: true,
             write_check_ns: Some(1_800),
-            boundary_ns: Some(1_900),
-            queue_ns: None,
+            boundary_ns: Some(1_905),
+            queue_ns: Some(1_950),
             answer: Some("ACCEPTED"),
-            answer_ns: Some(9_900),
+            answer_ns: Some(9_950),
         }],
         window: Window {
             why_incomplete: None,
             window_ms: 15_000,
             launch_block: Some(130_000_000),
-            launch_ms: Some(1_793_000_000_000),
-            end_block: Some(130_000_005),
+            launch_ms: Some(1_792_999_990_000),
+            end_block: Some(130_000_020),
             trades: 7,
             buys: 5,
             sells: 2,
@@ -2119,7 +2120,7 @@ fn evaluated_attempt(ordinal: u64) -> darkbot_bsc_execution::live_attempts::Atte
             first_external: Some((
                 [0xE1; 32],
                 130_000_001,
-                2,
+                8,
                 U256::from(250_000_000_000_000_000u64),
             )),
             own_price: Some(U256::from(200_000_000_000_000_000u64)),
@@ -2127,283 +2128,376 @@ fn evaluated_attempt(ordinal: u64) -> darkbot_bsc_execution::live_attempts::Atte
         },
         verdicts: Verdicts {
             acquisition: "PASS",
-            canonical: "PASS",
+            canonical: "FAIL",
             timing: "UNKNOWN",
-            placement: "PASS",
-            capture: "PASS",
-            local: "PASS",
-            economics: "PASS",
-            verdict: "UNKNOWN",
+            placement: "NOT_APPLICABLE",
+            capture: "TEST_CAPTURE",
+            local: "TEST_LOCAL",
+            economics: "TEST_ECONOMICS",
+            verdict: "TEST_VERDICT",
         },
-        reasons: vec!["TIMING_WITNESS_MISSING".into()],
+        reasons: vec!["TIMING_WITNESS_MISSING".into(), "PLACEMENT_LATE".into()],
         counters: Counters {
-            attempts: ordinal,
-            acquired: ordinal,
-            passed: 0,
-            failed: 0,
-            undecided: ordinal,
+            attempts: 20 + ordinal,
+            acquired: 30 + ordinal,
+            passed: 40 + ordinal,
+            failed: 50 + ordinal,
+            undecided: 60 + ordinal,
         },
     }
 }
+/// The name `bsc_runtime live attempts` gives the record of [`evaluated_attempt`]`(n)`: its
+/// transaction.
+fn attempt_file(n: u64) -> String {
+    darkbot_bsc_execution::live_attempts::attempt_file_name(&[n as u8; 32])
+}
+/// The warning of `total` attempt records, more than the campaign's limit (re-check F2).
+fn beyond_limit(total: usize) -> String {
+    use super::campaign::MAX_ATTEMPTS;
+    format!(
+        "LIVE_ATTEMPTS_BEYOND_LIMIT {total}/{MAX_ATTEMPTS}, shown: the first {MAX_ATTEMPTS} by ordinal of the first {} by transaction",
+        MAX_ATTEMPTS + 1
+    )
+}
+/// [`evaluated_attempt`]`(n)` as the LIVE tab must show it from a record of the evaluation `ms`:
+/// every field of the record (review H1), written out.
+fn projected_attempt(n: u64, ms: u64) -> super::wire::bsc::LiveAttempt {
+    use super::wire::bsc::{LiveAttempt, LiveAttemptAdapter};
+    let hex = |b: u8, len: usize| format!("0x{}", format!("{b:02x}").repeat(len));
+    LiveAttempt {
+        ordinal: n,
+        tx: hex(n as u8, 32),
+        kind: "C3_BUY".into(),
+        cell: "EXTERNAL_FULL_LAUNCH".into(),
+        state: "INCLUDED".into(),
+        verdict: "TEST_VERDICT".into(),
+        acquisition: "PASS".into(),
+        canonical: "FAIL".into(),
+        timing: "UNKNOWN".into(),
+        placement: "NOT_APPLICABLE".into(),
+        capture: "TEST_CAPTURE".into(),
+        local: "TEST_LOCAL".into(),
+        economics: "TEST_ECONOMICS".into(),
+        reasons: vec!["TIMING_WITNESS_MISSING".into(), "PLACEMENT_LATE".into()],
+        window_why: String::new(),
+        trades: 7,
+        buys: 5,
+        sells: 2,
+        first_external_price: Some("250000000000000000".into()),
+        price_vs_first_external_ppm: Some(800_000),
+        ingress_to_send_ns: Some(900),
+        select_to_send_ns: Some(500),
+        send_to_ack_ns: Some(8_000),
+        attempts: 20 + n,
+        acquired: 30 + n,
+        passed: 40 + n,
+        failed: 50 + n,
+        undecided: 60 + n,
+        adapters: vec![LiveAttemptAdapter {
+            builder: "CLUB48_BUILDER_V1".into(),
+            outcome: "SENT".into(),
+            answer: "ACCEPTED".into(),
+            adapter: 7,
+            boundary: "WRITE".into(),
+            qualified: true,
+            t_write_check_ns: Some(1_800),
+            t_boundary_ns: Some(1_905),
+            t_queue_ns: Some(1_950),
+            t_answer_ns: Some(9_950),
+        }],
+        window: "COMPLETE".into(),
+        attempt: hex(0xA0, 32),
+        run: Some(100 + n),
+        token: hex(0xAB, 20),
+        launch_hash: hex(0x1A, 32),
+        trigger: "BSC_INGRESS_PUBLICNODE".into(),
+        block_number: Some(130_000_010),
+        block_hash: hex(0xB1, 32),
+        block_ms: Some(1_793_000_000_000),
+        tokens: Some("5000".into()),
+        eth_wei: Some("1000".into()),
+        gas_wei: Some("21".into()),
+        own_price: Some("200000000000000000".into()),
+        placed: "LATE".into(),
+        launch_index: Some(4),
+        own_index: Some(6),
+        buys_before: Some(1),
+        clock_id: Some(2),
+        t_ingress_ns: Some(1_000),
+        t_select_ns: Some(1_400),
+        t_send_ns: Some(1_900),
+        t_ack_ns: Some(9_900),
+        deadline_misses: Some(3),
+        window_ms: 15_000,
+        launch_block: Some(130_000_000),
+        launch_ms: Some(1_792_999_990_000),
+        window_end_block: Some(130_000_020),
+        t0_exact: false,
+        first_external_buy_tx: hex(0xE1, 32),
+        first_external_buy_block: Some(130_000_001),
+        first_external_buy_index: Some(8),
+        buy_wei: "9000".into(),
+        sell_wei: "3000".into(),
+        evaluated_unix_ms: ms,
+    }
+}
+/// The LIVE campaign warnings of a LIVE state, in their order.
+fn campaign_warnings(l: &super::wire::bsc::BscLiveState) -> Vec<String> {
+    l.warnings
+        .iter()
+        .filter(|w| w.starts_with("LIVE_"))
+        .cloned()
+        .collect()
+}
 /// REV.1.0 R2b: the campaign verdict and the attempt records reach the LIVE tab typed and
-/// unchanged (a real `Campaign::encode` / `Attempt::encode` round trip); absent records are no
-/// rows and no warning.
+/// unchanged (a real `Campaign::encode` / `Attempt::encode` round trip, every field of both
+/// records its own value, review H1/M5); absent records are no rows and no warning.
 #[test]
 fn the_live_tab_shows_the_campaign_verdict_and_the_attempts_as_recorded() {
+    use super::wire::bsc::{LiveAttempt, LiveCampaign, LiveCampaignCell};
     use darkbot_bsc_execution::live_attempts::{ATTEMPTS_DIR, Campaign, CellRow, VERDICT_PATH};
+    use darkbot_bsc_record::schema::bsc_runtime::live_attempt as la;
+    use darkbot_bsc_record::{Value, hex};
+    const MS: u64 = 1_793_000_050_000;
     let root = std::env::temp_dir().join(format!("darkbot-bsc-campaign-{}", std::process::id()));
     let _ = fs::remove_dir_all(&root);
     let rundir = root.join("run");
-    fs::create_dir_all(rundir.join(ATTEMPTS_DIR)).unwrap();
+    let dir = rundir.join(ATTEMPTS_DIR);
+    fs::create_dir_all(&dir).unwrap();
     let live =
         || super::live::live_state(&root, &rundir, Err("TEST_ONLY"), Some(1_793_000_100_000));
     let empty = live();
     assert!(empty.campaign.is_none() && empty.attempts.is_empty());
-    assert!(
-        !empty.warnings.iter().any(|w| w.starts_with("LIVE_")),
-        "{:?}",
-        empty.warnings
-    );
+    assert_eq!(campaign_warnings(&empty), Vec::<String>::new());
     let campaign = Campaign {
         verdict: "CAMPAIGN_NOT_READY",
         reasons: vec!["NO_MANIFEST".into(), "NO_PRECOMMIT".into()],
         release: "RELEASE_EVIDENCE_NOT_READY",
         manifest_sha256: Some([0x11; 32]),
-        precommit_sha256: None,
+        precommit_sha256: Some([0x33; 32]),
         build_sha256: [0x22; 32],
-        planned: 10,
-        observed: 40,
-        selected: 30,
-        admitted: 4,
+        planned: 11,
+        observed: 41,
+        selected: 31,
+        admitted: 5,
         skipped: 37,
-        written: 3,
-        acquired: 2,
-        reverted: 1,
-        dropped: 0,
-        late: 1,
-        unresolved: 0,
-        passed: 1,
-        failed: 1,
-        undecided: 1,
-        consecutive_misses: 12,
-        before_precommit: 1,
-        unverifiable: 2,
-        skip_reasons: vec!["HASH_ONLY=7".into()],
+        written: 9,
+        acquired: 8,
+        reverted: 2,
+        dropped: 3,
+        late: 4,
+        unresolved: 6,
+        passed: 12,
+        failed: 13,
+        undecided: 14,
+        consecutive_misses: 15,
+        before_precommit: 16,
+        unverifiable: 17,
+        skip_reasons: vec!["HASH_ONLY=7".into(), "LATE_SIGHTING=2".into()],
         covered_s: 3_600,
         uncovered_s: 400,
         covered_ppm: 900_000,
-        cells: vec![CellRow {
-            cell: "EXTERNAL_FULL_LAUNCH",
-            enabled: true,
-            min_attempts: Some(10),
-            attempts: 3,
-            passed: 1,
-            failed: 1,
-            undecided: 1,
-            min_duration_s: None,
-            duration_s: 3_600,
-            verdict: "CAMPAIGN_OPEN",
-        }],
+        cells: vec![
+            CellRow {
+                cell: "EXTERNAL_FULL_LAUNCH",
+                enabled: true,
+                min_attempts: Some(25),
+                attempts: 21,
+                passed: 22,
+                failed: 23,
+                undecided: 24,
+                min_duration_s: Some(26),
+                duration_s: 3_601,
+                verdict: "CAMPAIGN_OPEN",
+            },
+            CellRow {
+                cell: "SELF_LAUNCH",
+                enabled: false,
+                min_attempts: None,
+                attempts: 0,
+                passed: 0,
+                failed: 0,
+                undecided: 0,
+                min_duration_s: None,
+                duration_s: 0,
+                verdict: "CAMPAIGN_NOT_READY",
+            },
+        ],
     };
-    let bytes = campaign.encode(1_793_000_050_000).unwrap();
+    let bytes = campaign.encode(MS).unwrap();
     fs::write(rundir.join(VERDICT_PATH), &bytes).unwrap();
     for n in [2u64, 1] {
-        let a = evaluated_attempt(n);
         fs::write(
-            rundir
-                .join(ATTEMPTS_DIR)
-                .join(format!("0x{}.dbrec", darkbot_bsc_record::hex(&a.tx_hash))),
-            a.encode(1_793_000_050_000).unwrap(),
+            dir.join(attempt_file(n)),
+            evaluated_attempt(n).encode(MS).unwrap(),
         )
         .unwrap();
     }
     let l = live();
-    assert!(
-        !l.warnings.iter().any(|w| w.starts_with("LIVE_")),
-        "{:?}",
-        l.warnings
-    );
-    let c = l.campaign.unwrap();
+    assert_eq!(campaign_warnings(&l), Vec::<String>::new());
     assert_eq!(
-        (
-            c.verdict.as_str(),
-            c.release_evidence.as_str(),
-            c.reasons.clone()
-        ),
-        (
-            "CAMPAIGN_NOT_READY",
-            "RELEASE_EVIDENCE_NOT_READY",
-            vec!["NO_MANIFEST".to_string(), "NO_PRECOMMIT".into()]
-        )
+        l.campaign.unwrap(),
+        LiveCampaign {
+            verdict: "CAMPAIGN_NOT_READY".into(),
+            release_evidence: "RELEASE_EVIDENCE_NOT_READY".into(),
+            reasons: vec!["NO_MANIFEST".into(), "NO_PRECOMMIT".into()],
+            planned: 11,
+            observed: 41,
+            selected: 31,
+            admitted: 5,
+            skipped: 37,
+            written: 9,
+            acquired: 8,
+            reverted: 2,
+            dropped: 3,
+            late: 4,
+            unresolved: 6,
+            passed: 12,
+            failed: 13,
+            undecided: 14,
+            consecutive_misses: 15,
+            before_precommit: 16,
+            unverifiable: 17,
+            covered_s: 3_600,
+            uncovered_s: 400,
+            covered_ppm: 900_000,
+            skip_reasons: vec!["HASH_ONLY=7".into(), "LATE_SIGHTING=2".into()],
+            cells: vec![
+                LiveCampaignCell {
+                    cell: "EXTERNAL_FULL_LAUNCH".into(),
+                    enabled: true,
+                    min_attempts: Some(25),
+                    attempts: 21,
+                    passed: 22,
+                    failed: 23,
+                    undecided: 24,
+                    min_duration_s: Some(26),
+                    duration_s: 3_601,
+                    verdict: "CAMPAIGN_OPEN".into(),
+                },
+                LiveCampaignCell {
+                    cell: "SELF_LAUNCH".into(),
+                    enabled: false,
+                    min_attempts: None,
+                    attempts: 0,
+                    passed: 0,
+                    failed: 0,
+                    undecided: 0,
+                    min_duration_s: None,
+                    duration_s: 0,
+                    verdict: "CAMPAIGN_NOT_READY".into(),
+                },
+            ],
+            manifest_sha256: "11".repeat(32),
+            precommit_sha256: "33".repeat(32),
+            build_sha256: "22".repeat(32),
+            evaluated_unix_ms: MS,
+            record_sha256: hex(&darkbot_bsc_record::sha256(&bytes)),
+        }
     );
+    // In their order, every recorded field as the record holds it.
     assert_eq!(
-        [
-            c.planned,
-            c.observed,
-            c.selected,
-            c.admitted,
-            c.skipped,
-            c.written,
-            c.acquired,
-            c.reverted,
-            c.dropped,
-            c.late,
-            c.unresolved,
-            c.passed,
-            c.failed,
-            c.undecided,
-            c.consecutive_misses,
-            c.before_precommit,
-            c.unverifiable,
-            c.covered_s,
-            c.uncovered_s,
-            c.covered_ppm
-        ],
-        [
-            10, 40, 30, 4, 37, 3, 2, 1, 0, 1, 0, 1, 1, 1, 12, 1, 2, 3_600, 400, 900_000
-        ]
+        l.attempts,
+        [projected_attempt(1, MS), projected_attempt(2, MS)]
     );
-    assert_eq!(c.skip_reasons, ["HASH_ONLY=7"]);
-    assert_eq!(
-        (
-            c.manifest_sha256.as_str(),
-            c.precommit_sha256.as_str(),
-            c.build_sha256.as_str()
-        ),
-        ("11".repeat(32).as_str(), "", "22".repeat(32).as_str())
-    );
-    assert_eq!(c.evaluated_unix_ms, 1_793_000_050_000);
-    assert_eq!(
-        c.record_sha256,
-        darkbot_bsc_record::hex(&darkbot_bsc_record::sha256(&bytes))
-    );
-    let cell = &c.cells[0];
-    assert_eq!(
-        (
-            cell.cell.as_str(),
-            cell.enabled,
-            cell.min_attempts,
-            cell.attempts,
-            cell.passed,
-            cell.failed,
-            cell.undecided,
-            cell.min_duration_s,
-            cell.duration_s,
-            cell.verdict.as_str()
-        ),
-        (
-            "EXTERNAL_FULL_LAUNCH",
-            true,
-            Some(10),
-            3,
-            1,
-            1,
-            1,
-            None,
-            3_600,
-            "CAMPAIGN_OPEN"
-        )
-    );
-    // In their order, every recorded value as the record holds it.
-    assert_eq!(
-        l.attempts.iter().map(|a| a.ordinal).collect::<Vec<_>>(),
-        [1, 2]
-    );
-    let a = &l.attempts[0];
-    assert_eq!(a.tx, format!("0x{}", "01".repeat(32)));
-    assert_eq!(
-        [
-            a.kind.as_str(),
-            a.cell.as_str(),
-            a.state.as_str(),
-            a.verdict.as_str(),
-            a.acquisition.as_str(),
-            a.canonical.as_str(),
-            a.timing.as_str(),
-            a.placement.as_str(),
-            a.capture.as_str(),
-            a.local.as_str(),
-            a.economics.as_str()
-        ],
-        [
-            "C3_BUY",
-            "EXTERNAL_FULL_LAUNCH",
-            "INCLUDED",
-            "UNKNOWN",
-            "PASS",
-            "PASS",
-            "UNKNOWN",
-            "PASS",
-            "PASS",
-            "PASS",
-            "PASS"
-        ]
-    );
-    assert_eq!(a.reasons, ["TIMING_WITNESS_MISSING"]);
-    assert_eq!(
-        (
-            a.window_complete,
-            a.window_why.as_str(),
-            a.trades,
-            a.buys,
-            a.sells
-        ),
-        (true, "", 7, 5, 2)
-    );
-    assert_eq!(
-        a.first_external_price.as_deref(),
-        Some("250000000000000000")
-    );
-    assert_eq!(a.price_vs_first_external_ppm, Some(800_000));
-    assert_eq!(
-        (a.ingress_to_send_ns, a.select_to_send_ns, a.send_to_ack_ns),
-        (Some(900), Some(500), Some(8_000))
-    );
-    assert_eq!(
-        (a.attempts, a.acquired, a.passed, a.failed, a.undecided),
-        (1, 1, 0, 0, 1)
-    );
-    assert_eq!(
-        a.adapters
-            .iter()
-            .map(|x| (x.builder.as_str(), x.outcome.as_str(), x.answer.as_str()))
-            .collect::<Vec<_>>(),
-        [("CLUB48_BUILDER_V1", "SENT", "ACCEPTED")]
-    );
-    // An incomplete window and no send: its reason, no timing, no price.
+    // An incomplete window without a release, an inclusion, a placement or a launch: the
+    // record's own words (review L9), nothing where it names nothing.
     let mut open = evaluated_attempt(3);
     open.window.why_incomplete = Some("WINDOW_NOT_FINAL");
     open.window.first_external = None;
     open.window.price_vs_first_external_ppm = None;
+    open.window.own_price = None;
+    open.window.launch_block = None;
+    open.window.launch_ms = None;
+    open.window.end_block = None;
     open.local = None;
     open.adapters.clear();
-    fs::write(
-        rundir.join(ATTEMPTS_DIR).join("0x03.dbrec"),
-        open.encode(1).unwrap(),
-    )
-    .unwrap();
-    let a = live().attempts.pop().unwrap();
+    open.block = None;
+    open.tokens = None;
+    open.eth_wei = None;
+    open.gas_wei = None;
+    open.placement = None;
+    open.launch_hash = None;
+    open.trigger = None;
+    open.run = None;
+    open.reasons.clear();
+    fs::write(dir.join(attempt_file(3)), open.encode(MS).unwrap()).unwrap();
     assert_eq!(
-        (a.ordinal, a.window_complete, a.window_why.as_str()),
-        (3, false, "WINDOW_NOT_FINAL")
+        live().attempts.pop().unwrap(),
+        LiveAttempt {
+            window: "INCOMPLETE".into(),
+            window_why: "WINDOW_NOT_FINAL".into(),
+            first_external_price: None,
+            price_vs_first_external_ppm: None,
+            own_price: None,
+            first_external_buy_tx: String::new(),
+            first_external_buy_block: None,
+            first_external_buy_index: None,
+            launch_block: None,
+            launch_ms: None,
+            window_end_block: None,
+            ingress_to_send_ns: None,
+            select_to_send_ns: None,
+            send_to_ack_ns: None,
+            clock_id: None,
+            t_ingress_ns: None,
+            t_select_ns: None,
+            t_send_ns: None,
+            t_ack_ns: None,
+            deadline_misses: None,
+            adapters: Vec::new(),
+            block_number: None,
+            block_hash: String::new(),
+            block_ms: None,
+            tokens: None,
+            eth_wei: None,
+            gas_wei: None,
+            placed: String::new(),
+            launch_index: None,
+            own_index: None,
+            buys_before: None,
+            launch_hash: String::new(),
+            trigger: String::new(),
+            run: None,
+            reasons: Vec::new(),
+            ..projected_attempt(3, MS)
+        }
     );
+    // T0 is the producer's exact time only where the record says so.
+    let r =
+        darkbot_bsc_record::decode(&la::SCHEMA, &evaluated_attempt(1).encode(MS).unwrap()).unwrap();
+    let mut exact = Draft::new(&la::SCHEMA);
+    for (tag, v) in r.fields() {
+        let v = if *tag == la::T0_EXACT {
+            Value::Bool(true)
+        } else {
+            v.clone()
+        };
+        exact.push(*tag, v);
+    }
+    fs::write(dir.join(attempt_file(1)), exact.encode().unwrap()).unwrap();
     assert_eq!(
-        (
-            a.first_external_price,
-            a.price_vs_first_external_ppm,
-            a.ingress_to_send_ns
-        ),
-        (None, None, None)
+        live().attempts[0],
+        LiveAttempt {
+            t0_exact: true,
+            ..projected_attempt(1, MS)
+        }
     );
-    assert!(a.adapters.is_empty());
     fs::remove_dir_all(&root).unwrap();
 }
-/// REV.1.0 R2b: a damaged campaign verdict or attempt record is a warning, never a value; the
-/// list stays within the campaign's total BUY attempt limit (more is a warning).
+/// REV.1.0 R2b review (M2, M3, M4, L6, re-check L-2/L-3): a damaged record is a warning, never a
+/// value, and every kind of damage is one counted warning. An attempt record is only the one named
+/// by its own transaction: garbage, another schema, a copy, capitals, another name or one beyond a
+/// record's size is not, and a link is not even to a valid record of that very transaction (nor
+/// is a link to a valid verdict); the writer's `.dbrec.tmp` and other names are not read. The
+/// attempts directory is a real directory. A tie in the order and a record of another evaluation
+/// (than the verdict's, without one than the newest) stay as written, with a warning. At most the
+/// limit and one more record are read, the first by transaction.
 #[test]
 fn damaged_campaign_records_are_warnings_and_the_attempts_stay_bounded() {
+    use super::campaign::MAX_ATTEMPTS;
     use darkbot_bsc_execution::live_attempts::{ATTEMPTS_DIR, Campaign, VERDICT_PATH};
-    use darkbot_bsc_execution::sources::MAX_BUY_ATTEMPTS_TOTAL;
+    use std::os::unix::fs::symlink;
     let root =
         std::env::temp_dir().join(format!("darkbot-bsc-campaign-bad-{}", std::process::id()));
     let _ = fs::remove_dir_all(&root);
@@ -2411,64 +2505,408 @@ fn damaged_campaign_records_are_warnings_and_the_attempts_stay_bounded() {
     let dir = rundir.join(ATTEMPTS_DIR);
     fs::create_dir_all(&dir).unwrap();
     let live = || super::live::live_state(&root, &rundir, Err("TEST_ONLY"), Some(1));
-    let good = evaluated_attempt(1).encode(1).unwrap();
-    fs::write(dir.join("0x01.dbrec"), &good).unwrap();
-    // A torn verdict, a garbage attempt and a record of the wrong schema.
+    let write = |n: u64, ms: u64| {
+        fs::write(
+            dir.join(attempt_file(n)),
+            evaluated_attempt(n).encode(ms).unwrap(),
+        )
+        .unwrap()
+    };
+    let ordinals = |l: &super::wire::bsc::BscLiveState| {
+        l.attempts.iter().map(|a| a.ordinal).collect::<Vec<_>>()
+    };
+    write(1, 7);
     let verdict = Campaign {
         verdict: "CAMPAIGN_OPEN",
         release: "RELEASE_EVIDENCE_NOT_READY",
         ..Campaign::default()
     }
-    .encode(1)
+    .encode(7)
     .unwrap();
+    // A torn verdict.
     fs::write(rundir.join(VERDICT_PATH), &verdict[..verdict.len() - 1]).unwrap();
-    fs::write(dir.join("0x02.dbrec"), b"not a record").unwrap();
-    fs::write(dir.join("0x03.dbrec"), &verdict).unwrap();
-    // Not an attempt record's name: not read.
+    // Garbage and another schema under attempts' names.
+    fs::write(dir.join(attempt_file(2)), b"not a record").unwrap();
+    fs::write(dir.join(attempt_file(3)), &verdict).unwrap();
+    // A copy of the first attempt (its transaction is the first's).
+    fs::copy(dir.join(attempt_file(1)), dir.join(attempt_file(4))).unwrap();
+    // Review L-2: a link under the fifth's name to a valid record of the fifth, outside the
+    // directory: refused as a link, nothing else.
+    let outside = rundir.join("outside");
+    fs::create_dir_all(&outside).unwrap();
+    fs::write(
+        outside.join(attempt_file(5)),
+        evaluated_attempt(5).encode(7).unwrap(),
+    )
+    .unwrap();
+    symlink(outside.join(attempt_file(5)), dir.join(attempt_file(5))).unwrap();
+    // Beyond a record's size.
+    fs::File::create(dir.join(attempt_file(6)))
+        .unwrap()
+        .set_len(darkbot_bsc_record::MAX_RECORD_BYTES as u64 + 1)
+        .unwrap();
+    // Its transaction in capitals, and a short name.
+    let mut capital = evaluated_attempt(0xAB);
+    capital.tx_hash = [0xAB; 32];
+    fs::write(
+        dir.join(format!("0x{}.dbrec", "AB".repeat(32))),
+        capital.encode(7).unwrap(),
+    )
+    .unwrap();
+    fs::write(
+        dir.join("0x01.dbrec"),
+        evaluated_attempt(1).encode(7).unwrap(),
+    )
+    .unwrap();
+    // Not an attempt record's name: never read.
     fs::write(dir.join("README"), b"x").unwrap();
+    fs::write(dir.join(format!("{}.tmp", attempt_file(7))), b"torn").unwrap();
     let l = live();
     assert!(l.campaign.is_none());
+    assert_eq!(ordinals(&l), [1]);
     assert_eq!(
-        l.attempts.iter().map(|a| a.ordinal).collect::<Vec<_>>(),
-        [1]
+        campaign_warnings(&l),
+        [
+            "LIVE_CAMPAIGN_VERDICT_INVALID",
+            "LIVE_ATTEMPT_INVALID 7, first 0x01.dbrec"
+        ]
     );
-    for w in [
-        "LIVE_CAMPAIGN_VERDICT_INVALID",
-        "LIVE_ATTEMPT_INVALID 0x02.dbrec",
-        "LIVE_ATTEMPT_INVALID 0x03.dbrec",
-    ] {
-        assert!(l.warnings.contains(&w.to_string()), "{w}: {:?}", l.warnings);
-    }
-    assert!(!l.warnings.iter().any(|w| w.contains("README")));
-    // A link is no record.
+    // Review L-2: a link to a valid verdict is no verdict.
     fs::remove_file(rundir.join(VERDICT_PATH)).unwrap();
-    std::os::unix::fs::symlink(dir.join("0x01.dbrec"), rundir.join(VERDICT_PATH)).unwrap();
-    assert!(
-        live()
-            .warnings
-            .contains(&"LIVE_CAMPAIGN_VERDICT_INVALID".to_string())
-    );
-    // More records than the campaign can have attempts: the first ones, and a warning.
-    fs::remove_file(dir.join("0x02.dbrec")).unwrap();
-    fs::remove_file(dir.join("0x03.dbrec")).unwrap();
-    let limit = u64::from(MAX_BUY_ATTEMPTS_TOTAL);
-    for n in 2..=limit + 1 {
-        fs::write(
-            dir.join(format!("0x{n:02x}.dbrec")),
-            evaluated_attempt(n).encode(1).unwrap(),
-        )
-        .unwrap();
-    }
+    fs::write(outside.join("verdict.dbrec"), &verdict).unwrap();
+    symlink(outside.join("verdict.dbrec"), rundir.join(VERDICT_PATH)).unwrap();
+    let l = live();
+    assert!(l.campaign.is_none());
+    assert_eq!(campaign_warnings(&l)[0], "LIVE_CAMPAIGN_VERDICT_INVALID");
+    fs::remove_file(rundir.join(VERDICT_PATH)).unwrap();
+    // Review L6: the attempts directory is a real directory, never a link to one or a file.
+    let elsewhere = rundir.join("elsewhere");
+    fs::rename(&dir, &elsewhere).unwrap();
+    symlink(&elsewhere, &dir).unwrap();
+    let l = live();
+    assert!(l.attempts.is_empty());
+    assert_eq!(campaign_warnings(&l), ["LIVE_ATTEMPTS_UNREADABLE"]);
+    fs::remove_file(&dir).unwrap();
+    fs::write(&dir, b"x").unwrap();
+    assert_eq!(campaign_warnings(&live()), ["LIVE_ATTEMPTS_UNREADABLE"]);
+    fs::remove_file(&dir).unwrap();
+    fs::remove_dir_all(&elsewhere).unwrap();
+    fs::create_dir_all(&dir).unwrap();
+    // Review M3, M4: a tie in the order and a record of another evaluation than the verdict's
+    // stay as written, each kind one warning.
+    fs::write(rundir.join(VERDICT_PATH), &verdict).unwrap();
+    write(1, 7);
+    write(2, 8);
+    let mut tie = evaluated_attempt(1);
+    tie.tx_hash = [3; 32];
+    fs::write(dir.join(attempt_file(3)), tie.encode(7).unwrap()).unwrap();
     let l = live();
     assert_eq!(
-        l.attempts.iter().map(|a| a.ordinal).collect::<Vec<_>>(),
-        (1..=limit).collect::<Vec<_>>()
+        l.attempts
+            .iter()
+            .map(|a| (a.ordinal, a.tx.as_str()))
+            .collect::<Vec<_>>(),
+        [
+            (1, &attempt_file(1)[..66]),
+            (1, &attempt_file(3)[..66]),
+            (2, &attempt_file(2)[..66])
+        ]
     );
+    assert_eq!(
+        campaign_warnings(&l),
+        [
+            format!(
+                "LIVE_ATTEMPT_OF_ANOTHER_EVALUATION 1, first {}",
+                attempt_file(2)
+            ),
+            format!(
+                "LIVE_ATTEMPT_DUPLICATE_ORDINAL 1, first {}",
+                attempt_file(3)
+            ),
+        ]
+    );
+    // Without a verdict, against the newest attempt's evaluation.
+    fs::remove_file(rundir.join(VERDICT_PATH)).unwrap();
+    fs::remove_file(dir.join(attempt_file(3))).unwrap();
+    assert_eq!(
+        campaign_warnings(&live()),
+        [format!(
+            "LIVE_ATTEMPT_OF_ANOTHER_EVALUATION 1, first {}",
+            attempt_file(1)
+        )]
+    );
+    fs::write(rundir.join(VERDICT_PATH), &verdict).unwrap();
+    // More records than the campaign can have attempts: the first ones and a warning. Nothing
+    // beyond the limit and one more is read: a damaged record after them stays unread, a short
+    // name is never one of them.
+    for n in 1..=MAX_ATTEMPTS as u64 + 1 {
+        write(n, 7);
+    }
+    fs::write(dir.join(attempt_file(0xF0)), b"not a record").unwrap();
+    fs::write(dir.join("0x01.dbrec"), b"not a record").unwrap();
+    let l = live();
+    assert_eq!(ordinals(&l), (1..=MAX_ATTEMPTS as u64).collect::<Vec<_>>());
+    assert_eq!(
+        campaign_warnings(&l),
+        [
+            "LIVE_ATTEMPT_INVALID 1, first 0x01.dbrec".to_string(),
+            beyond_limit(MAX_ATTEMPTS + 2)
+        ]
+    );
+    // Re-check F2, F4: ordinals against the transactions' order; of the limit and one more first
+    // by transaction, the first by ordinal are shown, and the warnings are of those shown only
+    // (the first by transaction, the one not shown, is of another evaluation).
+    for n in 1..=MAX_ATTEMPTS as u64 + 1 {
+        let mut a = evaluated_attempt(n);
+        a.ordinal = MAX_ATTEMPTS as u64 + 2 - n;
+        let ms = if n == 1 { 8 } else { 7 };
+        fs::write(dir.join(attempt_file(n)), a.encode(ms).unwrap()).unwrap();
+    }
+    let l = live();
+    assert_eq!(ordinals(&l), (1..=MAX_ATTEMPTS as u64).collect::<Vec<_>>());
+    assert_eq!(
+        l.attempts.iter().map(|a| a.tx.clone()).collect::<Vec<_>>(),
+        (2..=MAX_ATTEMPTS as u64 + 1)
+            .rev()
+            .map(|n| attempt_file(n)[..66].to_string())
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        campaign_warnings(&l),
+        [
+            "LIVE_ATTEMPT_INVALID 1, first 0x01.dbrec".to_string(),
+            beyond_limit(MAX_ATTEMPTS + 2)
+        ]
+    );
+    fs::remove_dir_all(&root).unwrap();
+}
+/// REV.1.0 R2b review (M2, re-check L-1): whatever the records hold, the campaign section takes
+/// only what the rest of the LIVE tab leaves of `bsc.live.state`, and it comes last. Every list is
+/// cut at its record's share of that in the evaluator's order with one counted warning, a record
+/// whose own fields alone are beyond it is a warning, and the worst case (the limit of attempts,
+/// every text as long as a record allows) behind a LIVE tab filled at a large practical size
+/// encodes below the publisher's bound; when the section as a whole does not fit, none of it is
+/// shown, counted, and when not even that count fits, the rest alone (re-check F1).
+#[test]
+fn the_campaign_section_takes_only_what_the_rest_of_the_live_tab_leaves() {
+    use super::campaign::{MAX_ATTEMPTS, share};
+    use super::publisher::MAX_STATE_BYTES;
+    use super::wire::bsc::{
+        BscLiveState, LiveGrant, LivePosition, LivePrecondition, LiveTransaction,
+    };
+    use darkbot_bsc_execution::live_attempts::{
+        ATTEMPTS_DIR, AdapterRow, Campaign, CellRow, VERDICT_PATH,
+    };
+    let root =
+        std::env::temp_dir().join(format!("darkbot-bsc-campaign-share-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    let rundir = root.join("run");
+    let dir = rundir.join(ATTEMPTS_DIR);
+    fs::create_dir_all(&dir).unwrap();
+    // Texts as long as a record allows, four times what the whole state could hold of them per
+    // record: far more than any share.
+    let longest = darkbot_bsc_record::DEFAULT_MAX_LEN as usize;
+    let many = 4 * MAX_STATE_BYTES / (MAX_ATTEMPTS + 2) / longest;
+    let texts = |tag: char| {
+        (0..many)
+            .map(|i| format!("{i:04}{}", tag.to_string().repeat(longest - 4)))
+            .collect::<Vec<String>>()
+    };
+    let campaign = Campaign {
+        verdict: "CAMPAIGN_OPEN",
+        release: "RELEASE_EVIDENCE_NOT_READY",
+        reasons: texts('R'),
+        skip_reasons: texts('S'),
+        ..Campaign::default()
+    };
+    fs::write(rundir.join(VERDICT_PATH), campaign.encode(7).unwrap()).unwrap();
+    // The first attempt's own fields alone are beyond any share: its adapters' answers.
+    let answer: &'static str = "A".repeat(longest).leak();
+    let mut over = evaluated_attempt(1);
+    over.adapters = vec![
+        AdapterRow {
+            answer: Some(answer),
+            ..over.adapters[0].clone()
+        };
+        many
+    ];
+    fs::write(dir.join(attempt_file(1)), over.encode(7).unwrap()).unwrap();
+    for k in 2..=MAX_ATTEMPTS as u64 + 1 {
+        let mut a = evaluated_attempt(k);
+        a.reasons = texts('A');
+        fs::write(dir.join(attempt_file(k)), a.encode(7).unwrap()).unwrap();
+    }
+    let is_section = |w: &String| w.starts_with("LIVE_CAMPAIGN_") || w.starts_with("LIVE_ATTEMPT");
+    let first = |list: &[String], tag: char| {
+        !list.is_empty()
+            && list
+                .iter()
+                .enumerate()
+                .all(|(i, t)| t.starts_with(&format!("{i:04}{tag}")))
+    };
+    // `l` behind `rest`: every record within its share of what `rest` leaves, its lists the
+    // evaluator's first texts in their order, the section's warnings after the rest's.
+    let check = |l: &BscLiveState, rest: &BscLiveState| {
+        let s = share(MAX_STATE_BYTES - rest.encoded_len());
+        assert_eq!(
+            l.attempts.iter().map(|a| a.ordinal).collect::<Vec<_>>(),
+            (2..=MAX_ATTEMPTS as u64 + 1).collect::<Vec<_>>()
+        );
+        let c = l.campaign.as_ref().unwrap();
+        assert!(c.encoded_len() <= s && first(&c.reasons, 'R'));
+        assert!(c.skip_reasons.iter().all(|t| t.contains('S')));
+        let hidden = 2 * many - c.reasons.len() - c.skip_reasons.len();
+        let mut hidden_attempts = 0;
+        for a in &l.attempts {
+            assert!(a.encoded_len() <= s && first(&a.reasons, 'A'));
+            hidden_attempts += many - a.reasons.len();
+        }
+        assert!(hidden > 0 && hidden_attempts > 0);
+        let (own, section) = l.warnings.split_at(rest.warnings.len());
+        assert_eq!(own, rest.warnings);
+        assert_eq!(
+            section,
+            [
+                format!("LIVE_CAMPAIGN_REASONS_BEYOND_LIMIT {hidden}"),
+                format!("LIVE_ATTEMPT_INVALID 1, first {}", attempt_file(1)),
+                format!(
+                    "LIVE_ATTEMPT_REASONS_BEYOND_LIMIT {hidden_attempts}, first {}",
+                    attempt_file(2)
+                ),
+                beyond_limit(MAX_ATTEMPTS + 1),
+            ]
+        );
+        assert!(
+            l.encoded_len() <= MAX_STATE_BYTES,
+            "{} of {MAX_STATE_BYTES}",
+            l.encoded_len()
+        );
+    };
+    // The LIVE tab of this run directory: the section last, behind everything else.
+    let l = super::live::live_state(&root, &rundir, Err("TEST_ONLY"), Some(1));
+    let rest = BscLiveState {
+        campaign: None,
+        attempts: Vec::new(),
+        warnings: l
+            .warnings
+            .iter()
+            .filter(|w| !is_section(w))
+            .cloned()
+            .collect(),
+        ..l.clone()
+    };
+    check(&l, &rest);
+    // Review L-1: behind a LIVE tab filled at a large practical size, its texts as long as the
+    // reporter lets one be, its ledger several lots and transactions per attempt.
+    let text = super::projection::safe_text(&"T".repeat(longest));
+    let word = "9".repeat(78);
+    let lots = 4 * MAX_ATTEMPTS;
+    let full = BscLiveState {
+        gate: "BLOCKED".into(),
+        blockers: vec![text.clone(); 8],
+        preconditions: (0..16)
+            .map(|i| LivePrecondition {
+                id: format!("PRECONDITION_{i}"),
+                met: false,
+                reason: text.clone(),
+            })
+            .collect(),
+        grant: Some(LiveGrant {
+            scope_text: text.clone(),
+            ..Default::default()
+        }),
+        path_state: "BLOCKED".into(),
+        path_reason: text.clone(),
+        last_refusal: text.clone(),
+        positions: (0..lots)
+            .map(|i| LivePosition {
+                lot: format!("0x{i:064x}"),
+                token: format!("0x{i:040x}"),
+                component: "EXEC_C3".into(),
+                state: "CLOSED".into(),
+                tokens: word.clone(),
+                input_wei: word.clone(),
+                proceeds_wei: word.clone(),
+                gas_wei: word.clone(),
+                pnl_wei: Some(format!("-{word}")),
+            })
+            .collect(),
+        transactions: (0..4 * lots)
+            .map(|i| LiveTransaction {
+                tx_hash: format!("0x{i:064x}"),
+                intent: "SELL".into(),
+                token: format!("0x{i:040x}"),
+                nonce: u64::MAX,
+                state: "INCLUDED".into(),
+                block_number: Some(u64::MAX),
+            })
+            .collect(),
+        realized_pnl_wei: format!("-{word}"),
+        gas_wei: word.clone(),
+        warnings: vec![text.clone(); 4],
+        ..Default::default()
+    };
+    let mut l = full.clone();
+    super::campaign::project(&rundir, &mut l);
+    check(&l, &full);
+    // When the section as a whole does not fit what the rest leaves, none of it is shown and one
+    // warning counts what was not.
+    // The rest leaves exactly that one warning's bytes.
+    let counted = "LIVE_CAMPAIGN_BEYOND_STATE 0 records, 3 warnings";
+    let cost = BscLiveState {
+        warnings: vec![counted.into()],
+        ..Default::default()
+    }
+    .encoded_len();
+    let framing = BscLiveState {
+        path_reason: "T".repeat(MAX_STATE_BYTES),
+        ..Default::default()
+    }
+    .encoded_len()
+        - MAX_STATE_BYTES;
+    let mut edge = BscLiveState {
+        path_reason: "T".repeat(MAX_STATE_BYTES - framing - cost),
+        ..Default::default()
+    };
+    super::campaign::project(&rundir, &mut edge);
+    assert!(edge.campaign.is_none() && edge.attempts.is_empty());
+    assert_eq!(edge.warnings, [counted]);
+    assert_eq!(edge.encoded_len(), MAX_STATE_BYTES);
+    // Re-check F1: one byte less left, not even that count fits: the rest alone, within the bound.
+    let rest = BscLiveState {
+        path_reason: "T".repeat(MAX_STATE_BYTES - framing - cost + 1),
+        ..Default::default()
+    };
+    let mut beyond = rest.clone();
+    super::campaign::project(&rundir, &mut beyond);
+    assert_eq!(beyond, rest);
+    assert!(beyond.encoded_len() <= MAX_STATE_BYTES);
+    // A verdict whose own fields alone are beyond its share (its cells) is a warning, no value.
+    let cell: &'static str = "C".repeat(longest).leak();
+    let over = Campaign {
+        cells: vec![
+            CellRow {
+                cell,
+                enabled: true,
+                min_attempts: None,
+                attempts: 0,
+                passed: 0,
+                failed: 0,
+                undecided: 0,
+                min_duration_s: None,
+                duration_s: 0,
+                verdict: "CAMPAIGN_OPEN",
+            };
+            many
+        ],
+        ..campaign
+    };
+    fs::write(rundir.join(VERDICT_PATH), over.encode(7).unwrap()).unwrap();
+    let l = super::live::live_state(&root, &rundir, Err("TEST_ONLY"), Some(1));
+    assert!(l.campaign.is_none());
     assert!(
         l.warnings
-            .contains(&format!("LIVE_ATTEMPTS_BEYOND_LIMIT {}/{limit}", limit + 1)),
-        "{:?}",
-        l.warnings
+            .contains(&"LIVE_CAMPAIGN_VERDICT_INVALID".to_string())
     );
     fs::remove_dir_all(&root).unwrap();
 }

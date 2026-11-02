@@ -76,6 +76,26 @@ pub const ELIGIBILITY_C3: &str = "CANONICAL_FLAP_C1_SCOPE";
 /// Where the evaluation is written in the run directory.
 pub const ATTEMPTS_DIR: &str = "bsc-runtime/live-attempts";
 pub const VERDICT_PATH: &str = "bsc-runtime/live-campaign-verdict.dbrec";
+/// What every record name in [`ATTEMPTS_DIR`] ends with (the writer's
+/// temporary file adds `.tmp`).
+pub const ATTEMPT_FILE_SUFFIX: &str = ".dbrec";
+
+/// The name of an attempt's record in [`ATTEMPTS_DIR`]: its transaction,
+/// `0x<lowercase hex>.dbrec`.
+pub fn attempt_file_name(tx_hash: &[u8; 32]) -> String {
+    format!(
+        "0x{}{ATTEMPT_FILE_SUFFIX}",
+        alloy_primitives::hex::encode(tx_hash)
+    )
+}
+
+/// The transaction an attempt record's `name` names: only a name exactly
+/// of [`attempt_file_name`]'s form has one.
+pub fn attempt_file_tx(name: &str) -> Option<[u8; 32]> {
+    let digits = name.strip_prefix("0x")?.strip_suffix(ATTEMPT_FILE_SUFFIX)?;
+    let tx = <[u8; 32]>::try_from(alloy_primitives::hex::decode(digits).ok()?).ok()?;
+    (attempt_file_name(&tx) == name).then_some(tx)
+}
 
 /// The decision a pre-commitment binds.
 pub const SCOPE: &str = "REV1/LIVE-CAMPAIGN";
@@ -2376,10 +2396,7 @@ pub fn evaluate(
         .map_err(|e| format!("{}: {e}", dir.display()))?;
     for a in &attempts {
         crate::replay_proof::write(
-            &dir.join(format!(
-                "0x{}.dbrec",
-                alloy_primitives::hex::encode(a.tx_hash)
-            )),
+            &dir.join(attempt_file_name(&a.tx_hash)),
             &a.encode(now_unix_ms)?,
         )?;
     }

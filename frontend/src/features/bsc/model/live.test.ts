@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { NO_EVALUATION, attemptCells, campaignRows, conditionRows, grantScope, liveIndicator, liveRequestOf, scopeSha256, scopeText, signedBnb, totalInputOk, weiOk } from "./live";
+import { ATTEMPT_COLUMNS, COUNTERS_MEANING, NO_EVALUATION, evaluationOf, attemptCells, campaignBeyondState, campaignRows, conditionRows, grantScope, liveIndicator, liveRequestOf, scopeSha256, scopeText, signedBnb, totalInputOk, weiOk } from "./live";
 import type { BscLiveView, LiveAttemptView, LiveCampaignView } from "./types";
 
 // The native owner's own output (`bsc_runtime live scope` with these flags): text and digest.
@@ -111,26 +111,82 @@ describe("BSC LIVE tab (plan 28.10.)", () => {
   });
 
   it("shows the campaign's counts as recorded, every rate with its denominator (REV.1.0 R2b)", () => {
-    const c = { verdict: "CAMPAIGN_OPEN", releaseEvidence: "RELEASE_EVIDENCE_NOT_READY", reasons: [], planned: 10n, observed: 40n, selected: 30n, admitted: 4n, skipped: 37n,
-      written: 3n, acquired: 2n, reverted: 1n, dropped: 0n, late: 1n, unresolved: 0n, passed: 1n, failed: 1n, undecided: 1n, consecutiveMisses: 12n, beforePrecommit: 1n,
-      unverifiable: 2n, coveredS: 3600n, uncoveredS: 400n, coveredPpm: 900000n, skipReasons: ["HASH_ONLY=7"], cells: [], manifestSha256: "", precommitSha256: "", buildSha256: "",
+    // Every count its own value: a swapped field is visible.
+    const c = { verdict: "CAMPAIGN_OPEN", releaseEvidence: "RELEASE_EVIDENCE_NOT_READY", reasons: [], planned: 11n, observed: 41n, selected: 31n, admitted: 5n, skipped: 37n,
+      written: 9n, acquired: 8n, reverted: 2n, dropped: 3n, late: 4n, unresolved: 6n, passed: 12n, failed: 13n, undecided: 14n, consecutiveMisses: 15n, beforePrecommit: 16n,
+      unverifiable: 17n, coveredS: 3600n, uncoveredS: 400n, coveredPpm: 900000n, skipReasons: ["HASH_ONLY=7"], cells: [], manifestSha256: "", precommitSha256: "", buildSha256: "",
       evaluatedUnixMs: 1n, recordSha256: "" } as LiveCampaignView;
     const rows = Object.fromEntries(campaignRows(c).map(r => [r.label, r.value]));
-    expect(rows).toMatchObject({
-      "Attempts written": "3/10 planned", "Acquired": "2/3", "Passed · failed · undecided": "1/3 · 1/3 · 1/3",
-      "Reverted · dropped · late · unresolved": "1/3 · 0/3 · 1/3 · 0/3", "Selected launches": "30/40", "Skipped launches": "37/40", "Longest run of misses": "12",
+    expect(rows).toEqual({
+      "Attempts written": "9/11 planned", "Acquired": "8/9", "Passed · failed · undecided": "12/9 · 13/9 · 14/9",
+      "Reverted · dropped · late · unresolved": "2/9 · 3/9 · 4/9 · 6/9", "Selected launches": "31/41", "Skipped launches": "37/41", "Admitted by the owner": "5",
+      "Longest run of misses": "15", "Before the commitment": "16", "Unverifiable launches": "17", "Coverage": "3600 s covered · 400 s not",
     });
     expect(campaignRows(c).find(r => r.label === "Skipped launches")?.hint).toBe("HASH_ONLY=7");
+    expect(campaignRows(c).find(r => r.label === "Coverage")?.hint).toContain("900000 ppm");
     expect(NO_EVALUATION).toBe("keine Bewertung");
-    const a = { ordinal: 1n, tx: "0x01", kind: "C3_BUY", cell: "EXTERNAL_FULL_LAUNCH", state: "INCLUDED", verdict: "UNKNOWN", acquisition: "PASS", canonical: "PASS", timing: "UNKNOWN",
-      placement: "PASS", capture: "PASS", local: "PASS", economics: "PASS", reasons: ["TIMING_WITNESS_MISSING"], windowComplete: false, windowWhy: "WINDOW_NOT_FINAL", trades: 7n, buys: 5n, sells: 2n,
-      ingressToSendNs: 900n, attempts: 4n, acquired: 3n, passed: 0n, failed: 1n, undecided: 3n, adapters: [{ builder: "CLUB48_BUILDER_V1", outcome: "SENT", answer: "ACCEPTED" }] } as LiveAttemptView;
-    const cells = attemptCells(a);
-    expect(cells[5]).toContain("timing UNKNOWN");
-    expect(cells[6]).toBe("INCOMPLETE (WINDOW_NOT_FINAL) · trades 7 (buys 5, sells 2)");
-    expect(cells[7]).toBe("—");
-    expect(cells[8]).toBe("ingress→send 900 ns · select→send — · send→ack —");
-    expect(cells[9]).toBe("acquired 3/4 · passed 0/4 · failed 1/4 · undecided 3/4");
-    expect(cells[10]).toBe("CLUB48_BUILDER_V1 SENT ACCEPTED");
+  });
+
+  it("finds the reporter's warning that the campaign section is beyond the state, no other (REV.1.0 R2b re-check F3)", () => {
+    const beyond = "LIVE_CAMPAIGN_BEYOND_STATE 3 records, 2 warnings";
+    expect(campaignBeyondState(["LIVE_ATTEMPT_INVALID 1, first x", beyond])).toBe(beyond);
+    expect(campaignBeyondState(["LIVE_CAMPAIGN_BEYOND_STATEX 1", "LIVE_CAMPAIGN_VERDICT_INVALID"])).toBeUndefined();
+  });
+
+  it("shows every recorded field of an attempt, the counters as counts with their meaning (REV.1.0 R2b review)", () => {
+    const tx = `0x${"01".repeat(32)}`;
+    // TEST_ONLY values, every field its own: a swapped field is visible.
+    const a: LiveAttemptView = { ordinal: 1n, tx, kind: "C3_BUY", cell: "EXTERNAL_FULL_LAUNCH", state: "INCLUDED", verdict: "TEST_VERDICT", acquisition: "PASS", canonical: "FAIL",
+      timing: "UNKNOWN", placement: "NOT_APPLICABLE", capture: "TEST_CAPTURE", local: "TEST_LOCAL", economics: "TEST_ECONOMICS", reasons: ["TIMING_WITNESS_MISSING", "PLACEMENT_LATE"],
+      window: "INCOMPLETE", windowWhy: "WINDOW_NOT_FINAL", trades: 7n, buys: 5n, sells: 2n, firstExternalPrice: "250", priceVsFirstExternalPpm: 800000n,
+      ingressToSendNs: 900n, selectToSendNs: 500n, sendToAckNs: 8000n, attempts: 21n, acquired: 31n, passed: 41n, failed: 51n, undecided: 61n,
+      adapters: [{ builder: "CLUB48_BUILDER_V1", outcome: "SENT", answer: "ACCEPTED", adapter: 7n, boundary: "WRITE", qualified: true, tWriteCheckNs: 1800n, tBoundaryNs: 1905n, tQueueNs: 1950n, tAnswerNs: 9950n }],
+      attempt: `0x${"a0".repeat(32)}`, run: 101n, token: `0x${"ab".repeat(20)}`, launchHash: `0x${"1a".repeat(32)}`, trigger: "BSC_INGRESS_PUBLICNODE",
+      blockNumber: 130000010n, blockHash: `0x${"b1".repeat(32)}`, blockMs: 1793000000000n, tokens: "5000", ethWei: "1000", gasWei: "21", ownPrice: "200", placed: "LATE",
+      launchIndex: 4n, ownIndex: 6n, buysBefore: 1n, clockId: 2n, tIngressNs: 1000n, tSelectNs: 1400n, tSendNs: 1900n, tAckNs: 9900n, deadlineMisses: 3n, windowMs: 15000n,
+      launchBlock: 130000000n, launchMs: 1792999990000n, windowEndBlock: 130000020n, t0Exact: false, firstExternalBuyTx: `0x${"e1".repeat(32)}`, firstExternalBuyBlock: 130000001n,
+      firstExternalBuyIndex: 8n, buyWei: "9000", sellWei: "3000", evaluatedUnixMs: 1793000050000n };
+    const cells = attemptCells(a, 1793000050000n);
+    expect(cells).toHaveLength(ATTEMPT_COLUMNS.length);
+    expect(Object.fromEntries(ATTEMPT_COLUMNS.map((h, i) => [h, cells[i]]))).toEqual({
+      "#": "1",
+      "Tx · attempt · run": `${tx} · attempt 0x${"a0".repeat(32)} · run 101`,
+      "Kind · cell": "C3_BUY · EXTERNAL_FULL_LAUNCH",
+      "Token · launch · trigger": `0x${"ab".repeat(20)} · launch 0x${"1a".repeat(32)} · trigger BSC_INGRESS_PUBLICNODE`,
+      "Block": `130000010 · 0x${"b1".repeat(32)} · 2026-10-26T07:33:20.000Z`,
+      "State": "INCLUDED",
+      "Verdict": "TEST_VERDICT",
+      "Components": "acquisition PASS · canonical FAIL · timing UNKNOWN · placement NOT_APPLICABLE · capture TEST_CAPTURE · local TEST_LOCAL · economics TEST_ECONOMICS",
+      "Tokens · cost": "tokens 5000 · input 1000 wei · gas 21 wei",
+      "Placement": "LATE · launch index 4 · own index 6 · 1 BUYs between",
+      "15-s window": "INCOMPLETE (WINDOW_NOT_FINAL) · 15000 ms from block 130000000 (2026-10-26T07:33:10.000Z) to 130000020 · trades 7 (buys 5 9000 wei, sells 2 3000 wei)",
+      "Price vs first external BUY": `own 200 · first external 250 (wei per 10^18) · 800000 ppm · first external BUY 0x${"e1".repeat(32)} (block 130000001, index 8)`,
+      "Local timing": "T0 UNKNOWN · clock 2 · ingress 1000 ns · select 1400 ns · send 1900 ns · ack 9900 ns · ingress→send 900 ns · select→send 500 ns · send→ack 8000 ns · deadline misses 3",
+      // Review L8: C3 verdict counts, never a share of the attempts.
+      "Counters": "acquired 31/21 LIVE BUYs · C3 verdicts so far: 41 passed · 51 failed · 61 undecided",
+      "Adapters": "CLUB48_BUILDER_V1 (adapter 7) SENT ACCEPTED · WRITE qualified · write-check 1800 ns · boundary 1905 ns · queue 1950 ns · answer 9950 ns",
+      "Reasons": "TIMING_WITNESS_MISSING · PLACEMENT_LATE",
+      "Evaluated": "2026-10-26T07:34:10.000Z",
+    });
+    expect(COUNTERS_MEANING).toContain("passed · failed · undecided zählen nur die Verdikte der C3-BUYs");
+    // Review M4: a record of another evaluation is marked: against the verdict's, without one
+    // against the newest attempt's.
+    expect(attemptCells(a, 1793000060000n).at(-1)).toBe("2026-10-26T07:34:10.000Z · of another evaluation");
+    const newer = { ...a, evaluatedUnixMs: 1793000070000n };
+    expect(evaluationOf(undefined, [a, newer, a])).toBe(1793000070000n);
+    expect(evaluationOf({ evaluatedUnixMs: 1793000050000n } as LiveCampaignView, [a, newer])).toBe(1793000050000n);
+    expect(evaluationOf(undefined, [])).toBeUndefined();
+    expect(attemptCells(a).at(-1)).toBe("2026-10-26T07:34:10.000Z");
+    // The window as written, the exact T0 only when recorded, nothing where the record names nothing.
+    const bare: LiveAttemptView = { ...a, window: "COMPLETE", windowWhy: "", t0Exact: true, run: undefined, launchHash: "", trigger: "", blockNumber: undefined, blockHash: "",
+      blockMs: undefined, tokens: undefined, ethWei: undefined, gasWei: undefined, placed: "", adapters: [], reasons: [], ownPrice: undefined, firstExternalPrice: undefined,
+      priceVsFirstExternalPpm: undefined, firstExternalBuyTx: "", firstExternalBuyBlock: undefined, firstExternalBuyIndex: undefined, launchMs: 9000000000000000n };
+    const b = attemptCells(bare);
+    expect([b[1], b[3], b[4], b[8], b[9], b[11], b[14], b[15]]).toEqual([`${tx} · attempt 0x${"a0".repeat(32)} · run —`, `0x${"ab".repeat(20)} · launch — · trigger —`, "not included",
+      "tokens — · input — · gas —", "—", "own — · first external — (wei per 10^18) · — · first external BUY — (block —, index —)", "—", "—"]);
+    expect(b[10]).toBe("COMPLETE · 15000 ms from block 130000000 (9000000000000000 ms) to 130000020 · trades 7 (buys 5 9000 wei, sells 2 3000 wei)");
+    expect(b[12]).toMatch(/^T0 exact \(recorded\) · /);
+    // Review L9: the record's word, never a reading of whether it names a reason.
+    expect(attemptCells({ ...a, windowWhy: "" })[10]).toMatch(/^INCOMPLETE · 15000 ms/);
   });
 });

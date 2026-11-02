@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file darkbot/bsc/v1/status.proto.
  */
 export const file_darkbot_bsc_v1_status: GenFile = /*@__PURE__*/
-  fileDesc("ChtkYXJrYm90L2JzYy92MS9zdGF0dXMucHJvdG8SDmRhcmtib3QuYnNjLnYxIioKC1B1YmxpY0ZpZWxkEgwKBG5hbWUYASABKAkSDQoFdmFsdWUYAiABKAkiQQoIRXZpZGVuY2USDAoEcGF0aBgBIAEoCRIOCgZzaGEyNTYYAiABKAkSFwoPb2JzZXJ2ZWRfdW5peF9zGAMgASgEIqICCgtHdWFyZFN0YXR1cxIeChZmcm96ZW5fYXBwcm92ZWRfc2hhMjU2GAEgASgJEhMKC2d1YXJkX3N0YXRlGAIgASgJEhUKDWNvbnRyYWN0X3BhdGgYAyABKAkSGAoQY29udHJhY3RfcHJlc2VudBgEIAEoCBIXCg9jb250cmFjdF9zaGEyNTYYBSABKAkSFQoIYXBwcm92ZWQYBiABKAhIAIgBARIcCg9leGVjdXRpb25fcmVhZHkYByABKAhIAYgBARISCgphdHRlbXB0X2lkGAggASgJEhkKDG1heF9hdHRlbXB0cxgJIAEoBEgCiAEBQgsKCV9hcHByb3ZlZEISChBfZXhlY3V0aW9uX3JlYWR5Qg8KDV9tYXhfYXR0ZW1wdHMibgoKR2F0ZVN0YXR1cxIPCgdnYXRlX2lkGAEgASgJEg0KBXN0YXRlGAIgASgJEioKCGV2aWRlbmNlGAMgASgLMhguZGFya2JvdC5ic2MudjEuRXZpZGVuY2USFAoMcmVhc29uX2NvZGVzGAQgAygJIqQDCg9SZWFkaW5lc3NTdGF0dXMSDwoHdmVyZGljdBgBIAEoCRIqCghldmlkZW5jZRgCIAEoCzIYLmRhcmtib3QuYnNjLnYxLkV2aWRlbmNlEhcKD2Z1bmRpbmdfdmVyZGljdBgDIAEoCRIrCgZjaGVja3MYBCADKAsyGy5kYXJrYm90LmJzYy52MS5QdWJsaWNGaWVsZBIcChRwb3J0YWxfdmVyc2lvbl9ib3VuZBgFIAEoCRIfChdwb3J0YWxfdmVyc2lvbl9vYnNlcnZlZBgGIAEoCRIZChFwb3J0YWxfaW1wbF9ib3VuZBgHIAEoCRIcChRwb3J0YWxfaW1wbF9vYnNlcnZlZBgIIAEoCRIeChFjb2RlX2hhc2hfY2hhbmdlZBgJIAEoCEgAiAEBEhcKCmhlYWRfYmxvY2sYCiABKARIAYgBARIPCgdyZWFzb25zGAsgAygJEgwKBG1vZGUYDCABKAkSGQoRY2FuZGlkYXRlX2JpbmRpbmcYDSABKAlCFAoSX2NvZGVfaGFzaF9jaGFuZ2VkQg0KC19oZWFkX2Jsb2NrIvIBCg1CdWlsZGVyU3RhdHVzEh8KF3JlZnJlc2hfb2JzZXJ2ZWRfdW5peF9zGAEgASgEEh4KFnJlZnJlc2hfZXhwaXJlc191bml4X3MYAiABKAQSKwoGZmxvb3JzGAMgAygLMhsuZGFya2JvdC5ic2MudjEuUHVibGljRmllbGQSJwoFcHJvYmUYBCABKAsyGC5kYXJrYm90LmJzYy52MS5FdmlkZW5jZRINCgVwcmljZRgFIAEoCRIQCghub19tZXJnZRgGIAEoCRIWCg5wb3NpdGlvbl9maXJzdBgHIAEoCRIRCglpbmNsdXNpb24YCCABKAkigAEKDVdpdG5lc3NTdGF0dXMSGQoMc291cmNlX3JlYWR5GAEgASgISACIAQESFwoPdDBfdG9fYnV5X3N0YXRlGAIgASgJEioKCGV2aWRlbmNlGAMgASgLMhguZGFya2JvdC5ic2MudjEuRXZpZGVuY2VCDwoNX3NvdXJjZV9yZWFkeSLLAQoJRHJ5U3RhdHVzEioKCGV2aWRlbmNlGAEgASgLMhguZGFya2JvdC5ic2MudjEuRXZpZGVuY2USDgoGZHJ5X2lkGAIgASgJEg0KBXN0YXRlGAMgASgJEi8KCnBhcmFtZXRlcnMYBCADKAsyGy5kYXJrYm90LmJzYy52MS5QdWJsaWNGaWVsZBIlChh2YWxpZF9mb3JfY3VycmVudF9wb3J0YWwYBSABKAhIAIgBAUIbChlfdmFsaWRfZm9yX2N1cnJlbnRfcG9ydGFsIrkBCglKb2JTdGF0dXMSCwoDam9iGAEgASgJEg0KBXN0YXRlGAIgASgJEhEKCWxhdW5jaF9pZBgDIAEoCRIWCg5zdGFydGVkX3VuaXhfcxgEIAEoBBIUCgxlbmRlZF91bml4X3MYBSABKAQSEwoLcmVzdWx0X2NvZGUYBiABKAkSIQoUY29udHJvbGxlcl9hdmFpbGFibGUYByABKAhIAIgBAUIXChVfY29udHJvbGxlcl9hdmFpbGFibGUiYgoLTmF0aXZlRmllbGQSDAoEbmFtZRgBIAEoCRIoCgRraW5kGAIgASgOMhouZGFya2JvdC5ic2MudjEuTmF0aXZlS2luZBINCgV2YWx1ZRgDIAEoCRIMCgR1bml0GAQgASgJIosBCgxOYXRpdmVSZWNvcmQSDgoGc2NoZW1hGAEgASgJEioKCGV2aWRlbmNlGAIgASgLMhguZGFya2JvdC5ic2MudjEuRXZpZGVuY2USEgoKcHJvdmVuYW5jZRgDIAEoCRIrCgZmaWVsZHMYBCADKAsyGy5kYXJrYm90LmJzYy52MS5OYXRpdmVGaWVsZCK3AwoJQnNjU3RhdHVzEhUKDXNvdXJjZV9jb21taXQYASABKAkSGAoQZXZhbHVhdGVkX3VuaXhfcxgCIAEoBBIqCgVndWFyZBgEIAEoCzIbLmRhcmtib3QuYnNjLnYxLkd1YXJkU3RhdHVzEikKBWdhdGVzGAUgAygLMhouZGFya2JvdC5ic2MudjEuR2F0ZVN0YXR1cxIyCglyZWFkaW5lc3MYBiABKAsyHy5kYXJrYm90LmJzYy52MS5SZWFkaW5lc3NTdGF0dXMSLgoHYnVpbGRlchgHIAEoCzIdLmRhcmtib3QuYnNjLnYxLkJ1aWxkZXJTdGF0dXMSLgoHd2l0bmVzcxgIIAEoCzIdLmRhcmtib3QuYnNjLnYxLldpdG5lc3NTdGF0dXMSJgoDZHJ5GAkgASgLMhkuZGFya2JvdC5ic2MudjEuRHJ5U3RhdHVzEicKBGpvYnMYCiADKAsyGS5kYXJrYm90LmJzYy52MS5Kb2JTdGF0dXMSEAoId2FybmluZ3MYCyADKAkSGQoRZGF0YV9hc19vZl91bml4X3MYDCABKARKBAgDEARSCmxpdmVfc3RhdGUirwEKDUNvbnRyb2xTd2l0Y2gSCgoCaWQYASABKAkSEQoJcmVxdWVzdGVkGAIgASgJEhEKCWVmZmVjdGl2ZRgDIAEoCRIUCgxibG9ja19yZWFzb24YBCABKAkSEgoKZ2VuZXJhdGlvbhgFIAEoBBISCgpyZXF1ZXN0X2lkGAYgASgJEhsKDnNldF9nZW5lcmF0aW9uGAcgASgESACIAQFCEQoPX3NldF9nZW5lcmF0aW9uIqwBCg9CdXlBdHRlbXB0TGltaXQSDwoHcGVyX2RheRgBIAEoBBIPCgdkYXlfdXRjGAIgASgJEgwKBHVzZWQYAyABKAQSEQoJcmVtYWluaW5nGAQgASgEEhIKCmdlbmVyYXRpb24YBSABKAQSEgoKcmVxdWVzdF9pZBgGIAEoCRIbCg5zZXRfZ2VuZXJhdGlvbhgHIAEoBEgAiAEBQhEKD19zZXRfZ2VuZXJhdGlvbiKrAwoOQnNjTGF1bmNoU3RhdGUSGAoQY29udHJhY3RfcHJlc2VudBgBIAEoCBIqCghldmlkZW5jZRgCIAEoCzIYLmRhcmtib3QuYnNjLnYxLkV2aWRlbmNlEjQKD2NvbnRyYWN0X2ZpZWxkcxgDIAMoCzIbLmRhcmtib3QuYnNjLnYxLlB1YmxpY0ZpZWxkEjMKDnJ1bnRpbWVfZmllbGRzGAQgAygLMhsuZGFya2JvdC5ic2MudjEuUHVibGljRmllbGQSDgoGcmVhc29uGAUgASgJEi0KB3JlY29yZHMYBiADKAsyHC5kYXJrYm90LmJzYy52MS5OYXRpdmVSZWNvcmQSOAoRZWNvbm9taWNfY29udHJvbHMYByADKAsyHS5kYXJrYm90LmJzYy52MS5Db250cm9sU3dpdGNoEjoKEWJ1eV9hdHRlbXB0X2xpbWl0GAggASgLMh8uZGFya2JvdC5ic2MudjEuQnV5QXR0ZW1wdExpbWl0EjMKDHJ1bnRpbWVfbW9kZRgJIAEoCzIdLmRhcmtib3QuYnNjLnYxLkNvbnRyb2xTd2l0Y2girAEKEkJzY01vbml0b3JpbmdTdGF0ZRINCgVzdGF0ZRgBIAEoCRIqCghldmlkZW5jZRgCIAEoCzIYLmRhcmtib3QuYnNjLnYxLkV2aWRlbmNlEiwKB3Jlc3VsdHMYAyADKAsyGy5kYXJrYm90LmJzYy52MS5QdWJsaWNGaWVsZBItCgdyZWNvcmRzGAQgAygLMhwuZGFya2JvdC5ic2MudjEuTmF0aXZlUmVjb3JkIvMECg9Cc2NXYWxsZXRzU3RhdGUSGAoQZXhwZWN0ZWRfYWRkcmVzcxgBIAEoCRIVCg13YWxsZXRfc3RhdHVzGAIgASgJEhgKEGxhdW5jaGVyX2FkZHJlc3MYAyABKAkSFQoNYnV5ZXJfYWRkcmVzcxgEIAEoCRIVCghjaGFpbl9pZBgFIAEoBEgAiAEBEiEKFGxhdW5jaGVyX2JhbGFuY2Vfd2VpGAYgASgJSAGIAQESHgoRYnV5ZXJfYmFsYW5jZV93ZWkYByABKAlIAogBARIbCg5vYnNlcnZlZF9ibG9jaxgIIAEoBEgDiAEBEhcKD29ic2VydmVkX3VuaXhfcxgJIAEoBBIOCgZzb3VyY2UYCiABKAkSIgoVcmVxdWlyZWRfbGF1bmNoZXJfd2VpGAsgASgJSASIAQESHwoScmVxdWlyZWRfYnV5ZXJfd2VpGAwgASgJSAWIAQESKgoIZXZpZGVuY2UYDSABKAsyGC5kYXJrYm90LmJzYy52MS5FdmlkZW5jZRI3ChBsYXVuY2hlcl9jb250cm9sGA4gASgLMh0uZGFya2JvdC5ic2MudjEuQ29udHJvbFN3aXRjaBI0Cg1idXllcl9jb250cm9sGA8gASgLMh0uZGFya2JvdC5ic2MudjEuQ29udHJvbFN3aXRjaEILCglfY2hhaW5faWRCFwoVX2xhdW5jaGVyX2JhbGFuY2Vfd2VpQhQKEl9idXllcl9iYWxhbmNlX3dlaUIRCg9fb2JzZXJ2ZWRfYmxvY2tCGAoWX3JlcXVpcmVkX2xhdW5jaGVyX3dlaUIVChNfcmVxdWlyZWRfYnV5ZXJfd2VpIjsKEExpdmVQcmVjb25kaXRpb24SCgoCaWQYASABKAkSCwoDbWV0GAIgASgIEg4KBnJlYXNvbhgDIAEoCSL1AgoJTGl2ZUdyYW50Eg0KBXZlbnVlGAEgASgJEhIKCnN0cmF0ZWdpZXMYAiABKAkSDwoHc291cmNlcxgDIAMoCRIQCghhZGFwdGVycxgEIAMoCRIVCg1tYXhfaW5wdXRfd2VpGAUgASgJEhUKDW1heF9zcGVuZF93ZWkYBiABKAkSFAoMbWF4X2F0dGVtcHRzGAcgASgNEhcKD2V4cGlyZXNfdW5peF9tcxgIIAEoBBIUCgxzY29wZV9zaGEyNTYYCSABKAkSEgoKc2NvcGVfdGV4dBgKIAEoCRISCgpyZXF1ZXN0X2lkGAsgASgJEhYKDnNldF9nZW5lcmF0aW9uGAwgASgEEhEKCWV4aXRfb25seRgNIAEoCBIrCgRyaXNrGA4gASgLMh0uZGFya2JvdC5ic2MudjEuTGl2ZUdyYW50UmlzaxIvCgZsaW1pdHMYDyABKAsyHy5kYXJrYm90LmJzYy52MS5MaXZlR3JhbnRMaW1pdHMijgEKD0xpdmVHcmFudExpbWl0cxIaChJtYXhfb3Blbl9wb3NpdGlvbnMYASABKA0SHQoVbWF4X3JlYWxpemVkX2xvc3Nfd2VpGAIgASgJEiMKG21heF9kYWlseV9yZWFsaXplZF9sb3NzX3dlaRgDIAEoCRIbChNtaW5fYnV5X2ludGVydmFsX21zGAQgASgEIr0BCg1MaXZlR3JhbnRSaXNrEhwKFG1heF9idXlfc2xpcHBhZ2VfYnBzGAEgASgNEh0KFW1heF9leGl0X3NsaXBwYWdlX2JwcxgCIAEoDRIZChFtYXhfZ2FzX3ByaWNlX3dlaRgDIAEoBBIZChFtYXhfYnV5X2dhc19saW1pdBgEIAEoBBIdChVtYXhfYXBwcm92ZV9nYXNfbGltaXQYBSABKAQSGgoSbWF4X3NlbGxfZ2FzX2xpbWl0GAYgASgEIrgBCgxMaXZlUG9zaXRpb24SDQoFdG9rZW4YASABKAkSEQoJY29tcG9uZW50GAIgASgJEg0KBXN0YXRlGAMgASgJEg4KBnRva2VucxgEIAEoCRIRCglpbnB1dF93ZWkYBSABKAkSFAoMcHJvY2VlZHNfd2VpGAYgASgJEg8KB2dhc193ZWkYByABKAkSFAoHcG5sX3dlaRgIIAEoCUgAiAEBEgsKA2xvdBgJIAEoCUIKCghfcG5sX3dlaSKLAQoPTGl2ZVRyYW5zYWN0aW9uEg8KB3R4X2hhc2gYASABKAkSDgoGaW50ZW50GAIgASgJEg0KBXRva2VuGAMgASgJEg0KBW5vbmNlGAQgASgEEg0KBXN0YXRlGAUgASgJEhkKDGJsb2NrX251bWJlchgGIAEoBEgAiAEBQg8KDV9ibG9ja19udW1iZXIi0QcKDEJzY0xpdmVTdGF0ZRIMCgRnYXRlGAEgASgJEhAKCGJsb2NrZXJzGAIgAygJEjcKDXByZWNvbmRpdGlvbnMYAyADKAsyIC5kYXJrYm90LmJzYy52MS5MaXZlUHJlY29uZGl0aW9uEigKBWdyYW50GAQgASgLMhkuZGFya2JvdC5ic2MudjEuTGl2ZUdyYW50EhIKCmdlbmVyYXRpb24YBSABKAQSMwoMcnVudGltZV9tb2RlGAYgASgLMh0uZGFya2JvdC5ic2MudjEuQ29udHJvbFN3aXRjaBI0Cg1lY29ub21pY19saXZlGAcgASgLMh0uZGFya2JvdC5ic2MudjEuQ29udHJvbFN3aXRjaBIuCgVkYWlseRgIIAEoCzIfLmRhcmtib3QuYnNjLnYxLkJ1eUF0dGVtcHRMaW1pdBITCgt0b3RhbF9saW1pdBgJIAEoBBISCgp0b3RhbF91c2VkGAogASgEEhsKE2dyYW50X2F0dGVtcHRzX3VzZWQYCyABKAQSEQoJc3BlbnRfd2VpGAwgASgJEhUKDXF1YWxpZmljYXRpb24YDSABKAkSHAoUcXVhbGlmaWNhdGlvbl9kZXRhaWwYDiABKAkSEgoKcGF0aF9zdGF0ZRgPIAEoCRITCgtwYXRoX3JlYXNvbhgQIAEoCRINCgVyb3V0ZRgRIAEoCRINCgVidXllchgSIAEoCRIeChFidXllcl9iYWxhbmNlX3dlaRgTIAEoCUgAiAEBEhAKCHJlbGVhc2VkGBQgASgEEg8KB3Vua25vd24YFSABKAQSFAoMbGFzdF9yZWZ1c2FsGBYgASgJEi8KCXBvc2l0aW9ucxgXIAMoCzIcLmRhcmtib3QuYnNjLnYxLkxpdmVQb3NpdGlvbhI1Cgx0cmFuc2FjdGlvbnMYGCADKAsyHy5kYXJrYm90LmJzYy52MS5MaXZlVHJhbnNhY3Rpb24SGAoQcmVhbGl6ZWRfcG5sX3dlaRgZIAEoCRIPCgdnYXNfd2VpGBogASgJEhAKCHdhcm5pbmdzGBsgAygJEiwKBXNjb3BlGBwgAygLMh0uZGFya2JvdC5ic2MudjEuQ29udHJvbFN3aXRjaBIZChFncmFudGFibGVfc291cmNlcxgdIAMoCRIuCghjYW1wYWlnbhgeIAEoCzIcLmRhcmtib3QuYnNjLnYxLkxpdmVDYW1wYWlnbhItCghhdHRlbXB0cxgfIAMoCzIbLmRhcmtib3QuYnNjLnYxLkxpdmVBdHRlbXB0QhQKEl9idXllcl9iYWxhbmNlX3dlaSL3AQoQTGl2ZUNhbXBhaWduQ2VsbBIMCgRjZWxsGAEgASgJEg8KB2VuYWJsZWQYAiABKAgSGQoMbWluX2F0dGVtcHRzGAMgASgESACIAQESEAoIYXR0ZW1wdHMYBCABKAQSDgoGcGFzc2VkGAUgASgEEg4KBmZhaWxlZBgGIAEoBBIRCgl1bmRlY2lkZWQYByABKAQSGwoObWluX2R1cmF0aW9uX3MYCCABKARIAYgBARISCgpkdXJhdGlvbl9zGAkgASgEEg8KB3ZlcmRpY3QYCiABKAlCDwoNX21pbl9hdHRlbXB0c0IRCg9fbWluX2R1cmF0aW9uX3MiiAUKDExpdmVDYW1wYWlnbhIPCgd2ZXJkaWN0GAEgASgJEhgKEHJlbGVhc2VfZXZpZGVuY2UYAiABKAkSDwoHcmVhc29ucxgDIAMoCRIPCgdwbGFubmVkGAQgASgEEhAKCG9ic2VydmVkGAUgASgEEhAKCHNlbGVjdGVkGAYgASgEEhAKCGFkbWl0dGVkGAcgASgEEg8KB3NraXBwZWQYCCABKAQSDwoHd3JpdHRlbhgJIAEoBBIQCghhY3F1aXJlZBgKIAEoBBIQCghyZXZlcnRlZBgLIAEoBBIPCgdkcm9wcGVkGAwgASgEEgwKBGxhdGUYDSABKAQSEgoKdW5yZXNvbHZlZBgOIAEoBBIOCgZwYXNzZWQYDyABKAQSDgoGZmFpbGVkGBAgASgEEhEKCXVuZGVjaWRlZBgRIAEoBBIaChJjb25zZWN1dGl2ZV9taXNzZXMYEiABKAQSGAoQYmVmb3JlX3ByZWNvbW1pdBgTIAEoBBIUCgx1bnZlcmlmaWFibGUYFCABKAQSEQoJY292ZXJlZF9zGBUgASgEEhMKC3VuY292ZXJlZF9zGBYgASgEEhMKC2NvdmVyZWRfcHBtGBcgASgEEhQKDHNraXBfcmVhc29ucxgYIAMoCRIvCgVjZWxscxgZIAMoCzIgLmRhcmtib3QuYnNjLnYxLkxpdmVDYW1wYWlnbkNlbGwSFwoPbWFuaWZlc3Rfc2hhMjU2GBogASgJEhgKEHByZWNvbW1pdF9zaGEyNTYYGyABKAkSFAoMYnVpbGRfc2hhMjU2GBwgASgJEhkKEWV2YWx1YXRlZF91bml4X21zGB0gASgEEhUKDXJlY29yZF9zaGEyNTYYHiABKAkiRgoSTGl2ZUF0dGVtcHRBZGFwdGVyEg8KB2J1aWxkZXIYASABKAkSDwoHb3V0Y29tZRgCIAEoCRIOCgZhbnN3ZXIYAyABKAkigAYKC0xpdmVBdHRlbXB0Eg8KB29yZGluYWwYASABKAQSCgoCdHgYAiABKAkSDAoEa2luZBgDIAEoCRIMCgRjZWxsGAQgASgJEg0KBXN0YXRlGAUgASgJEg8KB3ZlcmRpY3QYBiABKAkSEwoLYWNxdWlzaXRpb24YByABKAkSEQoJY2Fub25pY2FsGAggASgJEg4KBnRpbWluZxgJIAEoCRIRCglwbGFjZW1lbnQYCiABKAkSDwoHY2FwdHVyZRgLIAEoCRINCgVsb2NhbBgMIAEoCRIRCgllY29ub21pY3MYDSABKAkSDwoHcmVhc29ucxgOIAMoCRIXCg93aW5kb3dfY29tcGxldGUYDyABKAgSEgoKd2luZG93X3doeRgQIAEoCRIOCgZ0cmFkZXMYESABKAQSDAoEYnV5cxgSIAEoBBINCgVzZWxscxgTIAEoBBIhChRmaXJzdF9leHRlcm5hbF9wcmljZRgUIAEoCUgAiAEBEigKG3ByaWNlX3ZzX2ZpcnN0X2V4dGVybmFsX3BwbRgVIAEoBEgBiAEBEh8KEmluZ3Jlc3NfdG9fc2VuZF9ucxgWIAEoBEgCiAEBEh4KEXNlbGVjdF90b19zZW5kX25zGBcgASgESAOIAQESGwoOc2VuZF90b19hY2tfbnMYGCABKARIBIgBARIQCghhdHRlbXB0cxgZIAEoBBIQCghhY3F1aXJlZBgaIAEoBBIOCgZwYXNzZWQYGyABKAQSDgoGZmFpbGVkGBwgASgEEhEKCXVuZGVjaWRlZBgdIAEoBBI0CghhZGFwdGVycxgeIAMoCzIiLmRhcmtib3QuYnNjLnYxLkxpdmVBdHRlbXB0QWRhcHRlckIXChVfZmlyc3RfZXh0ZXJuYWxfcHJpY2VCHgocX3ByaWNlX3ZzX2ZpcnN0X2V4dGVybmFsX3BwbUIVChNfaW5ncmVzc190b19zZW5kX25zQhQKEl9zZWxlY3RfdG9fc2VuZF9uc0IRCg9fc2VuZF90b19hY2tfbnMivwIKE0JzY0xpdmVHcmFudENvbW1hbmQSDQoFdmVudWUYASABKAkSEgoKc3RyYXRlZ2llcxgCIAEoCRIPCgdzb3VyY2VzGAMgAygJEhAKCGFkYXB0ZXJzGAQgAygJEhUKDW1heF9pbnB1dF93ZWkYBSABKAkSFQoNbWF4X3NwZW5kX3dlaRgGIAEoCRIUCgxtYXhfYXR0ZW1wdHMYByABKA0SFwoPZXhwaXJlc191bml4X21zGAggASgEEhQKDHNjb3BlX3NoYTI1NhgJIAEoCRIRCglleGl0X29ubHkYCiABKAgSKwoEcmlzaxgLIAEoCzIdLmRhcmtib3QuYnNjLnYxLkxpdmVHcmFudFJpc2sSLwoGbGltaXRzGAwgASgLMh8uZGFya2JvdC5ic2MudjEuTGl2ZUdyYW50TGltaXRzKsQBCgpOYXRpdmVLaW5kEhsKF05BVElWRV9LSU5EX1VOU1BFQ0lGSUVEEAASFAoQTkFUSVZFX0tJTkRfQk9PTBABEhMKD05BVElWRV9LSU5EX1U2NBACEhMKD05BVElWRV9LSU5EX0k2NBADEhQKEE5BVElWRV9LSU5EX1UyNTYQBBIXChNOQVRJVkVfS0lORF9BRERSRVNTEAUSFAoQTkFUSVZFX0tJTkRfQjI1NhAGEhQKEE5BVElWRV9LSU5EX1RFWFQQB0J7ChJjb20uZGFya2JvdC5ic2MudjFCC1N0YXR1c1Byb3RvUAGiAgNEQliqAg5EYXJrYm90LkJzYy5WMcoCDkRhcmtib3RcQnNjXFYx4gIaRGFya2JvdFxCc2NcVjFcR1BCTWV0YWRhdGHqAhBEYXJrYm90OjpCc2M6OlYxYgZwcm90bzM");
+  fileDesc("ChtkYXJrYm90L2JzYy92MS9zdGF0dXMucHJvdG8SDmRhcmtib3QuYnNjLnYxIioKC1B1YmxpY0ZpZWxkEgwKBG5hbWUYASABKAkSDQoFdmFsdWUYAiABKAkiQQoIRXZpZGVuY2USDAoEcGF0aBgBIAEoCRIOCgZzaGEyNTYYAiABKAkSFwoPb2JzZXJ2ZWRfdW5peF9zGAMgASgEIqICCgtHdWFyZFN0YXR1cxIeChZmcm96ZW5fYXBwcm92ZWRfc2hhMjU2GAEgASgJEhMKC2d1YXJkX3N0YXRlGAIgASgJEhUKDWNvbnRyYWN0X3BhdGgYAyABKAkSGAoQY29udHJhY3RfcHJlc2VudBgEIAEoCBIXCg9jb250cmFjdF9zaGEyNTYYBSABKAkSFQoIYXBwcm92ZWQYBiABKAhIAIgBARIcCg9leGVjdXRpb25fcmVhZHkYByABKAhIAYgBARISCgphdHRlbXB0X2lkGAggASgJEhkKDG1heF9hdHRlbXB0cxgJIAEoBEgCiAEBQgsKCV9hcHByb3ZlZEISChBfZXhlY3V0aW9uX3JlYWR5Qg8KDV9tYXhfYXR0ZW1wdHMibgoKR2F0ZVN0YXR1cxIPCgdnYXRlX2lkGAEgASgJEg0KBXN0YXRlGAIgASgJEioKCGV2aWRlbmNlGAMgASgLMhguZGFya2JvdC5ic2MudjEuRXZpZGVuY2USFAoMcmVhc29uX2NvZGVzGAQgAygJIqQDCg9SZWFkaW5lc3NTdGF0dXMSDwoHdmVyZGljdBgBIAEoCRIqCghldmlkZW5jZRgCIAEoCzIYLmRhcmtib3QuYnNjLnYxLkV2aWRlbmNlEhcKD2Z1bmRpbmdfdmVyZGljdBgDIAEoCRIrCgZjaGVja3MYBCADKAsyGy5kYXJrYm90LmJzYy52MS5QdWJsaWNGaWVsZBIcChRwb3J0YWxfdmVyc2lvbl9ib3VuZBgFIAEoCRIfChdwb3J0YWxfdmVyc2lvbl9vYnNlcnZlZBgGIAEoCRIZChFwb3J0YWxfaW1wbF9ib3VuZBgHIAEoCRIcChRwb3J0YWxfaW1wbF9vYnNlcnZlZBgIIAEoCRIeChFjb2RlX2hhc2hfY2hhbmdlZBgJIAEoCEgAiAEBEhcKCmhlYWRfYmxvY2sYCiABKARIAYgBARIPCgdyZWFzb25zGAsgAygJEgwKBG1vZGUYDCABKAkSGQoRY2FuZGlkYXRlX2JpbmRpbmcYDSABKAlCFAoSX2NvZGVfaGFzaF9jaGFuZ2VkQg0KC19oZWFkX2Jsb2NrIvIBCg1CdWlsZGVyU3RhdHVzEh8KF3JlZnJlc2hfb2JzZXJ2ZWRfdW5peF9zGAEgASgEEh4KFnJlZnJlc2hfZXhwaXJlc191bml4X3MYAiABKAQSKwoGZmxvb3JzGAMgAygLMhsuZGFya2JvdC5ic2MudjEuUHVibGljRmllbGQSJwoFcHJvYmUYBCABKAsyGC5kYXJrYm90LmJzYy52MS5FdmlkZW5jZRINCgVwcmljZRgFIAEoCRIQCghub19tZXJnZRgGIAEoCRIWCg5wb3NpdGlvbl9maXJzdBgHIAEoCRIRCglpbmNsdXNpb24YCCABKAkigAEKDVdpdG5lc3NTdGF0dXMSGQoMc291cmNlX3JlYWR5GAEgASgISACIAQESFwoPdDBfdG9fYnV5X3N0YXRlGAIgASgJEioKCGV2aWRlbmNlGAMgASgLMhguZGFya2JvdC5ic2MudjEuRXZpZGVuY2VCDwoNX3NvdXJjZV9yZWFkeSLLAQoJRHJ5U3RhdHVzEioKCGV2aWRlbmNlGAEgASgLMhguZGFya2JvdC5ic2MudjEuRXZpZGVuY2USDgoGZHJ5X2lkGAIgASgJEg0KBXN0YXRlGAMgASgJEi8KCnBhcmFtZXRlcnMYBCADKAsyGy5kYXJrYm90LmJzYy52MS5QdWJsaWNGaWVsZBIlChh2YWxpZF9mb3JfY3VycmVudF9wb3J0YWwYBSABKAhIAIgBAUIbChlfdmFsaWRfZm9yX2N1cnJlbnRfcG9ydGFsIrkBCglKb2JTdGF0dXMSCwoDam9iGAEgASgJEg0KBXN0YXRlGAIgASgJEhEKCWxhdW5jaF9pZBgDIAEoCRIWCg5zdGFydGVkX3VuaXhfcxgEIAEoBBIUCgxlbmRlZF91bml4X3MYBSABKAQSEwoLcmVzdWx0X2NvZGUYBiABKAkSIQoUY29udHJvbGxlcl9hdmFpbGFibGUYByABKAhIAIgBAUIXChVfY29udHJvbGxlcl9hdmFpbGFibGUiYgoLTmF0aXZlRmllbGQSDAoEbmFtZRgBIAEoCRIoCgRraW5kGAIgASgOMhouZGFya2JvdC5ic2MudjEuTmF0aXZlS2luZBINCgV2YWx1ZRgDIAEoCRIMCgR1bml0GAQgASgJIosBCgxOYXRpdmVSZWNvcmQSDgoGc2NoZW1hGAEgASgJEioKCGV2aWRlbmNlGAIgASgLMhguZGFya2JvdC5ic2MudjEuRXZpZGVuY2USEgoKcHJvdmVuYW5jZRgDIAEoCRIrCgZmaWVsZHMYBCADKAsyGy5kYXJrYm90LmJzYy52MS5OYXRpdmVGaWVsZCK3AwoJQnNjU3RhdHVzEhUKDXNvdXJjZV9jb21taXQYASABKAkSGAoQZXZhbHVhdGVkX3VuaXhfcxgCIAEoBBIqCgVndWFyZBgEIAEoCzIbLmRhcmtib3QuYnNjLnYxLkd1YXJkU3RhdHVzEikKBWdhdGVzGAUgAygLMhouZGFya2JvdC5ic2MudjEuR2F0ZVN0YXR1cxIyCglyZWFkaW5lc3MYBiABKAsyHy5kYXJrYm90LmJzYy52MS5SZWFkaW5lc3NTdGF0dXMSLgoHYnVpbGRlchgHIAEoCzIdLmRhcmtib3QuYnNjLnYxLkJ1aWxkZXJTdGF0dXMSLgoHd2l0bmVzcxgIIAEoCzIdLmRhcmtib3QuYnNjLnYxLldpdG5lc3NTdGF0dXMSJgoDZHJ5GAkgASgLMhkuZGFya2JvdC5ic2MudjEuRHJ5U3RhdHVzEicKBGpvYnMYCiADKAsyGS5kYXJrYm90LmJzYy52MS5Kb2JTdGF0dXMSEAoId2FybmluZ3MYCyADKAkSGQoRZGF0YV9hc19vZl91bml4X3MYDCABKARKBAgDEARSCmxpdmVfc3RhdGUirwEKDUNvbnRyb2xTd2l0Y2gSCgoCaWQYASABKAkSEQoJcmVxdWVzdGVkGAIgASgJEhEKCWVmZmVjdGl2ZRgDIAEoCRIUCgxibG9ja19yZWFzb24YBCABKAkSEgoKZ2VuZXJhdGlvbhgFIAEoBBISCgpyZXF1ZXN0X2lkGAYgASgJEhsKDnNldF9nZW5lcmF0aW9uGAcgASgESACIAQFCEQoPX3NldF9nZW5lcmF0aW9uIqwBCg9CdXlBdHRlbXB0TGltaXQSDwoHcGVyX2RheRgBIAEoBBIPCgdkYXlfdXRjGAIgASgJEgwKBHVzZWQYAyABKAQSEQoJcmVtYWluaW5nGAQgASgEEhIKCmdlbmVyYXRpb24YBSABKAQSEgoKcmVxdWVzdF9pZBgGIAEoCRIbCg5zZXRfZ2VuZXJhdGlvbhgHIAEoBEgAiAEBQhEKD19zZXRfZ2VuZXJhdGlvbiKrAwoOQnNjTGF1bmNoU3RhdGUSGAoQY29udHJhY3RfcHJlc2VudBgBIAEoCBIqCghldmlkZW5jZRgCIAEoCzIYLmRhcmtib3QuYnNjLnYxLkV2aWRlbmNlEjQKD2NvbnRyYWN0X2ZpZWxkcxgDIAMoCzIbLmRhcmtib3QuYnNjLnYxLlB1YmxpY0ZpZWxkEjMKDnJ1bnRpbWVfZmllbGRzGAQgAygLMhsuZGFya2JvdC5ic2MudjEuUHVibGljRmllbGQSDgoGcmVhc29uGAUgASgJEi0KB3JlY29yZHMYBiADKAsyHC5kYXJrYm90LmJzYy52MS5OYXRpdmVSZWNvcmQSOAoRZWNvbm9taWNfY29udHJvbHMYByADKAsyHS5kYXJrYm90LmJzYy52MS5Db250cm9sU3dpdGNoEjoKEWJ1eV9hdHRlbXB0X2xpbWl0GAggASgLMh8uZGFya2JvdC5ic2MudjEuQnV5QXR0ZW1wdExpbWl0EjMKDHJ1bnRpbWVfbW9kZRgJIAEoCzIdLmRhcmtib3QuYnNjLnYxLkNvbnRyb2xTd2l0Y2girAEKEkJzY01vbml0b3JpbmdTdGF0ZRINCgVzdGF0ZRgBIAEoCRIqCghldmlkZW5jZRgCIAEoCzIYLmRhcmtib3QuYnNjLnYxLkV2aWRlbmNlEiwKB3Jlc3VsdHMYAyADKAsyGy5kYXJrYm90LmJzYy52MS5QdWJsaWNGaWVsZBItCgdyZWNvcmRzGAQgAygLMhwuZGFya2JvdC5ic2MudjEuTmF0aXZlUmVjb3JkIvMECg9Cc2NXYWxsZXRzU3RhdGUSGAoQZXhwZWN0ZWRfYWRkcmVzcxgBIAEoCRIVCg13YWxsZXRfc3RhdHVzGAIgASgJEhgKEGxhdW5jaGVyX2FkZHJlc3MYAyABKAkSFQoNYnV5ZXJfYWRkcmVzcxgEIAEoCRIVCghjaGFpbl9pZBgFIAEoBEgAiAEBEiEKFGxhdW5jaGVyX2JhbGFuY2Vfd2VpGAYgASgJSAGIAQESHgoRYnV5ZXJfYmFsYW5jZV93ZWkYByABKAlIAogBARIbCg5vYnNlcnZlZF9ibG9jaxgIIAEoBEgDiAEBEhcKD29ic2VydmVkX3VuaXhfcxgJIAEoBBIOCgZzb3VyY2UYCiABKAkSIgoVcmVxdWlyZWRfbGF1bmNoZXJfd2VpGAsgASgJSASIAQESHwoScmVxdWlyZWRfYnV5ZXJfd2VpGAwgASgJSAWIAQESKgoIZXZpZGVuY2UYDSABKAsyGC5kYXJrYm90LmJzYy52MS5FdmlkZW5jZRI3ChBsYXVuY2hlcl9jb250cm9sGA4gASgLMh0uZGFya2JvdC5ic2MudjEuQ29udHJvbFN3aXRjaBI0Cg1idXllcl9jb250cm9sGA8gASgLMh0uZGFya2JvdC5ic2MudjEuQ29udHJvbFN3aXRjaEILCglfY2hhaW5faWRCFwoVX2xhdW5jaGVyX2JhbGFuY2Vfd2VpQhQKEl9idXllcl9iYWxhbmNlX3dlaUIRCg9fb2JzZXJ2ZWRfYmxvY2tCGAoWX3JlcXVpcmVkX2xhdW5jaGVyX3dlaUIVChNfcmVxdWlyZWRfYnV5ZXJfd2VpIjsKEExpdmVQcmVjb25kaXRpb24SCgoCaWQYASABKAkSCwoDbWV0GAIgASgIEg4KBnJlYXNvbhgDIAEoCSL1AgoJTGl2ZUdyYW50Eg0KBXZlbnVlGAEgASgJEhIKCnN0cmF0ZWdpZXMYAiABKAkSDwoHc291cmNlcxgDIAMoCRIQCghhZGFwdGVycxgEIAMoCRIVCg1tYXhfaW5wdXRfd2VpGAUgASgJEhUKDW1heF9zcGVuZF93ZWkYBiABKAkSFAoMbWF4X2F0dGVtcHRzGAcgASgNEhcKD2V4cGlyZXNfdW5peF9tcxgIIAEoBBIUCgxzY29wZV9zaGEyNTYYCSABKAkSEgoKc2NvcGVfdGV4dBgKIAEoCRISCgpyZXF1ZXN0X2lkGAsgASgJEhYKDnNldF9nZW5lcmF0aW9uGAwgASgEEhEKCWV4aXRfb25seRgNIAEoCBIrCgRyaXNrGA4gASgLMh0uZGFya2JvdC5ic2MudjEuTGl2ZUdyYW50UmlzaxIvCgZsaW1pdHMYDyABKAsyHy5kYXJrYm90LmJzYy52MS5MaXZlR3JhbnRMaW1pdHMijgEKD0xpdmVHcmFudExpbWl0cxIaChJtYXhfb3Blbl9wb3NpdGlvbnMYASABKA0SHQoVbWF4X3JlYWxpemVkX2xvc3Nfd2VpGAIgASgJEiMKG21heF9kYWlseV9yZWFsaXplZF9sb3NzX3dlaRgDIAEoCRIbChNtaW5fYnV5X2ludGVydmFsX21zGAQgASgEIr0BCg1MaXZlR3JhbnRSaXNrEhwKFG1heF9idXlfc2xpcHBhZ2VfYnBzGAEgASgNEh0KFW1heF9leGl0X3NsaXBwYWdlX2JwcxgCIAEoDRIZChFtYXhfZ2FzX3ByaWNlX3dlaRgDIAEoBBIZChFtYXhfYnV5X2dhc19saW1pdBgEIAEoBBIdChVtYXhfYXBwcm92ZV9nYXNfbGltaXQYBSABKAQSGgoSbWF4X3NlbGxfZ2FzX2xpbWl0GAYgASgEIrgBCgxMaXZlUG9zaXRpb24SDQoFdG9rZW4YASABKAkSEQoJY29tcG9uZW50GAIgASgJEg0KBXN0YXRlGAMgASgJEg4KBnRva2VucxgEIAEoCRIRCglpbnB1dF93ZWkYBSABKAkSFAoMcHJvY2VlZHNfd2VpGAYgASgJEg8KB2dhc193ZWkYByABKAkSFAoHcG5sX3dlaRgIIAEoCUgAiAEBEgsKA2xvdBgJIAEoCUIKCghfcG5sX3dlaSKLAQoPTGl2ZVRyYW5zYWN0aW9uEg8KB3R4X2hhc2gYASABKAkSDgoGaW50ZW50GAIgASgJEg0KBXRva2VuGAMgASgJEg0KBW5vbmNlGAQgASgEEg0KBXN0YXRlGAUgASgJEhkKDGJsb2NrX251bWJlchgGIAEoBEgAiAEBQg8KDV9ibG9ja19udW1iZXIi0QcKDEJzY0xpdmVTdGF0ZRIMCgRnYXRlGAEgASgJEhAKCGJsb2NrZXJzGAIgAygJEjcKDXByZWNvbmRpdGlvbnMYAyADKAsyIC5kYXJrYm90LmJzYy52MS5MaXZlUHJlY29uZGl0aW9uEigKBWdyYW50GAQgASgLMhkuZGFya2JvdC5ic2MudjEuTGl2ZUdyYW50EhIKCmdlbmVyYXRpb24YBSABKAQSMwoMcnVudGltZV9tb2RlGAYgASgLMh0uZGFya2JvdC5ic2MudjEuQ29udHJvbFN3aXRjaBI0Cg1lY29ub21pY19saXZlGAcgASgLMh0uZGFya2JvdC5ic2MudjEuQ29udHJvbFN3aXRjaBIuCgVkYWlseRgIIAEoCzIfLmRhcmtib3QuYnNjLnYxLkJ1eUF0dGVtcHRMaW1pdBITCgt0b3RhbF9saW1pdBgJIAEoBBISCgp0b3RhbF91c2VkGAogASgEEhsKE2dyYW50X2F0dGVtcHRzX3VzZWQYCyABKAQSEQoJc3BlbnRfd2VpGAwgASgJEhUKDXF1YWxpZmljYXRpb24YDSABKAkSHAoUcXVhbGlmaWNhdGlvbl9kZXRhaWwYDiABKAkSEgoKcGF0aF9zdGF0ZRgPIAEoCRITCgtwYXRoX3JlYXNvbhgQIAEoCRINCgVyb3V0ZRgRIAEoCRINCgVidXllchgSIAEoCRIeChFidXllcl9iYWxhbmNlX3dlaRgTIAEoCUgAiAEBEhAKCHJlbGVhc2VkGBQgASgEEg8KB3Vua25vd24YFSABKAQSFAoMbGFzdF9yZWZ1c2FsGBYgASgJEi8KCXBvc2l0aW9ucxgXIAMoCzIcLmRhcmtib3QuYnNjLnYxLkxpdmVQb3NpdGlvbhI1Cgx0cmFuc2FjdGlvbnMYGCADKAsyHy5kYXJrYm90LmJzYy52MS5MaXZlVHJhbnNhY3Rpb24SGAoQcmVhbGl6ZWRfcG5sX3dlaRgZIAEoCRIPCgdnYXNfd2VpGBogASgJEhAKCHdhcm5pbmdzGBsgAygJEiwKBXNjb3BlGBwgAygLMh0uZGFya2JvdC5ic2MudjEuQ29udHJvbFN3aXRjaBIZChFncmFudGFibGVfc291cmNlcxgdIAMoCRIuCghjYW1wYWlnbhgeIAEoCzIcLmRhcmtib3QuYnNjLnYxLkxpdmVDYW1wYWlnbhItCghhdHRlbXB0cxgfIAMoCzIbLmRhcmtib3QuYnNjLnYxLkxpdmVBdHRlbXB0QhQKEl9idXllcl9iYWxhbmNlX3dlaSL3AQoQTGl2ZUNhbXBhaWduQ2VsbBIMCgRjZWxsGAEgASgJEg8KB2VuYWJsZWQYAiABKAgSGQoMbWluX2F0dGVtcHRzGAMgASgESACIAQESEAoIYXR0ZW1wdHMYBCABKAQSDgoGcGFzc2VkGAUgASgEEg4KBmZhaWxlZBgGIAEoBBIRCgl1bmRlY2lkZWQYByABKAQSGwoObWluX2R1cmF0aW9uX3MYCCABKARIAYgBARISCgpkdXJhdGlvbl9zGAkgASgEEg8KB3ZlcmRpY3QYCiABKAlCDwoNX21pbl9hdHRlbXB0c0IRCg9fbWluX2R1cmF0aW9uX3MiiAUKDExpdmVDYW1wYWlnbhIPCgd2ZXJkaWN0GAEgASgJEhgKEHJlbGVhc2VfZXZpZGVuY2UYAiABKAkSDwoHcmVhc29ucxgDIAMoCRIPCgdwbGFubmVkGAQgASgEEhAKCG9ic2VydmVkGAUgASgEEhAKCHNlbGVjdGVkGAYgASgEEhAKCGFkbWl0dGVkGAcgASgEEg8KB3NraXBwZWQYCCABKAQSDwoHd3JpdHRlbhgJIAEoBBIQCghhY3F1aXJlZBgKIAEoBBIQCghyZXZlcnRlZBgLIAEoBBIPCgdkcm9wcGVkGAwgASgEEgwKBGxhdGUYDSABKAQSEgoKdW5yZXNvbHZlZBgOIAEoBBIOCgZwYXNzZWQYDyABKAQSDgoGZmFpbGVkGBAgASgEEhEKCXVuZGVjaWRlZBgRIAEoBBIaChJjb25zZWN1dGl2ZV9taXNzZXMYEiABKAQSGAoQYmVmb3JlX3ByZWNvbW1pdBgTIAEoBBIUCgx1bnZlcmlmaWFibGUYFCABKAQSEQoJY292ZXJlZF9zGBUgASgEEhMKC3VuY292ZXJlZF9zGBYgASgEEhMKC2NvdmVyZWRfcHBtGBcgASgEEhQKDHNraXBfcmVhc29ucxgYIAMoCRIvCgVjZWxscxgZIAMoCzIgLmRhcmtib3QuYnNjLnYxLkxpdmVDYW1wYWlnbkNlbGwSFwoPbWFuaWZlc3Rfc2hhMjU2GBogASgJEhgKEHByZWNvbW1pdF9zaGEyNTYYGyABKAkSFAoMYnVpbGRfc2hhMjU2GBwgASgJEhkKEWV2YWx1YXRlZF91bml4X21zGB0gASgEEhUKDXJlY29yZF9zaGEyNTYYHiABKAkisAIKEkxpdmVBdHRlbXB0QWRhcHRlchIPCgdidWlsZGVyGAEgASgJEg8KB291dGNvbWUYAiABKAkSDgoGYW5zd2VyGAMgASgJEg8KB2FkYXB0ZXIYBCABKAQSEAoIYm91bmRhcnkYBSABKAkSEQoJcXVhbGlmaWVkGAYgASgIEh0KEHRfd3JpdGVfY2hlY2tfbnMYByABKARIAIgBARIaCg10X2JvdW5kYXJ5X25zGAggASgESAGIAQESFwoKdF9xdWV1ZV9ucxgJIAEoBEgCiAEBEhgKC3RfYW5zd2VyX25zGAogASgESAOIAQFCEwoRX3Rfd3JpdGVfY2hlY2tfbnNCEAoOX3RfYm91bmRhcnlfbnNCDQoLX3RfcXVldWVfbnNCDgoMX3RfYW5zd2VyX25zIu4OCgtMaXZlQXR0ZW1wdBIPCgdvcmRpbmFsGAEgASgEEgoKAnR4GAIgASgJEgwKBGtpbmQYAyABKAkSDAoEY2VsbBgEIAEoCRINCgVzdGF0ZRgFIAEoCRIPCgd2ZXJkaWN0GAYgASgJEhMKC2FjcXVpc2l0aW9uGAcgASgJEhEKCWNhbm9uaWNhbBgIIAEoCRIOCgZ0aW1pbmcYCSABKAkSEQoJcGxhY2VtZW50GAogASgJEg8KB2NhcHR1cmUYCyABKAkSDQoFbG9jYWwYDCABKAkSEQoJZWNvbm9taWNzGA0gASgJEg8KB3JlYXNvbnMYDiADKAkSEgoKd2luZG93X3doeRgQIAEoCRIOCgZ0cmFkZXMYESABKAQSDAoEYnV5cxgSIAEoBBINCgVzZWxscxgTIAEoBBIhChRmaXJzdF9leHRlcm5hbF9wcmljZRgUIAEoCUgAiAEBEigKG3ByaWNlX3ZzX2ZpcnN0X2V4dGVybmFsX3BwbRgVIAEoBEgBiAEBEh8KEmluZ3Jlc3NfdG9fc2VuZF9ucxgWIAEoBEgCiAEBEh4KEXNlbGVjdF90b19zZW5kX25zGBcgASgESAOIAQESGwoOc2VuZF90b19hY2tfbnMYGCABKARIBIgBARIQCghhdHRlbXB0cxgZIAEoBBIQCghhY3F1aXJlZBgaIAEoBBIOCgZwYXNzZWQYGyABKAQSDgoGZmFpbGVkGBwgASgEEhEKCXVuZGVjaWRlZBgdIAEoBBI0CghhZGFwdGVycxgeIAMoCzIiLmRhcmtib3QuYnNjLnYxLkxpdmVBdHRlbXB0QWRhcHRlchIOCgZ3aW5kb3cYHyABKAkSDwoHYXR0ZW1wdBggIAEoCRIQCgNydW4YISABKARIBYgBARINCgV0b2tlbhgiIAEoCRITCgtsYXVuY2hfaGFzaBgjIAEoCRIPCgd0cmlnZ2VyGCQgASgJEhkKDGJsb2NrX251bWJlchglIAEoBEgGiAEBEhIKCmJsb2NrX2hhc2gYJiABKAkSFQoIYmxvY2tfbXMYJyABKARIB4gBARITCgZ0b2tlbnMYKCABKAlICIgBARIUCgdldGhfd2VpGCkgASgJSAmIAQESFAoHZ2FzX3dlaRgqIAEoCUgKiAEBEhYKCW93bl9wcmljZRgrIAEoCUgLiAEBEg4KBnBsYWNlZBgsIAEoCRIZCgxsYXVuY2hfaW5kZXgYLSABKARIDIgBARIWCglvd25faW5kZXgYLiABKARIDYgBARIYCgtidXlzX2JlZm9yZRgvIAEoBEgOiAEBEhUKCGNsb2NrX2lkGDAgASgESA+IAQESGQoMdF9pbmdyZXNzX25zGDEgASgESBCIAQESGAoLdF9zZWxlY3RfbnMYMiABKARIEYgBARIWCgl0X3NlbmRfbnMYMyABKARIEogBARIVCgh0X2Fja19ucxg0IAEoBEgTiAEBEhwKD2RlYWRsaW5lX21pc3Nlcxg1IAEoBEgUiAEBEhEKCXdpbmRvd19tcxg2IAEoBBIZCgxsYXVuY2hfYmxvY2sYNyABKARIFYgBARIWCglsYXVuY2hfbXMYOCABKARIFogBARIdChB3aW5kb3dfZW5kX2Jsb2NrGDkgASgESBeIAQESEAoIdDBfZXhhY3QYOiABKAgSHQoVZmlyc3RfZXh0ZXJuYWxfYnV5X3R4GDsgASgJEiUKGGZpcnN0X2V4dGVybmFsX2J1eV9ibG9jaxg8IAEoBEgYiAEBEiUKGGZpcnN0X2V4dGVybmFsX2J1eV9pbmRleBg9IAEoBEgZiAEBEg8KB2J1eV93ZWkYPiABKAkSEAoIc2VsbF93ZWkYPyABKAkSGQoRZXZhbHVhdGVkX3VuaXhfbXMYQCABKARCFwoVX2ZpcnN0X2V4dGVybmFsX3ByaWNlQh4KHF9wcmljZV92c19maXJzdF9leHRlcm5hbF9wcG1CFQoTX2luZ3Jlc3NfdG9fc2VuZF9uc0IUChJfc2VsZWN0X3RvX3NlbmRfbnNCEQoPX3NlbmRfdG9fYWNrX25zQgYKBF9ydW5CDwoNX2Jsb2NrX251bWJlckILCglfYmxvY2tfbXNCCQoHX3Rva2Vuc0IKCghfZXRoX3dlaUIKCghfZ2FzX3dlaUIMCgpfb3duX3ByaWNlQg8KDV9sYXVuY2hfaW5kZXhCDAoKX293bl9pbmRleEIOCgxfYnV5c19iZWZvcmVCCwoJX2Nsb2NrX2lkQg8KDV90X2luZ3Jlc3NfbnNCDgoMX3Rfc2VsZWN0X25zQgwKCl90X3NlbmRfbnNCCwoJX3RfYWNrX25zQhIKEF9kZWFkbGluZV9taXNzZXNCDwoNX2xhdW5jaF9ibG9ja0IMCgpfbGF1bmNoX21zQhMKEV93aW5kb3dfZW5kX2Jsb2NrQhsKGV9maXJzdF9leHRlcm5hbF9idXlfYmxvY2tCGwoZX2ZpcnN0X2V4dGVybmFsX2J1eV9pbmRleEoECA8QEFIPd2luZG93X2NvbXBsZXRlIr8CChNCc2NMaXZlR3JhbnRDb21tYW5kEg0KBXZlbnVlGAEgASgJEhIKCnN0cmF0ZWdpZXMYAiABKAkSDwoHc291cmNlcxgDIAMoCRIQCghhZGFwdGVycxgEIAMoCRIVCg1tYXhfaW5wdXRfd2VpGAUgASgJEhUKDW1heF9zcGVuZF93ZWkYBiABKAkSFAoMbWF4X2F0dGVtcHRzGAcgASgNEhcKD2V4cGlyZXNfdW5peF9tcxgIIAEoBBIUCgxzY29wZV9zaGEyNTYYCSABKAkSEQoJZXhpdF9vbmx5GAogASgIEisKBHJpc2sYCyABKAsyHS5kYXJrYm90LmJzYy52MS5MaXZlR3JhbnRSaXNrEi8KBmxpbWl0cxgMIAEoCzIfLmRhcmtib3QuYnNjLnYxLkxpdmVHcmFudExpbWl0cyrEAQoKTmF0aXZlS2luZBIbChdOQVRJVkVfS0lORF9VTlNQRUNJRklFRBAAEhQKEE5BVElWRV9LSU5EX0JPT0wQARITCg9OQVRJVkVfS0lORF9VNjQQAhITCg9OQVRJVkVfS0lORF9JNjQQAxIUChBOQVRJVkVfS0lORF9VMjU2EAQSFwoTTkFUSVZFX0tJTkRfQUREUkVTUxAFEhQKEE5BVElWRV9LSU5EX0IyNTYQBhIUChBOQVRJVkVfS0lORF9URVhUEAdCewoSY29tLmRhcmtib3QuYnNjLnYxQgtTdGF0dXNQcm90b1ABogIDREJYqgIORGFya2JvdC5Cc2MuVjHKAg5EYXJrYm90XEJzY1xWMeICGkRhcmtib3RcQnNjXFYxXEdQQk1ldGFkYXRh6gIQRGFya2JvdDo6QnNjOjpWMWIGcHJvdG8z");
 
 /**
  * An explicitly selected public bound value, never a signed transaction or secret.
@@ -1693,6 +1693,7 @@ export type BscLiveState = Message<"darkbot.bsc.v1.BscLiveState"> & {
   /**
    * The evaluated LIVE BUY attempts in their order, as their records hold them; at most the
    * campaign's total BUY attempt limit (MAX_BUY_ATTEMPTS_TOTAL), more is a warning.
+   * Beyond it, the shown ones are the first by ordinal of the limit plus one first by transaction.
    *
    * @generated from field: repeated darkbot.bsc.v1.LiveAttempt attempts = 31;
    */
@@ -1813,7 +1814,8 @@ export type LiveCampaign = Message<"darkbot.bsc.v1.LiveCampaign"> & {
   releaseEvidence: string;
 
   /**
-   * Why the verdict is not a pass, in the evaluator's order.
+   * Why the verdict is not a pass, in the evaluator's order; with skip_reasons at most the
+   * verdict's share of the state (LIVE_CAMPAIGN_REASONS_BEYOND_LIMIT counts the rest).
    *
    * @generated from field: repeated string reasons = 3;
    */
@@ -2042,6 +2044,55 @@ export type LiveAttemptAdapter = Message<"darkbot.bsc.v1.LiveAttemptAdapter"> & 
    * @generated from field: string answer = 3;
    */
   answer: string;
+
+  /**
+   * The adapter's index in the runtime's dispatch.
+   *
+   * @generated from field: uint64 adapter = 4;
+   */
+  adapter: bigint;
+
+  /**
+   * The boundary its send time is taken at.
+   *
+   * @generated from field: string boundary = 5;
+   */
+  boundary: string;
+
+  /**
+   * Whether its record and its transport qualify that boundary as the send time.
+   *
+   * @generated from field: bool qualified = 6;
+   */
+  qualified: boolean;
+
+  /**
+   * Its write check on the runtime's clock, ns; absent without one.
+   *
+   * @generated from field: optional uint64 t_write_check_ns = 7;
+   */
+  tWriteCheckNs?: bigint;
+
+  /**
+   * Its boundary on the runtime's clock, ns; absent without one.
+   *
+   * @generated from field: optional uint64 t_boundary_ns = 8;
+   */
+  tBoundaryNs?: bigint;
+
+  /**
+   * Its queueing on the runtime's clock, ns; absent without one.
+   *
+   * @generated from field: optional uint64 t_queue_ns = 9;
+   */
+  tQueueNs?: bigint;
+
+  /**
+   * Its answer on the runtime's clock, ns; absent without one.
+   *
+   * @generated from field: optional uint64 t_answer_ns = 10;
+   */
+  tAnswerNs?: bigint;
 };
 
 /**
@@ -2053,7 +2104,7 @@ export const LiveAttemptAdapterSchema: GenMessage<LiveAttemptAdapter> = /*@__PUR
 
 /**
  * One evaluated LIVE BUY attempt (REV.1.0 R2), unchanged from its record. T0 is never the
- * producer's here: without its witness the timing verdict is UNKNOWN.
+ * producer's unless the record says t0_exact: without its witness the timing verdict is UNKNOWN.
  *
  * @generated from message darkbot.bsc.v1.LiveAttempt
  */
@@ -2150,21 +2201,15 @@ export type LiveAttempt = Message<"darkbot.bsc.v1.LiveAttempt"> & {
   economics: string;
 
   /**
-   * Why, in the evaluator's order.
+   * Why, in the evaluator's order; at most the attempt's share of the state
+   * (LIVE_ATTEMPT_REASONS_BEYOND_LIMIT counts the rest).
    *
    * @generated from field: repeated string reasons = 14;
    */
   reasons: string[];
 
   /**
-   * Whether the 15-s market window from the launch's block is complete.
-   *
-   * @generated from field: bool window_complete = 15;
-   */
-  windowComplete: boolean;
-
-  /**
-   * Why it is not; empty when complete.
+   * Why the window is not complete; empty when complete.
    *
    * @generated from field: string window_why = 16;
    */
@@ -2227,7 +2272,8 @@ export type LiveAttempt = Message<"darkbot.bsc.v1.LiveAttempt"> & {
   sendToAckNs?: bigint;
 
   /**
-   * Counters of every attempt up to this one: the attempts (every rate's denominator).
+   * Counters of every attempt up to this one: the LIVE BUYs (C3 and Strategy C, before the
+   * commitment too), the acquisition rate's denominator.
    *
    * @generated from field: uint64 attempts = 25;
    */
@@ -2241,21 +2287,22 @@ export type LiveAttempt = Message<"darkbot.bsc.v1.LiveAttempt"> & {
   acquired: bigint;
 
   /**
-   * Of them passed.
+   * C3 BUYs among them whose verdict is PASS (a count, not a rate: a Strategy C BUY has no
+   * verdict, NOT_APPLICABLE).
    *
    * @generated from field: uint64 passed = 27;
    */
   passed: bigint;
 
   /**
-   * Of them failed.
+   * C3 BUYs among them whose verdict is FAIL.
    *
    * @generated from field: uint64 failed = 28;
    */
   failed: bigint;
 
   /**
-   * Of them undecided.
+   * C3 BUYs among them whose verdict is UNKNOWN.
    *
    * @generated from field: uint64 undecided = 29;
    */
@@ -2267,6 +2314,245 @@ export type LiveAttempt = Message<"darkbot.bsc.v1.LiveAttempt"> & {
    * @generated from field: repeated darkbot.bsc.v1.LiveAttemptAdapter adapters = 30;
    */
   adapters: LiveAttemptAdapter[];
+
+  /**
+   * The 15-s market window from the launch's block as written: COMPLETE or INCOMPLETE.
+   *
+   * @generated from field: string window = 31;
+   */
+  window: string;
+
+  /**
+   * The attempt's identity (its lease attempt, or its hash), 0x hex.
+   *
+   * @generated from field: string attempt = 32;
+   */
+  attempt: string;
+
+  /**
+   * The run whose journal holds its release; absent without a release record.
+   *
+   * @generated from field: optional uint64 run = 33;
+   */
+  run?: bigint;
+
+  /**
+   * The token, 0x hex.
+   *
+   * @generated from field: string token = 34;
+   */
+  token: string;
+
+  /**
+   * The launch's transaction hash, 0x hex; empty without a launch (Strategy C).
+   *
+   * @generated from field: string launch_hash = 35;
+   */
+  launchHash: string;
+
+  /**
+   * The source whose sighting triggered it (a C3 BUY); empty without one.
+   *
+   * @generated from field: string trigger = 36;
+   */
+  trigger: string;
+
+  /**
+   * Its block's number; absent while not included.
+   *
+   * @generated from field: optional uint64 block_number = 37;
+   */
+  blockNumber?: bigint;
+
+  /**
+   * Its block's hash, 0x hex; empty while not included.
+   *
+   * @generated from field: string block_hash = 38;
+   */
+  blockHash: string;
+
+  /**
+   * Its block's header time, unix ms; absent while not included.
+   *
+   * @generated from field: optional uint64 block_ms = 39;
+   */
+  blockMs?: bigint;
+
+  /**
+   * Tokens its own Portal BUY acquired, decimal token units; absent when unknown.
+   *
+   * @generated from field: optional string tokens = 40;
+   */
+  tokens?: string;
+
+  /**
+   * The native amount its included BUY spent, decimal wei; absent when unknown.
+   *
+   * @generated from field: optional string eth_wei = 41;
+   */
+  ethWei?: string;
+
+  /**
+   * Gas its inclusion paid, decimal wei; absent when unknown.
+   *
+   * @generated from field: optional string gas_wei = 42;
+   */
+  gasWei?: string;
+
+  /**
+   * Its own price, native wei per 10^18 token units, decimal; absent without its own trade.
+   *
+   * @generated from field: optional string own_price = 43;
+   */
+  ownPrice?: string;
+
+  /**
+   * The ledger's PLACED fact: FIRST, LATE, OTHER_BLOCK or NO_TOKENS; empty without one.
+   *
+   * @generated from field: string placed = 44;
+   */
+  placed: string;
+
+  /**
+   * The launch's transaction index in its block; absent when the launch is not in it.
+   *
+   * @generated from field: optional uint64 launch_index = 45;
+   */
+  launchIndex?: bigint;
+
+  /**
+   * Its own transaction index in its block; absent without a PLACED fact.
+   *
+   * @generated from field: optional uint64 own_index = 46;
+   */
+  ownIndex?: bigint;
+
+  /**
+   * Other traders' BUYs of the token between the launch and it; absent without a PLACED fact.
+   *
+   * @generated from field: optional uint64 buys_before = 47;
+   */
+  buysBefore?: bigint;
+
+  /**
+   * The runtime clock the local times are on; absent without a release record.
+   *
+   * @generated from field: optional uint64 clock_id = 48;
+   */
+  clockId?: bigint;
+
+  /**
+   * Ingress (C3) or decision (Strategy C) on that clock, ns; absent without a release record.
+   *
+   * @generated from field: optional uint64 t_ingress_ns = 49;
+   */
+  tIngressNs?: bigint;
+
+  /**
+   * Selection on that clock, ns; absent without a release record.
+   *
+   * @generated from field: optional uint64 t_select_ns = 50;
+   */
+  tSelectNs?: bigint;
+
+  /**
+   * The first qualified send among its adapters on that clock, ns; absent without one.
+   *
+   * @generated from field: optional uint64 t_send_ns = 51;
+   */
+  tSendNs?: bigint;
+
+  /**
+   * The first acknowledgement on that clock, ns; absent without one.
+   *
+   * @generated from field: optional uint64 t_ack_ns = 52;
+   */
+  tAckNs?: bigint;
+
+  /**
+   * Local start deadlines it missed; absent without a release record.
+   *
+   * @generated from field: optional uint64 deadline_misses = 53;
+   */
+  deadlineMisses?: bigint;
+
+  /**
+   * The market window's length, ms.
+   *
+   * @generated from field: uint64 window_ms = 54;
+   */
+  windowMs: bigint;
+
+  /**
+   * The launch's block; absent without one.
+   *
+   * @generated from field: optional uint64 launch_block = 55;
+   */
+  launchBlock?: bigint;
+
+  /**
+   * The launch block's header time, unix ms (the window's start); absent without one.
+   *
+   * @generated from field: optional uint64 launch_ms = 56;
+   */
+  launchMs?: bigint;
+
+  /**
+   * The last block inside the window; absent while the window is not over.
+   *
+   * @generated from field: optional uint64 window_end_block = 57;
+   */
+  windowEndBlock?: bigint;
+
+  /**
+   * Whether T0 is the producer's exact time (never so without its witness).
+   *
+   * @generated from field: bool t0_exact = 58;
+   */
+  t0Exact: boolean;
+
+  /**
+   * The first other trader's BUY in the window, 0x hex; empty without one.
+   *
+   * @generated from field: string first_external_buy_tx = 59;
+   */
+  firstExternalBuyTx: string;
+
+  /**
+   * Its block; absent without one.
+   *
+   * @generated from field: optional uint64 first_external_buy_block = 60;
+   */
+  firstExternalBuyBlock?: bigint;
+
+  /**
+   * Its transaction index in that block; absent without one.
+   *
+   * @generated from field: optional uint64 first_external_buy_index = 61;
+   */
+  firstExternalBuyIndex?: bigint;
+
+  /**
+   * The native volume of the token's BUYs in the window (its own too), decimal wei.
+   *
+   * @generated from field: string buy_wei = 62;
+   */
+  buyWei: string;
+
+  /**
+   * The native volume of the token's SELLs in the window, decimal wei.
+   *
+   * @generated from field: string sell_wei = 63;
+   */
+  sellWei: string;
+
+  /**
+   * When its evaluation wrote the record, unix ms: the campaign verdict's evaluated_unix_ms
+   * when both are of one evaluation.
+   *
+   * @generated from field: uint64 evaluated_unix_ms = 64;
+   */
+  evaluatedUnixMs: bigint;
 };
 
 /**

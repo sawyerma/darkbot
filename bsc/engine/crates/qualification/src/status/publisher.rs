@@ -85,7 +85,7 @@ pub fn job(rundir: &Path, label: &str) -> JobStatus {
 }
 /// Shared engine-feed limit (engine_feed.proto): a STATE payload of at most the gateway's
 /// ServerLimits.max_state_full_bytes, a frame of at most that plus the envelope reserve.
-const MAX_STATE_BYTES: usize = 262_144;
+pub(super) const MAX_STATE_BYTES: usize = 262_144;
 const ENVELOPE_RESERVE: usize = 4096;
 fn send(stream: &mut UnixStream, msg: engine_frame::Msg) -> io::Result<()> {
     let bytes = EngineFrame { msg: Some(msg) }.encode_to_vec();

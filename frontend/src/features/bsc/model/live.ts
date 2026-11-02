@@ -173,8 +173,10 @@ export function signedBnb(wei: string): string {
 export const NO_EVALUATION = "keine Bewertung";
 /** What the verdict is: the campaign's evidence, never a release or a permission. */
 export const CAMPAIGN_SCOPE = "Kampagnen-Evidenz allein (RELEASE_EVIDENCE_*): ein Release braucht zusätzlich Implementierungsmatrix, Runtime-Durchsetzung und LIVE-Freigabe";
-/** The producer's T0 to T_buy is not measured locally. */
-export const T0_UNKNOWN = "T0→T_buy bleibt UNKNOWN ohne Producer-Witness; die lokalen Zeiten sind die Uhr der Runtime (Ingress→Send), nie T0→T_buy";
+/** The producer's T0 to T_buy is not measured locally: unknown unless a record says it is exact. */
+export const T0_UNKNOWN = "T0→T_buy bleibt UNKNOWN ohne Producer-Witness";
+/** Always true: the local times are the runtime's clock, never T0 to T_buy. */
+export const LOCAL_NOT_T0 = "Die lokalen Zeiten sind die Uhr der Runtime (Ingress→Send), nie T0→T_buy";
 
 export interface CountRow { label: string; value: string; hint: string }
 const of = (n: bigint, d: bigint) => `${n.toString()}/${d.toString()}`;
@@ -197,22 +199,62 @@ export function campaignRows(c: LiveCampaignView): CountRow[] {
   ];
 }
 
-/** One attempt's row cells, as its record holds it ("—" where it names nothing). */
-export function attemptCells(a: LiveAttemptView): string[] {
+/** ECMAScript's largest time value (ms). */
+const MAX_DATE_MS = 8_640_000_000_000_000n;
+/** A unix-ms time as ISO; beyond the date range its raw value (never a thrown error). */
+export function unixMs(v: bigint | undefined): string {
+  if (v === undefined) return "—";
+  return v <= MAX_DATE_MS ? new Date(Number(v)).toISOString() : `${v.toString()} ms`;
+}
+/** What an attempt's counters count (REV.1.0 R2b review L8): counts, not rates of the attempts. */
+export const COUNTERS_MEANING = "Je Versuch bis einschließlich ihm: acquired von allen LIVE-BUYs (C3 und Strategy C, auch vor dem Commitment); passed · failed · undecided zählen nur die Verdikte der C3-BUYs (ein Strategy-C-BUY hat keins, NOT_APPLICABLE)";
+/** The campaign verdict record exists but is unreadable or not of its schema. */
+export const VERDICT_INVALID = "LIVE_CAMPAIGN_VERDICT_INVALID";
+/** The campaign section did not fit what the rest of the LIVE tab leaves of the state bound:
+ *  none of it is shown, its records and warnings counted (REV.1.0 R2b re-check F3). */
+export const CAMPAIGN_BEYOND_STATE = "LIVE_CAMPAIGN_BEYOND_STATE";
+/** The reporter's warning that the campaign section is beyond the state, if any. */
+export function campaignBeyondState(warnings: readonly string[]): string | undefined {
+  return warnings.find(w => w.startsWith(`${CAMPAIGN_BEYOND_STATE} `));
+}
+
+/** The attempts table's columns, one per cell of {@link attemptCells}. */
+export const ATTEMPT_COLUMNS = ["#", "Tx · attempt · run", "Kind · cell", "Token · launch · trigger", "Block", "State", "Verdict", "Components", "Tokens · cost",
+  "Placement", "15-s window", "Price vs first external BUY", "Local timing", "Counters", "Adapters", "Reasons", "Evaluated"] as const;
+
+/** The evaluation the attempts are of: the verdict's, without one the newest attempt's. */
+export function evaluationOf(c: LiveCampaignView | undefined, attempts: readonly LiveAttemptView[]): bigint | undefined {
+  return c?.evaluatedUnixMs ?? attempts.reduce<bigint | undefined>((m, a) => m === undefined || a.evaluatedUnixMs > m ? a.evaluatedUnixMs : m, undefined);
+}
+
+/** One attempt's row cells, as its record holds it ("—" where it names nothing); `evaluationMs`
+ *  is {@link evaluationOf}, against which a record of another evaluation is marked. */
+export function attemptCells(a: LiveAttemptView, evaluationMs?: bigint): string[] {
   const ns = (v: bigint | undefined) => v === undefined ? "—" : `${v.toString()} ns`;
+  const n = (v: bigint | undefined) => v === undefined ? "—" : v.toString();
+  const wei = (v: string | undefined) => v === undefined || v === "" ? "—" : `${v} wei`;
+  const adapter = (x: LiveAttemptView["adapters"][number]) => `${x.builder || "UNKNOWN"} (adapter ${x.adapter.toString()}) ${x.outcome}${x.answer ? ` ${x.answer}` : ""} · ${x.boundary} ${x.qualified ? "qualified" : "not qualified"}`
+    + ` · write-check ${ns(x.tWriteCheckNs)} · boundary ${ns(x.tBoundaryNs)} · queue ${ns(x.tQueueNs)} · answer ${ns(x.tAnswerNs)}`;
   return [
     a.ordinal.toString(),
-    a.tx,
+    `${a.tx} · attempt ${a.attempt || "—"} · run ${n(a.run)}`,
     `${a.kind} · ${a.cell}`,
+    `${a.token} · launch ${a.launchHash || "—"} · trigger ${a.trigger || "—"}`,
+    a.blockNumber === undefined ? "not included" : `${a.blockNumber.toString()} · ${a.blockHash || "—"} · ${unixMs(a.blockMs)}`,
     a.state,
     a.verdict,
     `acquisition ${a.acquisition} · canonical ${a.canonical} · timing ${a.timing} · placement ${a.placement} · capture ${a.capture} · local ${a.local} · economics ${a.economics}`,
-    `${a.windowComplete ? "COMPLETE" : `INCOMPLETE (${a.windowWhy || "UNKNOWN"})`} · trades ${a.trades.toString()} (buys ${a.buys.toString()}, sells ${a.sells.toString()})`,
-    a.priceVsFirstExternalPpm === undefined ? "—" : `${a.priceVsFirstExternalPpm.toString()} ppm of the first external BUY's price (${a.firstExternalPrice ?? "—"} wei per 10^18)`,
-    `ingress→send ${ns(a.ingressToSendNs)} · select→send ${ns(a.selectToSendNs)} · send→ack ${ns(a.sendToAckNs)}`,
-    `acquired ${of(a.acquired, a.attempts)} · passed ${of(a.passed, a.attempts)} · failed ${of(a.failed, a.attempts)} · undecided ${of(a.undecided, a.attempts)}`,
-    a.adapters.length ? a.adapters.map(x => `${x.builder || "UNKNOWN"} ${x.outcome}${x.answer ? ` ${x.answer}` : ""}`).join(" · ") : "—",
+    `tokens ${a.tokens ?? "—"} · input ${wei(a.ethWei)} · gas ${wei(a.gasWei)}`,
+    a.placed ? `${a.placed} · launch index ${n(a.launchIndex)} · own index ${n(a.ownIndex)} · ${n(a.buysBefore)} BUYs between` : "—",
+    `${a.window}${a.windowWhy ? ` (${a.windowWhy})` : ""} · ${a.windowMs.toString()} ms from block ${n(a.launchBlock)} (${unixMs(a.launchMs)}) to ${n(a.windowEndBlock)}`
+      + ` · trades ${a.trades.toString()} (buys ${a.buys.toString()} ${wei(a.buyWei)}, sells ${a.sells.toString()} ${wei(a.sellWei)})`,
+    `own ${a.ownPrice ?? "—"} · first external ${a.firstExternalPrice ?? "—"} (wei per 10^18) · ${a.priceVsFirstExternalPpm === undefined ? "—" : `${a.priceVsFirstExternalPpm.toString()} ppm`}`
+      + ` · first external BUY ${a.firstExternalBuyTx || "—"} (block ${n(a.firstExternalBuyBlock)}, index ${n(a.firstExternalBuyIndex)})`,
+    `T0 ${a.t0Exact ? "exact (recorded)" : "UNKNOWN"} · clock ${n(a.clockId)} · ingress ${ns(a.tIngressNs)} · select ${ns(a.tSelectNs)} · send ${ns(a.tSendNs)} · ack ${ns(a.tAckNs)}`
+      + ` · ingress→send ${ns(a.ingressToSendNs)} · select→send ${ns(a.selectToSendNs)} · send→ack ${ns(a.sendToAckNs)} · deadline misses ${n(a.deadlineMisses)}`,
+    `acquired ${of(a.acquired, a.attempts)} LIVE BUYs · C3 verdicts so far: ${a.passed.toString()} passed · ${a.failed.toString()} failed · ${a.undecided.toString()} undecided`,
+    a.adapters.length ? a.adapters.map(adapter).join(" · ") : "—",
     a.reasons.length ? a.reasons.join(" · ") : "—",
+    `${unixMs(a.evaluatedUnixMs)}${evaluationMs !== undefined && evaluationMs !== a.evaluatedUnixMs ? " · of another evaluation" : ""}`,
   ];
 }
-
