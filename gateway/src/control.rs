@@ -188,10 +188,12 @@ mod provider_shape {
     fn key_shaped(s: &str) -> bool {
         s.len() >= 16 && s.bytes().all(|b| b.is_ascii_hexdigit())
     }
-    /// A provider or credential id: 1–32 of `[a-z0-9_-]`, never key-shaped.
+    /// A provider or credential id: 1–32 of `[a-z0-9_-]`, never key-shaped, never read as an
+    /// option of the controller (no leading `-`).
     pub fn id_ok(s: &str) -> bool {
         !s.is_empty()
             && s.len() <= 32
+            && !s.starts_with('-')
             && !key_shaped(s)
             && s.bytes()
                 .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || b == b'_')
@@ -216,8 +218,37 @@ mod provider_shape {
             && has(segment, u8::is_ascii_digit);
         word || hex || mixed
     }
-    /// An endpoint without user info, query, fragment or token-like path segment, at most 512
-    /// characters of visible ASCII.
+    /// `host[:port]` (an IPv6 host in brackets) with a numeric port of at most 65535 — never a
+    /// key in the port's place (the native URL parser refuses it, after the ledger).
+    fn authority_ok(authority: &str) -> bool {
+        let (host, port) = match authority.strip_prefix('[') {
+            Some(v6) => match v6.split_once(']') {
+                Some((host, "")) => (host, None),
+                Some((host, rest)) => match rest.strip_prefix(':') {
+                    Some(port) => (host, Some(port)),
+                    None => return false,
+                },
+                None => return false,
+            },
+            None => match authority.split_once(':') {
+                Some((host, port)) => (host, Some(port)),
+                None => (authority, None),
+            },
+        };
+        !host.is_empty()
+            && !host.contains(['@', '[', ']'])
+            && match port {
+                Some(p) => {
+                    !p.is_empty()
+                        && p.bytes().all(|b| b.is_ascii_digit())
+                        && p.parse::<u16>().is_ok()
+                }
+                None => true,
+            }
+    }
+    /// An endpoint without user info, query, fragment, backslash (the native URL parser reads it
+    /// as `/`) or token-like path segment, with a numeric port, at most 512 characters of visible
+    /// ASCII.
     pub fn endpoint_ok(url: &str) -> bool {
         let Some((scheme, rest)) = url.split_once("://") else {
             return false;
@@ -225,10 +256,9 @@ mod provider_shape {
         let (authority, path) = rest.split_once('/').unwrap_or((rest, ""));
         url.len() <= 512
             && url.bytes().all(|b| b.is_ascii_graphic())
+            && !url.contains(['?', '#', '\\'])
             && ["https", "http", "wss", "ws"].contains(&scheme)
-            && !authority.is_empty()
-            && !authority.contains('@')
-            && !url.contains(['?', '#'])
+            && authority_ok(authority)
             && !path.split('/').any(token_like)
     }
     /// none | path | query:NAME | header:NAME (a name, never a key).
@@ -247,10 +277,12 @@ mod provider_shape {
             _ => false,
         }
     }
-    /// The plan's published name: 1–32 of `[a-z0-9_.-]`, never key-shaped.
+    /// The plan's published name: 1–32 of `[a-z0-9_.-]`, never key-shaped, never read as an
+    /// option (no leading `-`).
     pub fn entitlement_ok(s: &str) -> bool {
         !s.is_empty()
             && s.len() <= 32
+            && !s.starts_with('-')
             && !key_shaped(s)
             && s.bytes().all(|b| {
                 b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'-' | b'_' | b'.')
@@ -263,13 +295,31 @@ mod provider_shape {
 /// (volatile: never elided); never printed.
 struct SecretBuf(Vec<u8>);
 
+/// Overwrites `bytes` with zeros (volatile: never elided).
+fn wipe(bytes: &mut [u8]) {
+    for b in bytes.iter_mut() {
+        // SAFETY: a valid, exclusive reference to an initialized byte.
+        unsafe { std::ptr::write_volatile(b, 0) };
+    }
+    std::sync::atomic::compiler_fence(std::sync::atomic::Ordering::SeqCst);
+}
+
 impl Drop for SecretBuf {
     fn drop(&mut self) {
-        for b in self.0.iter_mut() {
-            // SAFETY: a valid, exclusive reference to an initialized byte.
-            unsafe { std::ptr::write_volatile(b, 0) };
+        wipe(&mut self.0);
+    }
+}
+
+/// DEC-18 (P0-019): a command's request body, which may carry a credential's secret; overwritten
+/// when the command returns, once no view of it remains (the ledger holds the request without the
+/// secret). A body still shared elsewhere is left to its other owner.
+struct WipedBody(Bytes);
+
+impl Drop for WipedBody {
+    fn drop(&mut self) {
+        if let Ok(mut owned) = std::mem::take(&mut self.0).try_into_mut() {
+            wipe(&mut owned);
         }
-        std::sync::atomic::compiler_fence(std::sync::atomic::Ordering::SeqCst);
     }
 }
 
@@ -281,7 +331,9 @@ fn separate_secret(req: &CommandRequest) -> Option<(CommandRequest, Option<Secre
         return Some((req.clone(), None));
     }
     let mut c = ProviderCredentialCommand::decode(req.params.as_ref()).ok()?;
-    if c.secret.is_empty() {
+    // The native rule (`provider_registry` CREDENTIAL_SECRET_FORMAT): one line of visible bytes —
+    // the controller reads its input up to the line end; the body limit bounds its length.
+    if c.secret.is_empty() || c.secret.iter().any(u8::is_ascii_control) {
         return None;
     }
     // Room for the line end the controller's input takes: the buffer never reallocates (an
@@ -2017,7 +2069,7 @@ impl Control {
             }
             _ => {
                 record.detail = if provider {
-                    "Controller outcome unknown; inspect the provider registry in project0.analytics.jobs before a new request (the same request id returns its receipt)"
+                    "Controller outcome unknown; inspect the provider registry in project0.analytics.jobs before a new request (this request id stays PendingReconcile here; its native receipt: p0ctl provider status)"
                 } else if action == CAPABILITY_SET {
                     "Controller outcome unknown; inspect the LIVE capability in project0.liquidator.state before a new request"
                 } else if BOOT_ACTIONS.contains(&action) || action == START {
@@ -2329,16 +2381,20 @@ fn protobuf(msg: impl Message) -> Response {
         .into_response()
 }
 pub async fn command(State(app): State<Arc<AppState>>, h: HeaderMap, body: Bytes) -> Response {
+    let body = WipedBody(body);
     if let Err(s) = authorized(&app, &h, true) {
         return s.into_response();
     }
     if h.get(CONTENT_TYPE).and_then(|v| v.to_str().ok()) != Some("application/x-protobuf") {
         return StatusCode::UNSUPPORTED_MEDIA_TYPE.into_response();
     }
-    let Ok(req) = CommandRequest::decode(body) else {
+    let Ok(req) = CommandRequest::decode(body.0.clone()) else {
         return StatusCode::BAD_REQUEST.into_response();
     };
-    protobuf(app.control.execute(&req).await)
+    let response = app.control.execute(&req).await;
+    drop(req);
+    drop(body);
+    protobuf(response)
 }
 #[derive(Deserialize)]
 pub struct Lookup {
@@ -4648,10 +4704,223 @@ mod tests {
         assert!(!log.exists());
         fs::remove_dir_all(dir).unwrap();
     }
-    /// B03/U-9: an analytics job action maps its typed parameters 1:1 onto the options of
-    /// `p0ctl job` (through `darkbotctl p0 job`), without observing a capture process; a native
-    /// refusal is a FAILED receipt with its code; invalid parameters are rejected before the
-    /// ledger and never dispatched.
+    /// DEC-18 (package-4 review F1, F3, F5, F9): the gateway's provider rules are the native
+    /// descriptor's — a key in an endpoint's port or behind a backslash, an identifier that reads as
+    /// an option, a secret with a control byte are refused before any record — and each of the
+    /// twelve provider actions maps onto exactly its `p0ctl provider` arguments; none is a BSC one.
+    #[test]
+    fn dec18_provider_rules_are_the_native_ones_and_every_action_maps() {
+        use crate::proto::expected_version::Version::ConfigVersion;
+        use crate::proto::project0::v1::{
+            ProviderCredentialCommand, ProviderDescriptorCommand, ProviderPriorityCommand,
+            ProviderQualifyCommand, ProviderSelectCommand,
+        };
+        use provider_shape::{endpoint_ok, entitlement_ok, id_ok};
+        // F1: what the native `canonical_endpoint` refuses (its URL parser reads `\` as `/`, a
+        // port as at most 65535) is refused here too; ordinary endpoints stay accepted.
+        for bad in [
+            "https://rpc.example\\LEAKEDKEY1a2b3c4d5e6f7g8h9",
+            "https://rpc.example:0123456789abcdef0123",
+            "https://rpc.example:",
+            "https://rpc.example:65536",
+            "https://[::1",
+            "https://[::1]x",
+        ] {
+            assert!(!endpoint_ok(bad), "{bad}");
+        }
+        for good in [
+            "https://mainnet.helius-rpc.com",
+            "wss://mainnet.helius-rpc.com",
+            "http://127.0.0.1:8899",
+            "https://[::1]:8899",
+            "https://x.example:443/v1/rpc",
+        ] {
+            assert!(endpoint_ok(good), "{good}");
+        }
+        // F9: an identifier or an entitlement never reads as an option of the controller.
+        for bad in ["--project", "-x", "-"] {
+            assert!(!id_ok(bad) && !entitlement_ok(bad), "{bad}");
+        }
+        let req = |action: &str, resource: &str, params: Vec<u8>| CommandRequest {
+            project: ProjectId::Project0 as i32,
+            request_id: "12345678-1234-1234-1234-123456789abc".into(),
+            action: action.into(),
+            resource_id: resource.into(),
+            expected: Some(crate::proto::ExpectedVersion {
+                version: Some(ConfigVersion(7)),
+            }),
+            params: params.into(),
+            issued_at_unix_ns: 0,
+        };
+        assert_eq!(job_args(&req(PROVIDER_REMOVE, "--project", vec![])), None);
+        // F3: a secret is one line of visible bytes (the controller reads up to the line end).
+        let credential = |secret: &[u8]| {
+            ProviderCredentialCommand {
+                credential: "helius".into(),
+                secret: secret.to_vec().into(),
+            }
+            .encode_to_vec()
+        };
+        for bad in [&b"AAAA\nBBBB"[..], b"AAAA\rB", b"A\0B", b"A\x7fB"] {
+            let r = req(PROVIDER_CREDENTIAL_SET, "", credential(bad));
+            assert!(separate_secret(&r).is_none(), "{bad:?}");
+        }
+        let r = req(PROVIDER_CREDENTIAL_ROTATE, "", credential(b"KEY-2"));
+        assert!(separate_secret(&r).is_some_and(|(_, secret)| secret.is_some()));
+        // F5: every action's arguments, the request id and the registry version last.
+        let descriptor = ProviderDescriptorCommand {
+            id: "rpc-a".into(),
+            kind: Some("rpc".into()),
+            endpoint: Some("https://rpc.example".into()),
+            auth: Some("header:x-api-key".into()),
+            credential: Some("cred-a".into()),
+            priority: Some(2),
+            capacity_rps: Some(5),
+            plan: Some("free".into()),
+            entitlement: Some("free-tier".into()),
+            disabled: true,
+        };
+        let update = ProviderDescriptorCommand {
+            id: "rpc-a".into(),
+            endpoint: Some("https://rpc2.example".into()),
+            ..Default::default()
+        };
+        let priority = ProviderPriorityCommand {
+            id: "rpc-a".into(),
+            priority: 3,
+        };
+        let select = ProviderSelectCommand {
+            kind: "wss".into(),
+            id: "wss-a".into(),
+        };
+        let qualify = ProviderQualifyCommand {
+            id: "rpc-a".into(),
+            evidence: "0123456789abcdef".into(),
+        };
+        let cases: [(&str, &str, Vec<u8>, &[&str]); 12] = [
+            (
+                PROVIDER_ADD,
+                "",
+                descriptor.encode_to_vec(),
+                &[
+                    "add",
+                    "--id",
+                    "rpc-a",
+                    "--kind",
+                    "rpc",
+                    "--endpoint",
+                    "https://rpc.example",
+                    "--auth",
+                    "header:x-api-key",
+                    "--credential",
+                    "cred-a",
+                    "--plan",
+                    "free",
+                    "--entitlement",
+                    "free-tier",
+                    "--priority",
+                    "2",
+                    "--capacity-rps",
+                    "5",
+                    "--disabled",
+                ],
+            ),
+            (
+                PROVIDER_UPDATE,
+                "",
+                update.encode_to_vec(),
+                &[
+                    "update",
+                    "--id",
+                    "rpc-a",
+                    "--endpoint",
+                    "https://rpc2.example",
+                ],
+            ),
+            (
+                PROVIDER_REMOVE,
+                "rpc-a",
+                vec![],
+                &["remove", "--id", "rpc-a"],
+            ),
+            (
+                PROVIDER_ENABLE,
+                "rpc-a",
+                vec![],
+                &["enable", "--id", "rpc-a"],
+            ),
+            (
+                PROVIDER_DISABLE,
+                "rpc-a",
+                vec![],
+                &["disable", "--id", "rpc-a"],
+            ),
+            (
+                PROVIDER_PRIORITY,
+                "",
+                priority.encode_to_vec(),
+                &["priority", "--id", "rpc-a", "--priority", "3"],
+            ),
+            (
+                PROVIDER_SELECT,
+                "",
+                select.encode_to_vec(),
+                &["select", "--kind", "wss", "--id", "wss-a"],
+            ),
+            (
+                PROVIDER_UNSELECT,
+                "jito",
+                vec![],
+                &["unselect", "--kind", "jito"],
+            ),
+            (
+                PROVIDER_QUALIFY,
+                "",
+                qualify.encode_to_vec(),
+                &["qualify", "--id", "rpc-a", "--evidence", "0123456789abcdef"],
+            ),
+            (
+                PROVIDER_CREDENTIAL_SET,
+                "",
+                credential(b"KEY-1"),
+                &["credential", "set", "--credential", "helius"],
+            ),
+            (
+                PROVIDER_CREDENTIAL_ROTATE,
+                "",
+                credential(b"KEY-2"),
+                &["credential", "rotate", "--credential", "helius"],
+            ),
+            (
+                PROVIDER_CREDENTIAL_REVOKE,
+                "helius",
+                vec![],
+                &["credential", "revoke", "--credential", "helius"],
+            ),
+        ];
+        let tail = [
+            "--request-id",
+            "12345678-1234-1234-1234-123456789abc",
+            "--expect-version",
+            "7",
+        ];
+        for (action, resource, params, args) in cases {
+            let expected: Vec<String> = ["p0", "provider"]
+                .iter()
+                .chain(args)
+                .chain(&tail)
+                .map(|s| s.to_string())
+                .collect();
+            assert_eq!(
+                job_args(&req(action, resource, params)),
+                Some(expected),
+                "{action}"
+            );
+            assert!(allowed(ProjectId::Project0 as i32, action), "{action}");
+            assert!(!allowed(ProjectId::Bsc as i32, action), "{action}");
+        }
+    }
+
     #[tokio::test]
     async fn dec18_provider_commands_map_onto_p0ctl_and_no_secret_is_recorded() {
         // DEC-18 (P0-019/P0-020): every registry change through the one controller with its CAS
@@ -4806,6 +5075,33 @@ mod tests {
         assert_eq!(again.phase, CommandPhase::Completed as i32);
         assert!(again.detail.starts_with("Provider change intent persisted"));
         assert_eq!(fs::read_to_string(&runs).unwrap().lines().count(), before);
+        // A rotation: its arguments, its secret on the standard input only; afterwards the
+        // gateway keeps no view of the request body, so the handler can overwrite it (F2).
+        let rotate = ProviderCredentialCommand {
+            credential: "helius".into(),
+            secret: b"SECRET-KEY-2".to_vec().into(),
+        };
+        let body = Bytes::from(
+            request(
+                4,
+                PROVIDER_CREDENTIAL_ROTATE,
+                "",
+                rotate.encode_to_vec(),
+                Some(5),
+            )
+            .encode_to_vec(),
+        );
+        let decoded = CommandRequest::decode(body.clone()).unwrap();
+        let r = control.execute(&decoded).await;
+        assert_eq!(r.phase, CommandPhase::Completed as i32, "{}", r.detail);
+        assert!(argv().starts_with("p0\nprovider\ncredential\nrotate\n--credential\nhelius\n"));
+        assert_eq!(fs::read_to_string(&input).unwrap(), "SECRET-KEY-2\n");
+        assert!(
+            !holds(&ledger(), "SECRET-KEY-2"),
+            "the ledger holds no secret"
+        );
+        drop(decoded);
+        assert!(body.try_into_mut().is_ok(), "no view of the body remains");
         // A credential action without its secret is refused.
         let empty = ProviderCredentialCommand {
             credential: "helius".into(),
@@ -4850,6 +5146,10 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
+    /// B03/U-9: an analytics job action maps its typed parameters 1:1 onto the options of
+    /// `p0ctl job` (through `darkbotctl p0 job`), without observing a capture process; a native
+    /// refusal is a FAILED receipt with its code; invalid parameters are rejected before the
+    /// ledger and never dispatched.
     #[tokio::test]
     async fn analytics_job_commands_dispatch_the_p0ctl_job_options() {
         use crate::proto::project0::v1::{BacktestJobCommand, FundingSet, OptimizeJobCommand};
