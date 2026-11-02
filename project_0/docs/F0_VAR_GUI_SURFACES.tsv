@@ -44,8 +44,8 @@ TS_DECLARATION	frontend/src/core/realtime/analyticsControl.ts	25	AnalyticsContro
 TS_DECLARATION	frontend/src/core/realtime/analyticsControl.ts	30	PointInput
 TS_DECLARATION	frontend/src/core/realtime/analyticsControl.ts	40	GridInput
 TS_DECLARATION	frontend/src/core/realtime/analyticsControl.ts	101	VerifyMode
-TS_DECLARATION	frontend/src/core/realtime/analyticsControl.ts	189	ProviderInput
-TS_DECLARATION	frontend/src/core/realtime/analyticsControl.ts	251	ModeCapability
+TS_DECLARATION	frontend/src/core/realtime/analyticsControl.ts	199	ProviderInput
+TS_DECLARATION	frontend/src/core/realtime/analyticsControl.ts	261	ModeCapability
 TS_DECLARATION	frontend/src/core/realtime/bscControl.ts	41	Outcome
 TS_DECLARATION	frontend/src/core/realtime/bscControl.ts	46	BscRequest
 TS_DECLARATION	frontend/src/core/realtime/bscControl.ts	72	ProcessState
@@ -229,26 +229,26 @@ DISPLAY	frontend/src/features/project0/components/OwnerSection.tsx	132	Threshold
 DISPLAY	frontend/src/features/project0/components/OwnerSection.tsx	133	Cross-check (ACTIVE) · samples / skipped / stale / misses · fallbacks
 CONTROL_OR_TEXT	frontend/src/features/project0/components/OwnerSection.tsx	164	Off
 CONTROL_OR_TEXT	frontend/src/features/project0/components/OwnerSection.tsx	164	Observe
-DISPLAY	frontend/src/features/project0/components/ProvidersSection.tsx	66	Running process · effective
-CONTROL_OR_TEXT	frontend/src/features/project0/components/ProvidersSection.tsx	70	Provider
-CONTROL_OR_TEXT	frontend/src/features/project0/components/ProvidersSection.tsx	71	New priority
-CONTROL_OR_TEXT	frontend/src/features/project0/components/ProvidersSection.tsx	72	Evidence record
-CONTROL_OR_TEXT	frontend/src/features/project0/components/ProvidersSection.tsx	77	"send(""project0.provider.unselect"", null, chosen.kind)}>Unselect"
-CONTROL_OR_TEXT	frontend/src/features/project0/components/ProvidersSection.tsx	79	"send(""project0.provider.priority"", providerPriorityCommand(chosen.id, priority))}>Set priority"
-CONTROL_OR_TEXT	frontend/src/features/project0/components/ProvidersSection.tsx	80	"send(""project0.provider.qualify"", providerQualifyCommand(chosen.id, evidence))}>Qualify"
-CONTROL_OR_TEXT	frontend/src/features/project0/components/ProvidersSection.tsx	81	"send(""project0.provider.remove"", null, chosen.id)}>Remove"
-CONTROL_OR_TEXT	frontend/src/features/project0/components/ProvidersSection.tsx	87	Kind
-CONTROL_OR_TEXT	frontend/src/features/project0/components/ProvidersSection.tsx	91	Plan
-CONTROL_OR_TEXT	frontend/src/features/project0/components/ProvidersSection.tsx	91	—
-CONTROL_OR_TEXT	frontend/src/features/project0/components/ProvidersSection.tsx	91	Free
-CONTROL_OR_TEXT	frontend/src/features/project0/components/ProvidersSection.tsx	91	Unknown (never selected)
-CONTROL_OR_TEXT	frontend/src/features/project0/components/ProvidersSection.tsx	98	"send(""project0.provider.add"", providerDescriptorCommand(form, true))}>Add"
-CONTROL_OR_TEXT	frontend/src/features/project0/components/ProvidersSection.tsx	99	"send(""project0.provider.update"", providerDescriptorCommand(form, false))}>Update"
-CONTROL_OR_TEXT	frontend/src/features/project0/components/ProvidersSection.tsx	103	Credential
-CONTROL_OR_TEXT	frontend/src/features/project0/components/ProvidersSection.tsx	104	Key
-CONTROL_OR_TEXT	frontend/src/features/project0/components/ProvidersSection.tsx	107	"setKeyed(""project0.provider.credential.set"")}>Set key"
-CONTROL_OR_TEXT	frontend/src/features/project0/components/ProvidersSection.tsx	108	"setKeyed(""project0.provider.credential.rotate"")}>Rotate key"
-CONTROL_OR_TEXT	frontend/src/features/project0/components/ProvidersSection.tsx	109	"send(""project0.provider.credential.revoke"", null, credential.trim())}>Revoke"
+DISPLAY	frontend/src/features/project0/components/ProvidersSection.tsx	67	Running process · effective
+CONTROL_OR_TEXT	frontend/src/features/project0/components/ProvidersSection.tsx	71	Provider
+CONTROL_OR_TEXT	frontend/src/features/project0/components/ProvidersSection.tsx	72	New priority
+CONTROL_OR_TEXT	frontend/src/features/project0/components/ProvidersSection.tsx	73	Evidence record
+CONTROL_OR_TEXT	frontend/src/features/project0/components/ProvidersSection.tsx	78	"send(""project0.provider.unselect"", null, chosen.kind)}>Unselect"
+CONTROL_OR_TEXT	frontend/src/features/project0/components/ProvidersSection.tsx	80	"send(""project0.provider.priority"", providerPriorityCommand(chosen.id, priority))}>Set priority"
+CONTROL_OR_TEXT	frontend/src/features/project0/components/ProvidersSection.tsx	81	"send(""project0.provider.qualify"", providerQualifyCommand(chosen.id, evidence))}>Qualify"
+CONTROL_OR_TEXT	frontend/src/features/project0/components/ProvidersSection.tsx	82	"send(""project0.provider.remove"", null, chosen.id)}>Remove"
+CONTROL_OR_TEXT	frontend/src/features/project0/components/ProvidersSection.tsx	88	Kind
+CONTROL_OR_TEXT	frontend/src/features/project0/components/ProvidersSection.tsx	92	Plan
+CONTROL_OR_TEXT	frontend/src/features/project0/components/ProvidersSection.tsx	92	—
+CONTROL_OR_TEXT	frontend/src/features/project0/components/ProvidersSection.tsx	92	Free
+CONTROL_OR_TEXT	frontend/src/features/project0/components/ProvidersSection.tsx	92	Unknown (never selected)
+CONTROL_OR_TEXT	frontend/src/features/project0/components/ProvidersSection.tsx	99	"send(""project0.provider.add"", providerDescriptorCommand(form, true))}>Add"
+CONTROL_OR_TEXT	frontend/src/features/project0/components/ProvidersSection.tsx	100	"send(""project0.provider.update"", providerDescriptorCommand(form, false))}>Update"
+CONTROL_OR_TEXT	frontend/src/features/project0/components/ProvidersSection.tsx	104	Credential
+CONTROL_OR_TEXT	frontend/src/features/project0/components/ProvidersSection.tsx	105	Key
+CONTROL_OR_TEXT	frontend/src/features/project0/components/ProvidersSection.tsx	108	"setKeyed(""project0.provider.credential.set"")}>Set key"
+CONTROL_OR_TEXT	frontend/src/features/project0/components/ProvidersSection.tsx	109	"setKeyed(""project0.provider.credential.rotate"")}>Rotate key"
+CONTROL_OR_TEXT	frontend/src/features/project0/components/ProvidersSection.tsx	110	"send(""project0.provider.credential.revoke"", null, credential.trim())}>Revoke"
 DISPLAY	frontend/src/features/project0/components/RunsSection.tsx	31	Recorded runs · post-capture
 CONTROL_OR_TEXT	frontend/src/features/project0/components/RunsSection.tsx	46	Run
 CONTROL_OR_TEXT	frontend/src/features/project0/components/RunsSection.tsx	47	Verification
