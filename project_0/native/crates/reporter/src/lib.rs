@@ -2118,12 +2118,12 @@ mod contract_tests {
                     "requested LIVE · effective BLOCKED · FE-06/P8-LT: LIVE is not authorized (B10)"
                         .into(),
             }),
-            // P8-CTRL.6: the owner's epoch 2; P8-CTRL.3: no grant (the operator authentication
-            // is undecided) and one scope previewed for this epoch.
+            // P8-CTRL.6: the owner's epoch 2; P8-CTRL.3: no grant (awaiting the operator's
+            // confirmation) and one scope previewed for this epoch.
             capability_epoch: Some(2),
             fe06: darkbot_runner::status_tap::OwnerFe06 {
                 block_reason:
-                    darkbot_runner::orchestration::capability_control::FE06_AUTH_UNDECIDED.into(),
+                    darkbot_runner::orchestration::capability_control::FE06_NO_GRANT.into(),
                 previews: vec![darkbot_runner::status_tap::OwnerFe06Preview {
                     digest: "d".repeat(64),
                     scope_mode: "ALL",
@@ -2719,6 +2719,7 @@ mod contract_tests {
                     plan: darkbot_runner::status_tap::Plan::Free,
                 })
                 .collect(),
+            operator_key_sha256: "o".repeat(64),
         };
         let mut s = golden_snapshot();
         s.operational = Some(Arc::new(operational_snapshot_of(&limits, Some(&effective))));

@@ -442,6 +442,11 @@ pub(super) fn prepare(
     ];
     // P8-CTRL.3: what this owner runs, fixed once at its start — a grant's scope must bind
     // exactly it.
+    // DEC-17a: the operator key this owner verifies signatures against, fixed at its start.
+    sources
+        .capabilities
+        .operator_key_sha256
+        .clone_from(&darkbot_solana::runtime_config::active().operator_key_sha256);
     if let Some(epoch) = sources.capabilities.epoch {
         let project = std::env::var("P0_PROJECT_DIR").ok();
         sources.capabilities.running = Some(running_identity(

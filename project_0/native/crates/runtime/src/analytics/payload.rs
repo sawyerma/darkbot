@@ -168,6 +168,11 @@ pub(crate) fn effective_of_revision(
     } else {
         vec![]
     };
+    let operator_key_sha256 = if revision >= darkbot_solana::runtime_config::OPERATOR_REVISION {
+        decode_prefix(bytes)?
+    } else {
+        String::new()
+    };
     Ok(darkbot_solana::runtime_config::EffectiveConfig {
         schema: head.schema,
         profile: head.profile,
@@ -192,13 +197,15 @@ pub(crate) fn effective_of_revision(
         source_geyser: owner.source_geyser,
         source_geyser_provider: owner.source_geyser_provider,
         providers,
+        operator_key_sha256,
     })
 }
 
 /// Test fixture: `value`'s payload with the `Limits` of `effective` re-encoded in layout
 /// `revision` and, before `OWNER_SETTINGS_REVISION`, without its owner settings, before
-/// `PROVIDERS_REVISION` without its provider bindings (what that revision's writer produced); the
-/// limits must occur exactly once in the payload.
+/// `PROVIDERS_REVISION` without its provider bindings, before `OPERATOR_REVISION` without the
+/// operator key (what that revision's writer produced); the limits must occur exactly once in the
+/// payload.
 #[cfg(test)]
 pub(crate) fn encode_with_limits_revision<T: Serialize>(
     value: &T,
@@ -218,7 +225,14 @@ pub(crate) fn encode_with_limits_revision<T: Serialize>(
         .windows(owner.len())
         .position(|w| w == owner.as_slice())
         .expect("owner settings inside the payload");
-    // The provider bindings follow the owner settings.
+    // The operator key follows the provider bindings, they follow the owner settings.
+    if revision < darkbot_solana::runtime_config::OPERATOR_REVISION {
+        let providers = encode_wire(&effective.providers).unwrap();
+        let operator = encode_wire(&effective.operator_key_sha256).unwrap();
+        let after = at + owner.len() + providers.len();
+        assert_eq!(&bytes[after..after + operator.len()], operator.as_slice());
+        bytes.drain(after..after + operator.len());
+    }
     if revision < darkbot_solana::runtime_config::PROVIDERS_REVISION {
         let providers = encode_wire(&effective.providers).unwrap();
         let after = at + owner.len();
@@ -314,24 +328,44 @@ pub struct CapabilityControlRequest {
     pub request_id: String,
     /// P8-CTRL.6: the owner epoch the request was made against (0: written before P8-CTRL).
     pub owner_epoch: u64,
+    /// DEC-17a: the operator's signature of the request (`operator_auth::statement`; empty:
+    /// unsigned — refused where the operator's authentication is required).
+    pub operator_signature: Vec<u8>,
 }
 impl Payload for CapabilityControlRequest {
     const KIND: u16 = journal::kind::CAPABILITY_CONTROL_REQUEST;
-    /// P8-CTRL.6: 3 — the request id and the owner epoch.
-    const SCHEMA: u16 = 3;
-    /// Schema 2 (DEC-13) had neither: readable without them — no owner epoch is 0, so every
-    /// owner refuses such a request.
+    /// DEC-17a: 4 — the operator's signature.
+    const SCHEMA: u16 = 4;
+    /// Schema 3 (P8-CTRL.6) had no signature, schema 2 (DEC-13) neither request id nor owner
+    /// epoch: readable unsigned — no owner epoch is 0, so every owner refuses such a request.
     fn decode_earlier(schema: u16, bytes: &[u8]) -> Option<io::Result<Self>> {
-        (schema == TYPED).then(|| {
-            decode_wire::<CapabilityControlRequestV2>(bytes).map(|v| Self {
-                seq: v.seq,
-                capability: v.capability,
-                requested: v.requested,
-                requested_unix_s: v.requested_unix_s,
-                request_id: String::new(),
-                owner_epoch: 0,
-            })
-        })
+        match schema {
+            3 => Some(
+                decode_wire::<CapabilityControlRequestV3>(bytes).map(|v| Self {
+                    seq: v.seq,
+                    capability: v.capability,
+                    requested: v.requested,
+                    requested_unix_s: v.requested_unix_s,
+                    request_id: v.request_id,
+                    owner_epoch: v.owner_epoch,
+                    operator_signature: vec![],
+                }),
+            ),
+            s if s == TYPED => {
+                Some(
+                    decode_wire::<CapabilityControlRequestV2>(bytes).map(|v| Self {
+                        seq: v.seq,
+                        capability: v.capability,
+                        requested: v.requested,
+                        requested_unix_s: v.requested_unix_s,
+                        request_id: String::new(),
+                        owner_epoch: 0,
+                        operator_signature: vec![],
+                    }),
+                )
+            }
+            _ => None,
+        }
     }
 }
 /// `CapabilityControlRequest` schema 2 (DEC-13).
@@ -341,6 +375,17 @@ struct CapabilityControlRequestV2 {
     capability: String,
     requested: String,
     requested_unix_s: u64,
+}
+
+/// The schema-3 layout of [`CapabilityControlRequest`] (P8-CTRL.6, before DEC-17a).
+#[derive(serde::Deserialize)]
+struct CapabilityControlRequestV3 {
+    seq: u64,
+    capability: String,
+    requested: String,
+    requested_unix_s: u64,
+    request_id: String,
+    owner_epoch: u64,
 }
 
 /// DEC-13/P8-CTRL: the state owner's decision on one capability request, its durable receipt —
@@ -964,6 +1009,9 @@ macro_rules! typed_kinds {
             }
             k::RELEASE_SOURCE => {
                 $f::<crate::orchestration::boot_audit::ReleaseSource>($kind, $schema, $bytes)
+            }
+            k::OPERATOR_KEY => {
+                $f::<crate::orchestration::operator_auth::OperatorKey>($kind, $schema, $bytes)
             }
             k::BOOT_NETWORK => {
                 $f::<crate::orchestration::boot_audit::NetworkAudit>($kind, $schema, $bytes)

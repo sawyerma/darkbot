@@ -18,14 +18,67 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 /// The schema line of a scope text.
-pub const SCOPE_SCHEMA: &str = "Project0/FE06Scope/1";
+/// DEC-17a: 2 — evidence bound by content (`kind:<record>@<sha256>`).
+pub const SCOPE_SCHEMA: &str = "Project0/FE06Scope/2";
 /// The store of previewed scopes and of grant events (`data/fe06`).
 pub const STORE: &str = "data/fe06";
 /// The cluster a scope may name (the qualified deployment's).
 pub const CLUSTER: &str = "mainnet-beta";
 /// The evidence a scope binds, by kind: a FREE_ONLY provider record (`provider_evidence`), a
-/// run's master qualification and the FE-01 state-scope freeze.
+/// run's master qualification and the FE-01 state-scope freeze. DEC-17a: each entry is
+/// `kind:<record>@<sha256>` — a typed record under the project and the SHA-256 of its bytes; the
+/// owner checks both at the grant and at every use ([`evidence_holds`]).
 pub const EVIDENCE_KINDS: [&str; 3] = ["provider", "qualification", "fe01"];
+
+/// The record kind an evidence kind names.
+fn evidence_record_kind(name: &str) -> Option<u16> {
+    match name {
+        "provider" => Some(kind::PROVIDER_EVIDENCE),
+        "qualification" => Some(kind::C0E1_QUALIFICATION),
+        "fe01" => Some(kind::FE01_FREEZE),
+        _ => None,
+    }
+}
+
+/// One evidence entry: its kind, the record's path under the project, the bound SHA-256.
+fn evidence_entry(e: &str) -> Option<(&str, &str, &str)> {
+    let (kind, rest) = e.split_once(':')?;
+    let (path, sha) = rest.rsplit_once('@')?;
+    let relative = Path::new(path);
+    let plain = !path.is_empty()
+        && relative.is_relative()
+        && relative
+            .components()
+            .all(|c| matches!(c, std::path::Component::Normal(_)))
+        && path.ends_with(".p0j")
+        && !path.contains(char::is_whitespace);
+    let hex = sha.len() == 64
+        && sha
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
+    (evidence_record_kind(kind).is_some() && plain && hex).then_some((kind, path, sha))
+}
+
+/// DEC-17a (P8-CTRL.3, L04): every evidence record the scope binds is there, of its kind, with
+/// exactly the bound bytes — at the grant and at every use; otherwise `EVIDENCE_CHANGED`.
+pub fn evidence_holds(project: &Path, s: &Scope) -> Result<(), String> {
+    for e in &s.evidence {
+        let changed = |why: &str| format!("EVIDENCE_CHANGED: {e} {why}");
+        let (name, path, sha) = evidence_entry(e).ok_or_else(|| changed("is no evidence entry"))?;
+        let full = project.join(path);
+        let bytes = std::fs::read(&full).map_err(|_| changed("is missing"))?;
+        if journal::hex(&solana_sdk::hash::hash(&bytes).to_bytes()) != sha {
+            return Err(changed("has other bytes"));
+        }
+        let first = journal::Reader::open(&full)
+            .and_then(|mut r| r.next_frame())
+            .map_err(|_| changed("is no record"))?;
+        if first.map(|f| f.kind) != evidence_record_kind(name) {
+            return Err(changed("is another record kind"));
+        }
+    }
+    Ok(())
+}
 /// The submission adapters a scope may name.
 pub const ADAPTERS: [&str; 3] = ["rpc", "jito_single", "jito_bundle"];
 
@@ -274,10 +327,7 @@ pub fn validate(s: &Scope, c: &Ceilings) -> Result<(), String> {
     }
     let mut kinds = BTreeSet::new();
     for e in &s.evidence {
-        let (kind, id) = e.split_once(':').ok_or_else(|| invalid("evidence"))?;
-        if !EVIDENCE_KINDS.contains(&kind) || id.is_empty() || id.contains(char::is_whitespace) {
-            return Err(invalid("evidence"));
-        }
+        let (kind, _, _) = evidence_entry(e).ok_or_else(|| invalid("evidence"))?;
         kinds.insert(kind);
     }
     if kinds.len() != EVIDENCE_KINDS.len() {
@@ -989,7 +1039,10 @@ pub(crate) mod tests {
             ("data_sources", "wss".into()),
             (
                 "evidence",
-                "provider:0123456789abcdef,qualification:run-1,fe01:frozen-1".into(),
+                format!(
+                    "provider:data/provider_evidence/0123456789abcdef.p0j@{h},qualification:data/runs/run-1/qualification.p0j@{h},fe01:data/fe01/frozen-1/fe01_freeze.p0j@{h}",
+                    h = "a".repeat(64)
+                ),
             ),
             ("max_input_per_attempt_usd_micro", "10000000".into()),
             ("max_exposure_usd_micro", "10000000".into()),
@@ -1062,7 +1115,10 @@ pub(crate) mod tests {
                 "FE06_SCOPE_FIELD_INVALID: signers",
             ),
             (
-                vec![("evidence", "provider:0123456789abcdef")],
+                vec![(
+                    "evidence",
+                    "provider:data/provider_evidence/0123456789abcdef.p0j@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                )],
                 "FE06_SCOPE_EVIDENCE_MISSING",
             ),
             (

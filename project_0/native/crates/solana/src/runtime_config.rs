@@ -311,8 +311,14 @@ parameters! {
 /// (P8-CTRL.3); 18: `route_attempts_max` (P4A-JIT-01); 19: `jupiter_authenticated_interval_ms` …
 /// `jupiter_exit_reserve` (P6-MT.7, Jupiter's account bucket); 20: no new parameter — the run's
 /// provider bindings appended to [`EffectiveConfig`] (DEC-18, [`PROVIDERS_REVISION`]); 21:
-/// `measure_seconds` … `measure_subscription_seconds` (DEC-18 §3.5, the C-11 pre-measurement).
-pub const LIMITS_REVISION: u16 = 21;
+/// `measure_seconds` … `measure_subscription_seconds` (DEC-18 §3.5, the C-11 pre-measurement); 22:
+/// no new parameter — the registered operator key's SHA-256 appended to [`EffectiveConfig`]
+/// (DEC-17a, [`OPERATOR_REVISION`]).
+pub const LIMITS_REVISION: u16 = 22;
+
+/// The first revision whose [`EffectiveConfig`] ends with the operator key's SHA-256 (DEC-17a);
+/// an earlier record has none.
+pub const OPERATOR_REVISION: u16 = 22;
 
 /// The first revision whose [`EffectiveConfig`] ends with the run's provider bindings (DEC-18);
 /// an earlier record has none.
@@ -539,6 +545,10 @@ pub struct RuntimeConfig {
     pub fe_mode: String,
     pub fe_targets: Vec<String>,
     pub fe_group: String,
+    /// DEC-17a (P8-CTRL-02): SHA-256 (hex) of the operator's registered public key
+    /// (`p0ctl operator register`); every FE-06 grant and ENABLE of a wallet, ECON_ARM, ECON_SEND
+    /// or ECON_LIVE is signed by it. Empty: none registered, every such request refused.
+    pub operator_key_sha256: String,
     /// DEC-05: the owner's typed settings. `P0_USE_THRESHOLD_TRIGGER`: the start request of the
     /// threshold mode (DEC-06): `on` requests ACTIVE, effective only through OBSERVE with N
     /// (`threshold_min_ticks`); `off` keeps the R127 sweep alone.
@@ -605,6 +615,7 @@ impl Default for RuntimeConfig {
                 "64vknRpPQgoyLDvro5GZtYk39odDtkLQ99Ye71T3vzEk".into(),
             ],
             fe_group: "4qp6Fx6tnZkY5Wropq9wUYgtFxXKwE6viZxFHg3rdAG8".into(),
+            operator_key_sha256: String::new(),
             threshold_trigger: false,
             c0_census: false,
             source_geyser: "off".into(),
@@ -1094,6 +1105,15 @@ impl RuntimeConfig {
         self.fe_group
             .parse::<solana_sdk::pubkey::Pubkey>()
             .map_err(|_| "invalid FE group pubkey")?;
+        let k = &self.operator_key_sha256;
+        if !k.is_empty()
+            && (k.len() != 64
+                || !k
+                    .bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)))
+        {
+            return Err("invalid operator key SHA-256 (64 lowercase hex digits)".into());
+        }
         if self.fe_mode == "smoke" && self.fe_targets.len() > 100 {
             return Err("smoke scope exceeds one getMultipleAccounts; use full".into());
         }
@@ -1281,6 +1301,7 @@ struct ConfigFile {
     fe_mode: Option<String>,
     fe_targets: Option<Vec<String>>,
     fe_group: Option<String>,
+    operator_key_sha256: Option<String>,
     threshold_trigger: Option<bool>,
     c0_census: Option<bool>,
     source_geyser: Option<String>,
@@ -1312,6 +1333,7 @@ impl ConfigFile {
                 "verification" => f.verification = Some(value),
                 "fe_mode" => f.fe_mode = Some(value),
                 "fe_group" => f.fe_group = Some(value),
+                "operator_key_sha256" => f.operator_key_sha256 = Some(value),
                 "source_geyser" => f.source_geyser = Some(value),
                 "source_geyser_provider" => f.source_geyser_provider = Some(value),
                 "fallback" => f.fallback = Some(on_off(&value)?),
@@ -1456,6 +1478,7 @@ impl Resolved {
             "fe_mode",
             "fe_targets",
             "fe_group",
+            "operator_key_sha256",
             "threshold_trigger",
             "c0_census",
             "source_geyser",
@@ -1480,6 +1503,10 @@ impl Resolved {
         if let Some(group) = env("P0_FE_GROUP").or_else(|| env("P0_GROUP_ID")) {
             c.fe_group = group;
             sources.insert("fe_group".into(), "environment".into());
+        }
+        if let Some(key) = env("P0_OPERATOR_KEY_SHA256") {
+            c.operator_key_sha256 = key;
+            sources.insert("operator_key_sha256".into(), "environment".into());
         }
         if let Some(targets) = env("P0_FE_TARGETS") {
             c.fe_targets = targets.split(',').map(String::from).collect();
@@ -1625,6 +1652,7 @@ impl Resolved {
             fe_mode,
             fe_targets,
             fe_group,
+            operator_key_sha256,
             threshold_trigger,
             c0_census,
             source_geyser,
@@ -1647,6 +1675,7 @@ impl Resolved {
                     "verification" => c.verification = val.clone(),
                     "fe_mode" => c.fe_mode = val.clone(),
                     "fe_group" => c.fe_group = val.clone(),
+                    "operator_key_sha256" => c.operator_key_sha256 = val.clone(),
                     "rpc_endpoints" => c.rpc_endpoints = list(&val),
                     "non_landing_sources" => c.non_landing_sources = list(&val),
                     "hold_b_min_attempts" => {
@@ -1859,10 +1888,11 @@ impl Resolved {
             source_geyser: c.source_geyser.clone(),
             source_geyser_provider: c.source_geyser_provider.clone(),
             providers: c.providers.iter().map(|p| p.summary()).collect(),
+            operator_key_sha256: c.operator_key_sha256.clone(),
         }
     }
     pub fn help() -> String {
-        let mut s=String::from("p0-longtail [--profile smoke|standard|performance|custom] [--config FILE] [--duration 10m|1h|5h|24h]\n--rpc-endpoints URL[,URL] --wss-endpoints URL[,URL] (loopback only: a local node or an offline test; a remote provider is the registry's, p0ctl provider add/select)\n--non-landing-sources OPERATOR=URL|PROVIDER_ID[,…] (P0_NON_LANDING_SOURCES; DEC-03 FREE_ONLY B sources; a loopback URL or a registry RPC provider id)\n--hold-b-min-attempts N (P0_HOLD_B_MIN_ATTEMPTS; DEC-04 B-8, no default: B ACTIVE blocked while unset)\n--threshold-min-ticks N (P0_THRESHOLD_MIN_TICKS; DEC-06 B-8, no default: threshold ACTIVE blocked while unset)\n--jito-block-engine-url URL (loopback; else the registry's Jito selection) --bundle-sim-rpc-url URL|PROVIDER_ID --jito-tip-account PUBKEY --jito-tip-lamports N (P0_JITO_BLOCK_ENGINE_URL, P0_BUNDLE_SIM_RPC_URL, P0_JITO_TIP_ACCOUNT, P0_JITO_TIP_LAMPORTS <= P0_MAX_TIP, no default; DEC-11 bundle path, never sends)\n--fe-mode smoke|full --fe-targets PUBKEY[,PUBKEY] --fe-group PUBKEY\n--fallback on|off --adaptive on|off --diagnostics on|off (P0_INTEGRATION_PROBE) --verification off|index|strict|crosscheck --print-effective-config\n--threshold-trigger on|off (P0_USE_THRESHOLD_TRIGGER; start request: on = ACTIVE through OBSERVE, DEC-06) --c0-census on|off (P0_C0_CENSUS) --source-geyser off|observe (P0_SOURCE_GEYSER) --source-geyser-provider ID (P0_SOURCE_GEYSER_PROVIDER)\nProfile per operating mode (P0_MODE) unless selected: shadow and market standard, econ4h performance.\nPrecedence: profile < environment < config file < CLI. All changes require restart.\nFinancial approval is separate. Profiles do not prove provider capacity.\n");
+        let mut s=String::from("p0-longtail [--profile smoke|standard|performance|custom] [--config FILE] [--duration 10m|1h|5h|24h]\n--rpc-endpoints URL[,URL] --wss-endpoints URL[,URL] (loopback only: a local node or an offline test; a remote provider is the registry's, p0ctl provider add/select)\n--non-landing-sources OPERATOR=URL|PROVIDER_ID[,…] (P0_NON_LANDING_SOURCES; DEC-03 FREE_ONLY B sources; a loopback URL or a registry RPC provider id)\n--hold-b-min-attempts N (P0_HOLD_B_MIN_ATTEMPTS; DEC-04 B-8, no default: B ACTIVE blocked while unset)\n--threshold-min-ticks N (P0_THRESHOLD_MIN_TICKS; DEC-06 B-8, no default: threshold ACTIVE blocked while unset)\n--jito-block-engine-url URL (loopback; else the registry's Jito selection) --bundle-sim-rpc-url URL|PROVIDER_ID --jito-tip-account PUBKEY --jito-tip-lamports N (P0_JITO_BLOCK_ENGINE_URL, P0_BUNDLE_SIM_RPC_URL, P0_JITO_TIP_ACCOUNT, P0_JITO_TIP_LAMPORTS <= P0_MAX_TIP, no default; DEC-11 bundle path, never sends)\n--fe-mode smoke|full --fe-targets PUBKEY[,PUBKEY] --fe-group PUBKEY\n--operator-key-sha256 HEX (P0_OPERATOR_KEY_SHA256; DEC-17a, the operator key `p0ctl operator register` registered)\n--fallback on|off --adaptive on|off --diagnostics on|off (P0_INTEGRATION_PROBE) --verification off|index|strict|crosscheck --print-effective-config\n--threshold-trigger on|off (P0_USE_THRESHOLD_TRIGGER; start request: on = ACTIVE through OBSERVE, DEC-06) --c0-census on|off (P0_C0_CENSUS) --source-geyser off|observe (P0_SOURCE_GEYSER) --source-geyser-provider ID (P0_SOURCE_GEYSER_PROVIDER)\nProfile per operating mode (P0_MODE) unless selected: shadow and market standard, econ4h performance.\nPrecedence: profile < environment < config file < CLI. All changes require restart.\nFinancial approval is separate. Profiles do not prove provider capacity.\n");
         for p in PARAMETERS {
             s += &format!(
                 "--{} <u64> [{}; default={}; {}..={}]\n",
@@ -1975,6 +2005,7 @@ impl Resolved {
             ("fe_mode", e.fe_mode.clone()),
             ("fe_targets", e.fe_targets.join(",")),
             ("fe_group", e.fe_group.clone()),
+            ("operator_key_sha256", e.operator_key_sha256.clone()),
             ("threshold_trigger", e.threshold_trigger.to_string()),
             ("c0_census", e.c0_census.to_string()),
             ("source_geyser", e.source_geyser.clone()),
@@ -2046,6 +2077,9 @@ pub struct EffectiveConfig {
     /// DEC-18 (from [`PROVIDERS_REVISION`]): the run's providers with their bindings; an earlier
     /// record has none.
     pub providers: Vec<crate::providers::ProviderBinding>,
+    /// DEC-17a (from [`OPERATOR_REVISION`]): the registered operator key's SHA-256; an earlier
+    /// record has none.
+    pub operator_key_sha256: String,
 }
 pub fn configured() -> bool {
     ACTIVE.get().is_some()
@@ -2548,7 +2582,7 @@ mod tests {
                 solana_sdk::hash::hash(names.as_bytes()).to_string()
             ),
             (
-                21,
+                22,
                 167,
                 "99aiFVj3NpMi32DyZ6PL4uzhQFDY1AU248HxadtetY1j".to_string()
             )

@@ -254,6 +254,9 @@ pub mod kind {
     /// P0-027: a deployed release's source identity (`boot_audit::ReleaseSource`),
     /// `<release>/p0-release.p0j`.
     pub const RELEASE_SOURCE: u16 = 1116;
+    /// DEC-17a (P8-CTRL-02): the registered operator key (`operator_auth::OperatorKey`),
+    /// `data/operator/key.p0j`.
+    pub const OPERATOR_KEY: u16 = 1117;
     pub const ALL: &[u16] = &[
         OWNER_RECORD,
         OWNER_OPPORTUNITY,
@@ -354,6 +357,7 @@ pub mod kind {
         C01_FE01,
         C01_FE01_PLAN,
         RELEASE_SOURCE,
+        OPERATOR_KEY,
         super::MANIFEST,
     ];
 }

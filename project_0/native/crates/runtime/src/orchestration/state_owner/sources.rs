@@ -97,8 +97,8 @@ pub(super) struct OwnerCapabilities {
     /// The effective bundle path and why it is not the requested one.
     pub(super) jito_effective: &'static str,
     pub(super) jito_block: &'static str,
-    /// DEC-13: the FE-06 authorization that opens LIVE; `None` in this build (no production path
-    /// constructs one), so LIVE stays BLOCKED.
+    /// DEC-13: the FE-06 authorization that opens LIVE — DEC-17a: taken over only from an FE-06
+    /// grant the operator signed (`accept_grant`); `None`: LIVE stays BLOCKED.
     pub(super) fe06: Option<crate::orchestration::capability_control::Fe06Authorization>,
     pub(super) last_decision: Option<crate::status_tap::OwnerSourceDecision>,
     pub(super) applied: u64,
@@ -108,6 +108,9 @@ pub(super) struct OwnerCapabilities {
     pub(super) previews: Fe06Previews,
     /// P8-CTRL.3: what this owner runs, fixed at its start (`None`: no capability control).
     pub(super) running: Option<crate::orchestration::fe06::Running>,
+    /// DEC-17a: the configured operator key's SHA-256, fixed at the start (empty: none — every
+    /// request that needs the operator is refused).
+    pub(super) operator_key_sha256: String,
     /// P8-CTRL.7 (review M5): the stops the control thread handed over, shared with it.
     pub(super) stop: std::sync::Arc<crate::orchestration::capability_control::StopSignal>,
 }
@@ -175,6 +178,61 @@ impl OwnerCapabilities {
         }
     }
 
+    /// DEC-17a: the project this owner's capability control is under (its request directory's).
+    fn project(&self) -> Option<&std::path::Path> {
+        self.dir
+            .as_deref()
+            .and_then(std::path::Path::parent)
+            .and_then(std::path::Path::parent)
+    }
+
+    /// DEC-17a (P8-CTRL.3, L04): the grant of the previewed scope of exactly `digest` — it binds
+    /// what this owner runs now and every evidence record it names is unchanged.
+    fn accept_grant(
+        &self,
+        digest: &str,
+    ) -> Result<crate::orchestration::capability_control::Fe06Authorization, String> {
+        use crate::orchestration::fe06;
+        let project = self
+            .project()
+            .ok_or("FE06_GRANT_REFUSED: no capability control")?;
+        let scope = fe06::preview(project, digest)?;
+        let running = self
+            .running
+            .as_ref()
+            .ok_or("FE06_GRANT_REFUSED: what the owner runs is unknown")?;
+        let now = super::accounts::wall_unix_s()
+            .map_err(|_| "FE06_GRANT_REFUSED: no readable clock".to_string())?;
+        fe06::check_running(&scope, running, now)?;
+        fe06::evidence_holds(project, &scope)?;
+        Ok(
+            crate::orchestration::capability_control::Fe06Authorization::granted(
+                digest.into(),
+                scope,
+                project,
+            ),
+        )
+    }
+
+    /// DEC-17a: a request that needs the operator's authentication carries the operator's valid
+    /// signature (`operator_auth::verify`); every other passes.
+    fn operator_authenticated(
+        &self,
+        r: &crate::analytics::payload::CapabilityControlRequest,
+    ) -> Result<(), String> {
+        use crate::orchestration::operator_auth;
+        if !operator_auth::required(&r.capability, &r.requested) {
+            return Ok(());
+        }
+        let project = self.project().ok_or_else(|| {
+            format!(
+                "{}: no capability control",
+                operator_auth::OPERATOR_AUTH_REQUIRED
+            )
+        })?;
+        operator_auth::verify(project, &self.operator_key_sha256, r, &r.operator_signature)
+    }
+
     /// P8-CTRL.2: what LIVE's effective value rests on now.
     pub(super) fn live_gates(&self) -> crate::orchestration::capability_control::LiveGates<'_> {
         crate::orchestration::capability_control::LiveGates {
@@ -239,6 +297,7 @@ impl Default for OwnerCapabilities {
             jito_effective: "OFF",
             jito_block: "",
             fe06: None,
+            operator_key_sha256: String::new(),
             last_decision: None,
             applied: 0,
             refused: 0,
@@ -571,6 +630,12 @@ impl ShadowOwner {
             .as_ref()
             .map_or(String::new(), |r| r.request_id.clone());
         let request_value = request.as_ref().ok().map(|r| r.requested.clone());
+        // DEC-17a: a grant or an enabling switch only with the operator's signature (checked after
+        // the request's own form, the epoch, the id and the signer it names).
+        let operator = match &request {
+            Ok(r) => self.sources.capabilities.operator_authenticated(r),
+            Err(_) => Ok(()),
+        };
         let (text, valid) = match request {
             Ok(r) => (
                 cap::shown(&r.capability, &r.requested),
@@ -578,7 +643,7 @@ impl ShadowOwner {
                     .capabilities
                     .admit(&r)
                     .and_then(|()| cap::validate(&r.capability, &r.requested))
-                    .map(|()| r.requested),
+                    .map(|()| r.requested.clone()),
             ),
             Err(reason) => ("unreadable".to_string(), Err(reason)),
         };
@@ -591,6 +656,7 @@ impl ShadowOwner {
             .as_deref()
             .and_then(cap::wallet_of)
             .and_then(Result::ok);
+        let mut granted = None;
         let valid = match valid {
             Ok(requested)
                 if wallet.is_some_and(|pk| {
@@ -607,8 +673,16 @@ impl ShadowOwner {
                     cap::shown(request_capability.as_deref().unwrap_or(""), &requested)
                 ))
             }
-            // P8-CTRL.3: no grant without the operator's own authentication (undecided).
-            Ok(_) if fe06_grant => Err(cap::FE06_AUTH_UNDECIDED.into()),
+            Ok(_) if operator.is_err() => operator.clone().map(|()| String::new()),
+            // DEC-17a (P8-CTRL.3): the signed grant of a previewed scope that binds what runs, with
+            // its evidence unchanged.
+            Ok(digest) if fe06_grant => match self.sources.capabilities.accept_grant(&digest) {
+                Ok(auth) => {
+                    granted = Some(auth);
+                    Ok(digest)
+                }
+                Err(e) => Err(e),
+            },
             Ok(digest)
                 if fe06_revoke
                     && self
@@ -671,6 +745,8 @@ impl ShadowOwner {
             if fe06_revoke {
                 // P8-CTRL.3: the grant ends at once and the submitter closes with it.
                 c.fe06 = None;
+            } else if fe06_grant {
+                c.fe06 = granted.take();
             } else if econ {
                 c.econ.set(request_capability.as_deref().unwrap_or(""), on);
             } else if let Some(pk) = wallet {

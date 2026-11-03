@@ -51,9 +51,9 @@ pub const ECON_EXIT: [&str; 4] = [ECON_LIVE, ECON_ARM, ECON_SIGN, ECON_SEND];
 /// revocation of the grant in force of that digest.
 pub const FE06_GRANT: &str = "FE06_GRANT";
 pub const FE06_REVOKE: &str = "FE06_REVOKE";
-/// Why no grant is taken while the operator authentication of a grant is not decided (P8-CTRL.3:
-/// a confirmation alone is no cryptographic identity).
-pub const FE06_AUTH_UNDECIDED: &str = "FE06_OPERATOR_AUTHORIZATION_UNDECIDED: a grant needs the operator's own authentication (P8-CTRL.3), not decided yet; no grant is taken";
+/// DEC-17a: why LIVE has no FE-06 grant — the operator confirms a previewed scope locally (a
+/// confirmation in the GUI is none; the owner verifies the operator's signature).
+pub const FE06_NO_GRANT: &str = "FE06_NO_GRANT: awaiting the operator's confirmation of a previewed scope (p0ctl live grant DIGEST --confirm, Touch ID)";
 /// P8-CTRL.1: the switch of one configured signer is `WALLET:<pubkey>`.
 pub const WALLET_PREFIX: &str = "WALLET:";
 /// P8-CTRL.1: the validated roles of a configured signer.
@@ -290,6 +290,17 @@ pub struct Written {
 /// looked up first — the same id with the same bytes is that request again (a retry after a lost
 /// answer finds its sequence number), with other bytes a conflict.
 pub fn write_request(dir: &Path, r: &NewRequest) -> Result<Written, String> {
+    write_signed_request(dir, r, &|_| Ok(vec![]))
+}
+
+/// DEC-17a: [`write_request`] with the operator's signature of the request as it is written —
+/// `sign` sees its final sequence (the CAS generation), id, epoch, value and time. A retry of the
+/// same id finds the request as first written, its first signature.
+pub fn write_signed_request(
+    dir: &Path,
+    r: &NewRequest,
+    sign: &dyn Fn(&CapabilityControlRequest) -> Result<Vec<u8>, String>,
+) -> Result<Written, String> {
     validate(r.capability, r.requested)?;
     validate_request_id(r.request_id)?;
     if r.owner_epoch == 0 {
@@ -313,14 +324,16 @@ pub fn write_request(dir: &Path, r: &NewRequest) -> Result<Written, String> {
         return Err(conflict(current));
     }
     let seq = current + 1;
-    let request = CapabilityControlRequest {
+    let mut request = CapabilityControlRequest {
         seq,
         capability: r.capability.into(),
         requested: r.requested.into(),
         requested_unix_s: r.now_unix_s,
         request_id: r.request_id.into(),
         owner_epoch: r.owner_epoch,
+        operator_signature: vec![],
     };
+    request.operator_signature = sign(&request)?;
     match journal::create_typed_value(
         &request_path(dir, seq),
         journal::source::CAPABILITY_CONTROL,
@@ -453,10 +466,11 @@ pub fn epoch_decisions(dir: &Path, epoch: u64) -> Result<Vec<CapabilityControlOu
 
 /// DEC-13: the separate FE-06 authorization that opens LIVE — the pipeline mode, Safety LIVE, the
 /// asset allowlist and the submitter together. No request, switch, FE-04 approval or
-/// configuration grants it; P8-CTRL-02 makes it the owner's FE-06 grant — until then this build
-/// reads none and no production path constructs one: LIVE stays BLOCKED (only the offline tests
-/// hold one). It must open all of them at once — `OwnerCapabilities::fe06`, `ObserveOnly::open`
-/// and Safety LIVE — never the mode alone (review L7).
+/// configuration grants it: DEC-17a (P8-CTRL-02) — only the owner takes it over, from an FE-06
+/// grant the operator signed, of a previewed scope that binds what runs, with every evidence
+/// record unchanged ([`Fe06Authorization::granted`]). It must open all of them at once —
+/// `OwnerCapabilities::fe06`, `ObserveOnly::open` and Safety LIVE — never the mode alone (review
+/// L7).
 #[derive(Debug, PartialEq, Eq)]
 pub struct Fe06Authorization {
     /// The digest of its scope (P8-CTRL.3).
@@ -465,6 +479,8 @@ pub struct Fe06Authorization {
     scope: Option<Box<super::fe06::Scope>>,
     not_before_unix_s: u64,
     expires_unix_s: u64,
+    /// DEC-17a: the project its evidence records are under (`None`: an offline test's grant).
+    evidence_root: Option<PathBuf>,
 }
 
 impl Fe06Authorization {
@@ -496,6 +512,27 @@ impl Fe06Authorization {
         (self.not_before_unix_s..self.expires_unix_s).contains(&now_unix_s)
     }
 
+    /// DEC-17a (P8-CTRL.3): the owner's grant of `scope` (its digest `digest`), its evidence under
+    /// `project` — only the owner's grant acceptance constructs one.
+    #[cfg(feature = "crate_health")]
+    pub(crate) fn granted(digest: String, scope: super::fe06::Scope, project: &Path) -> Self {
+        Self {
+            digest,
+            not_before_unix_s: scope.not_before_unix_s,
+            expires_unix_s: scope.expires_unix_s,
+            scope: Some(Box::new(scope)),
+            evidence_root: Some(project.to_path_buf()),
+        }
+    }
+
+    /// DEC-17a (L04): every evidence record of its scope unchanged — at every use.
+    pub fn evidence_holds(&self) -> Result<(), String> {
+        match (self.scope(), &self.evidence_root) {
+            (Some(scope), Some(root)) => super::fe06::evidence_holds(root, scope),
+            _ => Ok(()),
+        }
+    }
+
     /// The offline tests' stand-in of an FE-06 authorization, always in force (never part of a
     /// build).
     #[cfg(test)]
@@ -505,6 +542,7 @@ impl Fe06Authorization {
             scope: None,
             not_before_unix_s: 0,
             expires_unix_s: u64::MAX,
+            evidence_root: None,
         }
     }
 
@@ -516,6 +554,7 @@ impl Fe06Authorization {
             not_before_unix_s: scope.not_before_unix_s,
             expires_unix_s: scope.expires_unix_s,
             scope: Some(Box::new(scope)),
+            evidence_root: None,
         }
     }
 }
@@ -755,6 +794,10 @@ fn decision(g: &LiveGates, purpose: Purpose) -> (&'static str, String) {
                 if let Err(e) = scope_runs(g, scope, "FE06_SCOPE_BINDING") {
                     missing.push(e);
                 }
+            }
+            // DEC-17a (L04): a changed evidence record blocks the grant at every use.
+            if let Err(e) = a.evidence_holds() {
+                missing.push(e);
             }
         }
     }

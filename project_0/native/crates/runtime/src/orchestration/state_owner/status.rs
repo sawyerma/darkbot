@@ -348,7 +348,7 @@ impl ShadowOwner {
                     s.block_reason = cap::grant_not_in_force(grant.digest());
                 }
             }
-            None => s.block_reason = cap::FE06_AUTH_UNDECIDED.into(),
+            None => s.block_reason = cap::FE06_NO_GRANT.into(),
         }
         // The scopes previewed for this epoch, as the lifecycle's refresh cached them.
         s.previews = c.previews.current();

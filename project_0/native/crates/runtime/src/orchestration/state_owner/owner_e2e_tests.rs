@@ -2439,6 +2439,7 @@ fn dec11_owner_builds_the_bundle_path_through_the_capability() {
         requested_unix_s: 1,
         request_id: format!("t-{seq}"),
         owner_epoch: 0,
+        operator_signature: vec![],
     };
     let row = |f: &Fixture| {
         let r = f
@@ -2534,6 +2535,7 @@ fn dec04_owner_records_the_holds_and_gates_active_on_the_evidence() {
         requested_unix_s: 1,
         request_id: format!("t-{seq}"),
         owner_epoch: 0,
+        operator_signature: vec![],
     };
     f.owner
         .apply_capability_control(1, Ok(request("ACTIVE", 1)));
@@ -4522,6 +4524,7 @@ fn b01_the_controller_switches_rebalancing_hot() {
             requested_unix_s: 1,
             request_id: format!("r-{seq}"),
             owner_epoch: 0,
+            operator_signature: vec![],
         })
     };
     let decided = |f: &Fixture| {
@@ -5305,6 +5308,7 @@ fn dec13_a_live_request_is_recorded_and_never_effective() {
             requested_unix_s: 1,
             request_id: format!("t-{seq}"),
             owner_epoch: 0,
+            operator_signature: vec![],
         })
     };
     f.owner
@@ -5366,30 +5370,41 @@ fn dec13_a_live_request_is_recorded_and_never_effective() {
 /// unconfigured signer or a missing id is refused. LIVE stays BLOCKED with every switch and the
 /// signer ENABLED until FE-06 (its only missing gate then), and any one switch taken back blocks
 /// it again; an ENABLED without its receipt does not stand; a new owner starts all DISABLED.
+/// DEC-17a: every enabling switch is the operator's signed request (the registered test key).
+#[cfg(feature = "operator-test-signer")]
 #[test]
 fn p8ctrl01_the_owner_decides_switches_per_epoch_and_live_needs_every_gate() {
     use crate::analytics::payload::CapabilityControlRequest;
-    use crate::orchestration::capability_control as cap;
+    use crate::orchestration::{capability_control as cap, operator_auth};
     let mut f = fixture_with("p8ctrl01", None);
-    let dir = f.dir.join("capability-control");
+    let dir = f.dir.join("data/capability-control");
+    let project = f.dir.clone();
     let signer = f.owner.liquidator;
+    let key = operator_auth::register(&project, true).unwrap();
     {
         let c = &mut f.owner.sources.capabilities;
         (c.dir, c.config_version, c.epoch) = (Some(dir.clone()), Some(0), Some(3));
+        c.operator_key_sha256 = operator_auth::key_sha256(&key.public_key);
         c.wallets = vec![cap::WalletSwitch::configured(
             signer,
             &[cap::ROLE_LIQUIDATOR, cap::ROLE_FEE_PAYER],
         )];
     }
     let request = |seq, capability: &str, requested: &str, id: &str, epoch| {
-        Ok(CapabilityControlRequest {
+        let mut r = CapabilityControlRequest {
             seq,
             capability: capability.into(),
             requested: requested.into(),
             requested_unix_s: 1,
             request_id: id.into(),
             owner_epoch: epoch,
-        })
+            operator_signature: vec![],
+        };
+        if operator_auth::required(capability, requested) {
+            r.operator_signature =
+                operator_auth::sign(&project, &operator_auth::statement(&r)).unwrap();
+        }
+        Ok(r)
     };
     let shown = |f: &Fixture, name: &str| {
         let c = f
@@ -5641,14 +5656,18 @@ fn p8ctrl02_no_grant_without_the_operator_and_a_revocation_ends_it_at_once() {
             requested_unix_s: 1,
             request_id: format!("r-{seq}"),
             owner_epoch: 3,
+            operator_signature: vec![],
         })
     };
     let detail = |seq| cap::outcome_at(&dir, seq).unwrap().unwrap();
     f.owner
         .apply_capability_control(1, request(1, cap::FE06_GRANT, &digest));
     let o = detail(1);
+    // DEC-17a: no operator key configured, no signature: refused.
     assert!(
-        !o.applied && o.detail == cap::FE06_AUTH_UNDECIDED,
+        !o.applied
+            && o.detail
+                .starts_with(crate::orchestration::operator_auth::OPERATOR_AUTH_REQUIRED),
         "{}",
         o.detail
     );
@@ -6450,6 +6469,7 @@ fn dec06_the_controller_switches_the_threshold_mode_hot() {
             requested_unix_s: 1,
             request_id: format!("t-{seq}"),
             owner_epoch: 0,
+            operator_signature: vec![],
         })
     };
     let decided = |f: &Fixture| {
@@ -6618,6 +6638,7 @@ fn dec06_an_unrecorded_active_request_does_not_stand() {
             requested_unix_s: 1,
             request_id: format!("t-{seq}"),
             owner_epoch: 0,
+            operator_signature: vec![],
         })
     };
     f.owner.apply_capability_control(1, request(1, "OBSERVE"));
@@ -6799,6 +6820,7 @@ fn dec06_an_unrecorded_active_is_never_restored() {
             requested_unix_s: 1,
             request_id: format!("t-{seq}"),
             owner_epoch: 0,
+            operator_signature: vec![],
         })
     };
     f.owner.apply_capability_control(1, request(1, "OBSERVE"));
@@ -8858,6 +8880,7 @@ fn p8ctrl06_l07_a_disable_is_linearized_before_or_after_the_egress_never_inside(
             requested_unix_s: 1,
             request_id: "l07-after".into(),
             owner_epoch: 3,
+            operator_signature: vec![],
         }),
     );
     assert!(!f.owner.live_effective());
@@ -9100,6 +9123,7 @@ fn p8ctrl06_l16_a_restart_resets_the_switches_and_keeps_every_hold_and_booking()
             requested_unix_s: 1,
             request_id: "l16-earlier-epoch".into(),
             owner_epoch: first,
+            operator_signature: vec![],
         }),
     );
     assert_ne!(
@@ -9627,6 +9651,7 @@ fn p6_mt10_active_decides_a_sealed_class_locally_and_its_simulation_verifies_it(
                 requested_unix_s: 1,
                 request_id: format!("r-{seq}"),
                 owner_epoch: 0,
+                operator_signature: vec![],
             }),
         );
     };
@@ -10030,4 +10055,155 @@ fn p6_mt7_a_rebalance_quote_the_quota_refused_is_asked_again() {
     );
     let plan = f.owner.owner_snapshot(1).rebalance.unwrap();
     assert_eq!(plan.quotes_pending, 1, "unanswered, asked again");
+}
+
+/// DEC-17a (P8-CTRL-02, L04): the owner takes over the operator-signed grant of a previewed scope
+/// that binds what runs, with its evidence records exactly as bound; a changed record blocks it at
+/// the next use (EVIDENCE_CHANGED). Refused: unsigned, signed for another digest or generation, an
+/// expired scope. ENABLE of ECON_ARM only signed; DISABLE and REVOKE need no signature.
+#[cfg(feature = "operator-test-signer")]
+#[test]
+fn dec17a_a_signed_grant_is_taken_and_changed_evidence_blocks_it() {
+    use crate::analytics::journal::{self, kind, Writer};
+    use crate::analytics::payload::CapabilityControlRequest;
+    use crate::orchestration::{capability_control as cap, fe06, operator_auth};
+    let mut f = fixture_with("dec17a", None);
+    let project = f.dir.clone();
+    let dir = project.join("data/capability-control");
+    std::fs::create_dir_all(&dir).unwrap();
+    // The three evidence records, bound by their bytes.
+    let mut evidence = Vec::new();
+    for (name, record_kind, path) in [
+        (
+            "provider",
+            kind::PROVIDER_EVIDENCE,
+            "data/provider_evidence/e.p0j",
+        ),
+        (
+            "qualification",
+            kind::C0E1_QUALIFICATION,
+            "data/runs/r/qualification.p0j",
+        ),
+        ("fe01", kind::FE01_FREEZE, "data/fe01/f/fe01_freeze.p0j"),
+    ] {
+        let full = project.join(path);
+        std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+        let mut w = Writer::create(&full).unwrap();
+        w.test_append_historical(record_kind, &serde_json::json!({"n": name}))
+            .unwrap();
+        w.seal(true).unwrap();
+        let sha = journal::hex(&solana_sdk::hash::hash(&std::fs::read(&full).unwrap()).to_bytes());
+        evidence.push(format!("{name}:{path}@{sha}"));
+    }
+    let now = super::accounts::wall_unix_s().unwrap();
+    let scope_of = |from: u64, until: u64| {
+        let (from, until, evidence) = (from.to_string(), until.to_string(), evidence.join(","));
+        fe06::parse(
+            fe06::tests::text(
+                &f.owner.liquidator,
+                &[
+                    ("evidence", &evidence),
+                    ("not_before_unix_s", &from),
+                    ("expires_unix_s", &until),
+                ],
+            )
+            .as_bytes(),
+            &fe06::tests::ceilings(),
+        )
+        .unwrap()
+    };
+    let scope = scope_of(now - 60, now + 3_000);
+    let digest = fe06::put_preview(&project, &scope).unwrap();
+    let expired = fe06::put_preview(&project, &scope_of(now - 600, now - 60)).unwrap();
+    let key = operator_auth::register(&project, true).unwrap();
+    {
+        let c = &mut f.owner.sources.capabilities;
+        (c.dir, c.config_version, c.epoch) = (Some(dir.clone()), Some(0), Some(scope.owner_epoch));
+        c.operator_key_sha256 = operator_auth::key_sha256(&key.public_key);
+        c.running = Some(fe06::Running {
+            genesis_hash: darkbot_project0::protocol::GENESIS_HASH_MAINNET.into(),
+            program: scope.programs.iter().next().unwrap().clone(),
+            program_data_hash: scope.program_data_hash.clone(),
+            code_sha: Some(scope.code_sha.clone()),
+            binary_sha256: Some(scope.binary_sha256.clone()),
+            runtime_config_sha256: scope.runtime_config_sha256.clone(),
+            signers: scope.signers.clone(),
+            owner_epoch: scope.owner_epoch,
+        });
+    }
+    let epoch = scope.owner_epoch;
+    let request = |seq: u64, capability: &str, requested: &str| CapabilityControlRequest {
+        seq,
+        capability: capability.into(),
+        requested: requested.into(),
+        requested_unix_s: now,
+        request_id: format!("r-{seq}"),
+        owner_epoch: epoch,
+        operator_signature: vec![],
+    };
+    let signed = |r: CapabilityControlRequest| {
+        let mut r = r;
+        r.operator_signature =
+            operator_auth::sign(&project, &operator_auth::statement(&r)).unwrap();
+        r
+    };
+    let outcome = |seq| cap::outcome_at(&dir, seq).unwrap().unwrap();
+    let refused_as = |seq, code: &str| {
+        let o = outcome(seq);
+        assert!(!o.applied && o.detail.contains(code), "{seq}: {}", o.detail);
+    };
+    // Refused: unsigned; signed for another digest; signed at another generation; expired.
+    f.owner
+        .apply_capability_control(1, Ok(request(1, cap::FE06_GRANT, &digest)));
+    refused_as(1, operator_auth::OPERATOR_AUTH_REQUIRED);
+    let mut foreign = signed(request(2, cap::FE06_GRANT, &expired));
+    foreign.requested = digest.clone();
+    f.owner.apply_capability_control(2, Ok(foreign));
+    refused_as(2, operator_auth::OPERATOR_AUTH_REQUIRED);
+    let mut moved = signed(request(3, cap::FE06_GRANT, &digest));
+    moved.seq = 4;
+    moved.request_id = "r-4".into();
+    f.owner.apply_capability_control(4, Ok(moved));
+    refused_as(4, operator_auth::OPERATOR_AUTH_REQUIRED);
+    f.owner
+        .apply_capability_control(5, Ok(signed(request(5, cap::FE06_GRANT, &expired))));
+    refused_as(5, "FE06_SCOPE_EXPIRED");
+    assert!(f.owner.sources.capabilities.fe06.is_none());
+    // The signed grant of the current scope is taken over.
+    f.owner
+        .apply_capability_control(6, Ok(signed(request(6, cap::FE06_GRANT, &digest))));
+    assert!(outcome(6).applied, "{}", outcome(6).detail);
+    assert_eq!(
+        f.owner
+            .sources
+            .capabilities
+            .fe06
+            .as_ref()
+            .map(|a| a.digest()),
+        Some(digest.as_str())
+    );
+    let reason = |f: &Fixture| cap::live_decision(&f.owner.sources.capabilities.live_gates()).1;
+    assert!(!reason(&f).contains("EVIDENCE_CHANGED"), "{}", reason(&f));
+    // An enabling switch only signed; a disabling one never needs it.
+    f.owner
+        .apply_capability_control(7, Ok(request(7, cap::ECON_ARM, cap::ENABLED)));
+    refused_as(7, operator_auth::OPERATOR_AUTH_REQUIRED);
+    f.owner
+        .apply_capability_control(8, Ok(signed(request(8, cap::ECON_ARM, cap::ENABLED))));
+    assert!(outcome(8).applied, "{}", outcome(8).detail);
+    f.owner
+        .apply_capability_control(9, Ok(request(9, cap::ECON_ARM, cap::DISABLED)));
+    assert!(outcome(9).applied, "{}", outcome(9).detail);
+    // A changed evidence record blocks the grant at the next use.
+    let provider = project.join("data/provider_evidence/e.p0j");
+    let mut bytes = std::fs::read(&provider).unwrap();
+    *bytes.last_mut().unwrap() ^= 1;
+    std::fs::write(&provider, bytes).unwrap();
+    assert!(reason(&f).contains("EVIDENCE_CHANGED"), "{}", reason(&f));
+    // A revocation needs no signature.
+    f.owner
+        .apply_capability_control(10, Ok(request(10, cap::FE06_REVOKE, &digest)));
+    assert!(outcome(10).applied, "{}", outcome(10).detail);
+    assert!(f.owner.sources.capabilities.fe06.is_none());
+    cleanup(f);
 }

@@ -335,8 +335,8 @@ test("P8-CTRL-05: economic switches, FE-06 and the signer take the one command p
   // The LIVE checklist names each gate the owner reports; LIVE itself stays the owner's.
   await expect(line("LIVE gate · ECON_LIVE")).toContainText("missing · DISABLED");
   await expect(line("LIVE gate · Signers")).toContainText("met · 1 of 1 ENABLED");
-  await expect(line("LIVE gate · FE-06 grant")).toContainText("missing · FE06_OPERATOR_AUTHORIZATION_UNDECIDED");
-  await expect(line(/^FE-06 grant/)).toContainText("none · FE06_OPERATOR_AUTHORIZATION_UNDECIDED");
+  await expect(line("LIVE gate · FE-06 grant")).toContainText("missing · FE06_NO_GRANT");
+  await expect(line(/^FE-06 grant/)).toContainText("none · FE06_NO_GRANT");
   await page.getByRole("button", { name: "Enable ECON_LIVE" }).click();
   await expect.poll(() => sent.length).toBe(1);
   expect(command(0)).toEqual(["ECON_LIVE", "ENABLED", 2n]);

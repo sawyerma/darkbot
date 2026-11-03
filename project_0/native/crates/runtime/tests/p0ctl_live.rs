@@ -3,6 +3,8 @@
 //! digest; a grant names exactly a previewed digest with its version, epoch and request id and
 //! reaches the running owner's queue (this test process stands in for the runtime: owner lock,
 //! epoch, control thread); `live status` names the grant state. Offline only.
+// DEC-17a: the grant is signed by a registered test key — built with the test signer only.
+#![cfg(feature = "operator-test-signer")]
 use darkbot_common::channel::bounded;
 use darkbot_common::lifecycle::Shutdown;
 use darkbot_runner::orchestration::control;
@@ -41,7 +43,7 @@ fn p0ctl(project: &std::path::Path, env: &[(&str, &str)], args: &[&str]) -> (i32
 fn scope(signer: &Pubkey) -> String {
     let key = "11111111111111111111111111111112";
     [
-        "schema = Project0/FE06Scope/1".to_string(),
+        "schema = Project0/FE06Scope/2".to_string(),
         "scope_id = pilot-1".into(),
         "mode = ALL".into(),
         "cluster = mainnet-beta".into(),
@@ -69,7 +71,7 @@ fn scope(signer: &Pubkey) -> String {
         "exit_positions = NONE".into(),
         "submission_adapters = rpc".into(),
         "data_sources = wss".into(),
-        "evidence = provider:0123456789abcdef,qualification:run-1,fe01:frozen-1".into(),
+        format!("evidence = provider:data/provider_evidence/0123456789abcdef.p0j@{h},qualification:data/runs/run-1/qualification.p0j@{h},fe01:data/fe01/frozen-1/fe01_freeze.p0j@{h}", h = "a".repeat(64)),
         "max_input_per_attempt_usd_micro = 10000000".into(),
         "max_exposure_usd_micro = 10000000".into(),
         "max_loss_usd_micro = 1000000".into(),
@@ -96,6 +98,7 @@ fn scope(signer: &Pubkey) -> String {
     .join("\n")
 }
 
+/// DEC-17a: the grant is signed by the registered test key.
 #[test]
 fn p8ctrl02_p0ctl_live_previews_a_scope_and_sends_its_grant_to_the_owner() {
     let d = std::env::temp_dir().join(format!("p0ctl_live_{}", std::process::id()));
@@ -190,7 +193,19 @@ fn p8ctrl02_p0ctl_live_previews_a_scope_and_sends_its_grant_to_the_owner() {
         )),
     )
     .unwrap();
-    let (code, out, err) = grant(&digest, &bound);
+    // DEC-17a: a grant is the operator's signed confirmation — unconfirmed it is refused here.
+    let (code, _, err) = grant(&digest, &bound);
+    assert_eq!(code, 2);
+    assert!(err.contains("OPERATOR_AUTH_REQUIRED"), "{err}");
+    let (code, out, err) = p0ctl(
+        &d,
+        &[("P0_OPERATOR_SIGNER", "test")],
+        &["operator", "register"],
+    );
+    assert_eq!(code, 0, "{out}{err}");
+    let mut confirmed = bound.to_vec();
+    confirmed.push("--confirm");
+    let (code, out, err) = grant(&digest, &confirmed);
     assert_eq!(code, 0, "{out}{err}");
     let t = Instant::now();
     let message = loop {
@@ -205,6 +220,7 @@ fn p8ctrl02_p0ctl_live_previews_a_scope_and_sends_its_grant_to_the_owner() {
             seq: 1, request, ..
         } => {
             let r = request.unwrap();
+            assert!(!r.operator_signature.is_empty(), "the grant is signed");
             assert_eq!(
                 (
                     r.capability.as_str(),
@@ -222,7 +238,7 @@ fn p8ctrl02_p0ctl_live_previews_a_scope_and_sends_its_grant_to_the_owner() {
     assert!(
         out.contains("owner epoch: 1")
             && out.contains("grant in force: none")
-            && out.contains("FE06_OPERATOR_AUTHORIZATION_UNDECIDED"),
+            && out.contains("FE06_NO_GRANT"),
         "{out}"
     );
     // `live attempts`: a wallet's bookings against the previewed scope's quotas (none booked).

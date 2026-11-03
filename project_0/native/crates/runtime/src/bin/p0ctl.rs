@@ -2573,7 +2573,7 @@ fn provider_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
 }
 
 const CAPABILITY_USAGE: &str =
-    "usage: p0ctl capability set LIVE OFF|LIVE | HOLD_B OFF|OBSERVE|ACTIVE | JITO_BUNDLE OFF|OBSERVE|ACTIVE | THRESHOLD_TRIGGER OFF|OBSERVE|ACTIVE | INVENTORY_REBALANCING OFF|OBSERVE|ACTIVE | LOCAL_FEE_MODEL OFF|OBSERVE|ACTIVE | ECON_SIGN|ECON_ARM|ECON_SEND|ECON_ATTEMPT|ECON_LIVE DISABLED|ENABLED | WALLET:<pubkey> DISABLED|ENABLED | FE06_GRANT|FE06_REVOKE <scope digest> [--expect-version N] [--expect-epoch E] [--request-id ID] | p0ctl capability status";
+    "usage: p0ctl capability set LIVE OFF|LIVE | HOLD_B OFF|OBSERVE|ACTIVE | JITO_BUNDLE OFF|OBSERVE|ACTIVE | THRESHOLD_TRIGGER OFF|OBSERVE|ACTIVE | INVENTORY_REBALANCING OFF|OBSERVE|ACTIVE | LOCAL_FEE_MODEL OFF|OBSERVE|ACTIVE | ECON_SIGN|ECON_ARM|ECON_SEND|ECON_ATTEMPT|ECON_LIVE DISABLED|ENABLED | WALLET:<pubkey> DISABLED|ENABLED | FE06_GRANT|FE06_REVOKE <scope digest> [--expect-version N] [--expect-epoch E] [--request-id ID] [--confirm (DEC-17a: the operator signs in this terminal — required for FE06_GRANT and every ENABLED of ECON_ARM, ECON_SEND, ECON_LIVE, WALLET:*)] | p0ctl capability status";
 
 /// DEC-13/P8-CTRL: the operator's capability request (`set`), the same controller path as
 /// `source`: written only for a running owner of this project, under a one-time request id (the
@@ -2586,7 +2586,13 @@ fn capability_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
     match args {
         [set, capability, requested, opts @ ..] if set == "set" => {
             let (mut expected, mut stated_epoch, mut request_id) = (None, None, None);
-            let mut opts = opts.iter();
+            // DEC-17a: the operator confirms (signs) only here, in a terminal.
+            let confirm = opts.iter().filter(|a| *a == "--confirm").count();
+            if confirm > 1 {
+                return Err(CAPABILITY_USAGE.into());
+            }
+            let opts: Vec<&String> = opts.iter().filter(|a| *a != "--confirm").collect();
+            let mut opts = opts.into_iter();
             while let Some(flag) = opts.next() {
                 let value = opts.next().ok_or(CAPABILITY_USAGE)?;
                 let number = |code: &str| {
@@ -2649,7 +2655,34 @@ fn capability_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
                 Some(id) => id,
                 None => capability_control::new_request_id()?,
             };
-            let written = capability_control::write_request(
+            use darkbot_runner::orchestration::operator_auth;
+            let needs_operator = operator_auth::required(capability, requested);
+            if needs_operator && confirm == 0 {
+                return Err(format!("{}: {capability} {requested} is the operator's — confirm it locally with --confirm (Touch ID); {CAPABILITY_USAGE}", operator_auth::OPERATOR_AUTH_REQUIRED));
+            }
+            if confirm == 1 && !needs_operator {
+                return Err(format!("CAPABILITY_CONFIRM_UNNEEDED: {capability} {requested} needs no operator signature (a DISABLE, REVOKE or STOP never does)"));
+            }
+            // The Secure Enclave key is confirmed in a terminal only (no GUI, no pipe); a test key
+            // (only where the test signer is built) needs no presence.
+            if confirm == 1
+                && operator_auth::load(project)?.signer == operator_auth::SECURE_ENCLAVE
+                && !std::io::IsTerminal::is_terminal(&std::io::stdin())
+            {
+                return Err("OPERATOR_CONFIRM_NEEDS_TERMINAL: the operator confirms in a terminal (no GUI, no pipe)".into());
+            }
+            let sign = |r: &darkbot_runner::analytics::payload::CapabilityControlRequest| {
+                if confirm == 1 {
+                    println!(
+                        "[p0ctl] confirm {} as the operator (Touch ID or the login password)…",
+                        capability_control::shown(&r.capability, &r.requested)
+                    );
+                    operator_auth::sign(project, &operator_auth::statement(r))
+                } else {
+                    Ok(vec![])
+                }
+            };
+            let written = capability_control::write_signed_request(
                 &dir,
                 &capability_control::NewRequest {
                     capability,
@@ -2659,6 +2692,7 @@ fn capability_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
                     expected,
                     now_unix_s: now,
                 },
+                &sign,
             )?;
             source_control::signal(pid)?;
             println!(
@@ -2740,7 +2774,50 @@ fn capability_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
     }
 }
 
-const LIVE_USAGE: &str = "usage: p0ctl live scope --file FILE | p0ctl live grant|revoke --digest D --expect-version N --expect-epoch E --request-id ID | p0ctl live status | p0ctl live attempts --journal-dir DIR --wallet PUBKEY [--digest D]";
+const LIVE_USAGE: &str = "usage: p0ctl live scope --file FILE | p0ctl live grant --digest D --expect-version N --expect-epoch E --request-id ID --confirm (DEC-17a: the operator signs, Touch ID) | p0ctl live revoke --digest D --expect-version N --expect-epoch E --request-id ID | p0ctl live status | p0ctl live attempts --journal-dir DIR --wallet PUBKEY [--digest D]";
+
+const OPERATOR_USAGE: &str = "usage: p0ctl operator register   (DEC-17a: once — the operator key in this Mac's Secure Enclave; configure its printed operator_key_sha256) | p0ctl operator status";
+
+/// DEC-17a (P8-CTRL-02): the operator key — `register` makes it once, `status` names it.
+fn operator_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
+    use darkbot_runner::orchestration::operator_auth;
+    match args {
+        [register] if register == "register" => {
+            // A test key only where the test signer is built (the offline tests).
+            let test = cfg!(feature = "operator-test-signer")
+                && std::env::var("P0_OPERATOR_SIGNER").as_deref() == Ok("test");
+            let key = operator_auth::register(project, test)?;
+            println!(
+                "[p0ctl] operator key registered ({}): operator_key_sha256={}  — configure it (P0_OPERATOR_KEY_SHA256 or operator_key_sha256 in the configuration file); every grant and enabling switch is then signed with --confirm",
+                key.signer,
+                operator_auth::key_sha256(&key.public_key)
+            );
+            Ok(true)
+        }
+        [status] if status == "status" => {
+            let configured = &darkbot_solana::runtime_config::active().operator_key_sha256;
+            match operator_auth::load(project) {
+                Ok(key) => {
+                    let sha = operator_auth::key_sha256(&key.public_key);
+                    println!(
+                        "operator key: {} operator_key_sha256={sha} configured={}",
+                        key.signer,
+                        if configured.is_empty() {
+                            "NONE".to_string()
+                        } else if *configured == sha {
+                            "this key".to_string()
+                        } else {
+                            format!("another key ({configured})")
+                        }
+                    );
+                }
+                Err(e) => println!("operator key: none ({e})"),
+            }
+            Ok(true)
+        }
+        _ => Err(OPERATOR_USAGE.into()),
+    }
+}
 
 /// P8-CTRL.3/.8: the FE-06 scope, grant and revocation — a scope is previewed natively (read,
 /// validated against the registry's ceilings, stored under its digest and shown in full); a grant
@@ -2823,10 +2900,14 @@ fn live_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
                 }
                 _ => "none".to_string(),
             };
-            println!(
-                "grant in force: {state} · {}",
-                capability_control::FE06_AUTH_UNDECIDED
-            );
+            if state == "none" {
+                println!(
+                    "grant in force: none · {}",
+                    capability_control::FE06_NO_GRANT
+                );
+            } else {
+                println!("grant in force: {state}");
+            }
             Ok(true)
         }
         [attempts, rest @ ..] if attempts == "attempts" => live_attempts(project, rest),
@@ -3364,6 +3445,7 @@ fn main() -> ExitCode {
             (Some("provider"), _) => provider_cmd(&project, &rest),
             (Some("c01"), _) => c01_cmd(&project, &rest),
             (Some("release"), Some("identity")) => release_identity_cmd(&project, &rest[1..]),
+            (Some("operator"), _) => operator_cmd(&project, &rest),
             (Some("live"), _) => live_cmd(&project, &rest),
             (Some("boot"), _) => boot_cmd(&project, &rest),
             (Some("horizon"), _) => horizon_cmd(&project, &rest),

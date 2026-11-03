@@ -36,6 +36,8 @@
 # records, bytecode).
 /data/provider_measure/
 /data/c01/
+# DEC-17a: the registered operator key (its Secure-Enclave-wrapped form, usable on this Mac only).
+/data/operator/
 # orchestration/until_stopped.rs STORE (qualifications, autostart)
 /data/until_stopped/
 # orchestration/fe06.rs STORE

@@ -164,7 +164,7 @@ describe("Project 0 owner wire contract (golden frames written by the Rust repor
       .toBe("ECON_LIVE DISABLED (missing too: ECON_ARM DISABLED; ECON_SEND DISABLED; ECON_ATTEMPT DISABLED; FE-06/P8-LT: LIVE is not authorized (B10))");
     // No grant (unknown usage stays null, never 0) and the one scope previewed for this epoch.
     expect(liquidator.fe06).toMatchObject({ grantDigest: null, inForce: false, validFromUnixS: null, attemptsToday: null, attemptsGrant: null });
-    expect(liquidator.fe06?.blockReason).toMatch(/^FE06_OPERATOR_AUTHORIZATION_UNDECIDED: /);
+    expect(liquidator.fe06?.blockReason).toMatch(/^FE06_NO_GRANT: /);
     expect(liquidator.fe06?.previews).toEqual([{ digest: "d".repeat(64), scopeMode: "ALL", ownerEpoch: 2n, validUntilUnixS: 1_760_003_600n, terminal: "PROJECT 0 FE-06 SCOPE digest=dddd…" }]);
     // The checklist names what the owner reports, gate by gate; it decides nothing.
     expect(liveGates(liquidator).map((g) => `${g.gate}:${g.met ? "met" : "missing"}`)).toEqual([
