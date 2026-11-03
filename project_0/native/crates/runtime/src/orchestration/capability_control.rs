@@ -56,9 +56,11 @@ pub const FE06_REVOKE: &str = "FE06_REVOKE";
 pub const FE06_NO_GRANT: &str = "FE06_NO_GRANT: awaiting the operator's confirmation of a previewed scope (p0ctl live grant DIGEST --confirm, Touch ID)";
 /// P8-CTRL.1: the switch of one configured signer is `WALLET:<pubkey>`.
 pub const WALLET_PREFIX: &str = "WALLET:";
-/// P8-CTRL.1: the validated roles of a configured signer.
-pub const ROLE_LIQUIDATOR: &str = "LIQUIDATOR";
-pub const ROLE_FEE_PAYER: &str = "FEE_PAYER";
+/// P8-CTRL.1/DEC-17b: the validated roles of a configured signer (the one definition:
+/// `runtime_config::roles`) — a treasury is read only: never switched on, never a signer.
+pub const ROLE_LIQUIDATOR: &str = darkbot_solana::runtime_config::roles::LIQUIDATOR;
+pub const ROLE_FEE_PAYER: &str = darkbot_solana::runtime_config::roles::FEE_PAYER;
+pub const ROLE_TREASURY: &str = darkbot_solana::runtime_config::roles::TREASURY;
 
 pub fn request_dir(project: &Path) -> PathBuf {
     project.join("data").join("capability-control")
@@ -642,6 +644,17 @@ impl WalletSwitch {
         }
     }
 
+    /// DEC-17b: whether it may sign at all (a liquidator or a fee payer; a treasury never).
+    pub fn signs(&self) -> bool {
+        self.roles
+            .iter()
+            .any(|r| *r == ROLE_LIQUIDATOR || *r == ROLE_FEE_PAYER)
+    }
+
+    fn has(&self, role: &str) -> bool {
+        self.roles.contains(&role)
+    }
+
     /// Its capability name (`WALLET:<pubkey>`).
     pub fn capability(&self) -> String {
         format!("{WALLET_PREFIX}{}", self.pubkey)
@@ -792,6 +805,37 @@ pub fn grant_not_in_force(digest: &str) -> String {
     format!("FE-06 grant {digest} not in force (expired, not yet valid or no readable clock)")
 }
 
+/// DEC-17b: one enabled liquidator with an enabled fee payer (itself or another wallet) among
+/// the wallets the grant's scope admits — a wallet DISABLED otherwise blocks only itself (its
+/// signatures: `SignPermit`), never LIVE; a treasury counts for nothing.
+fn wallets_usable(g: &LiveGates) -> Result<(), String> {
+    let admitted = |w: &&WalletSwitch| {
+        w.enabled
+            && w.signs()
+            && g.fe06
+                .and_then(|a| a.scope())
+                .is_none_or(|s| s.signers.contains(&w.scope_entry()))
+    };
+    let usable: Vec<&WalletSwitch> = g.wallets.iter().filter(admitted).collect();
+    let fee_payer = usable.iter().any(|w| w.has(ROLE_FEE_PAYER));
+    if usable.iter().any(|w| w.has(ROLE_LIQUIDATOR)) && fee_payer {
+        return Ok(());
+    }
+    let states: Vec<String> = g
+        .wallets
+        .iter()
+        .filter(|w| w.signs())
+        .map(|w| {
+            let state = if w.enabled { ENABLED } else { DISABLED };
+            format!("{} {state}", w.capability())
+        })
+        .collect();
+    Err(format!(
+        "WALLET: no enabled liquidator with an enabled fee payer the grant admits ({})",
+        states.join(", ")
+    ))
+}
+
 fn decision(g: &LiveGates, purpose: Purpose) -> (&'static str, String) {
     let switches: &[&str] = match purpose {
         Purpose::NewAttempt => &ECON,
@@ -804,13 +848,9 @@ fn decision(g: &LiveGates, purpose: Purpose) -> (&'static str, String) {
         .collect();
     if g.wallets.is_empty() {
         missing.push("WALLET: no configured signer".into());
+    } else if let Err(e) = wallets_usable(g) {
+        missing.push(e);
     }
-    missing.extend(
-        g.wallets
-            .iter()
-            .filter(|w| !w.enabled)
-            .map(|w| format!("{} {DISABLED}", w.capability())),
-    );
     match g.fe06 {
         None => missing.push(LIVE_BLOCK_REASON.into()),
         Some(a) if !g.now_unix_s.is_some_and(|now| a.in_force(now)) => {
@@ -1040,7 +1080,11 @@ impl SignPermit {
             }
         }
         for s in signers {
-            if !g.wallets.iter().any(|w| w.pubkey == *s && w.enabled) {
+            if !g
+                .wallets
+                .iter()
+                .any(|w| w.pubkey == *s && w.enabled && w.signs())
+            {
                 return Err(format!("SIGN_NOT_PERMITTED: {WALLET_PREFIX}{s} DISABLED"));
             }
         }
@@ -1334,15 +1378,33 @@ mod tests {
                 ("BLOCKED", format!("{e} DISABLED"))
             );
         }
-        // Each wallet alone, and no signer at all.
-        for i in 0..wallets.len() {
-            let mut one = wallets.clone();
-            one[i].enabled = false;
-            assert_eq!(
-                decide(&econ, &one, Some(&fe06), LIVE),
-                ("BLOCKED", format!("{} DISABLED", one[i].capability()))
-            );
-        }
+        // DEC-17b: a wallet DISABLED blocks only itself — the fee payer alone off, the
+        // liquidator still pays for itself; the liquidator off, no liquidator is left.
+        let mut no_fee_payer = wallets.clone();
+        no_fee_payer[1].enabled = false;
+        assert_eq!(
+            decide(&econ, &no_fee_payer, Some(&fe06), LIVE),
+            (LIVE, String::new())
+        );
+        let mut no_liquidator = wallets.clone();
+        no_liquidator[0].enabled = false;
+        let (state, reason) = decide(&econ, &no_liquidator, Some(&fe06), LIVE);
+        assert_eq!(state, "BLOCKED");
+        assert!(
+            reason.starts_with("WALLET: no enabled liquidator with an enabled fee payer")
+                && reason.contains(&format!("{} DISABLED", no_liquidator[0].capability()))
+                && reason.contains(&format!("{} ENABLED", no_liquidator[1].capability())),
+            "{reason}"
+        );
+        // A liquidator without a fee payer, and a treasury (read only), count for nothing.
+        let mut alone = vec![
+            WalletSwitch::configured(pk, &[ROLE_LIQUIDATOR]),
+            WalletSwitch::configured(Pubkey::new_unique(), &[ROLE_TREASURY]),
+        ];
+        alone.iter_mut().for_each(|w| w.enabled = true);
+        assert!(decide(&econ, &alone, Some(&fe06), LIVE)
+            .1
+            .starts_with("WALLET: no enabled liquidator"));
         assert_eq!(
             decide(&econ, &[], Some(&fe06), LIVE),
             ("BLOCKED", "WALLET: no configured signer".to_string())
@@ -1522,7 +1584,8 @@ mod tests {
         ECON.iter().for_each(|e| {
             econ.set(e, true);
         });
-        let mut w = WalletSwitch::configured(Pubkey::new_unique(), &[ROLE_FEE_PAYER]);
+        let mut w =
+            WalletSwitch::configured(Pubkey::new_unique(), &[ROLE_LIQUIDATOR, ROLE_FEE_PAYER]);
         w.enabled = true;
         let wallets = [w];
         fn at<'a>(
@@ -1758,7 +1821,7 @@ mod tests {
         ECON.iter().for_each(|e| {
             econ.set(e, true);
         });
-        let mut w = WalletSwitch::configured(Pubkey::new_unique(), &[ROLE_FEE_PAYER]);
+        let mut w = WalletSwitch::configured(signer, &[ROLE_LIQUIDATOR, ROLE_FEE_PAYER]);
         w.enabled = true;
         let wallets = [w];
         let at = |now_unix_s| {

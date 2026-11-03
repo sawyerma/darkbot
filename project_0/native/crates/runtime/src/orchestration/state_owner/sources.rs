@@ -694,6 +694,22 @@ impl ShadowOwner {
                     cap::shown(request_capability.as_deref().unwrap_or(""), &requested)
                 ))
             }
+            // DEC-17b: a treasury is read only — never switched on.
+            Ok(requested)
+                if requested == cap::ENABLED
+                    && wallet.is_some_and(|pk| {
+                        self.sources
+                            .capabilities
+                            .wallets
+                            .iter()
+                            .any(|w| w.pubkey == pk && !w.signs())
+                    }) =>
+            {
+                Err(format!(
+                    "WALLET_READ_ONLY: {} is a treasury (read only, never a signer)",
+                    cap::shown(request_capability.as_deref().unwrap_or(""), &requested)
+                ))
+            }
             Ok(_) if operator.is_err() => operator.clone().map(|()| String::new()),
             // DEC-17a (P8-CTRL.3): the signed grant of a previewed scope that binds what runs, with
             // its evidence unchanged.

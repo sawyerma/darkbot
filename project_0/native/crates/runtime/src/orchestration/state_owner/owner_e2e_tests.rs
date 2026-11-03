@@ -5371,6 +5371,79 @@ fn dec13_a_live_request_is_recorded_and_never_effective() {
 /// signer ENABLED until FE-06 (its only missing gate then), and any one switch taken back blocks
 /// it again; an ENABLED without its receipt does not stand; a new owner starts all DISABLED.
 /// DEC-17a: every enabling switch is the operator's signed request (the registered test key).
+/// DEC-17b: one owner, several signers with roles — a treasury is never switched on (read only,
+/// even signed); a wallet DISABLED blocks only itself: with the pilot wallet ENABLED a second,
+/// DISABLED fee payer leaves LIVE to its other gates, the pilot DISABLED leaves no liquidator.
+#[cfg(feature = "operator-test-signer")]
+#[test]
+fn dec17b_a_treasury_is_read_only_and_a_wallet_blocks_only_itself() {
+    use crate::analytics::payload::CapabilityControlRequest;
+    use crate::orchestration::{capability_control as cap, operator_auth};
+    let mut f = fixture_with("dec17b_wallets", None);
+    let dir = f.dir.join("data/capability-control");
+    let project = f.dir.clone();
+    let pilot = f.owner.liquidator;
+    let (fee_payer, treasury) = (Pubkey::new_unique(), Pubkey::new_unique());
+    let key = operator_auth::register(&project, true).unwrap();
+    {
+        let c = &mut f.owner.sources.capabilities;
+        (c.dir, c.config_version, c.epoch) = (Some(dir.clone()), Some(0), Some(3));
+        c.operator_key_sha256 = operator_auth::key_sha256(&key.public_key);
+        c.epoch_nonce = "nonce-3".into();
+        c.wallets = vec![
+            cap::WalletSwitch::configured(pilot, &[cap::ROLE_LIQUIDATOR, cap::ROLE_FEE_PAYER]),
+            cap::WalletSwitch::configured(fee_payer, &[cap::ROLE_FEE_PAYER]),
+            cap::WalletSwitch::configured(treasury, &[cap::ROLE_TREASURY]),
+        ];
+    }
+    let signed = |seq: u64, capability: &str, requested: &str| {
+        let mut r = CapabilityControlRequest {
+            seq,
+            capability: capability.into(),
+            requested: requested.into(),
+            requested_unix_s: 1,
+            request_id: format!("r-{seq}"),
+            owner_epoch: 3,
+            operator_signature: vec![],
+        };
+        r.operator_signature =
+            operator_auth::sign(&project, &operator_auth::statement(&r, "nonce-3")).unwrap();
+        Ok(r)
+    };
+    let outcome = |seq| cap::outcome_at(&dir, seq).unwrap().unwrap();
+    f.owner
+        .apply_capability_control(1, signed(1, &format!("WALLET:{treasury}"), cap::ENABLED));
+    let o = outcome(1);
+    assert!(
+        !o.applied && o.detail.contains("WALLET_READ_ONLY"),
+        "{}",
+        o.detail
+    );
+    let mut seq = 1;
+    for c in cap::ECON
+        .iter()
+        .map(|e| e.to_string())
+        .chain([format!("WALLET:{pilot}")])
+    {
+        seq += 1;
+        f.owner
+            .apply_capability_control(seq, signed(seq, &c, cap::ENABLED));
+        assert!(outcome(seq).applied, "{c}: {}", outcome(seq).detail);
+    }
+    let reason = |f: &Fixture| cap::live_decision(&f.owner.sources.capabilities.live_gates()).1;
+    // Only FE-06 is missing: the DISABLED fee payer and the treasury block nothing.
+    assert_eq!(reason(&f), cap::LIVE_BLOCK_REASON);
+    seq += 1;
+    f.owner
+        .apply_capability_control(seq, signed(seq, &format!("WALLET:{pilot}"), cap::DISABLED));
+    assert!(
+        reason(&f).starts_with("WALLET: no enabled liquidator with an enabled fee payer"),
+        "{}",
+        reason(&f)
+    );
+    cleanup(f);
+}
+
 #[cfg(feature = "operator-test-signer")]
 #[test]
 fn p8ctrl01_the_owner_decides_switches_per_epoch_and_live_needs_every_gate() {

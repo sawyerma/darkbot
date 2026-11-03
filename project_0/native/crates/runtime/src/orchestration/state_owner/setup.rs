@@ -239,8 +239,19 @@ pub(super) fn prepare(
     let group = Pubkey::from_str(&config::require("P0_GROUP_ID")?)?;
     // DEC-18 §4.3 (P0-024): the econ4h calibration (a read-only measurement) loads no private
     // key: its payer is the configured public identity, every simulation UNSIGNED_SIMULATION.
-    let payer =
-        crate::execution::payer::OwnerPayer::of(&|k| std::env::var(k).ok(), econ.is_some())?;
+    // DEC-17b: every configured signer, each key checked at the start; the first pilot runs the
+    // first (its own fee payer) — the other keys are not kept (switched per wallet, unused).
+    let mut signers = crate::execution::payer::owner_signers(
+        &darkbot_solana::runtime_config::active().signers,
+        &|k| std::env::var(k).ok(),
+        econ.is_some(),
+    )?;
+    let first = signers.remove(0);
+    let wallet_roles: Vec<(Pubkey, Vec<&'static str>)> =
+        std::iter::once((first.pubkey, first.roles))
+            .chain(signers.into_iter().map(|s| (s.pubkey, s.roles)))
+            .collect();
+    let payer = first.payer;
     let liquidator = payer.pubkey();
     if payer.signer().is_none() {
         crate::console::line(format!(
@@ -429,17 +440,14 @@ pub(super) fn prepare(
     let optional_set: HashSet<Pubkey> = optional_dependency_keys.iter().copied().collect();
     // Refused source controls fail the start before any session runs.
     let mut sources = configured_sources(econ.as_ref(), clock, &wake, &shutdown)?;
-    // P8-CTRL.1: one switch per configured signer, DISABLED at the start — the one keypair signs
-    // every liquidation as its liquidator and pays its fees.
-    sources.capabilities.wallets = vec![
-        crate::orchestration::capability_control::WalletSwitch::configured(
-            liquidator,
-            &[
-                crate::orchestration::capability_control::ROLE_LIQUIDATOR,
-                crate::orchestration::capability_control::ROLE_FEE_PAYER,
-            ],
-        ),
-    ];
+    // P8-CTRL.1/DEC-17b: one switch per configured signer with its roles, DISABLED at the start
+    // — the wallet the owner runs signs every liquidation as its liquidator and pays its fees.
+    sources.capabilities.wallets = wallet_roles
+        .iter()
+        .map(|(pubkey, roles)| {
+            crate::orchestration::capability_control::WalletSwitch::configured(*pubkey, roles)
+        })
+        .collect();
     // P8-CTRL.3: what this owner runs, fixed once at its start — a grant's scope must bind
     // exactly it.
     // DEC-17a: the operator key this owner verifies signatures against, fixed at its start.

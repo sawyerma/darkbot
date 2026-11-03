@@ -5042,7 +5042,10 @@ fn dec13_without_fe06_a_live_request_reaches_no_submit() {
     }
     let mut signer = capability_control::WalletSwitch::configured(
         solana_sdk::signature::Signer::pubkey(&payer),
-        &[capability_control::ROLE_FEE_PAYER],
+        &[
+            capability_control::ROLE_LIQUIDATOR,
+            capability_control::ROLE_FEE_PAYER,
+        ],
     );
     signer.enabled = true;
     let gates = capability_control::LiveGates {

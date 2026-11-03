@@ -2720,6 +2720,7 @@ mod contract_tests {
                 })
                 .collect(),
             operator_key_sha256: "o".repeat(64),
+            signers: vec![],
         };
         let mut s = golden_snapshot();
         s.operational = Some(Arc::new(operational_snapshot_of(&limits, Some(&effective))));

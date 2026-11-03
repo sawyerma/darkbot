@@ -300,6 +300,9 @@ pub fn validate(s: &Scope, c: &Ceilings) -> Result<(), String> {
             "FE06_SCOPE_FIELD_INVALID: fee_payer (a signer with the FEE_PAYER role)".into(),
         );
     }
+    if !pilot_wallet(s) {
+        return Err(PILOT_ONE_WALLET.into());
+    }
     for b in s.banks.iter() {
         pubkey("banks", b)?;
     }
@@ -767,10 +770,24 @@ fn canonical_roles(roles: &str) -> bool {
     !roles.is_empty() && roles.split('+').all(|r| order.any(|k| *k == r))
 }
 
-/// P8-CTRL.3: whether a scope follows the rules of its route class and signer roles that hold now
-/// (one previewed under an earlier rule would be refused at its use).
+/// DEC-17b: why a scope admitting other wallets than the first pilot's is refused.
+pub const PILOT_ONE_WALLET: &str = "FE06_SCOPE_PILOT_ONE_WALLET: the first pilot admits exactly one wallet, its liquidator and its own fee payer (DEC-17b)";
+
+/// DEC-17b: the first pilot — exactly one wallet, LIQUIDATOR and its own FEE_PAYER.
+fn pilot_wallet(s: &Scope) -> bool {
+    use super::capability_control::{ROLE_FEE_PAYER, ROLE_LIQUIDATOR};
+    s.signers.len() == 1
+        && s.signers.contains(&format!(
+            "{}:{ROLE_LIQUIDATOR}+{ROLE_FEE_PAYER}",
+            s.fee_payer
+        ))
+}
+
+/// P8-CTRL.3: whether a scope follows the rules of its route class, signer roles and admitted
+/// wallets that hold now (one previewed under an earlier rule would be refused at its use).
 fn current_rules(s: &Scope) -> bool {
-    ROUTES.contains(&s.route.as_str())
+    pilot_wallet(s)
+        && ROUTES.contains(&s.route.as_str())
         && s.signers.iter().all(|e| {
             e.split_once(':')
                 .is_some_and(|(_, roles)| canonical_roles(roles))
@@ -800,7 +817,9 @@ pub fn check_running(s: &Scope, r: &Running, now_unix_s: u64) -> Result<(), Stri
     if s.runtime_config_sha256 != r.runtime_config_sha256 {
         return differs("runtime_config_sha256");
     }
-    if s.signers != r.signers {
+    // DEC-17b: every wallet the scope admits is a configured signer of what runs, with exactly
+    // these roles (the owner may run more: a wallet the scope does not name signs nothing).
+    if !s.signers.is_subset(&r.signers) {
         return differs("signers");
     }
     if s.owner_epoch != r.owner_epoch {
@@ -1196,6 +1215,37 @@ pub(crate) mod tests {
 
     /// P8-CTRL.3: the scope binds what runs — each binding alone refuses it, as do another epoch
     /// and a time outside its validity.
+    /// DEC-17b: the first pilot — a scope admits exactly one wallet, its liquidator and its own
+    /// fee payer; never a second wallet, a separate fee payer or a treasury.
+    #[test]
+    fn dec17b_a_scope_admits_the_pilot_wallet_only() {
+        let signer = Pubkey::new_unique();
+        let other = Pubkey::new_unique();
+        for (signers, fee_payer) in [
+            (
+                format!("{signer}:LIQUIDATOR+FEE_PAYER,{other}:LIQUIDATOR+FEE_PAYER"),
+                signer.to_string(),
+            ),
+            (
+                format!("{signer}:LIQUIDATOR,{other}:FEE_PAYER"),
+                other.to_string(),
+            ),
+        ] {
+            let e = parse(
+                text(&signer, &[("signers", &signers), ("fee_payer", &fee_payer)]).as_bytes(),
+                &ceilings(),
+            )
+            .unwrap_err();
+            assert_eq!(e, PILOT_ONE_WALLET, "{signers}");
+        }
+        let e = parse(
+            text(&signer, &[("signers", &format!("{signer}:TREASURY"))]).as_bytes(),
+            &ceilings(),
+        )
+        .unwrap_err();
+        assert!(e.starts_with("FE06_SCOPE_FIELD_INVALID: signers"), "{e}");
+    }
+
     #[test]
     fn p8ctrl02_a_scope_binds_what_runs() {
         let signer = Pubkey::new_unique();
@@ -1211,6 +1261,21 @@ pub(crate) mod tests {
             owner_epoch: 3,
         };
         assert_eq!(check_running(&s, &running, 1000), Ok(()));
+        // DEC-17b: the owner may run more signers than the scope admits (with the same roles).
+        let more = Running {
+            signers: BTreeSet::from([
+                format!("{signer}:LIQUIDATOR+FEE_PAYER"),
+                format!("{}:FEE_PAYER", Pubkey::new_unique()),
+                format!("{}:TREASURY", Pubkey::new_unique()),
+            ]),
+            ..running.clone()
+        };
+        assert_eq!(check_running(&s, &more, 1000), Ok(()));
+        let other_roles = Running {
+            signers: BTreeSet::from([format!("{signer}:LIQUIDATOR")]),
+            ..running.clone()
+        };
+        assert!(check_running(&s, &other_roles, 1000).is_err());
         let cases: Vec<(Running, &str)> = vec![
             (
                 Running {

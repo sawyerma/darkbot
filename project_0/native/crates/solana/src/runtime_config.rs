@@ -319,8 +319,46 @@ parameters! {
 /// `measure_seconds` … `measure_subscription_seconds` (DEC-18 §3.5, the C-11 pre-measurement); 22:
 /// no new parameter — the registered operator key's SHA-256 appended to [`EffectiveConfig`]
 /// (DEC-17a, [`OPERATOR_REVISION`]); 23: `prewarm_max_lamports`, `probe_max_lamports` (DEC-17f,
-/// the operator tools' cost limits).
-pub const LIMITS_REVISION: u16 = 23;
+/// the operator tools' cost limits); 24: no new parameter — the configured signers appended to
+/// [`EffectiveConfig`] (DEC-17b, [`SIGNERS_REVISION`]).
+pub const LIMITS_REVISION: u16 = 24;
+
+/// The first revision whose [`EffectiveConfig`] ends with the configured signers (DEC-17b); an
+/// earlier record has none (its owner ran the one keypair).
+pub const SIGNERS_REVISION: u16 = 24;
+
+/// DEC-17b: the roles of a configured signer — a liquidator, a fee payer (both sign), or a
+/// treasury (read only: it never signs and is never switched on).
+pub mod roles {
+    pub const LIQUIDATOR: &str = "LIQUIDATOR";
+    pub const FEE_PAYER: &str = "FEE_PAYER";
+    pub const TREASURY: &str = "TREASURY";
+    /// The signing roles in their canonical order (`<pubkey>:LIQUIDATOR+FEE_PAYER`).
+    pub const SIGNING: [&str; 2] = [LIQUIDATOR, FEE_PAYER];
+}
+
+/// DEC-17b: a signer entry `<pubkey>:<ROLE>+<ROLE>` — its key and its roles: signing roles each
+/// once in their canonical order, or the treasury alone.
+pub fn signer_entry(
+    entry: &str,
+) -> Result<(solana_sdk::pubkey::Pubkey, Vec<&'static str>), String> {
+    let invalid =
+        || format!("invalid signer {entry} (PUBKEY:LIQUIDATOR+FEE_PAYER, PUBKEY:TREASURY)");
+    let (key, list) = entry.split_once(':').ok_or_else(invalid)?;
+    let key = key.parse().map_err(|_| invalid())?;
+    if list == roles::TREASURY {
+        return Ok((key, vec![roles::TREASURY]));
+    }
+    let mut order = roles::SIGNING.iter();
+    let mut out = vec![];
+    for r in list.split('+') {
+        out.push(*order.find(|k| **k == r).ok_or_else(invalid)?);
+    }
+    if out.is_empty() {
+        return Err(invalid());
+    }
+    Ok((key, out))
+}
 
 /// The first revision whose [`EffectiveConfig`] ends with the operator key's SHA-256 (DEC-17a);
 /// an earlier record has none.
@@ -560,6 +598,12 @@ pub struct RuntimeConfig {
     /// (`p0ctl operator register`); every FE-06 grant and ENABLE of a wallet, ECON_ARM, ECON_SEND
     /// or ECON_LIVE is signed by it. Empty: none registered, every such request refused.
     pub operator_key_sha256: String,
+    /// DEC-17b: the configured signers, `<pubkey>:<ROLE>+<ROLE>` ([`signer_entry`]): one owner,
+    /// several signers with roles — at least one liquidator and one fee payer among them, a
+    /// treasury read only. Empty: the one keypair (`P0_KEYPAIR_PATH`) as LIQUIDATOR+FEE_PAYER.
+    /// Their keypairs are local (`P0_SIGNER_KEYPAIRS`, `<pubkey>=<path>`), never part of the
+    /// configuration's identity.
+    pub signers: Vec<String>,
     /// DEC-05: the owner's typed settings. `P0_USE_THRESHOLD_TRIGGER`: the start request of the
     /// threshold mode (DEC-06): `on` requests ACTIVE, effective only through OBSERVE with N
     /// (`threshold_min_ticks`); `off` keeps the R127 sweep alone.
@@ -627,6 +671,7 @@ impl Default for RuntimeConfig {
             ],
             fe_group: "4qp6Fx6tnZkY5Wropq9wUYgtFxXKwE6viZxFHg3rdAG8".into(),
             operator_key_sha256: String::new(),
+            signers: vec![],
             threshold_trigger: false,
             c0_census: false,
             source_geyser: "off".into(),
@@ -1125,6 +1170,21 @@ impl RuntimeConfig {
         {
             return Err("invalid operator key SHA-256 (64 lowercase hex digits)".into());
         }
+        if !self.signers.is_empty() {
+            let mut keys = std::collections::BTreeSet::new();
+            let (mut liquidator, mut fee_payer) = (false, false);
+            for e in &self.signers {
+                let (key, r) = signer_entry(e)?;
+                if !keys.insert(key) {
+                    return Err(format!("duplicate signer {key}"));
+                }
+                liquidator |= r.contains(&roles::LIQUIDATOR);
+                fee_payer |= r.contains(&roles::FEE_PAYER);
+            }
+            if !(liquidator && fee_payer) {
+                return Err("signers: at least one LIQUIDATOR and one FEE_PAYER".into());
+            }
+        }
         if self.fe_mode == "smoke" && self.fe_targets.len() > 100 {
             return Err("smoke scope exceeds one getMultipleAccounts; use full".into());
         }
@@ -1313,6 +1373,7 @@ struct ConfigFile {
     fe_targets: Option<Vec<String>>,
     fe_group: Option<String>,
     operator_key_sha256: Option<String>,
+    signers: Option<Vec<String>>,
     threshold_trigger: Option<bool>,
     c0_census: Option<bool>,
     source_geyser: Option<String>,
@@ -1368,6 +1429,7 @@ impl ConfigFile {
                     f.jito_tip_lamports = Some(number("jito_tip_lamports", &value)?)
                 }
                 "fe_targets" => f.fe_targets = Some(list(&value)),
+                "signers" => f.signers = Some(list(&value)),
                 field if Limits::default().get(field).is_some() => {
                     f.limits
                         .get_or_insert_with(BTreeMap::new)
@@ -1490,6 +1552,7 @@ impl Resolved {
             "fe_targets",
             "fe_group",
             "operator_key_sha256",
+            "signers",
             "threshold_trigger",
             "c0_census",
             "source_geyser",
@@ -1518,6 +1581,10 @@ impl Resolved {
         if let Some(key) = env("P0_OPERATOR_KEY_SHA256") {
             c.operator_key_sha256 = key;
             sources.insert("operator_key_sha256".into(), "environment".into());
+        }
+        if let Some(list) = env("P0_SIGNERS").filter(|v| !v.trim().is_empty()) {
+            c.signers = list.split(',').map(String::from).collect();
+            sources.insert("signers".into(), "environment".into());
         }
         if let Some(targets) = env("P0_FE_TARGETS") {
             c.fe_targets = targets.split(',').map(String::from).collect();
@@ -1664,6 +1731,7 @@ impl Resolved {
             fe_targets,
             fe_group,
             operator_key_sha256,
+            signers,
             threshold_trigger,
             c0_census,
             source_geyser,
@@ -1706,6 +1774,7 @@ impl Resolved {
                     }
                     "wss_endpoints" => c.wss_endpoints = list(&val),
                     "fe_targets" => c.fe_targets = list(&val),
+                    "signers" => c.signers = list(&val),
                     "fallback" => c.fallback = on_off(&val)?,
                     "adaptive" => c.adaptive = on_off(&val)?,
                     "diagnostics" => c.diagnostics = on_off(&val)?,
@@ -1900,10 +1969,11 @@ impl Resolved {
             source_geyser_provider: c.source_geyser_provider.clone(),
             providers: c.providers.iter().map(|p| p.summary()).collect(),
             operator_key_sha256: c.operator_key_sha256.clone(),
+            signers: c.signers.clone(),
         }
     }
     pub fn help() -> String {
-        let mut s=String::from("p0-longtail [--profile smoke|standard|performance|custom] [--config FILE] [--duration 10m|1h|5h|24h]\n--rpc-endpoints URL[,URL] --wss-endpoints URL[,URL] (loopback only: a local node or an offline test; a remote provider is the registry's, p0ctl provider add/select)\n--non-landing-sources OPERATOR=URL|PROVIDER_ID[,…] (P0_NON_LANDING_SOURCES; DEC-03 FREE_ONLY B sources; a loopback URL or a registry RPC provider id)\n--hold-b-min-attempts N (P0_HOLD_B_MIN_ATTEMPTS; DEC-04 B-8, no default: B ACTIVE blocked while unset)\n--threshold-min-ticks N (P0_THRESHOLD_MIN_TICKS; DEC-06 B-8, no default: threshold ACTIVE blocked while unset)\n--jito-block-engine-url URL (loopback; else the registry's Jito selection) --bundle-sim-rpc-url URL|PROVIDER_ID --jito-tip-account PUBKEY --jito-tip-lamports N (P0_JITO_BLOCK_ENGINE_URL, P0_BUNDLE_SIM_RPC_URL, P0_JITO_TIP_ACCOUNT, P0_JITO_TIP_LAMPORTS <= P0_MAX_TIP, no default; DEC-11 bundle path, never sends)\n--fe-mode smoke|full --fe-targets PUBKEY[,PUBKEY] --fe-group PUBKEY\n--operator-key-sha256 HEX (P0_OPERATOR_KEY_SHA256; DEC-17a, the operator key `p0ctl operator register` registered)\n--fallback on|off --adaptive on|off --diagnostics on|off (P0_INTEGRATION_PROBE) --verification off|index|strict|crosscheck --print-effective-config\n--threshold-trigger on|off (P0_USE_THRESHOLD_TRIGGER; start request: on = ACTIVE through OBSERVE, DEC-06) --c0-census on|off (P0_C0_CENSUS) --source-geyser off|observe (P0_SOURCE_GEYSER) --source-geyser-provider ID (P0_SOURCE_GEYSER_PROVIDER)\nProfile per operating mode (P0_MODE) unless selected: shadow and market standard, econ4h performance.\nPrecedence: profile < environment < config file < CLI. All changes require restart.\nFinancial approval is separate. Profiles do not prove provider capacity.\n");
+        let mut s=String::from("p0-longtail [--profile smoke|standard|performance|custom] [--config FILE] [--duration 10m|1h|5h|24h]\n--rpc-endpoints URL[,URL] --wss-endpoints URL[,URL] (loopback only: a local node or an offline test; a remote provider is the registry's, p0ctl provider add/select)\n--non-landing-sources OPERATOR=URL|PROVIDER_ID[,…] (P0_NON_LANDING_SOURCES; DEC-03 FREE_ONLY B sources; a loopback URL or a registry RPC provider id)\n--hold-b-min-attempts N (P0_HOLD_B_MIN_ATTEMPTS; DEC-04 B-8, no default: B ACTIVE blocked while unset)\n--threshold-min-ticks N (P0_THRESHOLD_MIN_TICKS; DEC-06 B-8, no default: threshold ACTIVE blocked while unset)\n--jito-block-engine-url URL (loopback; else the registry's Jito selection) --bundle-sim-rpc-url URL|PROVIDER_ID --jito-tip-account PUBKEY --jito-tip-lamports N (P0_JITO_BLOCK_ENGINE_URL, P0_BUNDLE_SIM_RPC_URL, P0_JITO_TIP_ACCOUNT, P0_JITO_TIP_LAMPORTS <= P0_MAX_TIP, no default; DEC-11 bundle path, never sends)\n--fe-mode smoke|full --fe-targets PUBKEY[,PUBKEY] --fe-group PUBKEY\n--operator-key-sha256 HEX (P0_OPERATOR_KEY_SHA256; DEC-17a, the operator key `p0ctl operator register` registered)\n--signers PUBKEY:ROLE+ROLE[,…] (P0_SIGNERS; DEC-17b, roles LIQUIDATOR, FEE_PAYER, TREASURY read only; their keypairs P0_SIGNER_KEYPAIRS PUBKEY=PATH,…; unset: P0_KEYPAIR_PATH as LIQUIDATOR+FEE_PAYER)\n--fallback on|off --adaptive on|off --diagnostics on|off (P0_INTEGRATION_PROBE) --verification off|index|strict|crosscheck --print-effective-config\n--threshold-trigger on|off (P0_USE_THRESHOLD_TRIGGER; start request: on = ACTIVE through OBSERVE, DEC-06) --c0-census on|off (P0_C0_CENSUS) --source-geyser off|observe (P0_SOURCE_GEYSER) --source-geyser-provider ID (P0_SOURCE_GEYSER_PROVIDER)\nProfile per operating mode (P0_MODE) unless selected: shadow and market standard, econ4h performance.\nPrecedence: profile < environment < config file < CLI. All changes require restart.\nFinancial approval is separate. Profiles do not prove provider capacity.\n");
         for p in PARAMETERS {
             s += &format!(
                 "--{} <u64> [{}; default={}; {}..={}]\n",
@@ -2017,6 +2087,7 @@ impl Resolved {
             ("fe_targets", e.fe_targets.join(",")),
             ("fe_group", e.fe_group.clone()),
             ("operator_key_sha256", e.operator_key_sha256.clone()),
+            ("signers", e.signers.join(",")),
             ("threshold_trigger", e.threshold_trigger.to_string()),
             ("c0_census", e.c0_census.to_string()),
             ("source_geyser", e.source_geyser.clone()),
@@ -2091,6 +2162,8 @@ pub struct EffectiveConfig {
     /// DEC-17a (from [`OPERATOR_REVISION`]): the registered operator key's SHA-256; an earlier
     /// record has none.
     pub operator_key_sha256: String,
+    /// DEC-17b (from [`SIGNERS_REVISION`]): the configured signers; an earlier record has none.
+    pub signers: Vec<String>,
 }
 pub fn configured() -> bool {
     ACTIVE.get().is_some()
@@ -2593,10 +2666,47 @@ mod tests {
                 solana_sdk::hash::hash(names.as_bytes()).to_string()
             ),
             (
-                23,
+                24,
                 169,
                 "8bmdvVBeM7FwuLb3gm3XbpF5CHbWJbumcE1XdNZkcxrX".to_string()
             )
+        );
+    }
+    /// DEC-17b: the configured signers — from the CLI, the environment or a file, rendered and in
+    /// the effective configuration; entries in their canonical form only (signing roles in order,
+    /// a treasury alone), each key once, at least one liquidator and one fee payer.
+    #[test]
+    fn dec17b_signers_are_a_typed_setting() {
+        let (a, b, t) = (
+            solana_sdk::pubkey::Pubkey::new_unique(),
+            solana_sdk::pubkey::Pubkey::new_unique(),
+            solana_sdk::pubkey::Pubkey::new_unique(),
+        );
+        let list = format!("{a}:LIQUIDATOR+FEE_PAYER,{b}:LIQUIDATOR,{t}:TREASURY");
+        let r = parse(&["--signers", &list]).unwrap();
+        assert_eq!(r.config.signers.len(), 3);
+        assert_eq!(r.effective().signers, r.config.signers);
+        assert!(r.text().contains(&format!("signers = {list} [source cli]")));
+        let env = Resolved::parse(&[], &|k| (k == "P0_SIGNERS").then(|| list.clone())).unwrap();
+        assert_eq!(env.config.signers, r.config.signers);
+        assert_eq!(env.sources["signers"], "environment");
+        assert!(parse(&[]).unwrap().config.signers.is_empty());
+        for bad in [
+            format!("{a}:FEE_PAYER+LIQUIDATOR"),
+            format!("{a}:LIQUIDATOR+LIQUIDATOR"),
+            format!("{a}:TREASURY+FEE_PAYER"),
+            format!("{a}:BUYER"),
+            format!("{a}:"),
+            "not-a-key:LIQUIDATOR+FEE_PAYER".to_string(),
+            format!("{a}:LIQUIDATOR+FEE_PAYER,{a}:TREASURY"),
+            format!("{a}:LIQUIDATOR,{t}:TREASURY"),
+            format!("{b}:FEE_PAYER"),
+        ] {
+            assert!(parse(&["--signers", &bad]).is_err(), "{bad}");
+        }
+        assert_eq!(
+            signer_entry(&format!("{t}:TREASURY")).unwrap(),
+            (t, vec![roles::TREASURY])
         );
     }
     /// V2-08 (P3-08/P4-04): the owner's sweep batch and ingress burst bounds are typed

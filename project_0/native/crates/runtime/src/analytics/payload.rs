@@ -173,6 +173,11 @@ pub(crate) fn effective_of_revision(
     } else {
         String::new()
     };
+    let signers = if revision >= darkbot_solana::runtime_config::SIGNERS_REVISION {
+        decode_prefix(bytes)?
+    } else {
+        vec![]
+    };
     Ok(darkbot_solana::runtime_config::EffectiveConfig {
         schema: head.schema,
         profile: head.profile,
@@ -198,14 +203,15 @@ pub(crate) fn effective_of_revision(
         source_geyser_provider: owner.source_geyser_provider,
         providers,
         operator_key_sha256,
+        signers,
     })
 }
 
 /// Test fixture: `value`'s payload with the `Limits` of `effective` re-encoded in layout
 /// `revision` and, before `OWNER_SETTINGS_REVISION`, without its owner settings, before
 /// `PROVIDERS_REVISION` without its provider bindings, before `OPERATOR_REVISION` without the
-/// operator key (what that revision's writer produced); the limits must occur exactly once in the
-/// payload.
+/// operator key, before `SIGNERS_REVISION` without the signers (what that revision's writer
+/// produced); the limits must occur exactly once in the payload.
 #[cfg(test)]
 pub(crate) fn encode_with_limits_revision<T: Serialize>(
     value: &T,
@@ -225,7 +231,16 @@ pub(crate) fn encode_with_limits_revision<T: Serialize>(
         .windows(owner.len())
         .position(|w| w == owner.as_slice())
         .expect("owner settings inside the payload");
-    // The operator key follows the provider bindings, they follow the owner settings.
+    // The signers follow the operator key, it follows the provider bindings, they follow the
+    // owner settings.
+    if revision < darkbot_solana::runtime_config::SIGNERS_REVISION {
+        let providers = encode_wire(&effective.providers).unwrap();
+        let operator = encode_wire(&effective.operator_key_sha256).unwrap();
+        let signers = encode_wire(&effective.signers).unwrap();
+        let after = at + owner.len() + providers.len() + operator.len();
+        assert_eq!(&bytes[after..after + signers.len()], signers.as_slice());
+        bytes.drain(after..after + signers.len());
+    }
     if revision < darkbot_solana::runtime_config::OPERATOR_REVISION {
         let providers = encode_wire(&effective.providers).unwrap();
         let operator = encode_wire(&effective.operator_key_sha256).unwrap();

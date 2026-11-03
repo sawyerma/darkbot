@@ -72,6 +72,89 @@ impl OwnerPayer {
     }
 }
 
+/// DEC-17b: one configured signer of the owner — its key, roles and payer (its keypair; the
+/// public key only for a treasury or on a read-only measurement).
+pub struct OwnerSigner {
+    pub pubkey: Pubkey,
+    pub roles: Vec<&'static str>,
+    pub payer: OwnerPayer,
+}
+
+/// DEC-17b: the owner's signers from its configuration (`signers`; none configured: the one
+/// keypair as LIQUIDATOR+FEE_PAYER). A signing one's keypair is `P0_SIGNER_KEYPAIRS`' file for
+/// its key (`<pubkey>=<path>,…`) or else `P0_KEYPAIR_PATH`, its public key checked against the
+/// configured one; a treasury has no key (one named for it is refused); the econ4h calibration
+/// loads none. The first is the wallet the owner runs — the first one that is its own fee payer
+/// (DEC-17b, the first pilot: one wallet, LIQUIDATOR and FEE_PAYER).
+pub fn owner_signers(
+    configured: &[String],
+    get: &dyn Fn(&str) -> Option<String>,
+    econ: bool,
+) -> Result<Vec<OwnerSigner>, String> {
+    use darkbot_solana::runtime_config::{roles, signer_entry};
+    if configured.is_empty() {
+        let payer = OwnerPayer::of(get, econ)?;
+        return Ok(vec![OwnerSigner {
+            pubkey: payer.pubkey(),
+            roles: roles::SIGNING.to_vec(),
+            payer,
+        }]);
+    }
+    let mut keypairs = std::collections::BTreeMap::new();
+    for item in get("P0_SIGNER_KEYPAIRS")
+        .unwrap_or_default()
+        .split(',')
+        .filter(|i| !i.trim().is_empty())
+    {
+        let (key, path) = item
+            .split_once('=')
+            .ok_or("P0_SIGNER_KEYPAIRS: PUBKEY=PATH,…")?;
+        let key: Pubkey = key
+            .trim()
+            .parse()
+            .map_err(|_| "P0_SIGNER_KEYPAIRS: invalid pubkey")?;
+        keypairs.insert(key, path.trim().to_string());
+    }
+    let mut out = vec![];
+    for entry in configured {
+        let (pubkey, r) = signer_entry(entry)?;
+        let payer = if r == [roles::TREASURY] {
+            if keypairs.contains_key(&pubkey) {
+                return Err(format!(
+                    "SIGNER_TREASURY_KEY: {pubkey} is a treasury (read only, no key)"
+                ));
+            }
+            OwnerPayer::PublicOnly(pubkey)
+        } else if econ {
+            OwnerPayer::PublicOnly(pubkey)
+        } else {
+            let path = keypairs
+                .get(&pubkey)
+                .cloned()
+                .or_else(|| get("P0_KEYPAIR_PATH"))
+                .ok_or_else(|| format!("SIGNER_KEYPAIR_MISSING: {pubkey} (P0_SIGNER_KEYPAIRS)"))?;
+            let kp = darkbot_solana::tx::load_keypair_json(&path).map_err(|e| e.to_string())?;
+            if kp.pubkey() != pubkey {
+                return Err(format!(
+                    "SIGNER_KEY_MISMATCH: the keypair for {pubkey} is another key's"
+                ));
+            }
+            OwnerPayer::Signer(kp)
+        };
+        out.push(OwnerSigner {
+            pubkey,
+            roles: r,
+            payer,
+        });
+    }
+    let first = out
+        .iter()
+        .position(|s| s.roles == roles::SIGNING)
+        .ok_or("SIGNERS_NO_PILOT_WALLET: the owner runs a wallet that is LIQUIDATOR and its own FEE_PAYER (DEC-17b)")?;
+    out.swap(0, first);
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -100,5 +183,75 @@ mod tests {
             .starts_with("P0_EXPECTED_PUBKEY required"));
         let kp = Keypair::new();
         assert_eq!(Payer::from(&kp).pubkey(), kp.pubkey());
+    }
+
+    /// DEC-17b: the configured signers — each key checked against its entry, a treasury without
+    /// a key, the econ4h calibration loading none; the wallet the owner runs is the first that is
+    /// its own fee payer; unconfigured, the one keypair.
+    #[test]
+    fn dec17b_the_owner_loads_its_configured_signers() {
+        let dir = std::env::temp_dir().join(format!(
+            "p0-signers-{}-{}",
+            std::process::id(),
+            Pubkey::new_unique()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let write = |kp: &Keypair| {
+            let path = dir.join(format!("{}.json", kp.pubkey()));
+            std::fs::write(&path, format!("{:?}", kp.to_bytes().to_vec())).unwrap();
+            path.to_string_lossy().into_owned()
+        };
+        let (fee_payer, pilot, treasury) = (Keypair::new(), Keypair::new(), Pubkey::new_unique());
+        let configured = vec![
+            format!("{}:FEE_PAYER", fee_payer.pubkey()),
+            format!("{}:LIQUIDATOR+FEE_PAYER", pilot.pubkey()),
+            format!("{treasury}:TREASURY"),
+        ];
+        let keys = format!(
+            "{}={},{}={}",
+            fee_payer.pubkey(),
+            write(&fee_payer),
+            pilot.pubkey(),
+            write(&pilot)
+        );
+        let env = |keys: String| move |k: &str| (k == "P0_SIGNER_KEYPAIRS").then(|| keys.clone());
+        let signers = owner_signers(&configured, &env(keys.clone()), false).unwrap();
+        assert_eq!(
+            signers
+                .iter()
+                .map(|s| (s.pubkey, s.payer.signer().is_some()))
+                .collect::<Vec<_>>(),
+            [
+                (pilot.pubkey(), true),
+                (fee_payer.pubkey(), true),
+                (treasury, false)
+            ]
+        );
+        // The calibration loads no key.
+        assert!(owner_signers(&configured, &env(keys.clone()), true)
+            .unwrap()
+            .iter()
+            .all(|s| s.payer.signer().is_none()));
+        // A key for the treasury, another key's file, a missing one, no pilot wallet: refused.
+        let e = |c: &[String], keys: String| owner_signers(c, &env(keys), false).err().unwrap();
+        assert!(e(
+            &configured,
+            format!("{keys},{treasury}={}", write(&Keypair::new()))
+        )
+        .starts_with("SIGNER_TREASURY_KEY"));
+        assert!(e(
+            &configured,
+            format!(
+                "{}={},{}={}",
+                fee_payer.pubkey(),
+                write(&fee_payer),
+                pilot.pubkey(),
+                write(&fee_payer)
+            )
+        )
+        .starts_with("SIGNER_KEY_MISMATCH"));
+        assert!(e(&configured, String::new()).starts_with("SIGNER_KEYPAIR_MISSING"));
+        assert!(e(&configured[..1], keys.clone()).starts_with("SIGNERS_NO_PILOT_WALLET"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
