@@ -10,6 +10,9 @@ publish.workspace = true
 darkbot-bsc-tx-encoding = { path = "../tx_encoding" }
 alloy-primitives = { workspace = true }
 k256 = { workspace = true }
+# BSC3-063 / Audit E 4.15, 5.5: every signer recovery (libsecp256k1); k256
+# signs, and stays the recovery's reference in the differential tests.
+secp256k1 = { workspace = true }
 
 [features]
 default = []
@@ -19,3 +22,8 @@ test-support = []
 # Exposes only the production ArmedFence constructor consumed by the
 # darkbot-bsc-execution Unit-6 durable startup path. No I/O is added to core.
 runner-startup = []
+
+[lints.rust]
+# BSC3-063 review: under `secp256k1_fuzz` libsecp256k1 recovers a key from
+# the signature bytes alone; the core refuses to build so (`signer`).
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(secp256k1_fuzz)"] }

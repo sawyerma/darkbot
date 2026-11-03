@@ -152,6 +152,9 @@ struct Seen {
     /// Bit per source index that delivered this hash.
     sources: u8,
     launch: Option<Venue>,
+    /// Whether its signed bytes address a venue contract (with `launch`,
+    /// recorded at the first full sighting).
+    venue_target: bool,
 }
 
 pub struct IngressCore {
@@ -434,6 +437,7 @@ impl IngressCore {
                                 first_full: None,
                                 sources: bit,
                                 launch: None,
+                                venue_target: false,
                             },
                         );
                     }
@@ -443,7 +447,17 @@ impl IngressCore {
             Observation::Full { hash, raw } => {
                 self.stats[i].full += 1;
                 self.stats[i].last_full_ns = Some(now_ns);
-                let (launch, venue_target) = classify(&self.four, raw, self.max_launch_calldata);
+                // Audit E 5.3: a hash seen in full before stands for the same
+                // signed bytes (its source checked the hash against them): its
+                // classification is the recorded one, never decoded again.
+                let known = self
+                    .seen
+                    .get(&hash)
+                    .and_then(|s| s.first_full.map(|_| (s.launch, s.venue_target)));
+                let (launch, venue_target) = match known {
+                    Some(recorded) => recorded,
+                    None => classify(&self.four, raw, self.max_launch_calldata),
+                };
                 self.last_venue_target = venue_target;
                 // The per-source launch counters stay the Flap C1 scope.
                 let flap = launch == Some(Venue::Flap);
@@ -465,6 +479,7 @@ impl IngressCore {
                             first_full: Some((i, now_ns, wall_us)),
                             sources: bit,
                             launch,
+                            venue_target,
                         },
                     );
                     return launch.map(|venue| Launch::First {
@@ -481,6 +496,7 @@ impl IngressCore {
                         self.last_first_full = true;
                         seen.first_full = Some((i, now_ns, wall_us));
                         seen.launch = launch;
+                        seen.venue_target = venue_target;
                         self.stats[i].first_full += 1;
                         if seen.first_any.0 != i {
                             self.stats[i].duplicates += 1;
@@ -933,6 +949,67 @@ mod tests {
             four_launch_token(&d, &raw, MAX_CALLDATA),
             Some(four::PendingToken::Unknown)
         );
+    }
+
+    /// Audit E 5.3: a later full sighting of a hash takes the classification
+    /// of its first full sighting (the hash binds the signed bytes; the
+    /// source checked it): nothing is decoded again, so even bytes that would
+    /// decode otherwise read as the recorded launch and venue target.
+    #[test]
+    fn a_later_full_sighting_takes_the_recorded_classification() {
+        let mut core = IngressCore::new(16, MAX_CALLDATA);
+        let launch = legacy(PORTAL, LAUNCH);
+        let h = [7u8; 32];
+        assert!(matches!(
+            core.observe(
+                SourceId::PublicNode,
+                Observation::Full {
+                    hash: h,
+                    raw: &launch
+                },
+                10,
+                None
+            ),
+            Some(Launch::First {
+                venue: Venue::Flap,
+                ..
+            })
+        ));
+        assert!(core.last_venue_target());
+        // Not decodable at all, yet the same hash: the recorded launch.
+        assert_eq!(
+            core.observe(
+                SourceId::Drpc,
+                Observation::Full { hash: h, raw: b"x" },
+                30,
+                None
+            ),
+            Some(Launch::Later {
+                hash: h,
+                source: SourceId::Drpc,
+                lag_ns: 20,
+                venue: Venue::Flap
+            })
+        );
+        assert!(core.last_venue_target());
+        // A hash first seen hash-only is classified at its first full sighting.
+        let g = [8u8; 32];
+        core.observe(SourceId::Drpc, Observation::HashOnly { hash: g }, 40, None);
+        assert!(matches!(
+            core.observe(
+                SourceId::PublicNode,
+                Observation::Full {
+                    hash: g,
+                    raw: &launch
+                },
+                50,
+                None
+            ),
+            Some(Launch::First {
+                venue: Venue::Flap,
+                ..
+            })
+        ));
     }
 
     /// Plan §5a.3: the first verified full sighting wins, even when another

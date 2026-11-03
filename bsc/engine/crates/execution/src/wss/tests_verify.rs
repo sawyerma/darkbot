@@ -296,14 +296,14 @@ fn hex_quantities_and_data_are_strict() {
 }
 
 /// BSC3-063: the source's libsecp256k1 recovery accepts and refuses exactly
-/// what the core's k256 `recover_signer` does, with the same error: k256
+/// what k256 (`recover_signer_k256`, the reference: Audit E 4.15) does, with the same error: k256
 /// signatures of many keys, their other parity, their high-`s` twin, `r`
 /// or `s` zero, at the order or one below it, `s` at and above n/2, an `r`
 /// that is no point's x, prehashes 0, n, n + 1 and 2^256 - 1, and a
 /// signature whose recovered key is the point at infinity.
 #[test]
 fn the_source_recovers_exactly_what_the_core_recovers() {
-    use darkbot_bsc_trading::signer::{SignerError, recover_signer};
+    use darkbot_bsc_trading::signer::{SignerError, recover_signer_k256 as recover_signer};
     use darkbot_bsc_trading::transactions::legacy::RecoverableSignature;
     use k256::elliptic_curve::PrimeField;
     use k256::elliptic_curve::point::AffineCoordinates;

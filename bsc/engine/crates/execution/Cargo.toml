@@ -30,8 +30,6 @@ zeroize = { version = "=1.9.0", optional = true }
 tungstenite = { version = "=0.24.0", default-features = false, features = ["handshake"], optional = true }
 darkbot-bsc-tx-encoding = { path = "../tx_encoding", optional = true }
 darkbot-bsc-geth-ipc = { path = "../geth_ipc", optional = true }
-# The source's signer recovery for every full transaction (BSC3-063).
-secp256k1 = { workspace = true, optional = true }
 # SIGTERM/SIGINT of the runtime process become its stop request (a safe
 # signal iterator; the crate forbids unsafe code).
 signal-hook = { version = "=0.3.18", default-features = false, features = ["iterator"], optional = true }
@@ -52,7 +50,7 @@ rpc-wire = []
 # serde_json only at the WSS source's JSON-RPC wire (`wss::jsonrpc`).
 # acceptance-guard: the runtime refuses the acceptance contract's G0.7
 # accounts (Audit E 3.12); the guard stays UNARMED and unused by it.
-runtime = ["acceptance-guard", "dep:darkbot-bsc-record", "dep:tungstenite", "dep:serde_json", "dep:darkbot-bsc-tx-encoding", "dep:darkbot-bsc-geth-ipc", "dep:darkbot-bsc-journal", "dep:signal-hook", "dep:zeroize", "dep:sha2", "dep:secp256k1"]
+runtime = ["acceptance-guard", "dep:darkbot-bsc-record", "dep:tungstenite", "dep:serde_json", "dep:darkbot-bsc-tx-encoding", "dep:darkbot-bsc-geth-ipc", "dep:darkbot-bsc-journal", "dep:signal-hook", "dep:zeroize", "dep:sha2"]
 g07-mainnet = ["acceptance-guard", "rpc-wire", "dep:serde_json", "dep:sha2", "dep:hex", "dep:darkbot-bsc-journal", "dep:alloy-sol-types", "dep:k256", "dep:zeroize"]
 # REV.1.0 R11: the harness build of bsc_runtime for the Messplan §3b cases:
 # its TLS clients also trust the test CA of tests/fixtures/tls, so the real
@@ -66,11 +64,6 @@ local-egress = ["runtime"]
 # Makes the crate's test helpers available to its integration tests and to
 # the tests of dependent crates. Never enabled by the production build.
 test-support = []
-
-[lints.rust]
-# BSC3-063 review: under `secp256k1_fuzz` libsecp256k1 recovers a key from
-# the signature bytes alone; the source refuses to build so (`wss::verify`).
-unexpected_cfgs = { level = "warn", check-cfg = ["cfg(secp256k1_fuzz)"] }
 
 [dev-dependencies]
 # The core's test helpers, for this crate's tests only.

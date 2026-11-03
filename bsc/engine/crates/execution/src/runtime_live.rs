@@ -373,6 +373,62 @@ pub struct RecoveryView {
     pub fault: Option<String>,
 }
 
+/// BSC3-075, Audit E 5.6: the launches waiting for a granted source, at
+/// most `bound`, the oldest first out; membership and removal O(1). Each
+/// held hash keeps the number of its arrival, and the arrival order its
+/// entries (hash, number): an entry whose number is no longer the held one
+/// (taken out, or held again since) lets nothing go at the front, and the
+/// order drops such entries when it reaches twice the bound, so it never
+/// holds more than that.
+#[derive(Debug, Default)]
+struct Awaiting {
+    order: std::collections::VecDeque<([u8; 32], u64)>,
+    held: std::collections::HashMap<[u8; 32], u64>,
+    arrivals: u64,
+}
+
+impl Awaiting {
+    /// Holds `hash` (once), first letting the oldest go at the bound.
+    fn insert(&mut self, hash: [u8; 32], bound: usize) {
+        let bound = bound.max(1);
+        if self.held.contains_key(&hash) {
+            return;
+        }
+        while self.held.len() >= bound {
+            match self.order.pop_front() {
+                Some((oldest, arrival)) => {
+                    if self.held.get(&oldest) == Some(&arrival) {
+                        self.held.remove(&oldest);
+                    }
+                }
+                None => break,
+            }
+        }
+        if self.order.len() >= 2 * bound {
+            let held = &self.held;
+            self.order.retain(|(h, n)| held.get(h) == Some(n));
+        }
+        self.arrivals += 1;
+        self.order.push_back((hash, self.arrivals));
+        self.held.insert(hash, self.arrivals);
+    }
+
+    /// Takes `hash` out; whether it was held.
+    fn take(&mut self, hash: &[u8; 32]) -> bool {
+        self.held.remove(hash).is_some()
+    }
+
+    fn clear(&mut self) {
+        self.order.clear();
+        self.held.clear();
+    }
+
+    #[cfg(test)]
+    fn len(&self) -> usize {
+        self.held.len()
+    }
+}
+
 pub struct LiveRuntime {
     setup: LiveSetup,
     exec: ExecSetup,
@@ -446,7 +502,7 @@ pub struct LiveRuntime {
     /// BSC3-075: those launches, until a granted source sees them (at most
     /// as many as the ingress remembers, `BSC_RUNTIME_DEDUP_HASHES`: a later
     /// sighting comes only of a launch it still holds; the oldest first out).
-    awaiting_granted: std::collections::VecDeque<[u8; 32]>,
+    awaiting_granted: Awaiting,
     awaiting_bound: usize,
     /// BSC3-076: the attempt of the C3 BUY lease last returned unused,
     /// with its grant's generation: the next lease under that grant takes
@@ -619,7 +675,7 @@ impl LiveRuntime {
             answers: Vec::new(),
             block_launches: Vec::new(),
             block_buys: Vec::new(),
-            awaiting_granted: std::collections::VecDeque::new(),
+            awaiting_granted: Awaiting::default(),
             awaiting_bound: 0,
             lease_attempt: None,
             lease_refused: 0,
@@ -2515,11 +2571,9 @@ impl LiveRuntime {
     ) -> Option<ExecBuy<LiveHandoff>> {
         self.executor.as_ref()?;
         let granted = self.sources_live.contains(&source);
-        let at = self.awaiting_granted.iter().position(|h| *h == hash);
-        let (true, Some(at)) = (granted, at) else {
+        if !granted || !self.awaiting_granted.take(&hash) {
             return None;
-        };
-        self.awaiting_granted.remove(at);
+        }
         self.on_launch(source, hash, raw, ingress_ns, owner, clock)
     }
 
@@ -2550,12 +2604,7 @@ impl LiveRuntime {
                 true => self.source_not_live += 1,
                 false => self.source_refused += 1,
             }
-            if !self.awaiting_granted.contains(&hash) {
-                if self.awaiting_granted.len() >= self.awaiting_bound.max(1) {
-                    self.awaiting_granted.pop_front();
-                }
-                self.awaiting_granted.push_back(hash);
-            }
+            self.awaiting_granted.insert(hash, self.awaiting_bound);
             return None;
         }
         if self.public_only_locked() {
@@ -3853,6 +3902,58 @@ mod tests {
             let end = source[at..].find("\n    }\n").unwrap();
             assert!(next < end, "{decision} polls before deciding");
         }
+    }
+
+    /// Audit E 5.6: the waiting launches keep their bound and their order
+    /// (the oldest held one goes first), take and insert are O(1), a taken
+    /// one leaves no gap in the bound, and the order never holds more than
+    /// twice the bound.
+    #[test]
+    fn the_awaiting_launches_keep_their_bound_and_order() {
+        let h = |n: u8| [n; 32];
+        let mut a = Awaiting::default();
+        for n in 1..=3 {
+            a.insert(h(n), 3);
+        }
+        a.insert(h(2), 3);
+        assert_eq!(a.len(), 3);
+        // At the bound the oldest goes: 1.
+        a.insert(h(4), 3);
+        assert!(!a.take(&h(1)) && a.len() == 3);
+        // A taken one frees its place: 2 goes, 5 comes, nothing else goes.
+        assert!(a.take(&h(2)));
+        a.insert(h(5), 3);
+        assert!(a.take(&h(3)) && a.take(&h(4)) && a.take(&h(5)));
+        assert_eq!(a.len(), 0);
+        // Many taken entries: the order stays within twice the bound.
+        for n in 0..=255u8 {
+            a.insert(h(n), 4);
+            a.take(&h(n));
+        }
+        assert!(a.order.len() <= 8, "{}", a.order.len());
+        a.insert(h(9), 4);
+        a.clear();
+        assert!(!a.take(&h(9)));
+        // Review LOW-1: a hash taken and held again is as young as its new
+        // arrival; its old entry lets nothing go (bound 2: A taken, B, A
+        // again, then C lets B go, the oldest held).
+        a.insert(h(1), 2);
+        assert!(a.take(&h(1)));
+        a.insert(h(2), 2);
+        a.insert(h(1), 2);
+        a.insert(h(3), 2);
+        assert!(!a.take(&h(2)) && a.take(&h(1)) && a.take(&h(3)));
+        // Review LOW-2: a hash held again keeps one entry when the order
+        // is compacted, so the order stays within twice the bound.
+        a.clear();
+        for _ in 0..3 {
+            a.insert(h(7), 2);
+            a.take(&h(7));
+        }
+        a.insert(h(7), 2);
+        a.insert(h(8), 2);
+        assert!(a.order.len() <= 2, "{}", a.order.len());
+        assert!(a.take(&h(7)) && a.take(&h(8)) && a.len() == 0);
     }
 
     /// BSC3-012: the LIVE path arms only in the build its qualification

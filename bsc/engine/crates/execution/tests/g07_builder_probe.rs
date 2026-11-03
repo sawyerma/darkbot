@@ -34,8 +34,9 @@ const PLAN: &str = include_str!("../src/bin/g07_builder_probe/plan.rs");
 /// BSC3-023: libc for the journal's drive calls in Cargo.lock (was 331cec21…).
 /// BSC3-063: secp256k1 for the source's signer recovery in Cargo.lock (was 9aca2d99…).
 /// Audit E 4.16: the geth_ipc -> tx_encoding edge in Cargo.lock (was b522f502…).
+/// Audit E 4.15: secp256k1 moved from execution to trading in Cargo.lock (was 41a95658…).
 /// Neither value is an approval.
-const PINNED_PLAN_SHA256: &str = "41a95658d68cb631b586ae250a63f2337d3c7b1f26f05c384640895207ab6a70";
+const PINNED_PLAN_SHA256: &str = "6653bba8a8dadac2dec1305498aa2f883320973760b55646dc0cecbf8e23c5c7";
 
 fn run(env: &[(&str, &str)]) -> std::process::Output {
     let mut cmd = Command::new(PROBE);

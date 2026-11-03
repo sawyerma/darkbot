@@ -20,7 +20,7 @@ Pakete aus den Audits A–E (01.11.); fertig = Code + Tests + Review + Gate + CI
 | R12 | Four Classic/OpenFour Economics + Ausführung | EXTERNAL_BLOCKED: Quote-Formel unbewiesen (Implementierungen unverifiziert, Key nötig; bezeugte BUYs ohne native BNB/Slippage), Encoder ohne Quote = toter Code; `FOUR_EXECUTION_PATH_MISSING` bleibt | – |
 | R13 | FOREIGN_AUTO-Profile | EXTERNAL_BLOCKED: keine fremde Launch-Klasse mit bezeugtem Zustand (Creator-Buy, Nicht-BNB-Quote, Steuerdauer, Identitätsbindung); erst Zensus der 7-Tage-Kampagne → Klasse → freie RPC-Probe je Klasse | – |
 | R14 | fmt/clippy-CI, Läufe nach 03.11., Rebaseline, Gesamtabnahme | OFFEN | – |
-| E1–E11 | Audit E (Pflichtstatus unten) | TEILWEISE (E-A, E2, E3, E4, E6, E9 fertig; Rest offen) | E-A `8a9584d9`…`f6156fa0` |
+| E1–E11 | Audit E (Pflichtstatus unten) | TEILWEISE (E-A, E2, E3, E4, E5, E6, E9 fertig; Rest offen) | E-A `8a9584d9`…`f6156fa0` |
 
 **BSC-Gate je Paket** (technischer Nachweis, nicht REV.1.0-Status):
 
@@ -35,7 +35,7 @@ Pakete aus den Audits A–E (01.11.); fertig = Code + Tests + Review + Gate + CI
 | R3b-2a | GR3b2a5 (Workspace 1667/0/27, bsc_tools, Clippy, F0-VAR; 26 Mutanten RED; Review PASS nach 2 Runden) | GATE_OK | `b3523732` |
 | R3b-2b-1 | GR3b2b1c (Workspace 1669/0/27, bsc_tools, Clippy, F0-VAR; Gateway 61+18+4, Clippy, fmt; 21 Mutanten RED; Review PASS + Re-Check PASS) | GATE_OK | `4a1bae86` |
 | R3b-2b-2 | GR3b2b2 (Workspace 1669/0/27, bsc_tools, Clippy, F0-VAR) + gezielt nach Review-Fix (execution lib, Status, Gateway, vitest 155, test:bsc 9) | GATE_OK | dieser Commit |
-| R4–R11, E2, E3, E4, E6, E9 | Messplan §2a.5 (T69–T85) | GATE_OK (Lastflakes nur mit grüner Wiederholung) | s. dort |
+| R4–R11, E2–E6, E9 | Messplan §2a.5 (T69–T86) | GATE_OK (Lastflakes nur mit grüner Wiederholung) | s. dort |
 
 **Audit E — Pflichtstatus je Befund** (FIX / FIX+REPIN / FIX+REFREEZE / KEEP mit Grund; Abschluss = Commit):
 
@@ -75,9 +75,9 @@ Pakete aus den Audits A–E (01.11.); fertig = Code + Tests + Review + Gate + CI
 | 4.6–4.7 G0.7/G0.6a-Eigenpfade | KEEP: eingefrorene Evidence-Erzeuger; Konsolidierung = V5-Refreeze mit Echtgeld-Requalifikation | – | – |
 | 4.8–4.12 Grant-Regeln, ID-Listen, LIVE-Indikatoren, Doppelprojektion, Frontend-Clients | FIX(+REPIN) | E4 | 4.10 (`BscStatus.live_state` entfernt, eine LIVE-Quelle), 4.12 (`bscControl.ts`) E-A `8a9584d9`; 4.8 (ein Grant-Vektor `tests/fixtures/live_grant/` für Owner und LIVE-Tab, Gateway prüft nur die Form), 4.9 (Auswahl/IDs aus der Projektion, `grant_venues/strategies/adapters`; Gateway-Allowlist per Test an den Owner gebunden), 4.11 (LIVE-Pfad nur typisiert) dieser Commit |
 | 4.13 Readiness-Job Python/Shell/Text | FIX+REPIN | E8 | – |
-| 4.15, 5.5 zwei secp256k1-Recovery-Pfade | FIX (gemessen) | E5 | – |
+| 4.15, 5.5 zwei secp256k1-Recovery-Pfade | FIX (gemessen) | E5 | dieser Commit (eine Recovery `trading::signer::recover_signer` mit libsecp256k1, k256 signiert und ist Referenz im Differentialtest; C3-Pfad p50 207,8 → 69,0 µs, finaler BUY-Check 89,0 → 17,5 µs) |
 | 4.16 drei RLP-Decoder | FIX (C1-Freeze geprüft) | E9 | dieser Commit (ein Decoder `tx_encoding::rlp::take_item`, kanonisch; geth_ipc-Envelopes darauf, trading-Legacy schon; C1-Freeze `818525b1` historisch unverändert, `decode_tx_target` 42 ns vorher/nachher; Probe-Plan-Pin neu: Cargo.lock) |
-| 5.2–5.4, 5.6 Hotpath-Mehrfachdecode, Dedup-Reihenfolge, Polling vor BUY, lineare Suche | FIX (Latenz/Speicher vorher/nachher) | E5 | – |
+| 5.2–5.4, 5.6 Hotpath-Mehrfachdecode, Dedup-Reihenfolge, Polling vor BUY, lineare Suche | FIX (Latenz/Speicher vorher/nachher) | E5 | dieser Commit: 5.3 FIX (Doppelsichtung übernimmt die Klassifikation, 167 → 41 ns), 5.6 FIX (Karte + Ring mit Ankunftsnummer, schlimmster Fall 146,7 µs → 42 ns, Speicher an der Grenze 262144 bis ~42 MB statt 8 MB); 5.2 KEEP (Executor prüft gegen sein eigenes Deployment/Calldata-Limit, 166 ns = 0,24 % des Pfads), 5.4 KEEP (C2-Pending vor dem BUY: `snapshot_id` braucht den Kandidaten; Antworten vorher lesen gibt die Verbindung frei, eine Anfrage je Verbindung) |
 | 5.7, 5.8, 5.10–5.12 Testpfad-Module, test-only pub fns, Store-Reste, Konstanten, Doku | FIX | E2 | 5.10, 5.11 E-A `8a9584d9`; 5.7/5.8/5.12 dieser Commit (KEEP: `OwnLaunch::from_signed_legacy` einziger Konstruktor; geth_ipc-/Economics-gebundene → E10) |
 | 5.13 Gott-Module | FIX+REPIN | E11 | – |
 

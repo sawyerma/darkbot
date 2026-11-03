@@ -722,7 +722,6 @@ dependencies = [
  "hex",
  "k256",
  "rustls",
- "secp256k1",
  "serde_json",
  "sha2",
  "signal-hook",
@@ -792,6 +791,7 @@ dependencies = [
  "alloy-primitives",
  "darkbot-bsc-tx-encoding",
  "k256",
+ "secp256k1",
 ]
 
 [[package]]

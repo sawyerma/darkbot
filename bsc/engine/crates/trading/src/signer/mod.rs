@@ -31,7 +31,7 @@
 //! never formatted, and is zeroized on drop by `k256`.
 
 use alloy_primitives::{Address, B256, keccak256};
-use k256::ecdsa::{RecoveryId, Signature, SigningKey, VerifyingKey};
+use k256::ecdsa::{SigningKey, VerifyingKey};
 
 use crate::transactions::legacy::{LegacyTx, RecoverableSignature, SignedLegacyTx, TxError};
 
@@ -113,6 +113,9 @@ impl Signer {
         let key =
             SigningKey::from_slice(secret.as_slice()).map_err(|_| SignerError::InvalidSecretKey)?;
         let address = address_of(key.verifying_key());
+        // The recovery's context is built once, here, before trading: never
+        // in the first BUY's final check (Audit E 4.15).
+        std::sync::LazyLock::force(&SECP);
         Ok(Self { key, address })
     }
 
@@ -161,13 +164,68 @@ impl Signer {
     }
 }
 
-/// Recovers the address that produced `signature` over `prehash`.
-///
-/// High-`s` signatures are rejected: they are invalid for transactions.
+/// The secp256k1 group order n, big-endian.
+const ORDER: [u8; 32] = [
+    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xfe,
+    0xba, 0xae, 0xdc, 0xe6, 0xaf, 0x48, 0xa0, 0x3b, 0xbf, 0xd2, 0x5e, 0x8c, 0xd0, 0x36, 0x41, 0x41,
+];
+
+/// ⌊n / 2⌋: an `s` above it is high (EIP-2).
+const HALF_ORDER: [u8; 32] = [
+    0x7f, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+    0x5d, 0x57, 0x6e, 0x73, 0x57, 0xa4, 0x50, 0x1d, 0xdf, 0xe9, 0x2f, 0x46, 0x68, 0x1b, 0x20, 0xa0,
+];
+
+static SECP: std::sync::LazyLock<secp256k1::Secp256k1<secp256k1::VerifyOnly>> =
+    std::sync::LazyLock::new(secp256k1::Secp256k1::verification_only);
+
+// Under `secp256k1_fuzz` libsecp256k1 "recovers" a key derived from the
+// signature bytes alone: every signature would verify.
+#[cfg(secp256k1_fuzz)]
+compile_error!("the trading core never builds with cfg(secp256k1_fuzz)");
+
+/// Recovers the address that produced `signature` over `prehash`: the one
+/// recovery of the core, the sources and the final BUY check (BSC3-063,
+/// Audit E 4.15/5.5), with libsecp256k1 (measured p50 17.5 µs against
+/// k256's 90.8 µs). Refused in this order: `r` or `s` not a scalar in
+/// 1..n, a high `s` (invalid for transactions), no recoverable key.
 pub fn recover_signer(
     prehash: &B256,
     signature: &RecoverableSignature,
 ) -> Result<Address, SignerError> {
+    // Big-endian bytes compare as the numbers they are.
+    let scalar = |x: &[u8; 32]| *x != [0u8; 32] && *x < ORDER;
+    if !scalar(&signature.r) || !scalar(&signature.s) {
+        return Err(SignerError::InvalidSignature);
+    }
+    if signature.s > HALF_ORDER {
+        return Err(SignerError::HighS);
+    }
+    let mut rs = [0u8; 64];
+    rs[..32].copy_from_slice(&signature.r);
+    rs[32..].copy_from_slice(&signature.s);
+    let id = match signature.y_parity {
+        true => secp256k1::ecdsa::RecoveryId::One,
+        false => secp256k1::ecdsa::RecoveryId::Zero,
+    };
+    let recoverable = secp256k1::ecdsa::RecoverableSignature::from_compact(&rs, id)
+        .map_err(|_| SignerError::InvalidSignature)?;
+    let key = SECP
+        .recover_ecdsa(secp256k1::Message::from_digest(prehash.0), &recoverable)
+        .map_err(|_| SignerError::RecoveryFailed)?;
+    let point = key.serialize_uncompressed();
+    Ok(Address::from_slice(&keccak256(&point[1..])[12..]))
+}
+
+/// The k256 recovery the core used before BSC3-063 reached it (Audit E
+/// 4.15): the reference of the differential tests, which require
+/// [`recover_signer`] to accept and refuse exactly what it does. Tests only.
+#[cfg(any(test, feature = "test-support"))]
+pub fn recover_signer_k256(
+    prehash: &B256,
+    signature: &RecoverableSignature,
+) -> Result<Address, SignerError> {
+    use k256::ecdsa::{RecoveryId, Signature};
     let mut rs = [0u8; 64];
     rs[..32].copy_from_slice(&signature.r);
     rs[32..].copy_from_slice(&signature.s);
@@ -423,6 +481,39 @@ mod tests {
             recover_signer(&B256::ZERO, &zero),
             Err(SignerError::InvalidSignature)
         );
+
+        // Audit E 4.15: r or s at the order or above is no scalar, as for
+        // the k256 reference; s at n/2 is still low, one above it high.
+        let raw = golden_raw();
+        let signed = decode_signed(&raw).unwrap();
+        let prehash = signed.tx.signing_hash(&mut Vec::new());
+        let order = U256::from_be_slice(&unhex(CURVE_ORDER));
+        let half = order >> 1;
+        for (r, s, want) in [
+            (Some(order), None, Err(SignerError::InvalidSignature)),
+            (None, Some(order), Err(SignerError::InvalidSignature)),
+            (Some(U256::MAX), None, Err(SignerError::InvalidSignature)),
+            (None, Some(U256::MAX), Err(SignerError::InvalidSignature)),
+            (None, Some(half + U256::from(1)), Err(SignerError::HighS)),
+            (None, Some(half), Ok(())),
+        ] {
+            let mut signature = signed.signature;
+            if let Some(r) = r {
+                signature.r = r.to_be_bytes::<32>();
+            }
+            if let Some(s) = s {
+                signature.s = s.to_be_bytes::<32>();
+            }
+            let got = recover_signer(&prehash, &signature);
+            assert_eq!(got, recover_signer_k256(&prehash, &signature));
+            match want {
+                Err(e) => assert_eq!(got, Err(e)),
+                Ok(()) => assert!(!matches!(
+                    got,
+                    Err(SignerError::InvalidSignature | SignerError::HighS)
+                )),
+            }
+        }
     }
 
     #[test]

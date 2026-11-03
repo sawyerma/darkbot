@@ -32,9 +32,9 @@ publish = false
 # Unit-1 review run (2026-10-03).
 alloy-primitives = "=1.7.3"
 k256 = { version = "=0.13.4", features = ["ecdsa"] }
-# BSC3-063: the signer recovery of the pending-transaction source
-# (libsecp256k1, measured about five times k256's), at the version this
-# lock already resolved.
+# BSC3-063 (approved 31.10.): the one signer recovery of the core, the
+# sources and the final BUY check (libsecp256k1, measured about five times
+# k256's; Audit E 4.15/5.5), at the version this lock already resolved.
 secp256k1 = { version = "=0.31.1", default-features = false, features = ["std", "recovery"] }
 # TLS of the builder transports (Unit 5). The versions the Gate-0 harness
 # resolved and locked (prestudy/bsc/experiments/gate0/Cargo.lock), with the ring crypto
