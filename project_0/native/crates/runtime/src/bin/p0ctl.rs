@@ -1649,6 +1649,11 @@ fn boot_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
                 None => jobs::new_id()?,
             };
             let mode = boot_mode(&options[1..])?;
+            // P0-027: an econ4h or shadow run starts through a checkout's launcher; a release (its
+            // data home no checkout) ships the raw capture only.
+            if mode != boot_audit::MARKET_MODE && !boot_audit::is_checkout(project) {
+                return Err(format!("BOOT_MODE_NEEDS_CHECKOUT: a {mode} flow starts through the checkout's launcher (scripts/capture.sh); a release runs market flows"));
+            }
             if mode == boot_audit::MARKET_MODE {
                 if !operational.is_empty() {
                     return Err("BOOT_MARKET_ARGS: the raw capture takes its configuration from its environment files, no operational arguments".into());

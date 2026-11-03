@@ -24,6 +24,32 @@ fn p0ctl(project: &std::path::Path, args: &[&str]) -> (i32, String, String) {
     )
 }
 
+/// P0-027: an econ4h flow needs a checkout — the test project is one (its own repository).
+fn checkout(d: &std::path::Path) {
+    for args in [
+        &["init", "-q"][..],
+        &[
+            "-c",
+            "user.email=t@t",
+            "-c",
+            "user.name=t",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "t",
+        ][..],
+    ] {
+        assert!(Command::new("git")
+            .arg("-C")
+            .arg(d)
+            .args(args)
+            .status()
+            .unwrap()
+            .success());
+    }
+}
+
 fn offline<'a>(flow: &'a str, duration: &'a str, ttl: Option<&'a str>) -> Vec<&'a str> {
     let mut args = vec!["boot", "offline", "--flow", flow, "--duration", duration];
     if let Some(ttl) = ttl {
@@ -37,6 +63,7 @@ fn dec07_p0ctl_boot_records_a_flow_and_refuses_unapproved_steps() {
     let d = std::env::temp_dir().join(format!("p0ctl_boot_{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&d);
     std::fs::create_dir_all(d.join("data")).unwrap();
+    checkout(&d);
     for bad in ["9", "121"] {
         let (code, _, err) = p0ctl(&d, &offline("f0", "10m", Some(bad)));
         assert_eq!(code, 2, "{err}");
@@ -380,6 +407,7 @@ fn dec07_provider_evidence_is_named_by_its_imported_record_id() {
     let d = std::env::temp_dir().join(format!("p0ctl_boot_evidence_{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&d);
     std::fs::create_dir_all(d.join("operator")).unwrap();
+    checkout(&d);
     let store = d.join("data/provider_evidence");
     // The operator's typed record (DEC-18 §3.4: a measured JSON is no record).
     let (json, record) = (

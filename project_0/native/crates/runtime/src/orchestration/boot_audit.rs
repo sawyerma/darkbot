@@ -141,13 +141,24 @@ fn boot_read_bounds(
 }
 
 fn git(project: &Path, args: &[&str]) -> Option<Vec<u8>> {
+    // The repository of `project` itself, never one named by the environment.
     let out = std::process::Command::new("git")
         .arg("-C")
         .arg(project)
         .args(args)
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .env_remove("GIT_INDEX_FILE")
         .output()
         .ok()?;
     out.status.success().then_some(out.stdout)
+}
+
+/// P0-027: whether `project` is a checkout's `project_0` (or a repository root of its own) — a
+/// data home inside some other repository is no checkout.
+pub fn is_checkout(project: &Path) -> bool {
+    git(project, &["rev-parse", "--show-prefix"])
+        .is_some_and(|p| matches!(String::from_utf8_lossy(&p).trim(), "" | "project_0/"))
 }
 
 /// FE-04: the commit this project's binaries are built from — its HEAD, only while the project
@@ -225,8 +236,9 @@ impl payload::Payload for ReleaseSource {
 }
 /// The release identity record beside the executables of a release.
 pub const RELEASE_IDENTITY: &str = "p0-release.p0j";
-/// The executables a release ships for its boot flows: control, runtime, raw capture.
-pub const RELEASE_BINARIES: [&str; 3] = ["p0ctl", "p0-longtail", "p0-market-capture-reported"];
+/// The executables a release ships for its boot flows: control and raw capture (an econ4h or
+/// shadow flow starts through a checkout's launcher only).
+pub const RELEASE_BINARIES: [&str; 2] = ["p0ctl", "p0-market-capture-reported"];
 
 /// `p0ctl release identity --output FILE`: the release identity of `project`'s checkout and the
 /// executables beside `exe`, written once to `output`.
@@ -235,11 +247,34 @@ pub fn release_identity(
     exe: &Path,
     output: &Path,
 ) -> Result<ReleaseSource, String> {
+    if !is_checkout(project) {
+        return Err(
+            "RELEASE_SOURCE_NOT_A_CHECKOUT: the release identity is taken from a git checkout"
+                .into(),
+        );
+    }
+    // The binaries' build inputs (the native crates and the protocol schemas) are exactly HEAD's.
+    let inputs = git(
+        project,
+        &[
+            "status",
+            "--porcelain",
+            "--untracked-files=all",
+            "--",
+            "native",
+            ":(top)protocol",
+        ],
+    )
+    .ok_or("RELEASE_SOURCE_NOT_A_CHECKOUT")?;
+    if let Some(first) = String::from_utf8_lossy(&inputs).lines().next() {
+        return Err(format!(
+            "RELEASE_SOURCE_DIRTY: a build input differs from HEAD ({}); commit or remove it before the build",
+            first.trim()
+        ));
+    }
     let head = git(project, &["rev-parse", "HEAD"])
         .map(|b| String::from_utf8_lossy(&b).trim().to_string())
-        .ok_or(
-            "RELEASE_SOURCE_NOT_A_CHECKOUT: the release identity is taken from a git checkout",
-        )?;
+        .ok_or("RELEASE_SOURCE_NOT_A_CHECKOUT")?;
     let dirty = git(project, &["status", "--porcelain", "--", "."])
         .map(|b| sha(&b))
         .ok_or("RELEASE_SOURCE_NOT_A_CHECKOUT")?;
@@ -262,18 +297,20 @@ pub fn release_identity(
     Ok(record)
 }
 
-/// The source of the release `exe` belongs to: its identity record beside it, naming exactly
-/// this executable's bytes; `None` without one or for other bytes.
+/// The source of the release `exe` belongs to: its identity record beside it, naming this
+/// executable and every executable of the release exactly as they lie beside it; `None` without
+/// one or for other bytes (every process of the release gets the same answer).
 fn release_source(exe: &Path) -> Option<(String, String)> {
-    let record: ReleaseSource =
-        journal::read_typed_value(&exe.parent()?.join(RELEASE_IDENTITY)).ok()?;
+    let dir = exe.parent()?;
+    let record: ReleaseSource = journal::read_typed_value(&dir.join(RELEASE_IDENTITY)).ok()?;
     let name = exe.file_name()?.to_str()?;
-    let own = sha(&std::fs::read(exe).ok()?);
-    record
-        .binaries
-        .iter()
-        .any(|(n, s)| n == name && *s == own)
-        .then_some((record.source_head, record.source_dirty_sha256))
+    let named = record.binaries.iter().any(|(n, _)| n == name);
+    let exact = record.binaries.len() == RELEASE_BINARIES.len()
+        && record.binaries.iter().all(|(n, s)| {
+            RELEASE_BINARIES.contains(&n.as_str())
+                && std::fs::read(dir.join(n)).is_ok_and(|b| sha(&b) == *s)
+        });
+    (named && exact).then_some((record.source_head, record.source_dirty_sha256))
 }
 
 /// Identities of this project with an explicit operational config.
@@ -299,15 +336,17 @@ pub fn identity_of(
     exe: Option<&Path>,
 ) -> Result<AuditedIdentity, String> {
     let runtime_config_sha256 = runtime_config_sha256(config)?;
-    let (source_head, source_dirty_sha256) = match git(project, &["rev-parse", "HEAD"]) {
-        Some(head) => (
-            Some(String::from_utf8_lossy(&head).trim().to_string()),
+    let (source_head, source_dirty_sha256) = if is_checkout(project) {
+        (
+            git(project, &["rev-parse", "HEAD"])
+                .map(|b| String::from_utf8_lossy(&b).trim().to_string()),
             git(project, &["status", "--porcelain", "--", "."]).map(|b| sha(&b)),
-        ),
-        None => match exe.and_then(release_source) {
+        )
+    } else {
+        match exe.and_then(release_source) {
             Some((head, dirty)) => (Some(head), Some(dirty)),
             None => (None, None),
-        },
+        }
     };
     Ok(AuditedIdentity {
         source_head,
@@ -380,8 +419,10 @@ pub struct OfflineInputs {
     pub run_roots: Vec<PathBuf>,
     /// E4/E6: root the next run is written to (`Err` = not resolvable, the launcher refuses too).
     pub run_output_root: Result<PathBuf, String>,
-    /// X3: identity of the control and runtime executables (`binary_identity`).
+    /// X3: identity of the control and runtime executables (`binary_identity_for`), the runtime's
+    /// name.
     pub binary: Result<String, String>,
+    pub runtime: &'static str,
     pub wallet_public_env: PathBuf,
     pub max_capture_bytes: u64,
     pub system_reserve_bytes: u64,
@@ -405,6 +446,7 @@ impl OfflineInputs {
                 .collect(),
             run_output_root: econ_run_root(project, &|k| std::env::var(k).ok()),
             binary: binary_identity_for(mode),
+            runtime: runtime_name(mode),
             wallet_public_env: project.join("config/wallet.public.env"),
             max_capture_bytes: w.max_bytes,
             system_reserve_bytes: w.system_reserve_bytes,
@@ -586,7 +628,11 @@ pub fn offline(inputs: &OfflineInputs) -> Result<BootAudit, String> {
             "source_identity",
             true,
             Pass,
-            "git or release identity",
+            if is_checkout(&inputs.project) {
+                "git"
+            } else {
+                "release identity"
+            },
             format!("HEAD {}", &h[..h.len().min(12)]),
         ),
         _ => add(
@@ -636,7 +682,7 @@ pub fn offline(inputs: &OfflineInputs) -> Result<BootAudit, String> {
             "runtime_binary",
             true,
             Pass,
-            "p0ctl + p0-longtail",
+            &format!("p0ctl + {}", inputs.runtime),
             format!("sha256 {}", &digest[..digest.len().min(12)]),
         ),
         Err(e) => add(
@@ -644,7 +690,7 @@ pub fn offline(inputs: &OfflineInputs) -> Result<BootAudit, String> {
             "runtime_binary",
             true,
             Blocked,
-            "p0ctl + p0-longtail",
+            &format!("p0ctl + {}", inputs.runtime),
             e.clone(),
         ),
     }
@@ -1013,6 +1059,7 @@ mod tests {
             run_roots: vec![d.join("data/runs")],
             run_output_root: Ok(d.join("data/runs")),
             binary: Ok("fixture-binary-digest".into()),
+            runtime: "p0-longtail",
             wallet_public_env: d.join("config/wallet.public.env"),
             max_capture_bytes: 512 * MIB,
             system_reserve_bytes: 1024 * MIB,
@@ -1909,12 +1956,19 @@ pub fn binary_identity() -> Result<String, String> {
 /// (`p0-market-capture-reported`, DEC-07 boot mode `market`) or the runtime (`p0-longtail`).
 pub fn binary_identity_for(mode: &str) -> Result<String, String> {
     let ctl = std::env::current_exe().map_err(|_| "BOOT_BINARY")?;
-    let runtime = if mode == MARKET_MODE {
+    binary_identity_of(
+        &ctl,
+        &ctl.parent().ok_or("BOOT_BINARY")?.join(runtime_name(mode)),
+    )
+}
+
+/// The runtime executable of operating mode `mode`.
+pub fn runtime_name(mode: &str) -> &'static str {
+    if mode == MARKET_MODE {
         "p0-market-capture-reported"
     } else {
         "p0-longtail"
-    };
-    binary_identity_of(&ctl, &ctl.parent().ok_or("BOOT_BINARY")?.join(runtime))
+    }
 }
 
 /// DEC-07: the boot mode of a standalone raw capture.
