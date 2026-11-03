@@ -52,6 +52,21 @@ impl Endpoint {
     }
 }
 
+/// The TLS client configuration of a gRPC endpoint (rustls with `ring`, webpki roots, ALPN h2) —
+/// the Geyser source's and the Jito searcher's (DEC-17c).
+pub fn h2_tls_config() -> Result<Arc<tokio_rustls::rustls::ClientConfig>, &'static str> {
+    let mut roots = tokio_rustls::rustls::RootCertStore::empty();
+    roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    let provider = Arc::new(tokio_rustls::rustls::crypto::ring::default_provider());
+    let mut config = tokio_rustls::rustls::ClientConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()
+        .map_err(|_| "GRPC_TLS_CONFIG")?
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+    config.alpn_protocols = vec![b"h2".to_vec()];
+    Ok(Arc::new(config))
+}
+
 /// gRPC status codes (`grpc-status`) as a rejection or a retry.
 pub fn status_error(code: u32) -> Option<StreamError> {
     Some(match code {
@@ -208,20 +223,12 @@ impl GeyserTransport for GrpcTransport {
                 return Self::open(tcp, endpoint.authority(), "http", token, request, timeout)
                     .await;
             }
-            let mut roots = tokio_rustls::rustls::RootCertStore::empty();
-            roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
-            let provider = Arc::new(tokio_rustls::rustls::crypto::ring::default_provider());
-            let mut config = tokio_rustls::rustls::ClientConfig::builder_with_provider(provider)
-                .with_safe_default_protocol_versions()
-                .map_err(|_| StreamError::Rejected("GEYSER_TLS_CONFIG"))?
-                .with_root_certificates(roots)
-                .with_no_client_auth();
-            config.alpn_protocols = vec![b"h2".to_vec()];
+            let config = h2_tls_config().map_err(|_| StreamError::Rejected("GEYSER_TLS_CONFIG"))?;
             let name = tokio_rustls::rustls::pki_types::ServerName::try_from(endpoint.host.clone())
                 .map_err(|_| StreamError::Rejected("GEYSER_ENDPOINT_INVALID"))?;
             let tls = tokio::time::timeout(
                 timeout,
-                tokio_rustls::TlsConnector::from(Arc::new(config)).connect(name, tcp),
+                tokio_rustls::TlsConnector::from(config).connect(name, tcp),
             )
             .await
             .map_err(|_| StreamError::Retryable("GRPC_TLS_TIMEOUT".into()))?

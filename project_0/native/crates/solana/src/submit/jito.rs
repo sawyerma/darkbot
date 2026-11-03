@@ -22,6 +22,34 @@ use solana_sdk::transaction::VersionedTransaction;
 use std::str::FromStr;
 use std::time::Duration;
 
+/// The most transactions one bundle carries (the block engine's rule).
+pub const BUNDLE_MAX_TXS: usize = 5;
+
+/// A bundle's size within 1..=[`BUNDLE_MAX_TXS`] and its signatures — every transaction's
+/// (non-default) fee-payer signature before any network handoff (L2/9e) — with the sentinel
+/// taken from this complete list, never by blind index: the receivership transaction, the
+/// second to last when the tip comes last ([FIX-18]). Shared by both block-engine adapters.
+pub(crate) fn bundle_signatures(
+    txs: &[VersionedTransaction],
+) -> Result<(Vec<Signature>, Signature), SubmitError> {
+    if txs.is_empty() || txs.len() > BUNDLE_MAX_TXS {
+        return Err(SubmitError::Rejected(format!(
+            "bundle size {} not in 1..={BUNDLE_MAX_TXS}",
+            txs.len()
+        )));
+    }
+    let sigs: Vec<Signature> = txs
+        .iter()
+        .filter_map(|t| t.signatures.first().copied())
+        .filter(|s| *s != Signature::default())
+        .collect();
+    if sigs.len() != txs.len() {
+        return Err(SubmitError::Rejected("BUNDLE_SIGNATURE_MISSING".into()));
+    }
+    let sentinel = sigs[sigs.len().saturating_sub(2)];
+    Ok((sigs, sentinel))
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum BundleStatus {
     NotFound,
@@ -136,24 +164,7 @@ impl JitoAdapter {
         t_handoff_ns: u64,
         deadline: std::time::Instant,
     ) -> Result<SubmitAck, SubmitError> {
-        if txs.is_empty() || txs.len() > 5 {
-            return Err(SubmitError::Rejected(format!(
-                "bundle size {} not in 1..=5",
-                txs.len()
-            )));
-        }
-        // L2/9e: every transaction must carry its (non-default) fee-payer signature before any
-        // network handoff; the sentinel is taken from this complete list, never by blind index.
-        let sigs: Vec<Signature> = txs
-            .iter()
-            .filter_map(|t| t.signatures.first().copied())
-            .filter(|s| *s != Signature::default())
-            .collect();
-        if sigs.len() != txs.len() {
-            return Err(SubmitError::Rejected("BUNDLE_SIGNATURE_MISSING".into()));
-        }
-        // [FIX-18] Sentinel = Receivership-TX (vorletzte, wenn Tip zuletzt), alle Signaturen mitführen.
-        let sentinel = sigs[sigs.len().saturating_sub(2)];
+        let (sigs, sentinel) = bundle_signatures(txs)?;
         let encoded: Result<Vec<String>, _> = txs.iter().map(super::encode_base64).collect();
         let encoded = encoded?;
         let total_len: usize = txs

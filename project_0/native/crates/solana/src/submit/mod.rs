@@ -10,6 +10,7 @@
 //! endpoint (FE-05/06, P8 NOT_RUN).
 
 pub mod jito;
+pub mod jito_grpc;
 pub mod rpc;
 
 use base64::Engine;
