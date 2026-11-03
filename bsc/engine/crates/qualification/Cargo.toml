@@ -28,6 +28,9 @@ hex = { workspace = true }
 ring = { version = "=0.17.14", default-features = false }
 
 prost = { version = "=0.13.5", optional = true }
+# Audit E 4.13: the readiness job's stop handler (forwards TERM/INT to its
+# run's process group), as bsc_runtime's, at the version this lock resolved.
+signal-hook = { version = "=0.3.18", default-features = false, features = ["iterator"], optional = true }
 
 [build-dependencies]
 prost-build = { version = "=0.13.5", optional = true }
@@ -41,7 +44,7 @@ darkbot-bsc-execution = { path = "../execution", features = ["test-support"] }
 
 [features]
 default = []
-status-reporter = ["dep:prost", "dep:prost-build", "dep:protox"]
+status-reporter = ["dep:prost", "dep:prost-build", "dep:protox", "dep:signal-hook"]
 
 [[bin]]
 name = "bsc-status-reporter"
@@ -49,4 +52,9 @@ required-features = ["status-reporter"]
 
 [[test]]
 name = "bsc_tools"
+required-features = ["status-reporter"]
+
+# Audit E 4.13: the readiness job's one native owner, end to end.
+[[test]]
+name = "readiness_job"
 required-features = ["status-reporter"]

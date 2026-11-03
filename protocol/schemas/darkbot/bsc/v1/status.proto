@@ -143,6 +143,8 @@ message JobStatus {
   string result_code = 6;
   // Whether the supervisor can control the job (deployed readiness binary and snapshot).
   optional bool controller_available = 7;
+  // Audit E 4.13: the job's process while launchd runs it.
+  optional uint32 pid = 8;
 }
 // Kind of a native leaf; the value is its canonical text form.
 enum NativeKind {

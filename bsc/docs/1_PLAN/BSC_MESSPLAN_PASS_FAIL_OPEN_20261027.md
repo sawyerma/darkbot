@@ -178,7 +178,8 @@ Gate = Workspace im T63-Umfang (`--workspace --all-features --no-fail-fast`, `bs
 | T84 | Audit E9 `baa702a8` | 1.732/0/27 | 8/8 / 0 / PASS; Release-Sätze 5/5 Clippy 0 | 2 Mutanten RED (`tools/mut_e9.py`); `decode_tx_target` 42/41 ns, `decode_tx_signature` 167/292 ns (Typ 2/Legacy) vorher = nachher; Review PASS (M1, L1–L3, L5, L6 behoben; L4 `#[inline]` gemessen langsamer 42→83 ns, verworfen) | **LOCAL_PASS + CI_PASS** (Run 41698230304) |
 | T85 | Audit E4 `886b79b5` | 1.735/0/27 | 8/8 / 0 / PASS; Release-Sätze 5/5 Clippy 0 | 6 Mutanten RED (`tools/mut_e4.py`); Gateway, Vitest, tsc, lint, `npm run test:bsc`, Protokollvertrag; Review PASS (M1, L1–L3 behoben, danach nur Frontend/Gateway/CI gezielt: vitest 158, test:bsc 11, Gateway 62, F0-VAR, Protokollvertrag; L4 Generation vor Komponenten/Venues zeigt sie nicht (fail-closed, nächster Request schreibt alle), L5 `confirm_state` je Reiter einmal, L6 Launch-Platzierung je ID = Darstellung) | **LOCAL_PASS + CI_PASS** (Run 41704611346) |
 | T86 | Audit E5 `e48559f1` | 1.737/0/27 | 8/8 / 0 / PASS; Release-Sätze 5/5 Clippy 0 | 8 Mutanten RED (`tools/mut_e5.py`); C3-PAPER T_ingress→T_shadow_sink p50 207,8 → 69,0 µs (n=2000, Allokationen 5..=9 unverändert); Review PASS (LOW-1/LOW-2 behoben: Ankunftsnummern, Fall A/B/C und Kompaktierung als Test, Mutanten F/G; Skalarbereich zusätzlich im Kern gegen k256, Mutant B2) | **LOCAL_PASS + CI_PASS** (Run 41712752394) |
-| T87 | Audit E7 + BSC3-085 (Commit mit dieser Zeile) | 1.741/0/27 | 8/8 / 0 / PASS; Release-Sätze 5/5 Clippy 0 | 12 Mutanten RED (`tools/mut_e7.py`; einer äquivalent ersetzt: RPC als Builder gerahmt, jede Rahmung prüft die Art selbst); C3-PAPER plan+frame p50 3,71 → 3,67 µs, T_ingress→T_shadow_sink p50 69,4 → 68,8 µs; Strategy-C-BUY p50 283,5 → 49,9 µs (5/5 Läufe, vorher 2/5 DEADLINE); Review PASS (L1–L5 behoben: Doku, Zuordnung, Komplexitätsangabe, jede Zählung im Testbau gegen den Scan geprüft (498 Lib-Tests), veraltete Tabelle zuerst; L6 Registerzeile) | **LOCAL_PASS** |
+| T87 | Audit E7 + BSC3-085 `54b41891` | 1.741/0/27 | 8/8 / 0 / PASS; Release-Sätze 5/5 Clippy 0 | 12 Mutanten RED (`tools/mut_e7.py`; einer äquivalent ersetzt: RPC als Builder gerahmt, jede Rahmung prüft die Art selbst); C3-PAPER plan+frame p50 3,71 → 3,67 µs, T_ingress→T_shadow_sink p50 69,4 → 68,8 µs; Strategy-C-BUY p50 283,5 → 49,9 µs (5/5 Läufe, vorher 2/5 DEADLINE); Review PASS (L1–L5 behoben: Doku, Zuordnung, Komplexitätsangabe, jede Zählung im Testbau gegen den Scan geprüft (498 Lib-Tests), veraltete Tabelle zuerst; L6 Registerzeile) | **LOCAL_PASS** (CI ausstehend: Abfrage rate-limited) |
+| T88 | Audit E8 (Commit mit dieser Zeile) | 1.747/0/27 | 7/7 / 0 / PASS; Release-Sätze 5/5 Clippy 0 | 13 Mutanten RED (`tools/mut_e8.py`; nicht deterministisch prüfbar: Stopp zwischen Handler und ARMED-Marke, Stopp vor dem Spawn; Größengrenze äquivalent zur Decoder-Grenze); `readiness_job.rs` 7/7, Gateway 63 / Clippy 0 / fmt, F0-VAR 3544/375, Protokollvertrag, Vitest bsc+realtime 96; `ops/tests/bsc_control_test.py` NOT_RUN (berührt bsc-dataseed, Verbot); Review FAIL→behoben (H1 Pins/Gate-Liste; M1 unbeantworteter Jobzustand entscheidet im Gateway nichts, Test an_unanswered_bsc_job_state_decides_nothing; L1 Gruppe nach dem Reap gelöscht, L2 Snapshot einmal aufgelöst, L3 Stopp ohne Marke signalisiert, L4 fehlerhafte --readiness-* schlagen fehl, L6 Doku/Temp) | **LOCAL_PASS** |
 
 ---
 
@@ -438,6 +439,7 @@ L = WALLET_LAUNCHER, B = WALLET_BUYER, S = ECON_SIGN, A = ECON_ARM, D = ECON_SEN
 - `bsc/engine/crates/qualification/tests/loopback.rs` — SOURCE_PRESENT
 - `bsc/engine/crates/qualification/tests/offline.rs` — SOURCE_PRESENT
 - `bsc/engine/crates/qualification/tests/provenance_clock.rs` — SOURCE_PRESENT
+- `bsc/engine/crates/qualification/tests/readiness_job.rs` — SOURCE_PRESENT
 - `bsc/engine/crates/qualification/tests/support/mod.rs` — SOURCE_PRESENT
 - `bsc/engine/crates/trading/tests/c14_prefilter_scope.rs` — SOURCE_PRESENT
 - `bsc/engine/crates/trading/tests/test_support.rs` — SOURCE_PRESENT
@@ -455,7 +457,6 @@ L = WALLET_LAUNCHER, B = WALLET_BUYER, S = ECON_SIGN, A = ECON_ARM, D = ECON_SEN
 - `bsc/tools/test_g06a_private_mode.cjs` — SOURCE_PRESENT
 - `bsc/tools/test_g06a_shell_scope.py` — SOURCE_PRESENT
 - `bsc/tools/test_g06a_state_pin.cjs` — SOURCE_PRESENT
-- `bsc/tools/test_readiness_job.py` — SOURCE_PRESENT
 - `bsc/tools/test_status_sync.py` — SOURCE_PRESENT
 - `frontend/src/core/realtime/GatewayConnection.test.ts` — SOURCE_PRESENT
 - `frontend/src/core/realtime/TopicState.test.ts` — SOURCE_PRESENT

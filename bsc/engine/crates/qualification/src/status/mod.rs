@@ -5,6 +5,7 @@ pub mod gui_readiness;
 pub mod live;
 pub mod projection;
 pub mod publisher;
+pub mod readiness_job;
 pub mod wire {
     pub mod control {
         include!(concat!(env!("OUT_DIR"), "/darkbot.control.v1.rs"));

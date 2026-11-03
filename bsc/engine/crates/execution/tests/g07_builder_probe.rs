@@ -35,8 +35,9 @@ const PLAN: &str = include_str!("../src/bin/g07_builder_probe/plan.rs");
 /// BSC3-063: secp256k1 for the source's signer recovery in Cargo.lock (was 9aca2d99…).
 /// Audit E 4.16: the geth_ipc -> tx_encoding edge in Cargo.lock (was b522f502…).
 /// Audit E 4.15: secp256k1 moved from execution to trading in Cargo.lock (was 41a95658…).
-/// Neither value is an approval.
-const PINNED_PLAN_SHA256: &str = "6653bba8a8dadac2dec1305498aa2f883320973760b55646dc0cecbf8e23c5c7";
+/// Audit E 4.13: the qualification -> signal-hook edge in Cargo.lock (was 6653bba8…).
+/// No value is an approval.
+const PINNED_PLAN_SHA256: &str = "331ade1f0718f8303c8c118174e5dc18cd67b4b2aec1a60e9d747c9a09c26e37";
 
 fn run(env: &[(&str, &str)]) -> std::process::Output {
     let mut cmd = Command::new(PROBE);

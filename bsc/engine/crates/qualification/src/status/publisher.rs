@@ -1,7 +1,4 @@
-use super::{
-    projection,
-    wire::{bsc::JobStatus, control::*},
-};
+use super::{projection, readiness_job, wire::control::*};
 use prost::Message;
 use std::{
     fs,
@@ -14,75 +11,6 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-fn kv(path: &Path, key: &str) -> String {
-    fs::read_to_string(path)
-        .unwrap_or_default()
-        .lines()
-        .find_map(|l| l.strip_prefix(&format!("{key}=")).map(str::to_owned))
-        .unwrap_or_default()
-}
-/// Result codes of a run that ended on its own or on request. The native verdict
-/// (PASS_READ_ONLY, BLOCKED, STOP) is the job result, never a process failure.
-const COMPLETED: [&str; 4] = ["PASS_READ_ONLY", "BLOCKED", "STOP", "STOPPED"];
-pub fn job(rundir: &Path, label: &str) -> JobStatus {
-    let launch = kv(&rundir.join("bsc.readiness.launch"), "launch_id");
-    let mut status = JobStatus {
-        job: "readiness".into(),
-        state: "UNKNOWN".into(),
-        launch_id: launch.clone(),
-        started_unix_s: kv(&rundir.join("bsc.readiness.launch"), "started_unix_s")
-            .parse()
-            .unwrap_or(0),
-        ..Default::default()
-    };
-    let Ok(out) = std::process::Command::new("/bin/launchctl")
-        .args(["list", label])
-        .output()
-    else {
-        return status;
-    };
-    let stopped =
-        kv(&rundir.join("bsc.readiness.stopping"), "launch_id") == launch && !launch.is_empty();
-    let result = rundir.join("bsc.readiness.result");
-    let matched = !launch.is_empty() && kv(&result, "launch_id") == launch;
-    let completed = matched && COMPLETED.contains(&kv(&result, "result_code").as_str());
-    let text = String::from_utf8_lossy(&out.stdout);
-    let pid = text.lines().any(|l| l.trim().starts_with("\"PID\" = "));
-    if out.status.success() {
-        status.state = if pid {
-            if stopped { "STOPPING" } else { "RUNNING" }
-        } else {
-            let code = text.lines().find_map(|l| {
-                l.trim()
-                    .strip_prefix("\"LastExitStatus\" = ")
-                    .and_then(|s| s.trim_end_matches(';').parse::<i32>().ok())
-            });
-            if completed {
-                "STOPPED"
-            } else if code.is_some() || matched {
-                "FAILED"
-            } else {
-                "UNKNOWN"
-            }
-        }
-        .into();
-    } else if String::from_utf8_lossy(&out.stderr).contains("Could not find service")
-        || String::from_utf8_lossy(&out.stderr).contains("Could not find specified service")
-    {
-        status.state = if launch.is_empty() || completed {
-            "STOPPED"
-        } else {
-            "FAILED"
-        }
-        .into();
-    }
-    let result = rundir.join("bsc.readiness.result");
-    if !launch.is_empty() && kv(&result, "launch_id") == launch {
-        status.ended_unix_s = kv(&result, "ended_unix_s").parse().unwrap_or(0);
-        status.result_code = kv(&result, "result_code");
-    }
-    status
-}
 /// Shared engine-feed limit (engine_feed.proto): a STATE payload of at most the gateway's
 /// ServerLimits.max_state_full_bytes, a frame of at most that plus the envelope reserve.
 pub(super) const MAX_STATE_BYTES: usize = 262_144;
@@ -144,10 +72,6 @@ fn trusted_socket_dir(dir: &Path, uid: u32) -> io::Result<()> {
         )));
     }
     Ok(())
-}
-/// The same controller test as the gateway: a deployed readiness binary and a source snapshot.
-fn controller_available(root: &Path, readiness_bin: Option<&Path>) -> bool {
-    readiness_bin.is_some_and(Path::is_file) && root.join("SNAPSHOT_SHA256").is_file()
 }
 pub fn serve(
     root: &Path,
@@ -231,9 +155,12 @@ pub fn serve(
         if let Some(stream) = client.as_mut() {
             let snapshot_root = root.canonicalize()?;
             let mut s = projection::project(&snapshot_root, rundir);
-            let mut readiness_job = job(rundir, label);
-            readiness_job.controller_available = Some(controller_available(root, readiness_bin));
-            s.status.jobs.push(readiness_job);
+            // Audit E 4.13: the job's state from its one native owner.
+            s.status.jobs.push(readiness_job::status(
+                rundir,
+                label,
+                readiness_job::controller_available(root, readiness_bin),
+            ));
             seq = seq
                 .checked_add(1)
                 .ok_or_else(|| io::Error::other("sequence exhausted"))?;

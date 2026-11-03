@@ -402,6 +402,39 @@ pub mod source_modes {
     };
 }
 
+/// Audit E 4.13: one mark of the GUI readiness job's lifecycle, its one
+/// native owner's (`bsc-status-reporter`; was the key=value files of
+/// `readiness_job.py` and `bsc-control.sh`): the controller's launch and stop
+/// request, the job's armed stop handler and its result. One file per kind
+/// in the run directory, replaced whole.
+pub mod readiness_job {
+    use super::*;
+
+    /// `LAUNCH`, `ARMED`, `STOPPING` or `RESULT`.
+    pub const KIND: u16 = 1;
+    pub const LAUNCH_ID: u16 = 2;
+    /// The launch's start (`LAUNCH`), the run's end (`RESULT`), else when
+    /// the mark was written; unix seconds.
+    pub const AT_UNIX_S: u16 = 3;
+    /// `RESULT` only: the native verdict, `STOPPED` or `FAILED`.
+    pub const RESULT_CODE: u16 = 4;
+    /// `RESULT` only: the readiness process's exit code (a signal `-N`).
+    pub const EXIT_CODE: u16 = 5;
+
+    pub const SCHEMA: Schema = Schema {
+        name: "darkbot.bsc.readiness-job.v1",
+        record_type: 76,
+        schema_version: 1,
+        fields: &[
+            Field::req(KIND, "kind", Text),
+            Field::req(LAUNCH_ID, "launch_id", Text),
+            Field::req(AT_UNIX_S, "at_unix_s", U64),
+            Field::opt(RESULT_CODE, "result_code", Text),
+            Field::opt(EXIT_CODE, "exit_code", I64),
+        ],
+    };
+}
+
 /// One consumed slot of the daily BUY attempt limit (plan 27.10.,
 /// `8b4721bb`): `buy-attempts/<UTC day>/<slot>.dbrec`, created create-new,
 /// so a slot is taken once; the same attempt again finds its slot.
@@ -2519,6 +2552,7 @@ pub mod live_campaign_verdict {
 }
 
 pub const ALL: &[&Schema] = &[
+    &readiness_job::SCHEMA,
     &source_modes::SCHEMA,
     &source_modes::SCHEMA_V4,
     &source_modes::SCHEMA_V3,

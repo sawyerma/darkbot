@@ -41,7 +41,8 @@ try{
  }
  await p.getByTestId('project-startstop-bsc').click();
  await until(async()=>{const s=await state();return s.run_id&&s.state==='STOPPED';},'native readiness result');
- const verdict=readFileSync(`${dir}/run/bsc.readiness.result`,'utf8').match(/^result_code=(\w+)$/m)?.[1];
+ // Audit E 4.13: the result is the job owner's typed mark, read through the shipped reporter.
+ const verdict=execFileSync(`${dir}/app/releases/test/bsc-status-reporter`,['--readiness-result'],{env:{PATH:'/usr/bin:/bin',DARKBOT_BSC_ROOT:`${dir}/app/snapshot`,DARKBOT_RUNDIR:`${dir}/run`},encoding:'utf8'}).trim();
  assert(['BLOCKED','STOP','PASS_READ_ONLY'].includes(verdict),'native verdict, not a wrapper exit-code mapping: '+verdict);
  // No browser HTTP polling on the global page: BSC state is pushed (Project 0 capture keeps its own watcher, separate owner gate).
  let mark=pageRequests.length;await idle(8000);

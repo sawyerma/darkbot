@@ -26,7 +26,11 @@ BSC_ROOT="$APP_HOME/bsc-source"
 BSC_CONFIG="$BSC_ROOT/bsc/config/ingress.public.env"
 
 bsc_pid() { launchctl list "$BSC_READINESS_LABEL" 2>/dev/null | sed -n 's/.*"PID" = \([0-9][0-9]*\);/\1/p' || true; }
-bsc_result_field() { sed -n "s/^$1=//p" "$RUNDIR/bsc.readiness.result" 2>/dev/null || true; }
+# Audit E 4.13: the readiness job's one native owner is the deployed reporter: it runs the job
+# (launchd program), writes the controller's typed marks and reads them; no key=value file here.
+bsc_reporter() { /usr/bin/env -i PATH=/usr/bin:/bin DARKBOT_BSC_ROOT="$BSC_ROOT" DARKBOT_RUNDIR="$RUNDIR" "$APP_HOME/current/bsc-status-reporter" "$@"; }
+bsc_readiness_launch() { bsc_reporter --readiness-launch 2>/dev/null || true; }
+bsc_readiness_result() { bsc_reporter --readiness-result 2>/dev/null || true; }
 bsc_plist() {
   local label="$1" program="$2" extra="$3" log="$4" keep="$5"
   bsc_launchd_conf
@@ -124,12 +128,12 @@ bsc_readiness_start() {
   bsc_check_launch "$@"
   [ -z "$(bsc_pid)" ] || { say "BSC readiness läuft bereits"; return 0; }
   [ -x "$APP_HOME/current/g07_pre_live_readiness" ] || die "BSC readiness nicht deployed"
+  [ -x "$APP_HOME/current/bsc-status-reporter" ] || die "BSC Reporter nicht deployed"
   launchctl bootout "$DOMAIN/$BSC_READINESS_LABEL" >/dev/null 2>&1 || true
   BSC_LAUNCH="$(/usr/bin/uuidgen | tr '[:upper:]' '[:lower:]')"
-  local log="$LOGDIR/bsc-readiness-$BSC_LAUNCH.log" tmp="$RUNDIR/bsc.readiness.launch.$$"
-  printf 'launch_id=%s\nstarted_unix_s=%s\n' "$BSC_LAUNCH" "$(date +%s)" > "$tmp"
-  mv -f "$tmp" "$RUNDIR/bsc.readiness.launch"
-  bsc_plist "$BSC_READINESS_LABEL" /usr/bin/python3 "<string>$(printf '%s' "$BSC_ROOT/bsc/tools/readiness_job.py" | xml_escape)</string>" "$log" false > "$BSC_JOB_PLIST"
+  local log="$LOGDIR/bsc-readiness-$BSC_LAUNCH.log"
+  bsc_reporter --readiness-mark launch "$BSC_LAUNCH" || die "BSC readiness: Start nicht vermerkt"
+  bsc_plist "$BSC_READINESS_LABEL" "$APP_HOME/current/bsc-status-reporter" "<string>--readiness-job</string>" "$log" false > "$BSC_JOB_PLIST"
   ln -sfn "$log" "$LOGDIR/bsc-readiness-latest.log"
   launchctl bootstrap "$DOMAIN" "$BSC_JOB_PLIST"
   say "BSC readiness gestartet launch=$BSC_LAUNCH (read-only)"
@@ -138,14 +142,15 @@ bsc_readiness_stop() {
   bsc_check_launch "$@"
   local pid; pid="$(bsc_pid)"
   [ -n "$pid" ] || { say "kein BSC readiness Job aktiv"; return 0; }
-  local launch; launch="$(sed -n 's/^launch_id=//p' "$RUNDIR/bsc.readiness.launch")"
-  printf 'launch_id=%s\n' "$launch" > "$RUNDIR/bsc.readiness.stopping"
+  local launch; launch="$(bsc_readiness_launch)"
+  # The mark only shows STOPPING; the stop goes without it (review L3).
+  bsc_reporter --readiness-mark stopping "$launch" || say "BSC readiness: Stopp nicht vermerkt (keine STOPPING-Anzeige); Signal folgt"
   # Signal only once the job armed its stop handler (at most
   # BSC_READINESS_ARM_WAIT_S): a TERM before would end it without a result
   # (Paket 8 review L6).
   bsc_launchd_conf
   local i=0
-  while [ "$(sed -n 's/^launch_id=//p' "$RUNDIR/bsc.readiness.armed" 2>/dev/null)" != "$launch" ] && [ "$i" -lt $((BSC_READINESS_ARM_WAIT_S * 10)) ] && [ "$(bsc_pid)" = "$pid" ]; do sleep 0.1; i=$((i+1)); done
+  while ! bsc_reporter --readiness-armed "$launch" && [ "$i" -lt $((BSC_READINESS_ARM_WAIT_S * 10)) ] && [ "$(bsc_pid)" = "$pid" ]; do sleep 0.1; i=$((i+1)); done
   launchctl kill SIGTERM "$DOMAIN/$BSC_READINESS_LABEL" || { [ "$(bsc_pid)" != "$pid" ] || die "BSC readiness konnte nicht signalisiert werden"; }
   say "BSC readiness: geordneter Stopp angefordert"
 }
@@ -334,7 +339,7 @@ cmd_bsc() {
     readiness) case "${2:-status}" in
       start) locked bsc_readiness_start "${@:3}" ;;
       stop) locked bsc_readiness_stop "${@:3}" ;;
-      status) say "BSC readiness pid=$(bsc_pid) result=$(bsc_result_field result_code)" ;;
+      status) say "BSC readiness pid=$(bsc_pid) result=$(bsc_readiness_result)" ;;
       *) die "bsc readiness start | stop | status" ;;
     esac ;;
     sync) [ "${DARKBOT_STAGED:-}" != 1 ] || die "bsc sync im Terminal aus dem Original-Repository ausführen"
@@ -356,7 +361,7 @@ bsc_status() {
   elif launchctl list "$BSC_RUNTIME_LABEL" >/dev/null 2>&1; then say "bsc runtime: geladen, kein Prozess"
   else say "bsc runtime: gestoppt"; fi
   if [ -S "$BSC_SOCKET" ]; then say "bsc reporter-socket: vorhanden"; else say "bsc reporter-socket: fehlt"; fi
-  say "bsc readiness: pid=$(bsc_pid) result=$(bsc_result_field result_code)"
+  say "bsc readiness: pid=$(bsc_pid) result=$(bsc_readiness_result)"
   if [ -f "$BSC_ROOT/COMMIT" ]; then say "bsc snapshot: $(cat "$BSC_ROOT/COMMIT")"; else say "bsc snapshot: fehlt"; fi
   [ -x "$rt" ] || { say "bsc runtime: nicht deployed"; return 0; }
   local held
@@ -370,5 +375,5 @@ bsc_sync() {
 }
 
 bsc_check_launch() {
-  [ "$#" -eq 0 ] || [ "$1" = "$(sed -n 's/^launch_id=//p' "$RUNDIR/bsc.readiness.launch" 2>/dev/null || true)" ] || die "BSC launch changed; no action dispatched"
+  [ "$#" -eq 0 ] || [ "$1" = "$(bsc_readiness_launch)" ] || die "BSC launch changed; no action dispatched"
 }

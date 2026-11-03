@@ -601,6 +601,7 @@ Supervisor-owned read-only job lifecycle.
 | ended_unix_s | [uint64](#uint64) |  | Completion time recorded by the controller. |
 | result_code | [string](#string) |  | Result of this launch, not an earlier one: the native verdict PASS_READ_ONLY, BLOCKED or STOP, STOPPED when stopped on request, FAILED on a technical failure. |
 | controller_available | [bool](#bool) | optional | Whether the supervisor can control the job (deployed readiness binary and snapshot). |
+| pid | [uint32](#uint32) | optional | Audit E 4.13: the job&#39;s process while launchd runs it. |
 
 
 

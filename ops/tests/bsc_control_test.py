@@ -16,8 +16,7 @@ try:
         shutil.copy2(h.ROOT/source,release/name)
     (release/'darkbotctl').chmod(0o755)
     shutil.copytree(h.ROOT/'frontend/dist',release/'dist')
-    source=h.WORK/'app/snapshot';(source/'bsc/tools').mkdir(parents=True)
-    shutil.copy2(h.ROOT/'bsc/tools/readiness_job.py',source/'bsc/tools/readiness_job.py')
+    source=h.WORK/'app/snapshot';source.mkdir(parents=True)
     # The job's public read-only endpoint and clock, as bsc_sync copies them into every snapshot.
     (source/'bsc/config').mkdir(parents=True)
     shutil.copy2(h.ROOT/'bsc/config/readiness.public.env',source/'bsc/config/readiness.public.env')

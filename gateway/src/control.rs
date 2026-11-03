@@ -1260,7 +1260,8 @@ pub struct Control {
     capacity: usize,
     window_ns: u64,
     retention: Duration,
-    /// `Limits::launchd_query_timeout_ms`: one read-only `launchctl list`.
+    /// `Limits::launchd_query_timeout_ms`: one read-only `launchctl list` (Project 0), one
+    /// `bsc-status-reporter --readiness-status` (BSC, Audit E 4.13).
     launchd_query: Duration,
     /// `Limits::controller_timeout_ms`: one `darkbotctl` dispatch.
     controller: Duration,
@@ -1515,66 +1516,40 @@ impl Control {
         if label.is_empty() {
             return s;
         }
-        s.controller_available = p.ctl.parent().is_some_and(|d| {
-            d.join("g07_pre_live_readiness").is_file()
-                && d.join("bsc-root/SNAPSHOT_SHA256").is_file()
-        });
-        let launch = text_file(&p.rundir.join("bsc.readiness.launch"));
-        s.run_id = kv(&launch, "launch_id");
-        let result = text_file(&p.rundir.join("bsc.readiness.result"));
-        let matched = !s.run_id.is_empty() && kv(&result, "launch_id") == s.run_id;
-        // A run that ended with its native verdict (BLOCKED included) or on request is
-        // STOPPED; FAILED is reserved for a runner or process failure.
-        let completed = matched
-            && ["PASS_READ_ONLY", "BLOCKED", "STOP", "STOPPED"]
-                .contains(&kv(&result, "result_code").as_str());
-        let stopping = !s.run_id.is_empty()
-            && kv(
-                &text_file(&p.rundir.join("bsc.readiness.stopping")),
-                "launch_id",
-            ) == s.run_id;
+        // Audit E 4.13: the job's state from its one native owner, the deployed reporter, as
+        // its typed status (it reads launchd and the job's typed marks); no job file read here.
+        // Without an answer within the launchd bound the job reads UNKNOWN, uncontrollable.
+        let Some(current) = p.ctl.parent() else {
+            return s;
+        };
         let out = tokio::time::timeout(
             self.launchd_query,
-            Command::new(&p.launchctl)
-                .args(["list", &label])
+            Command::new(current.join("bsc-status-reporter"))
+                .env_clear()
+                .env("PATH", "/usr/bin:/bin")
+                .env("DARKBOT_BSC_ROOT", current.join("bsc-root"))
+                .env("DARKBOT_RUNDIR", &p.rundir)
+                .env(
+                    "DARKBOT_BSC_READINESS_BIN",
+                    current.join("g07_pre_live_readiness"),
+                )
+                .args(["--readiness-status", &label])
                 .kill_on_drop(true)
                 .output(),
         )
         .await;
-        if let Ok(Ok(out)) = out {
-            if out.status.success() {
-                let text = String::from_utf8_lossy(&out.stdout);
-                s.pid = field(&text, "PID").filter(|v| *v > 0).map(|v| v as u32);
-                s.state = if s.pid.is_some() {
-                    if stopping {
-                        "STOPPING"
-                    } else {
-                        "RUNNING"
-                    }
-                } else if completed {
-                    "STOPPED"
-                } else if field(&text, "LastExitStatus").is_some() || matched {
-                    "FAILED"
-                } else {
-                    "UNKNOWN"
-                }
-                .into();
-            } else if String::from_utf8_lossy(&out.stderr).contains("Could not find") {
-                s.state = if s.run_id.is_empty() || completed {
-                    "STOPPED"
-                } else {
-                    "FAILED"
-                }
-                .into();
+        let job = match out {
+            Ok(Ok(out)) if out.status.success() => {
+                crate::proto::bsc::v1::JobStatus::decode(out.stdout.as_slice()).ok()
             }
-            s.reason = format!(
-                "launchd: {label}; result {}",
-                if matched {
-                    kv(&result, "result_code")
-                } else {
-                    String::new()
-                }
-            );
+            _ => None,
+        };
+        if let Some(job) = job {
+            s.state = job.state;
+            s.run_id = job.launch_id;
+            s.pid = job.pid;
+            s.controller_available = job.controller_available.unwrap_or(false);
+            s.reason = format!("launchd: {label}; result {}", job.result_code);
         }
         observed_now(s)
     }
@@ -1892,8 +1867,11 @@ impl Control {
             );
         }
         let before = self.observe_project(req.project).await;
+        // Audit E 4.13 review M1: an unknown BSC state (no answer of the job's owner) is no
+        // launch change; it is refused below as unknown.
         if req.project == ProjectId::Bsc as i32
             && candidate.is_none()
+            && before.state != "UNKNOWN"
             && req.resource_id != before.run_id
         {
             return reply(
@@ -2275,7 +2253,10 @@ impl Control {
         }
         if record.phase == CommandPhase::Pending as i32 {
             let state = self.observe_project(project).await;
-            if state.run_id != record.launch_id {
+            if project == ProjectId::Bsc as i32 && state.state == "UNKNOWN" {
+                // Audit E 4.13 review M1: nothing known (no answer of the job's owner): the
+                // stop stays pending, never closed as replaced.
+            } else if state.run_id != record.launch_id {
                 record.phase = CommandPhase::Completed as i32;
                 record.detail = "Target launch replaced; no signal sent to replacement".into();
             } else if state.state == "STOPPED" || state.state == "FAILED" {
@@ -2556,11 +2537,6 @@ pub async fn bsc_process(State(app): State<Arc<AppState>>, h: HeaderMap) -> Resp
     )
         .into_response()
 }
-fn kv(text: &str, key: &str) -> String {
-    text.lines()
-        .find_map(|l| l.strip_prefix(&format!("{key}=")).map(str::to_owned))
-        .unwrap_or_default()
-}
 #[derive(Deserialize)]
 pub struct LogQuery {
     source: String,
@@ -2699,6 +2675,21 @@ mod tests {
         fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
     }
 
+    /// Audit E 4.13: the deployed reporter's answer for a deployed, idle readiness job (the
+    /// reporter derives it, its own tests): no launch, stopped, controllable.
+    fn idle_reporter(dir: &Path) {
+        let job = crate::proto::bsc::v1::JobStatus {
+            job: "readiness".into(),
+            state: "STOPPED".into(),
+            controller_available: Some(true),
+            ..Default::default()
+        };
+        fs::write(dir.join("job.bin"), job.encode_to_vec()).unwrap();
+        executable(
+            &dir.join("bsc-status-reporter"),
+            &format!("#!/bin/sh\ncat '{}'\n", dir.join("job.bin").display()),
+        );
+    }
     fn absent_launchctl(dir: &Path) -> PathBuf {
         let path = dir.join("launchctl");
         executable(
@@ -2849,6 +2840,7 @@ mod tests {
             fs::create_dir_all(dir.join("run")).unwrap();
             fs::write(dir.join("bsc-root/SNAPSHOT_SHA256"), "a").unwrap();
             fs::write(dir.join("g07_pre_live_readiness"), "").unwrap();
+            idle_reporter(&dir);
             let runs = dir.join("runs");
             executable(
                 &dir.join("darkbotctl"),
@@ -4843,6 +4835,7 @@ mod tests {
         fs::create_dir_all(dir.join("bsc-root")).unwrap();
         fs::write(dir.join("bsc-root/SNAPSHOT_SHA256"), "a").unwrap();
         fs::write(dir.join("g07_pre_live_readiness"), "").unwrap();
+        idle_reporter(&dir);
         let ctl = dir.join("darkbotctl");
         let log = dir.join("argv");
         executable(
@@ -5945,22 +5938,24 @@ mod tests {
         assert!(!log.exists(), "nothing dispatched");
         fs::remove_dir_all(dir).unwrap();
     }
-    #[cfg(target_os = "macos")]
     #[tokio::test]
-    async fn a_completed_blocked_readiness_run_is_stopped_not_failed() {
+    async fn the_bsc_job_state_is_its_native_owners() {
+        // Audit E 4.13: the reporter derives the job's state (its tests); the gateway shows its
+        // typed answer as it is and passes it the run directory, the snapshot and the label.
         let dir = std::env::temp_dir().join(format!("gw-blocked-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(dir.join("run")).unwrap();
-        fs::write(
-            dir.join("run/bsc.readiness.launch"),
-            "launch_id=job-1\nstarted_unix_s=1\n",
-        )
-        .unwrap();
-        fs::write(
-            dir.join("run/bsc.readiness.result"),
-            "launch_id=job-1\nended_unix_s=2\nresult_code=BLOCKED\nexit_code=2\n",
-        )
-        .unwrap();
+        let job = crate::proto::bsc::v1::JobStatus {
+            job: "readiness".into(),
+            state: "RUNNING".into(),
+            launch_id: "job-1".into(),
+            started_unix_s: 1,
+            ended_unix_s: 0,
+            result_code: String::new(),
+            controller_available: Some(true),
+            pid: Some(7),
+        };
+        fs::write(dir.join("job.bin"), job.encode_to_vec()).unwrap();
         let control = Control::new(
             Some(Paths {
                 ctl: dir.join("darkbotctl"),
@@ -5971,9 +5966,105 @@ mod tests {
             }),
             &Limits::default(),
         );
+        // No reporter deployed: unknown and uncontrollable.
         let s = control.observe_project(ProjectId::Bsc as i32).await;
-        assert_eq!((s.state.as_str(), s.run_id.as_str()), ("STOPPED", "job-1"));
+        assert_eq!(
+            (s.state.as_str(), s.controller_available),
+            ("UNKNOWN", false)
+        );
+        executable(
+            &dir.join("bsc-status-reporter"),
+            &format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$@\" \"$DARKBOT_RUNDIR\" \"$DARKBOT_BSC_ROOT\" > '{}'\ncat '{}'\n",
+                dir.join("args.txt").display(),
+                dir.join("job.bin").display()
+            ),
+        );
+        let s = control.observe_project(ProjectId::Bsc as i32).await;
+        assert_eq!(
+            (
+                s.state.as_str(),
+                s.run_id.as_str(),
+                s.pid,
+                s.controller_available
+            ),
+            ("RUNNING", "job-1", Some(7), true)
+        );
+        assert_eq!(
+            s.reason,
+            "launchd: com.darkbot.test.absent.bsc.readiness; result "
+        );
+        assert_eq!(
+            fs::read_to_string(dir.join("args.txt")).unwrap(),
+            format!(
+                "--readiness-status\ncom.darkbot.test.absent.bsc.readiness\n{}\n{}\n",
+                dir.join("run").display(),
+                dir.join("bsc-root").display()
+            )
+        );
         fs::remove_dir_all(dir).unwrap();
+    }
+    /// Audit E 4.13 review M1: while the job's owner gives no answer, a BSC stop is refused as
+    /// unknown (never as a launch change) and a pending stop stays pending (never closed as
+    /// replaced); with its answer for the launch the stop closes.
+    #[tokio::test]
+    async fn an_unanswered_bsc_job_state_decides_nothing() {
+        let env = Env::new("bsc-unanswered");
+        let control = env.restart();
+        let launch = uuid(5);
+        let answer = |state: &str| {
+            let job = crate::proto::bsc::v1::JobStatus {
+                job: "readiness".into(),
+                state: state.into(),
+                launch_id: launch.clone(),
+                controller_available: Some(true),
+                ..Default::default()
+            };
+            fs::write(env.dir.join("job.bin"), job.encode_to_vec()).unwrap();
+        };
+        let stop = |n: usize| CommandRequest {
+            project: ProjectId::Bsc as i32,
+            request_id: uuid(n),
+            action: BSC_STOP.into(),
+            resource_id: launch.clone(),
+            expected: None,
+            params: Default::default(),
+            issued_at_unix_ns: now(),
+        };
+        let reporter = env.dir.join("bsc-status-reporter");
+        fs::remove_file(&reporter).unwrap();
+        let refused = control.execute(&stop(1)).await;
+        assert_eq!(
+            (refused.status, refused.reject_reason),
+            (
+                CommandStatus::Rejected as i32,
+                CommandRejectReason::GateBlocked as i32
+            ),
+            "{}",
+            refused.detail
+        );
+        assert_eq!(env.executions(), 0);
+        idle_reporter(&env.dir);
+        answer("RUNNING");
+        let pending = control.execute(&stop(2)).await;
+        assert_eq!(
+            pending.phase,
+            CommandPhase::Pending as i32,
+            "{}",
+            pending.detail
+        );
+        fs::remove_file(&reporter).unwrap();
+        let kept = control.lookup(&uuid(2), ProjectId::Bsc as i32).await;
+        assert_eq!(kept.phase, CommandPhase::Pending as i32, "{}", kept.detail);
+        idle_reporter(&env.dir);
+        answer("STOPPED");
+        let closed = control.lookup(&uuid(2), ProjectId::Bsc as i32).await;
+        assert_eq!(
+            closed.phase,
+            CommandPhase::Completed as i32,
+            "{}",
+            closed.detail
+        );
     }
     /// Audit E 3.7: the launchd query and the controller dispatch wait exactly the configured
     /// `Limits`, no literal: a launchd stand-in slower than its bound reads UNKNOWN (never its

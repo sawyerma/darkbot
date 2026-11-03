@@ -13,7 +13,7 @@ class SyncTests(unittest.TestCase):
    subprocess.run(['git','init','-q',str(root)],check=True)
    (root/'bsc/config').mkdir(parents=True);(root/'bsc/tools').mkdir()
    (root/'bsc/config/readiness.public.env').write_text('BSC_READINESS_STATE=ORIGINAL\n')
-   (root/'bsc/tools/readiness_job.py').write_text('# fixture\n')
+   (root/'bsc/tools/fixture.txt').write_text('# fixture\n')
    (root/'bsc/.env').write_text('PRIVATE_KEY=NEVER_COPY_THIS\n')
    # R10: an unread wallet file and the superseded v4 contract are never copied (no -dirty for them).
    (root/'bsc/config/wallet.public.env').write_text('BSC_WALLET_STATUS=UNPROVISIONED\n')
@@ -56,7 +56,7 @@ class SyncTests(unittest.TestCase):
   with tempfile.TemporaryDirectory(prefix='darkbot-sync-') as folder:
    base=pathlib.Path(folder);root=base/'repo';root.mkdir();app=base/'app';run=base/'run'
    subprocess.run(['git','init','-q',str(root)],check=True)
-   (root/'bsc/tools').mkdir(parents=True);(root/'bsc/tools/readiness_job.py').write_text('# fixture\n')
+   (root/'bsc/tools').mkdir(parents=True);(root/'bsc/tools/fixture.txt').write_text('# fixture\n')
    subprocess.run(['git','-C',str(root),'add','bsc/tools'],check=True)
    subprocess.run(['git','-C',str(root),'-c','user.name=Fixture','-c','user.email=fixture@example.invalid','commit','-qm','fixture'],check=True)
    state=root/'bsc/.local/g07_candidates';state.mkdir(parents=True)
@@ -76,7 +76,7 @@ class SyncTests(unittest.TestCase):
    base=pathlib.Path(folder);root=base/'repo';root.mkdir();app=base/'app';run=base/'run'
    subprocess.run(['git','init','-q',str(root)],check=True)
    (root/'bsc/config').mkdir(parents=True);(root/'bsc/tools').mkdir()
-   (root/'bsc/tools/readiness_job.py').write_text('# fixture\n')
+   (root/'bsc/tools/fixture.txt').write_text('# fixture\n')
    (root/'bsc/config/readiness.public.env').write_text('BSC_READINESS_RPC_HTTPS=https://rpc.example.invalid/\n')
    (root/'bsc/config/g04_criteria.env').write_text('BSC_G04_CRITERIA_STATE=PROPOSED\n')
    (root/'bsc/config/live_campaign.env').write_text('BSC_CAMPAIGN_STATE=PROPOSED\n')
@@ -133,7 +133,7 @@ class SyncTests(unittest.TestCase):
    base=pathlib.Path(folder);root=base/'repo';root.mkdir();app=base/'app';run=base/'run'
    subprocess.run(['git','init','-q',str(root)],check=True)
    (root/'bsc/config').mkdir(parents=True);(root/'bsc/tools').mkdir()
-   (root/'bsc/tools/readiness_job.py').write_text('# fixture\n')
+   (root/'bsc/tools/fixture.txt').write_text('# fixture\n')
    subprocess.run(['git','-C',str(root),'add','bsc/tools'],check=True)
    subprocess.run(['git','-C',str(root),'-c','user.name=Fixture','-c','user.email=fixture@example.invalid','commit','-qm','fixture'],check=True)
    (root/'bsc/config/live_qualification.dbrec').write_bytes(b'qualification')
@@ -169,6 +169,7 @@ class SyncTests(unittest.TestCase):
    subprocess.run(['git','-C',str(root),'add','bsc/config/g04_criteria.env'],check=True)
    subprocess.run(['git','-C',str(root),'-c','user.name=Fixture','-c','user.email=fixture@example.invalid','commit','-qm','criteria'],check=True)
    mod.sync(root,app,run);self.assertFalse(commit().endswith('-dirty'),commit())
-   (root/'bsc/tools/readiness_job.py').write_text('# changed\n')
+   # A tracked change of a copied file (Audit E 4.13: no job script is copied any more).
+   (root/'bsc/config/g04_criteria.env').write_text('BSC_G04_CRITERIA_STATE=CHANGED\n')
    mod.sync(root,app,run);self.assertTrue(commit().endswith('-dirty'))
 if __name__=='__main__':unittest.main()

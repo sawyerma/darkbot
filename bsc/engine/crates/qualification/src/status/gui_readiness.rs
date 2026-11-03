@@ -20,12 +20,12 @@ fn readiness_bytes(dir: &Path) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 
-fn launch_id_ok(id: &str) -> bool {
+pub(crate) fn launch_id_ok(id: &str) -> bool {
     !id.is_empty() && id.len() <= 64 && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
 }
 
 /// The result directory a launch ID names, repository-relative.
-fn relative_path(launch_id: &str) -> String {
+pub(crate) fn relative_path(launch_id: &str) -> String {
     format!("{RESULT_DIR}/gui_readiness_{launch_id}")
 }
 

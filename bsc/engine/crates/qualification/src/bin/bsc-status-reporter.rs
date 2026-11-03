@@ -1,4 +1,5 @@
 //! Read-only local evidence publisher. Never reads secret environment files or sends chain RPC.
+use darkbot_bsc_qualification::status::readiness_job::{self, Mark};
 use darkbot_bsc_qualification::status::{census, gui_readiness, projection, publisher};
 use prost::Message;
 use std::path::PathBuf;
@@ -13,24 +14,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
         return Ok(());
     }
-    if std::env::args().nth(1).as_deref() == Some("--validate-readiness") {
-        let p = std::env::args().nth(2).ok_or("missing path")?;
-        let bytes = std::fs::read(p)?;
-        use darkbot_bsc_record::schema::g07::readiness;
-        let decoded = darkbot_bsc_record::schema::decode_any(&bytes)?;
-        if decoded.schema() != &readiness::SCHEMA {
-            return Err("not a readiness record".into());
-        }
-        // The typed native verdict and mode, for the job wrapper's result.
-        let status = decoded.text(readiness::STATUS)?;
-        let mode = decoded.text(readiness::MODE)?;
-        if !["PASS_READ_ONLY", "BLOCKED", "STOP"].contains(&status)
-            || !["READ_ONLY_RPC", "OFFLINE_ZERO_EGRESS"].contains(&mode)
-        {
-            return Err("unknown readiness status or mode".into());
-        }
-        println!("status={status}\nmode={mode}");
-        return Ok(());
+    // Audit E 4.13: the readiness job's one native owner: the job itself (its launchd
+    // program), the controller's marks and the job's state.
+    if let Some(code) = readiness(&root, &run)? {
+        std::process::exit(code);
     }
     // BSC-048: the typed provenance of a GUI readiness result (no JSON).
     if std::env::args().nth(1).as_deref() == Some("--seal-readiness-provenance") {
@@ -71,4 +58,73 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let readiness_bin = std::env::var_os("DARKBOT_BSC_READINESS_BIN").map(PathBuf::from);
     publisher::serve(&root, &run, &socket, &label, readiness_bin.as_deref())?;
     Ok(())
+}
+
+/// The readiness job's commands; none when the arguments are none of them.
+fn readiness(
+    root: &std::path::Path,
+    run: &std::path::Path,
+) -> Result<Option<i32>, Box<dyn std::error::Error>> {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let readiness_bin = std::env::var_os("DARKBOT_BSC_READINESS_BIN").map(PathBuf::from);
+    match args
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>()
+        .as_slice()
+    {
+        ["--readiness-job"] => {
+            let launch_id = std::env::var("DARKBOT_BSC_LAUNCH_ID")
+                .map_err(|_| "DARKBOT_BSC_LAUNCH_ID missing")?;
+            let readiness_bin = readiness_bin.ok_or("DARKBOT_BSC_READINESS_BIN missing")?;
+            Ok(Some(readiness_job::run(&readiness_job::Job {
+                root,
+                rundir: run,
+                launch_id: &launch_id,
+                readiness_bin: &readiness_bin,
+            })))
+        }
+        ["--readiness-mark", kind, launch_id] => {
+            let mark = Mark::of_controller(kind)
+                .ok_or("usage: --readiness-mark launch|stopping <launch_id>")?;
+            readiness_job::write(run, mark, launch_id, readiness_job::now_s(), None)?;
+            Ok(Some(0))
+        }
+        // Exit 0 once the job of `launch_id` armed its stop handler.
+        ["--readiness-armed", launch_id] => Ok(Some(i32::from(
+            readiness_job::read(run, Mark::Armed).is_none_or(|m| m.launch_id != *launch_id),
+        ))),
+        ["--readiness-launch"] => {
+            println!(
+                "{}",
+                readiness_job::read(run, Mark::Launch)
+                    .unwrap_or_default()
+                    .launch_id
+            );
+            Ok(Some(0))
+        }
+        ["--readiness-result"] => {
+            println!(
+                "{}",
+                readiness_job::read(run, Mark::Result)
+                    .unwrap_or_default()
+                    .result_code
+            );
+            Ok(Some(0))
+        }
+        // The job's state as its typed status (protobuf), for the gateway.
+        ["--readiness-status", label] => {
+            use std::io::Write;
+            let available = readiness_job::controller_available(root, readiness_bin.as_deref());
+            std::io::stdout()
+                .lock()
+                .write_all(&readiness_job::status(run, label, available).encode_to_vec())?;
+            Ok(Some(0))
+        }
+        // A malformed readiness command fails; it never starts the socket server.
+        [first, ..] if first.starts_with("--readiness-") => {
+            Err(format!("usage: {first}: see bsc-control.sh").into())
+        }
+        _ => Ok(None),
+    }
 }

@@ -775,6 +775,7 @@ dependencies = [
  "ring",
  "rustls",
  "serde_json",
+ "signal-hook",
 ]
 
 [[package]]

@@ -1,7 +1,7 @@
 //! The `bsc/tools` tests in the cargo regression (BSC-002 follow-up 28.10.:
 //! `test_g06a_state_pin.cjs` was red from `86de25c9` because no gate ran
 //! them). The six that need no status reporter, each with its fixed test
-//! count; the two others run in qualification's `bsc_tools`. The tools call
+//! count; the other one runs in qualification's `bsc_tools`. The tools call
 //! the owner binaries by their fixed debug path: those must be this build's.
 
 #[path = "support/bsc_tools.rs"]

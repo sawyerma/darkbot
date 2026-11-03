@@ -1,4 +1,4 @@
-use super::{projection, publisher, wire::control::*};
+use super::{projection, publisher, readiness_job, wire::control::*};
 use darkbot_bsc_record::{Draft, schema};
 use prost::Message;
 use std::{fs, path::PathBuf};
@@ -424,20 +424,48 @@ fn a_completed_blocked_readiness_run_is_a_stopped_process_not_a_failure() {
         projection::now()
     ));
     fs::create_dir_all(&run).unwrap();
-    fs::write(
-        run.join("bsc.readiness.launch"),
-        "launch_id=job-1\nstarted_unix_s=1\n",
-    )
-    .unwrap();
+    use readiness_job::Mark;
+    let label = "com.darkbot.test.absent-readiness-label";
+    readiness_job::write(&run, Mark::Launch, "job-1", 1, None).unwrap();
+    readiness_job::write(&run, Mark::Result, "job-1", 2, Some(("BLOCKED", 2))).unwrap();
+    // No launchd service carries this label: the run has ended.
+    let job = readiness_job::status(&run, label, true);
+    assert_eq!(
+        (
+            job.state.as_str(),
+            job.result_code.as_str(),
+            job.launch_id.as_str()
+        ),
+        ("STOPPED", "BLOCKED", "job-1")
+    );
+    assert_eq!(
+        (
+            job.started_unix_s,
+            job.ended_unix_s,
+            job.pid,
+            job.controller_available
+        ),
+        (1, 2, None, Some(true))
+    );
+    // Audit E 4.13: an earlier launch's result is not this launch's; a
+    // key=value file (the former job's) or another kind is no mark.
+    readiness_job::write(&run, Mark::Launch, "job-2", 3, None).unwrap();
+    assert_eq!(readiness_job::status(&run, label, true).state, "FAILED");
     fs::write(
         run.join("bsc.readiness.result"),
-        "launch_id=job-1\nended_unix_s=2\nresult_code=BLOCKED\nexit_code=2\n",
+        "launch_id=job-2\nended_unix_s=4\nresult_code=BLOCKED\nexit_code=2\n",
     )
     .unwrap();
-    // No launchd service carries this label: the run has ended.
-    let job = publisher::job(&run, "com.darkbot.test.absent-readiness-label");
-    assert_eq!(job.state, "STOPPED");
-    assert_eq!(job.result_code, "BLOCKED");
+    assert_eq!(readiness_job::read(&run, Mark::Result), None);
+    assert_eq!(readiness_job::status(&run, label, true).state, "FAILED");
+    readiness_job::write(&run, Mark::Armed, "job-2", 5, None).unwrap();
+    fs::copy(
+        run.join("bsc.readiness.armed"),
+        run.join("bsc.readiness.result"),
+    )
+    .unwrap();
+    assert_eq!(readiness_job::read(&run, Mark::Result), None);
+    assert!(readiness_job::write(&run, Mark::Stopping, "../x", 6, None).is_err());
     fs::remove_dir_all(run).unwrap();
 }
 #[test]
