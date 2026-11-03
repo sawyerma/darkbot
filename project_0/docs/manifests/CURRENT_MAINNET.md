@@ -19,7 +19,7 @@ Single code source of every value below: `native/crates/liquidation/src/protocol
 | Receivership program allowlist | ComputeBudget, marginfi, Kamino, Drift, JupLend, Jupiter v6, Titan (`receivership_allowed_programs`) | source-pinned |
 | Refresh allowlist (before start) | Kamino RefreshReserve/RefreshReservesBatch/RefreshObligation, init_liquidation_record, Drift UpdateSpotMarketCumulativeInterest, JupLend UpdateRate | source-pinned (`liquidate_start.rs`) |
 | OracleSetup, health rules, flat SOL fee, premium limit | `docs/evidence/P0_20261016/ORACLE_MODEL.md`, `docs/architecture/p0_reuse_matrix.md` (Economics) | source-pinned |
-| Asset tags, premium activation | not in 0.1.11 → P1B | — |
+| Asset tags, premium activation | 0.1.12-rc2: asset tags and premium state decoded through the type crate (`integration.rs`, `census.rs`, `protocol.rs`) | source-pinned |
 
 ## Upgrade watch (P1A-04)
 

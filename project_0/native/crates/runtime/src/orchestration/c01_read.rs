@@ -908,15 +908,25 @@ pub fn evaluate(reads: &C01Reads, reads_sha256: &str, steps: &Steps) -> P1aParit
             d.decode_error.as_deref().unwrap_or("")
         ),
     ));
+    // The pin of the read hash against the reference of this build (the read's own verdict
+    // was against the reference of its build).
+    let pin = d
+        .account_hash
+        .as_deref()
+        .and_then(|h| solana_sdk::hash::Hash::from_str(h).ok())
+        .zip(Pubkey::from_str(protocol::PROGRAM_ID_MAINNET).ok())
+        .map(|(h, program)| protocol::hash_pin(&program, &h).name().to_string())
+        .or_else(|| d.pin.clone());
     gates.push(gate(
         "PIN",
-        pass(d.pin.as_deref() == Some("REFERENCE")),
+        pass(pin.as_deref() == Some("REFERENCE")),
         false,
         format!(
-            "{} (reference {} of {}; NOT_REFERENCE is a promotion candidate)",
-            d.pin.as_deref().unwrap_or("-"),
+            "{} (reference {} of {}; read as {}; NOT_REFERENCE is a promotion candidate)",
+            pin.as_deref().unwrap_or("-"),
             protocol::PROGRAM_DATA_REFERENCE_HASH,
-            protocol::PROGRAM_DATA_REFERENCE_SOURCE_TAG
+            protocol::PROGRAM_DATA_REFERENCE_SOURCE_TAG,
+            d.pin.as_deref().unwrap_or("-")
         ),
     ));
     let build = match &steps.build {
@@ -1222,6 +1232,16 @@ mod tests {
         };
         assert_eq!(verdict("IDL"), "PASS");
         assert_eq!(verdict("PIN"), "FAIL");
+        // The pin follows the read hash against this build's reference (C-01 step 7).
+        let mut promoted = reads();
+        promoted.deployment.account_hash = Some(protocol::PROGRAM_DATA_REFERENCE_HASH.into());
+        let p2 = evaluate(&promoted, "x", &Steps::default());
+        let pin = p2.gates.iter().find(|g| g.name == "PIN").unwrap();
+        assert!(
+            pin.verdict == "PASS" && pin.detail.contains("read as NOT_REFERENCE"),
+            "{}",
+            pin.detail
+        );
         assert_eq!(p.overall, "BLOCKED: BUILD NOT_RUN");
         let mut r = reads();
         r.banks[0].observation_error = Some("unsupported".into());

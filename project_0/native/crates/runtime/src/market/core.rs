@@ -1449,12 +1449,16 @@ impl ObserverCore {
             liquidation_path_coverage_complete,
             liquidation_count_scope: "RECEIVERSHIP_ONLY_NOT_TOTAL_MARGINFI_MARKET".into(),
             live_source_coverage_verified: self.source.coverage_verified(),
-            deployment_continuity: super::summary::DeploymentContinuity {
-                before: self.deployment_before.clone(),
-                after: self.deployment_after.clone(),
-                error: self.deployment_error.map(String::from),
-                source_pin: "33c67987a661f59c6683a65485ebb4f0ef030b77".into(),
-                bytecode_source_equivalence: "NOT_ATTESTED; pinned source is contract authority; hash continuity against existing upgrade-watch reference".into(),
+            deployment_continuity: {
+                let (source_pin, bytecode_source_equivalence) =
+                    paths::continuity_source(self.deployment_before.as_ref());
+                super::summary::DeploymentContinuity {
+                    before: self.deployment_before.clone(),
+                    after: self.deployment_after.clone(),
+                    error: self.deployment_error.map(String::from),
+                    source_pin,
+                    bytecode_source_equivalence,
+                }
             },
             completeness_authority: "FULL_FINALIZED_SLOT_RECONCILIATION_AND_PATH_QUALIFICATION"
                 .into(),

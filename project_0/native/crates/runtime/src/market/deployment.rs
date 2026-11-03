@@ -9,7 +9,34 @@ fn qualified(hash: &str) -> bool {
     hash == protocol::PROGRAM_DATA_REFERENCE_HASH
         || protocol::PROGRAM_DATA_HISTORICAL_REFERENCES
             .iter()
-            .any(|(h, _)| *h == hash)
+            .any(|(h, _, _)| *h == hash)
+}
+
+/// The source a capture's deployment continuity names (`source_pin`, `bytecode_source_equivalence`):
+/// the pinned source with the reproducible-build proof for the reference, a former reference's own
+/// source (hash continuity only) for a historical capture.
+pub(super) fn continuity_source(before: Option<&Deployment>) -> (String, String) {
+    let hash = before.map(|d| d.hash.as_str());
+    match protocol::PROGRAM_DATA_HISTORICAL_REFERENCES
+        .iter()
+        .find(|(h, _, _)| Some(*h) == hash)
+    {
+        Some((_, _, commit)) => (
+            (*commit).into(),
+            "NOT_ATTESTED; pinned source is contract authority; hash continuity against existing upgrade-watch reference".into(),
+        ),
+        None if hash == Some(protocol::PROGRAM_DATA_REFERENCE_HASH) => (
+            protocol::SOURCE_COMMIT.into(),
+            format!(
+                "REPRODUCIBLE_BUILD; the deployed ELF is the build of {} (C-01 P1A parity); hash continuity against the reference",
+                protocol::SOURCE_TAG
+            ),
+        ),
+        None => (
+            protocol::SOURCE_COMMIT.into(),
+            "NOT_QUALIFIED; no qualified deployment observed".into(),
+        ),
+    }
 }
 const PROGRAM: &str = protocol::PROGRAM_ID_MAINNET;
 const LOADER: &str = protocol::BPF_LOADER_UPGRADEABLE_ID;
@@ -282,6 +309,19 @@ mod tests {
         assert!(!verified(Some(&a), Some(&b), Some(10)));
         (c.hash, d.hash) = ("changed".into(), "changed".into());
         assert!(!verified(Some(&c), Some(&d), Some(10)));
+        // The source each continuity names.
+        assert_eq!(continuity_source(Some(&a)).0, protocol::SOURCE_COMMIT);
+        assert!(continuity_source(Some(&a))
+            .1
+            .starts_with("REPRODUCIBLE_BUILD"));
+        let mut h = a.clone();
+        h.hash = former.into();
+        assert_eq!(
+            continuity_source(Some(&h)).0,
+            protocol::PROGRAM_DATA_HISTORICAL_REFERENCES[0].2
+        );
+        assert!(continuity_source(Some(&h)).1.starts_with("NOT_ATTESTED"));
+        assert!(continuity_source(None).1.starts_with("NOT_QUALIFIED"));
     }
     /// DEC-18 §2 (P0-025): the namespace is exactly the pinned program's — every `pub fn` of the
     /// `#[program]` module of the pinned source checkout (`SOURCE_COMMIT`; none overrides its

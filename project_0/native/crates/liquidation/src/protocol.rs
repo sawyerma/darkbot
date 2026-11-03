@@ -346,12 +346,14 @@ pub const SOURCE_BUILD_ENV: [(&str, &str); 5] = [
 pub const PROGRAM_DATA_REFERENCE_HASH: &str = "5BrAnWXJFY2Z5sM6PRXWZBYL9ewVEhKKpFjPC8jpXEkm";
 /// The source the reference deployment was qualified for.
 pub const PROGRAM_DATA_REFERENCE_SOURCE_TAG: &str = "mrgn-0.1.12-rc2";
-/// Former qualified deployments (hash, source): the 0.1.11 ProgramData recorded by the qualified
-/// Shadow upgrade watch (c0e1_4h_20261008T222326Z). They qualify no start; historical captures
-/// of their deployment are still verified against them (deployment continuity).
-pub const PROGRAM_DATA_HISTORICAL_REFERENCES: [(&str, &str); 1] = [(
+/// Former qualified deployments (hash, source tag, source commit): the 0.1.11 ProgramData recorded
+/// by the qualified Shadow upgrade watch (c0e1_4h_20261008T222326Z). They qualify no start;
+/// historical captures of their deployment are still verified against them (deployment
+/// continuity).
+pub const PROGRAM_DATA_HISTORICAL_REFERENCES: [(&str, &str, &str); 1] = [(
     "H57mqzeof3mnCmVTPJzmzeTfs7G6zbpaApQP4yNycr3f",
     "mrgn-0.1.11-rc1",
+    "33c67987a661f59c6683a65485ebb4f0ef030b77",
 )];
 /// `UpgradeableLoaderState::ProgramData` metadata: tag u32, slot u64, Option<Pubkey> (always 33 bytes).
 pub const PROGRAM_DATA_METADATA_LEN: usize = 45;
@@ -480,6 +482,19 @@ pub fn deployment_pin(program: &Pubkey, d: &ProgramDeployment) -> DeploymentPin 
     )
 }
 
+/// The pin of a ProgramData account by its hash alone (what a record keeps of a deployment).
+pub fn hash_pin(program: &Pubkey, hash: &Hash) -> DeploymentPin {
+    deployment_pin(
+        program,
+        &ProgramDeployment {
+            program_data: program_data_address(program),
+            deployment_slot: 0,
+            upgrade_authority: None,
+            hash: *hash,
+        },
+    )
+}
+
 /// `qualified`: the reference deployment hash and the source it was qualified for; a reference
 /// of another source than `SOURCE_TAG` qualifies nothing.
 fn pin_against(program: &Pubkey, d: &ProgramDeployment, qualified: (&str, &str)) -> DeploymentPin {
@@ -602,7 +617,7 @@ mod tests {
             deployment_pin(&program, &reference),
             DeploymentPin::Reference
         );
-        for (hash, source) in PROGRAM_DATA_HISTORICAL_REFERENCES {
+        for (hash, source, _) in PROGRAM_DATA_HISTORICAL_REFERENCES {
             assert_ne!(source, SOURCE_TAG);
             let former = ProgramDeployment {
                 hash: Hash::from_str(hash).unwrap(),
@@ -612,7 +627,15 @@ mod tests {
                 deployment_pin(&program, &former),
                 DeploymentPin::NotReference
             );
+            assert_eq!(
+                hash_pin(&program, &former.hash),
+                DeploymentPin::NotReference
+            );
         }
+        assert_eq!(
+            hash_pin(&program, &reference.hash),
+            DeploymentPin::Reference
+        );
         // A deployment qualified for the pinned source is the reference; of another source, not.
         let qualified = (PROGRAM_DATA_REFERENCE_HASH, SOURCE_TAG);
         assert_eq!(
