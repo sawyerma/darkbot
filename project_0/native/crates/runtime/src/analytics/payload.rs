@@ -1040,6 +1040,9 @@ macro_rules! typed_kinds {
             k::JOURNAL_ARCHIVE => {
                 $f::<crate::orchestration::journal_archive::JournalArchive>($kind, $schema, $bytes)
             }
+            k::OPERATOR_TOOL_USE => {
+                $f::<crate::orchestration::tool_permit::OperatorToolUse>($kind, $schema, $bytes)
+            }
             k::BOOT_NETWORK => {
                 $f::<crate::orchestration::boot_audit::NetworkAudit>($kind, $schema, $bytes)
             }

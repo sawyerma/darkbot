@@ -260,6 +260,9 @@ pub mod kind {
     /// DEC-17e: an archived corrupt journal's manifest (`journal_archive::JournalArchive`),
     /// `data/archive/<sha256 prefix>/manifest.p0j`.
     pub const JOURNAL_ARCHIVE: u16 = 1118;
+    /// DEC-17f (P8-CTRL-03d): a permitted operator tool use (`tool_permit::OperatorToolUse`),
+    /// `data/operator-tools/<digest>.p0j`.
+    pub const OPERATOR_TOOL_USE: u16 = 1119;
     pub const ALL: &[u16] = &[
         OWNER_RECORD,
         OWNER_OPPORTUNITY,
@@ -362,6 +365,7 @@ pub mod kind {
         RELEASE_SOURCE,
         OPERATOR_KEY,
         JOURNAL_ARCHIVE,
+        OPERATOR_TOOL_USE,
         super::MANIFEST,
     ];
 }

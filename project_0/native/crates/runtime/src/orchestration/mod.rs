@@ -29,6 +29,7 @@ mod startup;
 #[cfg(feature = "crate_health")]
 mod state_owner;
 pub mod threshold_mode;
+pub mod tool_permit;
 pub mod until_stopped;
 pub mod until_stopped_view;
 pub mod winner_tracker;

@@ -18,6 +18,12 @@ alloc-count = []
 # DEC-17a: a software operator key for the offline tests (Linux CI); never a production build's.
 operator-test-signer = []
 
+# DEC-17f: the v1 wire probe, signed under the owner's permits (`tool_permit`).
+[[bin]]
+name = "p0-probe-v1"
+path = "src/bin/p0-probe-v1.rs"
+required-features = ["txv1"]
+
 # DEC-09: the A4 parity differential reads historical raw JSON sources only.
 [[bin]]
 name = "p0-parity"

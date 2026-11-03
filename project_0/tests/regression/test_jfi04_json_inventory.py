@@ -36,6 +36,7 @@ PINNED = {
     'runtime/src/analytics/renders.rs': (13, 'H'),  # read-only historical view check only (renders::check, p0-journal renders); no JSON writer exists (25.10., F4)
     'runtime/src/bin/p0-parity.rs': (8, 'H'),  # DEC-08: + the historical INDEX/PAYLOAD source reads (parity gate)
     'runtime/src/bin/p0-probe-costs.rs': (12, 'WR'),
+    'runtime/src/bin/p0-probe-v1.rs': (16, 'WR'),  # DEC-17f: moved from the solana crate (signed under the owner's permits)
     'runtime/src/execution/one_shot/approval_file.rs': (2, 'H'),  # DEC-10: historical JSON approval shown by the historical build only (never authorizes); the approval is native key = value
     'runtime/src/execution/one_shot/non_landing.rs': (13, 'W'),  # DEC-03: B/C non-landing reads on the deadline-bound JSON-RPC wire
     'runtime/src/execution/one_shot.rs': (7, 'H'),  # <wallet>.json decoded only by the explicit migration (p0ctl fe04 migrate); open refuses it (F8, 25.10.)
@@ -55,7 +56,6 @@ PINNED = {
     'runtime/src/orchestration/provider_evidence.rs': (1, 'H'),  # the measured JSON's explicit offline import, historical build only (DEC-18 §3.4, P0-023)
     'runtime/src/orchestration/provider_measure.rs': (26, 'W'),  # DEC-18 §3 (C-11, P0-022): the probes' JSON-RPC params, subscribe messages and answers at the wire; plan and measurement are typed records
     'runtime/examples/p0-gap-ws-proxy.rs': (10, 'W'),
-    'solana/src/bin/p0-probe-v1.rs': (16, 'WR'),
     'solana/src/chain.rs': (41, 'WH'),  # wire decode (DEC-08: + getSignaturesForAddress page); encode_* only for the read-only historical view check (25.10., F4)
     'solana/src/ingress/mod.rs': (5, 'W'),
     'solana/src/ingress/ws_probe.rs': (8, 'W'),  # DEC-18 §3.3 (C-11): the subscription probes' messages on the one WSS connection

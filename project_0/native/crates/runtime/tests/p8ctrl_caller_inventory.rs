@@ -70,6 +70,8 @@ fn p8ctrl03_every_real_signer_and_sender_is_behind_the_permit_boundary() {
     let found = inventory(&[
         "tx::sign(",
         "sign_transaction(",
+        "sign_message(",
+        "signed_v1_wire(",
         "VersionedTransaction::try_new(",
         "new_signed_with_payer(",
         ".submit(",
@@ -93,14 +95,13 @@ fn p8ctrl03_every_real_signer_and_sender_is_behind_the_permit_boundary() {
         ((".submit_bundle(", "execution/bundle_path.rs"), 1),
         // Not an egress: the market journal writer's own `submit`.
         ((".submit(", "market/sink.rs"), 1),
-        // P8-CTRL-03d (open): the operator tools that sign or send outside the owner — inventoried
-        // here until they are put behind the same boundary.
-        (("new_signed_with_payer(", "bin/p0-prewarm-atas.rs"), 1),
+        // DEC-17f (P8-CTRL-03d): the operator tools sign only through `ToolPermit::sign` and the
+        // prewarm sends only after `ToolPermit::admit_send`.
+        (("sign_message(", "orchestration/tool_permit.rs"), 1),
         (
             ("send_and_confirm_transaction(", "bin/p0-prewarm-atas.rs"),
             1,
         ),
-        (("tx::sign(", "bin/p0-probe-costs.rs"), 1),
     ]
     .into_iter()
     .map(|((p, f), n)| ((p.to_string(), f.to_string()), n))

@@ -77,8 +77,3 @@ time = { version = "0.3", features = ["parsing"] }
 security-framework = { version = "=3.7.0", default-features = false }
 
 [dev-dependencies]
-
-[[bin]]
-name = "p0-probe-v1"
-path = "src/bin/p0-probe-v1.rs"
-required-features = ["txv1"]

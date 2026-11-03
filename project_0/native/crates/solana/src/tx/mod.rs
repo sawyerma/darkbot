@@ -785,6 +785,50 @@ pub fn signed_v1_wire(
     limits: &TxLimits,
     signers: &[&Keypair],
 ) -> Result<Vec<u8>, BuildError> {
+    signed_v1_wire_by(plan, blockhash, limits, signers)
+}
+
+/// DEC-17f: signs a message's bytes for its required signers, in their order (a permit's).
+pub type MessageSigner<'a> = dyn FnMut(&[u8]) -> Result<Vec<Signature>, String> + 'a;
+
+/// DEC-17f: the canonical v1 wire with the signatures `sign` makes of its message bytes — each
+/// checked against the message's required signers, in their order.
+#[cfg(feature = "txv1")]
+pub fn signed_v1_wire_with(
+    plan: &TxPlan,
+    blockhash: Hash,
+    limits: &TxLimits,
+    sign: &mut MessageSigner,
+) -> Result<Vec<u8>, BuildError> {
+    let msg = compile_v1_message(plan, blockhash, limits)?;
+    let message = msg.serialize();
+    let signatures = sign(&message).map_err(BuildError::Sign)?;
+    let required = usize::from(msg.header.num_required_signatures);
+    let keys: Vec<_> = msg.account_keys.iter().take(required).collect();
+    if signatures.len() != required
+        || keys
+            .iter()
+            .zip(&signatures)
+            .any(|(k, s)| !s.verify(&k.to_bytes(), &message))
+    {
+        return Err(BuildError::Sign(format!(
+            "v1 expects the signatures of its {required} required signers, in order"
+        )));
+    }
+    let mut wire = message;
+    for s in &signatures {
+        wire.extend_from_slice(s.as_ref());
+    }
+    Ok(wire)
+}
+
+#[cfg(feature = "txv1")]
+fn signed_v1_wire_by(
+    plan: &TxPlan,
+    blockhash: Hash,
+    limits: &TxLimits,
+    signers: &[&Keypair],
+) -> Result<Vec<u8>, BuildError> {
     let msg = compile_v1_message(plan, blockhash, limits)?;
     let required = usize::from(msg.header.num_required_signatures);
     if signers.len() != required {

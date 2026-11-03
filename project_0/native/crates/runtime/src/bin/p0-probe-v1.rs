@@ -1,9 +1,17 @@
-//! Explicit read-only provider capability probe; never calls sendTransaction.
+//! Explicit read-only provider capability probe; never calls sendTransaction. DEC-17f
+//! (P8-CTRL-03d): its messages are signed by the wallet under one permit of the owner's — WALLET
+//! and ECON_SIGN ENABLED in the running owner's epoch, the operator's confirmation
+//! (`tool_permit`).
 use base64::Engine;
+use darkbot_runner::orchestration::tool_permit::{self, Tool, ToolUse};
 use darkbot_solana::tx::{self, BuildVersion, Resources, TxLimits, TxPlan};
 use solana_client::rpc_request::RpcRequest;
 use solana_commitment_config::CommitmentConfig;
-use solana_sdk::{instruction::Instruction, pubkey::Pubkey, signature::Signer};
+use solana_sdk::{
+    instruction::{AccountMeta, Instruction},
+    pubkey::Pubkey,
+    signature::Signer,
+};
 use std::{env, error::Error, str::FromStr};
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -29,16 +37,21 @@ fn main() -> Result<(), Box<dyn Error>> {
     if payer.pubkey() != expected {
         return Err("signer identity mismatch".into());
     }
-    let mut results = Vec::new();
-    for large in [false, true] {
-        let hash = rpc
-            .get_latest_blockhash()
-            .map_err(|_| "blockhash RPC failed")?;
-        let mut instructions = vec![solana_system_interface::instruction::transfer(
-            &payer.pubkey(),
-            &payer.pubkey(),
-            0,
-        )];
+    let hash = rpc
+        .get_latest_blockhash()
+        .map_err(|_| "blockhash RPC failed")?;
+    let plan_of = |large: bool| -> Result<TxPlan, Box<dyn Error>> {
+        // Canonical SystemInstruction::Transfer discriminant (2), amount 0, to itself.
+        let mut data = 2u32.to_le_bytes().to_vec();
+        data.extend_from_slice(&0u64.to_le_bytes());
+        let mut instructions = vec![Instruction {
+            program_id: Pubkey::default(),
+            accounts: vec![
+                AccountMeta::new(payer.pubkey(), true),
+                AccountMeta::new(payer.pubkey(), false),
+            ],
+            data,
+        }];
         if large {
             instructions.push(Instruction::new_with_bytes(
                 Pubkey::from_str("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr")?,
@@ -46,7 +59,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 vec![],
             ));
         }
-        let plan = TxPlan {
+        Ok(TxPlan {
             version: BuildVersion::V1,
             payer: payer.pubkey(),
             instructions,
@@ -56,8 +69,39 @@ fn main() -> Result<(), Box<dyn Error>> {
                 priority_micro_lamports_per_cu: 0,
                 loaded_accounts_data_size: Some(4 * 1024 * 1024),
             },
-        };
-        let wire = tx::signed_v1_wire(&plan, hash, &TxLimits::default(), &[&payer])?;
+        })
+    };
+    let (small, over) = (plan_of(false)?, plan_of(true)?);
+    let mut control = small.clone();
+    control.version = BuildVersion::V0;
+    let mut control = tx::build(&control, hash, &TxLimits::default())?;
+    // DEC-17f: one permit, one confirmation, for exactly these three messages.
+    let messages = [
+        tx::v1_message_bytes(&small, hash, &TxLimits::default())?,
+        tx::v1_message_bytes(&over, hash, &TxLimits::default())?,
+        control.tx.message.serialize(),
+    ];
+    let project = std::path::PathBuf::from(env::var("P0_PROJECT_DIR")?);
+    let mut permit = tool_permit::issue(
+        &project,
+        darkbot_solana::runtime_config::active(),
+        &ToolUse {
+            tool: Tool::ProbeV1,
+            signers: &[payer.pubkey()],
+            messages: &messages.iter().map(Vec::as_slice).collect::<Vec<_>>(),
+            send: false,
+            cost_lamports: 0,
+        },
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?
+            .as_secs(),
+        &tool_permit::operator_confirmation(&project, Tool::ProbeV1),
+    )?;
+    let mut results = Vec::new();
+    for (large, plan) in [(false, &small), (true, &over)] {
+        let wire = tx::signed_v1_wire_with(plan, hash, &TxLimits::default(), &mut |m| {
+            permit.sign(m, &[&payer])
+        })?;
         let response: Result<serde_json::Value, _> = rpc.send(
             RpcRequest::SimulateTransaction,
             serde_json::json!([base64::engine::general_purpose::STANDARD.encode(&wire), {
@@ -80,13 +124,10 @@ fn main() -> Result<(), Box<dyn Error>> {
             "wire_bytes":wire.len(),"sig_verify":true,"result":result}),
         );
         if !large {
-            let mut control = plan.clone();
-            control.version = BuildVersion::V0;
-            let mut built = tx::build(&control, hash, &TxLimits::default())?;
-            tx::sign(&mut built, &[&payer])?;
+            control.tx.signatures = permit.sign(&messages[2], &[&payer])?;
             let result = rpc
                 .simulate_transaction_with_config(
-                    &built.tx,
+                    &control.tx,
                     solana_client::rpc_config::RpcSimulateTransactionConfig {
                         sig_verify: true,
                         commitment: Some(CommitmentConfig::confirmed()),

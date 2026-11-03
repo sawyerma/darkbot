@@ -40,6 +40,8 @@
 /data/operator/
 # DEC-17e: archived corrupt journals with their manifests.
 /data/archive/
+# DEC-17f: the permitted operator tool uses (tool_permit::STORE).
+/data/operator-tools/
 # orchestration/until_stopped.rs STORE (qualifications, autostart)
 /data/until_stopped/
 # orchestration/fe06.rs STORE

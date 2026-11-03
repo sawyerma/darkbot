@@ -154,6 +154,23 @@ pub fn verify(
             "{OPERATOR_AUTH_REQUIRED}: the owner epoch has no nonce"
         ));
     }
+    verify_message(
+        project,
+        configured_sha256,
+        &statement(r, epoch_nonce),
+        signature,
+    )
+}
+
+/// The check of the operator's signature of any statement (a request's, a tool use's — each
+/// under its own domain): the registered key is the configured one, a production build's key a
+/// Secure Enclave key, the signature over exactly `message` valid.
+pub fn verify_message(
+    project: &Path,
+    configured_sha256: &str,
+    message: &[u8],
+    signature: &[u8],
+) -> Result<(), String> {
     if configured_sha256.is_empty() {
         return Err(format!(
             "{OPERATOR_AUTH_REQUIRED}: no operator key configured (operator_key_sha256)"
@@ -182,9 +199,9 @@ pub fn verify(
         &ring::signature::ECDSA_P256_SHA256_ASN1,
         &key.public_key,
     )
-    .verify(&statement(r, epoch_nonce), signature)
+    .verify(message, signature)
     .map_err(|_| {
-        format!("{OPERATOR_AUTH_REQUIRED}: the signature is not the operator's over this request")
+        format!("{OPERATOR_AUTH_REQUIRED}: the signature is not the operator's over this statement")
     })
 }
 

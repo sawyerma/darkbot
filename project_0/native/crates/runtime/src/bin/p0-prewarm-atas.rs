@@ -1,10 +1,16 @@
+//! Prewarms the wallet's associated token accounts. A dry run reads, builds the creating
+//! transaction and simulates it unsigned (its fee and each account's rent measured). DEC-17f
+//! (P8-CTRL-03d): `--send` signs and sends it under the owner's own permits — WALLET, ECON_SIGN
+//! and ECON_SEND ENABLED in the running owner's epoch, the operator's confirmation, its cost
+//! within `prewarm_max_lamports` (`tool_permit`); there is no other way to send.
 use darkbot_project0::protocol;
+use darkbot_runner::orchestration::tool_permit::{self, Tool, ToolUse};
 use darkbot_solana::tx;
 use solana_client::rpc_config::{
     RpcSimulateTransactionAccountsConfig, RpcSimulateTransactionConfig,
 };
 use solana_commitment_config::CommitmentConfig;
-use solana_sdk::{pubkey::Pubkey, signature::Signer, transaction::Transaction};
+use solana_sdk::{message::Message, pubkey::Pubkey, signature::Signer, transaction::Transaction};
 use spl_associated_token_account::{
     get_associated_token_address_with_program_id,
     instruction::create_associated_token_account_idempotent,
@@ -46,10 +52,15 @@ fn run() -> Result<(), Box<dyn Error>> {
         .into());
     }
 
-    let args: Vec<String> = env::args().skip(1).collect();
+    let mut args: Vec<String> = env::args().skip(1).collect();
+    let send = args.first().is_some_and(|a| a == "--send");
+    if send {
+        args.remove(0);
+    }
     if args.is_empty() || !args.len().is_multiple_of(2) {
         return Err(
-            "usage: p0-prewarm-atas <mint> <token_program> [<mint> <token_program> ...]".into(),
+            "usage: p0-prewarm-atas [--send] <mint> <token_program> [<mint> <token_program> ...]"
+                .into(),
         );
     }
 
@@ -127,8 +138,6 @@ fn run() -> Result<(), Box<dyn Error>> {
         return Ok(());
     }
 
-    let send = env::var("P0_PREWARM_SEND").ok().as_deref() == Some("YES");
-
     let instructions = missing
         .iter()
         .map(|(mint, token_program, _)| {
@@ -137,16 +146,20 @@ fn run() -> Result<(), Box<dyn Error>> {
         .collect::<Vec<_>>();
 
     let blockhash = rpc.get_latest_blockhash()?;
-    let transaction =
-        Transaction::new_signed_with_payer(&instructions, Some(&payer_pk), &[&payer], blockhash);
+    // Unsigned: no real signature before the permit (DEC-17f).
+    let mut transaction = Transaction::new_unsigned(Message::new_with_blockhash(
+        &instructions,
+        Some(&payer_pk),
+        &blockhash,
+    ));
 
     // [FIX-122] Measure the actual post-create rent for each ATA, including Token-2022
-    // extensions, rather than guessing an account size. Verify the exact signed message.
+    // extensions, rather than guessing an account size.
     let fee_lamports = rpc.get_fee_for_message(&transaction.message)?;
     let simulation = rpc.simulate_transaction_with_config(
         &transaction,
         RpcSimulateTransactionConfig {
-            sig_verify: true,
+            sig_verify: false,
             replace_recent_blockhash: false,
             commitment: Some(CommitmentConfig::confirmed()),
             accounts: Some(RpcSimulateTransactionAccountsConfig {
@@ -224,19 +237,45 @@ fn run() -> Result<(), Box<dyn Error>> {
     }
 
     if !send {
-        println!("PREWARM_DRY_RUN simulation passed; no transaction sent; set P0_PREWARM_SEND=YES to create missing ATAs");
+        println!("PREWARM_DRY_RUN simulation passed; no transaction sent; --send creates the missing ATAs under the owner's permits");
         return Ok(());
     }
 
-    // A real prerequisite send requires the explicitly approved total-cost ceiling.
-    let approved_max = need("P0_PREWARM_MAX_LAMPORTS")?.parse::<u64>()?;
-    if total > approved_max {
-        return Err(format!(
-            "prewarm cost {} exceeds approved ceiling {}",
-            total, approved_max
-        )
-        .into());
+    // DEC-17f: the permit of exactly this message and its cost — the owner's switches, the
+    // operator's confirmation, the cost within `prewarm_max_lamports`.
+    let project = std::path::PathBuf::from(need("P0_PROJECT_DIR")?);
+    let message = transaction.message_data();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)?
+        .as_secs();
+    let mut permit = tool_permit::issue(
+        &project,
+        darkbot_solana::runtime_config::active(),
+        &ToolUse {
+            tool: Tool::PrewarmAtas,
+            signers: &[payer_pk],
+            messages: &[&message],
+            send: true,
+            cost_lamports: total,
+        },
+        now,
+        &tool_permit::operator_confirmation(&project, Tool::PrewarmAtas),
+    )?;
+    transaction.signatures = permit.sign(&message, &[&payer])?;
+    // The exact signed message verifies before it is sent.
+    let verified = rpc.simulate_transaction_with_config(
+        &transaction,
+        RpcSimulateTransactionConfig {
+            sig_verify: true,
+            replace_recent_blockhash: false,
+            commitment: Some(CommitmentConfig::confirmed()),
+            ..RpcSimulateTransactionConfig::default()
+        },
+    )?;
+    if let Some(err) = verified.value.err {
+        return Err(format!("prewarm signed simulation failed: {err:?}").into());
     }
+    permit.admit_send()?;
     let signature = rpc.send_and_confirm_transaction(&transaction)?;
     println!("PREWARM_SENT signature={}", signature);
 
