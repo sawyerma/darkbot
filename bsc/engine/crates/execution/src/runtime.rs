@@ -31,7 +31,7 @@ use crate::chain_follower::{
 };
 use crate::g04_census::{Census, census};
 use crate::ingress::{Health, IngressCore, Launch, Observation, SourceStats};
-use crate::paper_exec::{ExecConfig, FnClock, PAPER_PROFILE};
+use crate::paper_exec::{ExecConfig, FnClock, max_start_limit_ns, max_validity_blocks};
 use crate::runtime_journal::{
     CaptureScope, CaptureStatus, EXIT_PAYLOAD, JournalSetup, RunIdentity, RuntimeJournal,
     STOP_PAYLOAD, SourceEvent, canonical_launch_payload, first_sighting_payload,
@@ -699,12 +699,12 @@ impl RuntimeConfig {
                         validity_blocks: take(
                             "BSC_EXEC_VALIDITY_BLOCKS",
                             1,
-                            PAPER_PROFILE.max_block_window(),
+                            max_validity_blocks(),
                         )?,
                         start_limit_ns: take(
                             "BSC_EXEC_START_LIMIT_NS",
                             1,
-                            PAPER_PROFILE.max_transport_start_limit_ns(),
+                            max_start_limit_ns(),
                         )?,
                         max_frame: take("BSC_EXEC_MAX_FRAME_BYTES", 4_096, 1 << 20)? as usize,
                         strategy_lanes: take("BSC_EXEC_STRATEGY_LANES", 1, 65_536)? as usize,

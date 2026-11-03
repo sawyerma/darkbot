@@ -40,3 +40,40 @@ pub mod transport;
 
 #[cfg(test)]
 mod release_tests;
+
+use darkbot_bsc_trading::intent::AdapterId;
+use darkbot_bsc_trading::submission_policy::capability::{AdapterKind, AdapterTable};
+use darkbot_bsc_trading::submission_policy::plan::SubmissionPlan;
+use frame::{Endpoint, Frame, FrameError};
+
+/// Audit E 4.2: the frame of `adapter` for `plan`, by the adapter's kind in
+/// the capability table: a builder's bundle (or its single transaction) to
+/// `endpoint`, the local node's raw transaction (it names no endpoint).
+/// PAPER and LIVE frame through this one choice; a kind with no framing
+/// (the BlockRazor RPC) is refused.
+pub fn adapter_frame(
+    plan: &SubmissionPlan,
+    table: &AdapterTable,
+    adapter: AdapterId,
+    endpoint: &Endpoint<'_>,
+    launch_raw: &[u8],
+    capacity: usize,
+) -> Result<Frame, FrameError> {
+    if table.generation() != plan.capability_generation() {
+        return Err(FrameError::StaleCapabilities);
+    }
+    let kind = table
+        .record(adapter)
+        .ok_or(FrameError::AdapterNotInPlan)?
+        .kind();
+    match kind {
+        AdapterKind::Club48Builder => {
+            club48::frame(plan, table, adapter, endpoint, launch_raw, capacity)
+        }
+        AdapterKind::BlockRazorBuilder => {
+            blockrazor::frame(plan, table, adapter, endpoint, launch_raw, capacity)
+        }
+        AdapterKind::LocalGeth => local_geth::frame(plan, table, adapter, capacity),
+        AdapterKind::BlockRazorRpc => Err(FrameError::WrongAdapterKind),
+    }
+}

@@ -20,7 +20,7 @@ Pakete aus den Audits A–E (01.11.); fertig = Code + Tests + Review + Gate + CI
 | R12 | Four Classic/OpenFour Economics + Ausführung | EXTERNAL_BLOCKED: Quote-Formel unbewiesen (Implementierungen unverifiziert, Key nötig; bezeugte BUYs ohne native BNB/Slippage), Encoder ohne Quote = toter Code; `FOUR_EXECUTION_PATH_MISSING` bleibt | – |
 | R13 | FOREIGN_AUTO-Profile | EXTERNAL_BLOCKED: keine fremde Launch-Klasse mit bezeugtem Zustand (Creator-Buy, Nicht-BNB-Quote, Steuerdauer, Identitätsbindung); erst Zensus der 7-Tage-Kampagne → Klasse → freie RPC-Probe je Klasse | – |
 | R14 | fmt/clippy-CI, Läufe nach 03.11., Rebaseline, Gesamtabnahme | OFFEN | – |
-| E1–E11 | Audit E (Pflichtstatus unten) | TEILWEISE (E-A, E2, E3, E4, E5, E6, E9 fertig; Rest offen) | E-A `8a9584d9`…`f6156fa0` |
+| E1–E11 | Audit E (Pflichtstatus unten) | TEILWEISE (E-A, E2–E7, E9 fertig; Rest offen) | E-A `8a9584d9`…`f6156fa0` |
 
 **BSC-Gate je Paket** (technischer Nachweis, nicht REV.1.0-Status):
 
@@ -35,7 +35,7 @@ Pakete aus den Audits A–E (01.11.); fertig = Code + Tests + Review + Gate + CI
 | R3b-2a | GR3b2a5 (Workspace 1667/0/27, bsc_tools, Clippy, F0-VAR; 26 Mutanten RED; Review PASS nach 2 Runden) | GATE_OK | `b3523732` |
 | R3b-2b-1 | GR3b2b1c (Workspace 1669/0/27, bsc_tools, Clippy, F0-VAR; Gateway 61+18+4, Clippy, fmt; 21 Mutanten RED; Review PASS + Re-Check PASS) | GATE_OK | `4a1bae86` |
 | R3b-2b-2 | GR3b2b2 (Workspace 1669/0/27, bsc_tools, Clippy, F0-VAR) + gezielt nach Review-Fix (execution lib, Status, Gateway, vitest 155, test:bsc 9) | GATE_OK | dieser Commit |
-| R4–R11, E2–E6, E9 | Messplan §2a.5 (T69–T86) | GATE_OK (Lastflakes nur mit grüner Wiederholung) | s. dort |
+| R4–R11, E2–E7, E9 | Messplan §2a.5 (T69–T87) | GATE_OK (Lastflakes nur mit grüner Wiederholung) | s. dort |
 
 **Audit E — Pflichtstatus je Befund** (FIX / FIX+REPIN / FIX+REFREEZE / KEEP mit Grund; Abschluss = Commit):
 
@@ -70,7 +70,7 @@ Pakete aus den Audits A–E (01.11.); fertig = Code + Tests + Review + Gate + CI
 | 3.9–3.11, 3.13 Q5A-Hosts, Deployment-Pins, Owner-Pfad, Protokollkonstanten | KEEP: eingefrorene Pins / Sicherheitsanker / Protokoll | – | – |
 | 3.12 abgelehnte Konten doppelt | FIX | E3 | dieser Commit (Config verweigert ohne G0.7-Launcher/Buyer) |
 | 4.1, 4.14, 5.1 `startup.rs` toter Parallelpfad | FIX | E2 | E-A `8a9584d9` (entfernt, kein Aufrufer) |
-| 4.2 PaperEnd/LiveEnd-Planung doppelt | FIX | E7 | – |
+| 4.2 PaperEnd/LiveEnd-Planung doppelt | FIX | E7 | dieser Commit (ein Plan `paper_exec::plan_inputs`, ein Frame `submission::adapter_frame` nach Adapterart, für PAPER und LIVE; PAPER-Single jetzt SingleRawV1 (war BirthEntryV1); Ablauf jedem Anbieter, dem lokalen Knoten keiner; KEEP: PAPER-Strategy-C über den lokalen Knoten, Builder-Single nur mit LIVE-Qualifikation; C3 plan+frame p50 3,71 → 3,67 µs) |
 | 4.3–4.5, 5.14 JSON-RPC-Hex, HTTP-Framer, TLS-Builder, https-Prüfung | FIX | E6 | dieser Commit (ein Hex-Decoder `wss::jsonrpc`, lowercase; ein HTTP/1.1-Framer `http1.rs`; ein TLS-Aufbau `TlsSetup`; `Endpoint::parse_https`; g07-Eigenpfade KEEP 4.6) |
 | 4.6–4.7 G0.7/G0.6a-Eigenpfade | KEEP: eingefrorene Evidence-Erzeuger; Konsolidierung = V5-Refreeze mit Echtgeld-Requalifikation | – | – |
 | 4.8–4.12 Grant-Regeln, ID-Listen, LIVE-Indikatoren, Doppelprojektion, Frontend-Clients | FIX(+REPIN) | E4 | 4.10 (`BscStatus.live_state` entfernt, eine LIVE-Quelle), 4.12 (`bscControl.ts`) E-A `8a9584d9`; 4.8 (ein Grant-Vektor `tests/fixtures/live_grant/` für Owner und LIVE-Tab, Gateway prüft nur die Form), 4.9 (Auswahl/IDs aus der Projektion, `grant_venues/strategies/adapters`; Gateway-Allowlist per Test an den Owner gebunden), 4.11 (LIVE-Pfad nur typisiert) dieser Commit |
@@ -173,6 +173,7 @@ Pakete aus den Audits A–E (01.11.); fertig = Code + Tests + Review + Gate + CI
 | BSC3-082 (neu, REV.1.0 R1: offene LIVE-Lots ohne Exit nach Neustart/Gap/Reorg) | FIX_VERIFIED (Kurve blockgebunden gelesen (getTokenV8Safe, nftGate), erneut gehalten solange nicht überholt, journalisiert `k`; bis dahin und vor der ersten Meldung EXIT_FIRST; je Lot ein Read, begrenzt/Backoff per Config; off-curve/unpriced/unlesbar: gestrandet, kein neuer BUY; Status live v5; Phantom-Exits ohne Lot vor Lease-Rückgabe abgelehnt; LIVE ohne STRATEGY_C-Senderpfad verweigert) | `0159c1a7` | Betreiber-Auflösung gestrandeter Lots: R3a `49bcd98f` (resume, write-off, exit-now; nie gemeldete Lots enden für die Strategie); DEX-Exit: R5 |
 | BSC3-083 (neu, REV.1.0 R1: Snapshot ohne LIVE-Qualifikation, deployter LIVE-Pfad nie armbar) | FIX_VERIFIED (`live bound-inputs`, status_sync kopiert genau die gebundenen Dateien; `-dirty` nur bei echter Abweichung) | `0159c1a7` | – |
 | BSC3-084 (neu, REV.1.0 R1: `up`/App widerriefen laufendes LIVE, Deploy startete es neu) | FIX_VERIFIED (`source init` nur Anlage, `source reset` beim Stopp; `live idle`; Deploy verweigert bei aktivem LIVE ohne `--stop-live`) | `0159c1a7` | – |
+| BSC3-085 (neu, E7-Messung: PAPER-Exit-Reserve je BUY quadratisch über das Arm; Strategy-C-BUY p95 785 µs, DEADLINE in 2 von 5 Läufen) | FIX_VERIFIED (offene/genehmigte Positionen bei jeder Änderung gezählt, Reserve O(1); Strategy-C-BUY p50 283,5 → 49,9 µs, max 861 → ≤ 95 µs, 5/5 Läufe grün; Test `the_open_exits_are_counted_as_the_positions_change` gegen den Scan) | dieser Commit | – |
 | Latenz-Paket (vorgemerkt) | Approve direkt nach kanonischem BUY; Exit-Fortsetzung direkt nach Fenster-Re-Arm | – | – |
 
 Belege `a64d09c0`: CI bsc 40795910320 + Project-0-Contract 40795910374 grün; lokal Workspace 1430 passed/0 failed/23 ignored, bsc_tools 7/7, clippy -D warnings, F0-VAR PASS 2889; Review + Nachprüfung: kein HIGH/MEDIUM (LOW record()-Reihenfolge, Temp-Aufräumen, Testmengen behoben).

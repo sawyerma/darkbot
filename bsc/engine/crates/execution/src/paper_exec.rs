@@ -42,12 +42,12 @@
 //! but the sink.
 
 use crate::paper::{PaperHandoff, PaperIdentity, PaperSink};
+use crate::submission::adapter_frame;
 use crate::submission::send::{
     Armed, DispatchContext, DispatchError, FanoutReport, SendOutcome, dispatch_diagnostic,
 };
 use crate::submission::tls::{CLUB48_DOCUMENTED_HOST, HTTPS_PORT, ProviderTarget, TlsEndpoint};
 use crate::submission::transport::{Clock, ConnectionState, Transport};
-use crate::submission::{club48, local_geth};
 use alloy_primitives::{Address, B256, U256};
 use darkbot_bsc_trading::chain_state::SnapshotId;
 use darkbot_bsc_trading::chain_state::canonical::{FinalityProof, InclusionProof, OrphanProof};
@@ -61,7 +61,7 @@ use darkbot_bsc_trading::intent::{
 };
 use darkbot_bsc_trading::signer::Signer;
 use darkbot_bsc_trading::submission_policy::capability::{
-    AdapterBinding, AdapterTable, CapabilityId, SubmissionMode,
+    AdapterBinding, AdapterKind, AdapterTable, CapabilityId, SubmissionMode,
 };
 use darkbot_bsc_trading::submission_policy::plan::{
     BudgetEnvelope, ChainHead, Launch, LocalBlockStartDeadline, MergePolicy, PlanInputs,
@@ -80,8 +80,29 @@ use std::io::{self, Write};
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 
-/// The release profile whose rules the PAPER plan follows.
-pub const PAPER_PROFILE: ReleaseProfile = ReleaseProfile::BirthEntryV1;
+/// Audit E 4.2: the profiles a hand-over is planned under
+/// ([`Submission::profile`]); the executor's block window and transport
+/// start limit must fit each.
+pub const EXEC_PROFILES: [ReleaseProfile; 2] =
+    [ReleaseProfile::BirthEntryV1, ReleaseProfile::SingleRawV1];
+
+/// The widest `BSC_EXEC_VALIDITY_BLOCKS` every profile takes.
+pub fn max_validity_blocks() -> u64 {
+    EXEC_PROFILES
+        .iter()
+        .map(|p| p.max_block_window())
+        .min()
+        .unwrap_or(0)
+}
+
+/// The widest `BSC_EXEC_START_LIMIT_NS` every profile takes.
+pub fn max_start_limit_ns() -> u64 {
+    EXEC_PROFILES
+        .iter()
+        .map(|p| p.max_transport_start_limit_ns())
+        .min()
+        .unwrap_or(0)
+}
 
 /// Which PAPER paths take the PAPER sender's nonce sequence in one arm
 /// (`BSC_EXEC_SENDER_PATHS`, Phase I gate M2). C3's BUYs are alternatives
@@ -269,18 +290,18 @@ impl ExecConfig {
         if self.lanes == 0 {
             return Err("BSC_EXEC_LANES must be at least 1".into());
         }
-        if !(1..=PAPER_PROFILE.max_block_window()).contains(&self.validity_blocks) {
+        if !(1..=max_validity_blocks()).contains(&self.validity_blocks) {
             return Err(format!(
                 "BSC_EXEC_VALIDITY_BLOCKS {} outside 1..={}",
                 self.validity_blocks,
-                PAPER_PROFILE.max_block_window()
+                max_validity_blocks()
             ));
         }
-        if !(1..=PAPER_PROFILE.max_transport_start_limit_ns()).contains(&self.start_limit_ns) {
+        if !(1..=max_start_limit_ns()).contains(&self.start_limit_ns) {
             return Err(format!(
                 "BSC_EXEC_START_LIMIT_NS {} outside 1..={}",
                 self.start_limit_ns,
-                PAPER_PROFILE.max_transport_start_limit_ns()
+                max_start_limit_ns()
             ));
         }
         if self.capability_generation == 0 || self.policy_generation == 0 {
@@ -707,6 +728,14 @@ impl Transport for SinkTransport<'_> {
     }
 }
 
+/// BSC3-085: the held positions still to exit, and the approved ones of
+/// them.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct OpenExits {
+    open: u64,
+    approved: u64,
+}
+
 /// The armed path towards its end.
 pub struct Executor<E: End> {
     end: E,
@@ -747,6 +776,12 @@ pub struct Executor<E: End> {
     /// Approvals at the sink and the token amounts they approved.
     approved: Vec<([u8; 20], U256)>,
     exited: Vec<[u8; 20]>,
+    /// BSC3-085: of `strategy_bought`, the positions not exited and of
+    /// those the approved ones, recounted for the one token at each change
+    /// of a position (linear in the arm's lists): a BUY reads its exit
+    /// reserve in O(1) (before: every position against every exit and
+    /// approval, quadratic over an arm).
+    open_exits: OpenExits,
     exit_policy: ExitPolicy,
     strategy_counters: ExecCounters,
     /// The arming's next nonce: every C3 lane's nonce.
@@ -826,6 +861,102 @@ pub enum Submission<'a> {
     LaunchBundle(&'a [u8]),
     /// Strategy C: the transaction alone (a BUY, an approval or a SELL).
     Single,
+}
+
+impl<'a> Submission<'a> {
+    /// Audit E 4.2: the profile the hand-over is planned (and its transport
+    /// start deadline set) under, PAPER's and LIVE's alike: a launch's
+    /// bundle is a birth entry behind it, a transaction alone one alone.
+    pub fn profile(self) -> ReleaseProfile {
+        match self {
+            Self::LaunchBundle(_) => ReleaseProfile::BirthEntryV1,
+            Self::Single => ReleaseProfile::SingleRawV1,
+        }
+    }
+
+    /// The launch bytes a frame carries ahead of the transaction (none
+    /// alone).
+    pub fn launch_raw(self) -> &'a [u8] {
+        match self {
+            Self::LaunchBundle(launch_raw) => launch_raw,
+            Self::Single => &[],
+        }
+    }
+}
+
+/// Why a hand-over's plan inputs cannot be formed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InputsError {
+    NoAdapters,
+    WindowOverflow,
+}
+
+impl core::fmt::Display for InputsError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(match self {
+            Self::NoAdapters => "no adapter set",
+            Self::WindowOverflow => "the block window overflows",
+        })
+    }
+}
+
+/// Audit E 4.2: the plan inputs of one hand-over through `adapters`,
+/// PAPER's and LIVE's (each end plans them under its qualification: LIVE
+/// its verified one, PAPER none, never a release): the submission's mode,
+/// launch, merge policy and profile; the local block deadline at the head
+/// plus `validity_blocks`; and the same last block as the provider
+/// validity every provider is told (a plan through the local node alone
+/// has none: the node enforces no expiry).
+pub fn plan_inputs(
+    table: &AdapterTable,
+    adapters: &[AdapterId],
+    ticket: Ticket,
+    raw: &[u8],
+    submission: Submission<'_>,
+    head: ChainHead,
+    validity_blocks: u64,
+) -> Result<PlanInputs, InputsError> {
+    let set = AdapterSet::new(adapters).ok_or(InputsError::NoAdapters)?;
+    let last_block = head
+        .number
+        .checked_add(validity_blocks)
+        .ok_or(InputsError::WindowOverflow)?;
+    let local_only = adapters.iter().all(|a| {
+        table
+            .record(*a)
+            .is_some_and(|r| r.kind() == AdapterKind::LocalGeth)
+    });
+    let (mode, launch, merge) = match submission {
+        Submission::LaunchBundle(launch_raw) => (
+            SubmissionMode::PublicFullLaunchBundle,
+            Launch::PublicOriginal(TxRef::of(launch_raw)),
+            MergePolicy::NoMerge,
+        ),
+        Submission::Single => (
+            SubmissionMode::SingleRawBuy,
+            Launch::None,
+            MergePolicy::ProviderDefault,
+        ),
+    };
+    Ok(PlanInputs {
+        ticket,
+        buy: TxRef::of(raw),
+        launch,
+        mode,
+        profile: submission.profile(),
+        adapters: set,
+        local_block_deadline: LocalBlockStartDeadline {
+            last_head_block: last_block,
+        },
+        provider_validity: (!local_only).then_some(ProviderValidity {
+            max_block_number: last_block,
+            min_timestamp: None,
+            max_timestamp: None,
+        }),
+        merge,
+        pre_submission: PreSubmission::No,
+        provider_payment_wei: U256::ZERO,
+    })
 }
 
 /// One transaction its lane holds, bound to `expected` and `snapshot`, for
@@ -929,9 +1060,9 @@ pub trait End {
 }
 
 /// The PAPER end: the PAPER identity signs; the 48Club bundle (C3) and the
-/// local node's single raw transaction (Strategy C) are planned under the
-/// PAPER profile and dispatched diagnostically to the sink. Never a
-/// release.
+/// local node's single raw transaction (Strategy C) are planned under
+/// [`Submission::profile`] (a birth entry, one alone) and dispatched
+/// diagnostically to the sink. Never a release.
 pub struct PaperEnd {
     identity: PaperIdentity,
     table: AdapterTable,
@@ -1010,68 +1141,41 @@ impl End for PaperEnd {
             exit_reserve_wei: _,
             launcher: _,
         } = h;
-        let (adapter, mode, launch, merge) = match submission {
-            Submission::LaunchBundle(launch_raw) => (
-                paper_adapter(),
-                SubmissionMode::PublicFullLaunchBundle,
-                Launch::PublicOriginal(TxRef::of(launch_raw)),
-                MergePolicy::NoMerge,
-            ),
-            Submission::Single => (
-                paper_raw_adapter(),
-                SubmissionMode::SingleRawBuy,
-                Launch::None,
-                MergePolicy::ProviderDefault,
-            ),
+        // PAPER's adapters: the 48Club builder's bundle; a transaction alone
+        // through the local node (a builder's single is enabled only by the
+        // LIVE qualification, which PAPER never simulates).
+        let adapter = match submission {
+            Submission::LaunchBundle(_) => paper_adapter(),
+            Submission::Single => paper_raw_adapter(),
         };
         let table = &self.table;
         let target = &self.target;
         let planned = (|| {
-            let adapters = AdapterSet::new(&[adapter]).ok_or(Refusal::Plan)?;
-            let last_block = head
-                .number
-                .checked_add(config.validity_blocks)
-                .ok_or(Refusal::Plan)?;
-            let bundle = matches!(submission, Submission::LaunchBundle(_));
-            let plan = SubmissionPlan::new(
+            // Audit E 4.2: the shared plan inputs and framing, planned with
+            // no qualification.
+            let inputs = plan_inputs(
                 table,
-                expected,
-                budget,
-                PlanInputs {
-                    ticket,
-                    buy: TxRef::of(raw),
-                    launch,
-                    mode,
-                    profile: PAPER_PROFILE,
-                    adapters,
-                    local_block_deadline: LocalBlockStartDeadline {
-                        last_head_block: last_block,
-                    },
-                    provider_validity: bundle.then_some(ProviderValidity {
-                        max_block_number: last_block,
-                        min_timestamp: None,
-                        max_timestamp: None,
-                    }),
-                    merge,
-                    pre_submission: PreSubmission::No,
-                    provider_payment_wei: U256::ZERO,
-                },
+                &[adapter],
+                ticket,
+                raw,
+                submission,
+                head,
+                config.validity_blocks,
             )
             .map_err(|_| Refusal::Plan)?;
-            let frame = match submission {
-                Submission::LaunchBundle(launch_raw) => club48::frame(
-                    &plan,
-                    table,
-                    adapter,
-                    &target.frame_endpoint(),
-                    launch_raw,
-                    config.max_frame,
-                ),
-                Submission::Single => local_geth::frame(&plan, table, adapter, config.max_frame),
-            }
+            let plan =
+                SubmissionPlan::new(table, expected, budget, inputs).map_err(|_| Refusal::Plan)?;
+            let frame = adapter_frame(
+                &plan,
+                table,
+                adapter,
+                &target.frame_endpoint(),
+                submission.launch_raw(),
+                config.max_frame,
+            )
             .map_err(|_| Refusal::Plan)?;
             let deadline = TransportStartDeadline::for_profile(
-                PAPER_PROFILE,
+                submission.profile(),
                 clock.id(),
                 start_ns,
                 config.start_limit_ns,
@@ -1376,6 +1480,7 @@ impl<E: End> Executor<E> {
             strategy_bought: Vec::with_capacity(strategy_lanes.len()),
             approved: Vec::with_capacity(strategy_lanes.len()),
             exited: Vec::with_capacity(strategy_lanes.len()),
+            open_exits: OpenExits::default(),
             strategy_lanes,
             exit_policy,
             strategy_counters: ExecCounters::default(),
@@ -1817,6 +1922,15 @@ impl<E: End> Executor<E> {
     /// approval (a C3 position is the strategy's once adopted).
     fn held_exit_reserve(&self) -> U256 {
         let (approval, sell) = self.exit_gas();
+        let OpenExits { open, approved } = self.open_exits;
+        U256::from(open) * sell + U256::from(open - approved) * approval
+    }
+
+    /// The reserve as a scan of every position (the counted one's
+    /// reference).
+    #[cfg(test)]
+    fn held_exit_reserve_scan(&self) -> U256 {
+        let (approval, sell) = self.exit_gas();
         self.strategy_bought
             .iter()
             .filter(|h| !self.exited.contains(&h.token))
@@ -1825,6 +1939,25 @@ impl<E: End> Executor<E> {
                 false => approval + sell,
             })
             .fold(U256::ZERO, |sum, wei| sum + wei)
+    }
+
+    /// BSC3-085: whether `token` is a held position still to exit, and
+    /// whether it is approved too.
+    fn exit_state(&self, token: &[u8; 20]) -> (bool, bool) {
+        let open =
+            !self.exited.contains(token) && self.strategy_bought.iter().any(|h| h.token == *token);
+        (open, open && self.approved.iter().any(|(t, _)| t == token))
+    }
+
+    /// BSC3-085: counts the change of `token`'s exit state from `before`.
+    fn recount(&mut self, token: &[u8; 20], before: (bool, bool)) {
+        let after = self.exit_state(token);
+        let n = |b: bool| u64::from(b);
+        let o = &mut self.open_exits;
+        o.open = o.open + n(after.0) - n(before.0);
+        o.approved = o.approved + n(after.1) - n(before.1);
+        #[cfg(test)]
+        assert_eq!(self.held_exit_reserve(), self.held_exit_reserve_scan());
     }
 
     /// What a BUY leaves room for (BSC3-057/072): the exits of the open
@@ -1880,7 +2013,9 @@ impl<E: End> Executor<E> {
     /// arm (BSC3-048): the exit sells without approving again.
     pub fn adopt_approval(&mut self, token: [u8; 20], amount: U256) {
         if !self.approved.iter().any(|(t, _)| *t == token) {
+            let before = self.exit_state(&token);
             self.approved.push((token, amount));
+            self.recount(&token, before);
         }
     }
 
@@ -1888,6 +2023,7 @@ impl<E: End> Executor<E> {
     /// of `token` (BSC3-048): it never happened, the exit is open again.
     /// A replaced approval approved nothing.
     pub fn reopen_exit(&mut self, token: [u8; 20], approval: bool) {
+        let before = self.exit_state(&token);
         self.exited.retain(|t| *t != token);
         // Open again: its input is open exposure again (BSC3-030 review).
         if let Some(h) = self.strategy_bought.iter_mut().find(|h| h.token == token)
@@ -1899,6 +2035,7 @@ impl<E: End> Executor<E> {
         if approval {
             self.approved.retain(|(t, _)| *t != token);
         }
+        self.recount(&token, before);
     }
 
     /// Tokens whose exit's approval went and whose SELL did not (a chain
@@ -2096,12 +2233,14 @@ impl<E: End> Executor<E> {
                 return Err(r);
             }
         };
+        let before = self.exit_state(&token);
         self.strategy_bought.push(Held {
             released: false,
             token,
             min_tokens: admitted.min_output_amount(),
             input_wei,
         });
+        self.recount(&token, before);
         Ok(ExecIntent {
             kind: IntentKind::Buy,
             token,
@@ -2333,13 +2472,17 @@ impl<E: End> Executor<E> {
                     self.strategy_refused(index, disclosed);
                     // A SELL that may be out ends the position's exits.
                     if kind == IntentKind::Sell && disclosed {
+                        let before = self.exit_state(&token);
                         self.exited.push(token);
+                        self.recount(&token, before);
                     }
                     return Err(r);
                 }
             };
             if kind == IntentKind::Approve {
+                let before = self.exit_state(&token);
                 self.approved.push((token, amount));
+                self.recount(&token, before);
             }
             out.push(ExecIntent {
                 kind,
@@ -2363,7 +2506,9 @@ impl<E: End> Executor<E> {
             // (the exit again then hands it over).
             return Ok(());
         }
+        let before = self.exit_state(&token);
         self.exited.push(token);
+        self.recount(&token, before);
         // The position is closed: its input leaves the open exposure, the
         // gas spent stays (gate L1); once (a SELL again after a reverted or
         // replaced one releases nothing more, BSC3-030 review).
@@ -2450,12 +2595,16 @@ impl<E: End> Executor<E> {
     pub fn adopt(&mut self, token: [u8; 20], tokens: U256) {
         match self.strategy_bought.iter_mut().find(|h| h.token == token) {
             Some(h) => h.min_tokens = tokens,
-            None => self.strategy_bought.push(Held {
-                released: false,
-                token,
-                min_tokens: tokens,
-                input_wei: U256::ZERO,
-            }),
+            None => {
+                let before = self.exit_state(&token);
+                self.strategy_bought.push(Held {
+                    released: false,
+                    token,
+                    min_tokens: tokens,
+                    input_wei: U256::ZERO,
+                });
+                self.recount(&token, before);
+            }
         }
     }
 
@@ -3067,7 +3216,7 @@ pub(crate) mod tests {
                 ..good.clone()
             },
             ExecConfig {
-                validity_blocks: PAPER_PROFILE.max_block_window() + 1,
+                validity_blocks: max_validity_blocks() + 1,
                 ..good.clone()
             },
             ExecConfig {
@@ -3075,7 +3224,7 @@ pub(crate) mod tests {
                 ..good.clone()
             },
             ExecConfig {
-                start_limit_ns: PAPER_PROFILE.max_transport_start_limit_ns() + 1,
+                start_limit_ns: max_start_limit_ns() + 1,
                 ..good.clone()
             },
             ExecConfig {
@@ -3438,6 +3587,104 @@ pub(crate) mod tests {
             900,
         );
         assert_eq!((exits.len(), refused), (2, None));
+        exec.disarm().unwrap();
+        fs::remove_dir_all(&d).unwrap();
+    }
+
+    /// BSC3-085: the exit reserve a BUY leaves room for is counted as the
+    /// positions change (BUY, approval, SELL, a reopened exit with or
+    /// without its approval, an adopted position and approval), always the
+    /// scan of every position (which every executor test also checks at
+    /// each recount).
+    #[test]
+    fn the_open_exits_are_counted_as_the_positions_change() {
+        let input = U256::from(10_000_000_000_000_000u64);
+        let curve = curve_after(1_000_000_000_000_000_000);
+        let mut cfg = config(2, 2);
+        cfg.strategy_lanes = 16;
+        let price = U256::from(cfg.gas_price_wei);
+        let (approval, sell) = (
+            price * U256::from(cfg.approve_gas_limit),
+            price * U256::from(cfg.sell_gas_limit),
+        );
+        let (mut exec, d) = armed("strategy-open-exits", cfg);
+        let same = |exec: &PaperExecutor, want: U256, step: &str| {
+            assert_eq!(exec.held_exit_reserve_scan(), want, "{step}: scan");
+            assert_eq!(exec.held_exit_reserve(), want, "{step}: counted");
+        };
+        let mut held = Vec::new();
+        for n in 1..=3u8 {
+            let token = [n; 20];
+            let bought = exec
+                .on_strategy_buy(
+                    token,
+                    [0; 20],
+                    curve,
+                    input,
+                    &strategy_c2(Some(HEAD)),
+                    &clock(500, 3),
+                    500,
+                )
+                .unwrap();
+            let tokens =
+                decode_swap_exact_input_native(decode_signed(&bought.raw).unwrap().tx.input)
+                    .unwrap()
+                    .min_output_amount;
+            held.push((token, tokens));
+        }
+        same(&exec, U256::from(3u8) * (approval + sell), "three bought");
+        // An exit: its approval and SELL went, the position is closed.
+        let (exits, refused) = exec.on_strategy_exit(
+            held[0].0,
+            held[0].1,
+            curve,
+            &strategy_c2(Some(HEAD)),
+            &clock(900, 3),
+            900,
+        );
+        assert_eq!((exits.len(), refused), (2, None));
+        same(&exec, U256::from(2u8) * (approval + sell), "one exited");
+        // Its SELL replaced, the approval stands: open again, approved.
+        exec.reopen_exit(held[0].0, false);
+        same(
+            &exec,
+            U256::from(2u8) * (approval + sell) + sell,
+            "SELL reopened",
+        );
+        // The approval replaced too: open again, unapproved.
+        exec.reopen_exit(held[0].0, true);
+        same(
+            &exec,
+            U256::from(3u8) * (approval + sell),
+            "approval reopened",
+        );
+        // An approval the chain holds for a held token, one for a token
+        // not held (counted once it is adopted).
+        exec.adopt_approval(held[1].0, held[1].1);
+        same(
+            &exec,
+            U256::from(2u8) * (approval + sell) + sell,
+            "approval adopted",
+        );
+        exec.adopt_approval([9; 20], U256::from(5u8));
+        same(
+            &exec,
+            U256::from(2u8) * (approval + sell) + sell,
+            "foreign approval",
+        );
+        exec.adopt([9; 20], U256::from(5u8));
+        same(
+            &exec,
+            U256::from(2u8) * (approval + sell + sell),
+            "position adopted",
+        );
+        // Adopted again: still one position.
+        exec.adopt([9; 20], U256::from(6u8));
+        same(
+            &exec,
+            U256::from(2u8) * (approval + sell + sell),
+            "adopted again",
+        );
         exec.disarm().unwrap();
         fs::remove_dir_all(&d).unwrap();
     }

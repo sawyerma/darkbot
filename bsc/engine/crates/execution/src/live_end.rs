@@ -21,11 +21,14 @@
 use crate::live_key::LiveKey;
 use crate::live_ledger::{Fact, FactKind, Ledger};
 use crate::live_qualification::{Verified, capability};
-use crate::paper_exec::{End, Handed, HandoffTime, Handover, Refusal, Submission, consumed_by};
+use crate::paper_exec::{
+    End, Handed, HandoffTime, Handover, Refusal, Submission, consumed_by, plan_inputs,
+};
 use crate::sources::{
     BuyDay, ComponentId, LiveAdapter, LiveIntent, LiveIntentKind, LiveNow, NonceOrigin, OwnerMark,
     Store,
 };
+use crate::submission::adapter_frame;
 use crate::submission::frame::Frame;
 use crate::submission::loopback::{LoopbackTransport, loopback_response, qualify_loopback};
 use crate::submission::response::{ResponseBuffer, ResponseOutcome};
@@ -39,18 +42,11 @@ use crate::submission::tls::{
     response_transport,
 };
 use crate::submission::transport::{Clock, TransportQualifications};
-use crate::submission::{blockrazor, club48};
 use alloy_primitives::U256;
-use darkbot_bsc_trading::intent::{AdapterId, AdapterSet, IntentLane, MAX_ADAPTERS};
+use darkbot_bsc_trading::intent::{AdapterId, IntentLane, MAX_ADAPTERS};
 use darkbot_bsc_trading::signer::Signer;
-use darkbot_bsc_trading::submission_policy::capability::{
-    AdapterBinding, AdapterTable, SubmissionMode,
-};
-use darkbot_bsc_trading::submission_policy::plan::{
-    Launch, LocalBlockStartDeadline, MergePolicy, PlanInputs, PreSubmission, ProviderValidity,
-    SubmissionPlan, TransportStartDeadline, TxRef,
-};
-use darkbot_bsc_trading::submission_policy::release::ReleaseProfile;
+use darkbot_bsc_trading::submission_policy::capability::{AdapterBinding, AdapterTable};
+use darkbot_bsc_trading::submission_policy::plan::{SubmissionPlan, TransportStartDeadline};
 use darkbot_bsc_trading::venues::flap::binding::ExpectedTx;
 use std::time::Duration;
 
@@ -961,55 +957,33 @@ impl End for LiveEnd {
         // BSC3-076: Strategy C's BUY and every exit act on a block, not in
         // the race after a launch's ingress.
         let block_driven = matches!(submission, Submission::Single);
-        let (component, profile, mode, launch, launch_raw, merge) = match submission {
-            Submission::LaunchBundle(launch_raw) => (
-                ComponentId::ExecC3,
-                ReleaseProfile::BirthEntryV1,
-                SubmissionMode::PublicFullLaunchBundle,
-                Launch::PublicOriginal(TxRef::of(launch_raw)),
-                launch_raw,
-                MergePolicy::NoMerge,
-            ),
-            Submission::Single => (
-                ComponentId::StrategyC,
-                ReleaseProfile::SingleRawV1,
-                SubmissionMode::SingleRawBuy,
-                Launch::None,
-                &[][..],
-                MergePolicy::ProviderDefault,
-            ),
+        let component = match submission {
+            Submission::LaunchBundle(_) => ComponentId::ExecC3,
+            Submission::Single => ComponentId::StrategyC,
         };
+        let profile = submission.profile();
         let ids: Vec<AdapterId> = self.slots.iter().map(|s| s.adapter).collect();
-        let Some(adapters) = AdapterSet::new(&ids) else {
-            return self.refuse(Refusal::Plan, "no adapter set".into());
+        // Audit E 4.2: the shared plan inputs, planned under the verified
+        // LIVE qualification.
+        let inputs = match plan_inputs(
+            &self.table,
+            &ids,
+            ticket,
+            raw,
+            submission,
+            head,
+            config.validity_blocks,
+        ) {
+            Ok(inputs) => inputs,
+            Err(e) => return self.refuse(Refusal::Plan, e.to_string()),
         };
-        let Some(last_block) = head.number.checked_add(config.validity_blocks) else {
-            return self.refuse(Refusal::Plan, "the block window overflows".into());
-        };
+        let last_block = inputs.local_block_deadline.last_head_block;
         let plan = match SubmissionPlan::new_with(
             &self.table,
             &self.qualification.adapters,
             expected,
             budget,
-            PlanInputs {
-                ticket,
-                buy: TxRef::of(raw),
-                launch,
-                mode,
-                profile,
-                adapters,
-                local_block_deadline: LocalBlockStartDeadline {
-                    last_head_block: last_block,
-                },
-                provider_validity: Some(ProviderValidity {
-                    max_block_number: last_block,
-                    min_timestamp: None,
-                    max_timestamp: None,
-                }),
-                merge,
-                pre_submission: PreSubmission::No,
-                provider_payment_wei: U256::ZERO,
-            },
+            inputs,
         ) {
             Ok(p) => p,
             Err(e) => return self.refuse(Refusal::Plan, format!("{e:?}")),
@@ -1021,25 +995,15 @@ impl End for LiveEnd {
         };
         let mut frames = Vec::with_capacity(self.slots.len());
         for slot in &self.slots {
-            let endpoint = slot.target.frame_endpoint();
-            let frame = match slot.live {
-                LiveAdapter::Club48BuilderV1 => club48::frame(
-                    &plan,
-                    &self.table,
-                    slot.adapter,
-                    &endpoint,
-                    launch_raw,
-                    config.max_frame,
-                ),
-                LiveAdapter::BlockRazorBuilderV1 => blockrazor::frame(
-                    &plan,
-                    &self.table,
-                    slot.adapter,
-                    &endpoint,
-                    launch_raw,
-                    config.max_frame,
-                ),
-            };
+            // Audit E 4.2: the shared framing, by the slot's kind in the table.
+            let frame = adapter_frame(
+                &plan,
+                &self.table,
+                slot.adapter,
+                &slot.target.frame_endpoint(),
+                submission.launch_raw(),
+                config.max_frame,
+            );
             match frame {
                 Ok(f) => frames.push(f),
                 Err(e) => return self.refuse(Refusal::Plan, e.to_string()),
@@ -1350,7 +1314,9 @@ pub(crate) mod tests {
         HoldingCap, NativeBuyInputs, WITNESSED_MAINNET_TERMS, quote_native_buy,
     };
     use darkbot_bsc_trading::signer::recover_legacy_sender;
-    use darkbot_bsc_trading::submission_policy::capability::{CapabilityId, Knowledge};
+    use darkbot_bsc_trading::submission_policy::capability::{
+        CapabilityId, Knowledge, SubmissionMode,
+    };
     use darkbot_bsc_trading::submission_policy::qualification::{
         AdapterQualification, FeatureName, Finding, PropertyName,
     };

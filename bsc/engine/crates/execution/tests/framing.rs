@@ -423,3 +423,225 @@ fn a_qualified_single_transaction_is_a_one_transaction_bundle() {
         Some(FrameError::LaunchBytesMismatch)
     );
 }
+
+/// Audit E 4.2: PAPER and LIVE frame through one choice: the adapter's
+/// kind in the table picks the frame, byte for byte the adapter's own; a
+/// kind with no framing, or an adapter the table does not hold, is refused.
+#[test]
+fn the_adapter_frame_is_the_one_of_the_adapters_kind() {
+    use darkbot_bsc_execution::submission::adapter_frame;
+    use darkbot_bsc_trading::submission_policy::capability::CapabilityId;
+    let world = World::prepared();
+    let table = frozen_table();
+    let bundle = both_builders(&world, &table);
+    let of = |table: &AdapterTable, index: u8, endpoint: &Endpoint<'_>| {
+        adapter_frame(
+            &bundle,
+            table,
+            adapter(index),
+            endpoint,
+            &world.launch_raw,
+            FRAME_CAPACITY,
+        )
+        .map(|f| shown(&f))
+    };
+    assert_eq!(
+        of(&table, CLUB48, &CLUB48_ENDPOINT),
+        Ok(shown(&club48_frame(&world, &bundle, &table)))
+    );
+    assert_eq!(
+        of(&table, BLOCKRAZOR, &BLOCKRAZOR_ENDPOINT),
+        Ok(shown(&blockrazor_frame(&world, &bundle, &table)))
+    );
+    // The local node's raw transaction names no endpoint.
+    let single = plan(&world, &table, single_inputs(&world));
+    assert_eq!(
+        adapter_frame(
+            &single,
+            &table,
+            adapter(LOCAL),
+            &CLUB48_ENDPOINT,
+            &[],
+            FRAME_CAPACITY
+        )
+        .map(|f| f.redacted_request()),
+        Ok(local_frame(&single, &table).redacted_request())
+    );
+    let rpc = table_of(&[(CLUB48, *CapabilityId::BlockRazorRpcV1.record())]);
+    assert_eq!(
+        of(&rpc, CLUB48, &CLUB48_ENDPOINT).err(),
+        Some(FrameError::WrongAdapterKind)
+    );
+    assert_eq!(
+        of(&table, 3, &CLUB48_ENDPOINT).err(),
+        Some(FrameError::AdapterNotInPlan)
+    );
+    // A table changed since the plan: stale first, as every framing says.
+    let stale = AdapterTable::for_tests(CHAIN, CAPABILITY_GENERATION + 1, &[]).unwrap();
+    assert_eq!(
+        of(&stale, CLUB48, &CLUB48_ENDPOINT).err(),
+        Some(FrameError::StaleCapabilities)
+    );
+}
+
+/// Audit E 4.2: PAPER and LIVE plan a hand-over through one rule: a
+/// launch's bundle is a birth entry behind it without merging, a
+/// transaction alone one alone (PAPER planned it as a birth entry before);
+/// every provider is told the last block, the local node alone (PAPER's
+/// transaction alone) nothing: it enforces no expiry, and beside a
+/// provider the expiry stays, so the plan refuses the node.
+#[cfg(feature = "runtime")]
+#[test]
+fn both_ends_plan_a_hand_over_through_one_rule() {
+    use darkbot_bsc_execution::paper_exec::{
+        EXEC_PROFILES, InputsError, Submission, max_start_limit_ns, max_validity_blocks,
+        plan_inputs,
+    };
+    use darkbot_bsc_trading::intent::AdapterId;
+    use darkbot_bsc_trading::submission_policy::capability::{CapabilityId, SubmissionMode};
+    use darkbot_bsc_trading::submission_policy::plan::{ChainHead, Launch, PlanError, TxRef};
+    use darkbot_bsc_trading::submission_policy::qualification::{AdapterQualification, Finding};
+    use darkbot_bsc_trading::submission_policy::release::ReleaseProfile;
+    let world = World::prepared();
+    // What LIVE's qualification establishes: a builder's single.
+    let qualified = [AdapterQualification::from_findings(
+        CapabilityId::Club48BuilderV1,
+        &[Finding::Mode(SubmissionMode::SingleRawBuy)],
+    )
+    .unwrap()];
+    let table = frozen_table();
+    let head = head();
+    let window = 2;
+    let last = head.number + window;
+    let expiry = Some(ProviderValidity {
+        max_block_number: last,
+        min_timestamp: None,
+        max_timestamp: None,
+    });
+    let inputs = |ids: &[AdapterId], submission: Submission<'_>| {
+        plan_inputs(
+            &table,
+            ids,
+            world.ticket,
+            &world.raw_buy,
+            submission,
+            head,
+            window,
+        )
+    };
+    let builders = [adapter(CLUB48), adapter(BLOCKRAZOR)];
+    let bundle = inputs(&builders, Submission::LaunchBundle(&world.launch_raw)).unwrap();
+    assert_eq!(
+        (
+            bundle.mode,
+            bundle.launch,
+            bundle.merge,
+            bundle.profile,
+            bundle.provider_validity,
+            bundle.local_block_deadline.last_head_block,
+            bundle.buy,
+        ),
+        (
+            SubmissionMode::PublicFullLaunchBundle,
+            Launch::PublicOriginal(TxRef::of(&world.launch_raw)),
+            MergePolicy::NoMerge,
+            ReleaseProfile::BirthEntryV1,
+            expiry,
+            last,
+            TxRef::of(&world.raw_buy),
+        )
+    );
+    assert!(SubmissionPlan::new(&table, &world.expected, &budget(), bundle).is_ok());
+    let live = inputs(&builders, Submission::Single).unwrap();
+    assert_eq!(
+        (
+            live.mode,
+            live.launch,
+            live.merge,
+            live.profile,
+            live.provider_validity
+        ),
+        (
+            SubmissionMode::SingleRawBuy,
+            Launch::None,
+            MergePolicy::ProviderDefault,
+            ReleaseProfile::SingleRawV1,
+            expiry,
+        )
+    );
+    let club48 = inputs(&[adapter(CLUB48)], Submission::Single).unwrap();
+    assert!(
+        SubmissionPlan::new_with(&table, &qualified, &world.expected, &budget(), club48).is_ok()
+    );
+    // Without it (PAPER) a builder's single is not planned.
+    assert_eq!(
+        SubmissionPlan::new(&table, &world.expected, &budget(), club48).err(),
+        Some(PlanError::ModeNotEnabled)
+    );
+    let paper = inputs(&[adapter(LOCAL)], Submission::Single).unwrap();
+    assert_eq!(
+        (paper.profile, paper.provider_validity),
+        (ReleaseProfile::SingleRawV1, None)
+    );
+    assert!(SubmissionPlan::new(&table, &world.expected, &budget(), paper).is_ok());
+    let mixed = inputs(&[adapter(LOCAL), adapter(CLUB48)], Submission::Single).unwrap();
+    assert_eq!(mixed.provider_validity, expiry);
+    assert_eq!(
+        SubmissionPlan::new_with(&table, &qualified, &world.expected, &budget(), mixed).err(),
+        Some(PlanError::OptionNotEnabled)
+    );
+    assert_eq!(
+        inputs(&[], Submission::Single).err(),
+        Some(InputsError::NoAdapters)
+    );
+    let top = ChainHead {
+        number: u64::MAX,
+        ..head
+    };
+    assert_eq!(
+        plan_inputs(
+            &table,
+            &[adapter(LOCAL)],
+            world.ticket,
+            &world.raw_buy,
+            Submission::Single,
+            top,
+            1
+        )
+        .err(),
+        Some(InputsError::WindowOverflow)
+    );
+    // The executor's window and start limit fit every profile it plans.
+    for submission in [Submission::LaunchBundle(&[]), Submission::Single] {
+        assert!(EXEC_PROFILES.contains(&submission.profile()));
+    }
+    for profile in EXEC_PROFILES {
+        assert!((1..=profile.max_block_window()).contains(&max_validity_blocks()));
+        assert!(max_start_limit_ns() <= profile.max_transport_start_limit_ns());
+    }
+}
+
+/// Audit E 4.2: neither end plans or frames on its own: both take the one
+/// plan rule and the one framing choice.
+#[cfg(feature = "runtime")]
+#[test]
+fn neither_end_plans_or_frames_on_its_own() {
+    let paper = include_str!("../src/paper_exec.rs");
+    let paper = &paper[paper.find("impl End for PaperEnd").unwrap()..];
+    let paper = &paper[..paper.find("\n}\n").unwrap()];
+    let live = include_str!("../src/live_end.rs");
+    let live = &live[..live.find("#[cfg(test)]\npub(crate) mod tests").unwrap()];
+    for (end, source) in [("PaperEnd", paper), ("LiveEnd", live)] {
+        for own in [
+            "PlanInputs {",
+            "ProviderValidity {",
+            "club48::frame",
+            "blockrazor::frame",
+            "local_geth::frame",
+        ] {
+            assert!(!source.contains(own), "{end} plans or frames itself: {own}");
+        }
+        assert!(source.contains("plan_inputs("), "{end}");
+        assert!(source.contains("adapter_frame("), "{end}");
+    }
+}
