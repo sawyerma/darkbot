@@ -239,21 +239,19 @@ pub(super) fn prepare(
     let group = Pubkey::from_str(&config::require("P0_GROUP_ID")?)?;
     // DEC-18 §4.3 (P0-024): the econ4h calibration (a read-only measurement) loads no private
     // key: its payer is the configured public identity, every simulation UNSIGNED_SIMULATION.
-    // DEC-17b: every configured signer, each key checked at the start; the first pilot runs the
-    // first (its own fee payer) — the other keys are not kept (switched per wallet, unused).
-    let mut signers = crate::execution::payer::owner_signers(
+    // DEC-17b: every configured signer, each key checked at the start — one wallet each (its own
+    // book, Safety, FE-04 lane); the first is the pilot, its own fee payer.
+    let signers = crate::execution::payer::owner_signers(
         &darkbot_solana::runtime_config::active().signers,
         &|k| std::env::var(k).ok(),
         econ.is_some(),
     )?;
-    let first = signers.remove(0);
-    let wallet_roles: Vec<(Pubkey, Vec<&'static str>)> =
-        std::iter::once((first.pubkey, first.roles))
-            .chain(signers.into_iter().map(|s| (s.pubkey, s.roles)))
-            .collect();
-    let payer = first.payer;
-    let liquidator = payer.pubkey();
-    if payer.signer().is_none() {
+    let wallet_roles: Vec<(Pubkey, Vec<&'static str>)> = signers
+        .iter()
+        .map(|s| (s.pubkey, s.roles.clone()))
+        .collect();
+    let liquidator = signers[0].pubkey;
+    if signers[0].payer.signer().is_none() {
         crate::console::line(format!(
             "payer: {liquidator} public only (no private key loaded; every simulation {})",
             crate::analytics::record::Signing::Synthetic.label()
@@ -387,11 +385,8 @@ pub(super) fn prepare(
     required_dependency_keys.sort_unstable_by_key(|k| k.to_bytes());
     required_dependency_keys.dedup();
 
-    #[cfg(feature = "crate_health")]
-    let mut optional_dependency_keys: Vec<Pubkey> = bank_keys
-        .iter()
-        .flat_map(|bk| ata_candidates_for_bank(&StateView(&pre_state), &program, bk, &liquidator))
-        .collect();
+    let mut optional_dependency_keys: Vec<Pubkey> =
+        wallet_accounts(&StateView(&pre_state), &program, &bank_keys, &wallet_roles);
     #[cfg(feature = "crate_health")]
     optional_dependency_keys.extend(crate::execution::lookup_tables::published_keys(&group));
     optional_dependency_keys.sort_unstable_by_key(|k| k.to_bytes());
@@ -633,7 +628,7 @@ pub(super) fn prepare(
     let eval_slippage_bps = limits.max_slippage_bps;
     let mut allow = Allow::default();
     allow.execution_classes.insert("longtail");
-    let mut safety = Safety::new(limits, allow, false);
+    // DEC-17b: one Safety per wallet, each with these limits (`owner_wallets`).
     // [FIX-25] Semantische Kategorien getrennt; die globale Top-Level-Allowlist prüft die Pipeline separat.
     let allowlist = protocol::receivership_allowlist();
     // E2: init_liquidation_record is its own planner step (only before Start), not a refresh.
@@ -1106,20 +1101,25 @@ pub(super) fn prepare(
         (None, _) => None,
     };
     let mt0_owner = darkbot_common::mt0::OwnerTimer::new();
-    // P8-RES-02: the reservation book of the liquidator from its durable FE-04 journal.
-    let Fe04Owner {
-        book: reservations,
-        dir: fe04_journal,
-        held: fe04_held,
-        settle_due: fe04_settle_due,
-        unbooked: fe04_unbooked,
-    } = reservation_book(&|k| std::env::var(k).ok(), &liquidator)?
-        // D07/F-06: the replay books into the current day; without a wall clock the start is
-        // refused (never day 0, where today's limits would not see the booking).
-        .start(
-            &mut safety,
-            wall_unix_s().map_err(|e| format!("CLOCK_UNAVAILABLE: {e}"))?,
-        )?;
+    // P8-RES-02/DEC-17b: every wallet's reservation book from its durable FE-04 journal.
+    // D07/F-06: the replay books into the current day; without a wall clock the start is refused
+    // (never day 0, where today's limits would not see the booking).
+    let (wallets, fe04_journal) = owner_wallets(
+        signers,
+        limits,
+        &allow,
+        &|k| std::env::var(k).ok(),
+        wall_unix_s().map_err(|e| format!("CLOCK_UNAVAILABLE: {e}"))?,
+        &|w, dir| {
+            approval_source(
+                w,
+                &program,
+                &program_data_baseline_hash.to_string(),
+                &operational,
+                dir,
+            )
+        },
+    )?;
     let jit_funding_bank = crate::execution::inventory::parse_funding_bank(
         &std::env::var("P0_JIT_FUNDING_BANK").unwrap_or_default(),
     )?;
@@ -1211,7 +1211,6 @@ pub(super) fn prepare(
         ),
         status_published: None,
         status_seq: 0,
-        ledger_view: None,
         blockhash_max_age_ns: operational.blockhash_max_age_ms.saturating_mul(1_000_000),
         fe04_settle_retry: Duration::from_millis(operational.fe04_settle_retry_ms),
         fe04_refresh: Duration::from_millis(operational.fe04_refresh_ms),
@@ -1224,23 +1223,10 @@ pub(super) fn prepare(
         required_set,
         optional_set,
         prereq_allowed,
-        reservations,
-        fe04_approval: approval_source(
-            &liquidator,
-            &program,
-            &program_data_baseline_hash.to_string(),
-            &operational,
-            fe04_journal.as_deref(),
-        ),
+        wallets,
+        wallet_selection: Default::default(),
         fe04_journal,
         fe04_refreshed: std::time::Instant::now(),
-        fe04_held,
-        fe04_settle_due,
-        fe04_unbooked,
-        fe04_non_landing: Default::default(),
-        fe04_admission: None,
-        fe04_prewarm_after: None,
-        fe04_admissions: Default::default(),
         hold_gate: crate::execution::hold_b::HoldGate {
             n: darkbot_solana::runtime_config::active().hold_b_min_attempts,
             ..crate::execution::hold_b::HoldGate::OBSERVE
@@ -1266,7 +1252,6 @@ pub(super) fn prepare(
         blockhash_parking: Default::default(),
         blockhash_early: None,
         ownership: Default::default(),
-        atas: LiquidatorAtas::new(liquidator),
         min_profit,
         integration_probe_enabled,
         integration_probe_limit_per_kind,
@@ -1322,9 +1307,7 @@ pub(super) fn prepare(
         operational_failure,
         program,
         group,
-        payer,
         synthetic_signer: solana_sdk::signature::Keypair::new(),
-        liquidator,
         shutdown,
         stop_poll,
         halt,
@@ -1346,7 +1329,6 @@ pub(super) fn prepare(
         opt_shared,
         blockhash,
         blockhash_thread: Some(blockhash_thread),
-        safety,
         allowlist,
         #[cfg(feature = "crate_health")]
         instruction_table,
@@ -1457,6 +1439,92 @@ impl Fe04Start {
             settle_due,
             unbooked,
         })
+    }
+}
+
+/// DEC-17b: what the owner subscribes of its wallets — every configured signer's own account (its
+/// SOL in canonical state: the admission's, the wallet choice's and the rebalancing's balance)
+/// and, of every wallet that runs candidates, its ATAs of each bank's mint.
+pub(super) fn wallet_accounts<S: AccountSource + ?Sized>(
+    state: &S,
+    program: &Pubkey,
+    banks: &[Pubkey],
+    wallets: &[(Pubkey, Vec<&'static str>)],
+) -> Vec<Pubkey> {
+    let mut keys: Vec<Pubkey> = wallets.iter().map(|(k, _)| *k).collect();
+    for (wallet, roles) in wallets {
+        if roles.as_slice() == darkbot_solana::runtime_config::roles::SIGNING {
+            for bank in banks {
+                keys.extend(ata_candidates_for_bank(state, program, bank, wallet));
+            }
+        }
+    }
+    keys
+}
+
+/// DEC-17b: every configured signer's wallet at the start — its own Safety (the operational
+/// `limits`, nothing booked), its book and FE-04 lane replayed from its journals in
+/// `P0_FE04_JOURNAL_DIR` (`reservation_book`, `Fe04Start::start` at `now_unix_s`), its attempt
+/// records and its approval (`approval`). A wallet whose journals cannot be read is blocked for
+/// the run — its book unreadable, its Safety halted (its replay never booked) — the others run;
+/// no wallet that runs candidates readable is the start error (fail closed). Also the journal
+/// directory (none configured: no FE-04 attempt).
+#[allow(clippy::type_complexity)]
+pub(super) fn owner_wallets(
+    signers: Vec<crate::execution::payer::OwnerSigner>,
+    limits: Limits,
+    allow: &Allow,
+    get: &dyn Fn(&str) -> Option<String>,
+    now_unix_s: u64,
+    approval: &dyn Fn(&Pubkey, Option<&std::path::Path>) -> Option<ApprovalSource>,
+) -> Result<(Vec<super::wallets::OwnerWallet>, Option<std::path::PathBuf>), String> {
+    let dir = get("P0_FE04_JOURNAL_DIR")
+        .filter(|v| !v.trim().is_empty())
+        .map(std::path::PathBuf::from);
+    let mut wallets = Vec::new();
+    let (mut readable, mut first_error) = (false, None);
+    for s in signers {
+        let safety = Safety::new(limits, allow.clone(), false);
+        let mut w = super::wallets::OwnerWallet::new(s.pubkey, s.roles, s.payer, safety);
+        if w.runs_candidates() {
+            match reservation_book(get, &w.liquidator)
+                .and_then(|b| b.start(&mut w.safety, now_unix_s))
+            {
+                Ok(start) => {
+                    w.records = match (&start.held, &start.dir) {
+                        (Some(j), _) => j.attempt_records().ok(),
+                        (None, Some(d)) => crate::execution::one_shot::archive::records(
+                            d,
+                            &w.liquidator.to_string(),
+                        )
+                        .ok(),
+                        (None, None) => Some(vec![]),
+                    };
+                    w.reservations = start.book;
+                    w.fe04_held = start.held;
+                    w.fe04_settle_due = start.settle_due;
+                    w.fe04_unbooked = start.unbooked;
+                    readable = true;
+                }
+                Err(e) => {
+                    crate::console::line(format!(
+                        "wallet: {} BLOCKED for this run: {e}",
+                        w.liquidator
+                    ));
+                    w.reservations =
+                        crate::execution::reservation::WalletReservations::unreadable();
+                    w.safety
+                        .halt(darkbot_common::error::HaltReason::LedgerInvariant);
+                    first_error.get_or_insert(e);
+                }
+            }
+            w.fe04_approval = approval(&w.liquidator, dir.as_deref());
+        }
+        wallets.push(w);
+    }
+    match first_error {
+        Some(e) if !readable => Err(e),
+        _ => Ok((wallets, dir)),
     }
 }
 
@@ -1646,6 +1714,83 @@ mod cluster_tests {
             (start.book.held("SOL"), start.dir, start.replay),
             (0, Some(tmp.clone()), None)
         );
+        std::fs::remove_dir_all(&tmp).unwrap();
+    }
+
+    /// DEC-17b: every configured signer becomes a wallet with its own Safety and book; a wallet
+    /// whose journal cannot be read is blocked for the run (its book unreadable, its Safety
+    /// halted — its replay was never booked) while the others run; a treasury has no journal;
+    /// none of the wallets that run candidates readable fails the start (fail closed).
+    #[test]
+    fn dec17b_an_unreadable_journal_blocks_only_its_wallet() {
+        use crate::execution::payer::{OwnerPayer, OwnerSigner};
+        use darkbot_solana::runtime_config::roles;
+        let tmp = std::env::temp_dir().join(format!("p0_dec17b_wallets_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        let (good, bad, treasury) = (
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+        );
+        std::fs::write(tmp.join(format!("{bad}.p0j")), b"not a journal").unwrap();
+        let signer = |pubkey, roles: &[&'static str]| OwnerSigner {
+            pubkey,
+            roles: roles.to_vec(),
+            payer: OwnerPayer::PublicOnly(pubkey),
+        };
+        let path = tmp.to_string_lossy().to_string();
+        let lookup = |k: &str| (k == "P0_FE04_JOURNAL_DIR").then(|| path.clone());
+        let limits = Limits {
+            max_total_capital: 1,
+            max_outstanding_inventory: 1,
+            max_concurrent_positions: 1,
+            max_exposure_per_attempt: 1,
+            max_daily_loss: 1,
+            max_failed_attempts_per_day: 1,
+            max_tip: 0,
+            max_slippage_bps: 0,
+            max_outstanding_attempts: 1,
+        };
+        let start = |signers| {
+            owner_wallets(
+                signers,
+                limits,
+                &Allow::default(),
+                &lookup,
+                1_000,
+                &|_, _| None,
+            )
+        };
+        let (wallets, dir) = start(vec![
+            signer(bad, &roles::SIGNING),
+            signer(good, &roles::SIGNING),
+            signer(treasury, &[roles::TREASURY]),
+        ])
+        .unwrap();
+        assert_eq!(dir.as_deref(), Some(tmp.as_path()));
+        let w = |k: Pubkey| wallets.iter().find(|w| w.liquidator == k).unwrap();
+        assert!(w(bad).reservations.is_unreadable());
+        assert_eq!(
+            w(bad).safety.halted(),
+            Some(darkbot_common::error::HaltReason::LedgerInvariant)
+        );
+        assert_eq!(w(bad).records, None, "its bookings are unknown");
+        assert!(!w(good).reservations.is_unreadable());
+        assert_eq!(w(good).safety.halted(), None);
+        assert_eq!(w(good).records, Some(vec![]));
+        assert!(!w(treasury).runs_candidates());
+        assert_eq!(w(treasury).safety.halted(), None);
+        // The pilot stays first (the order of the configuration).
+        assert_eq!(wallets[0].liquidator, bad);
+        let only_bad = start(vec![
+            signer(bad, &roles::SIGNING),
+            signer(treasury, &[roles::TREASURY]),
+        ]);
+        assert!(only_bad
+            .err()
+            .unwrap()
+            .starts_with("RESERVATION_JOURNAL_UNREADABLE"));
         std::fs::remove_dir_all(&tmp).unwrap();
     }
 

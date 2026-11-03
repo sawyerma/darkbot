@@ -80,9 +80,11 @@ export function OwnerSection({ owner, topicStatus, system }: { owner: Liquidator
     {owner.rebalance ? <>
       <DetailRow title="Rebalancing · plan" value={owner.rebalance.atUnixMs == null ? `${owner.rebalance.mode} · nothing planned yet`
         : `${owner.rebalance.mode} · slot ${owner.rebalance.slot} · budget ${usdMicroDisplay(owner.rebalance.budgetUsdMicro.toString())}${owner.rebalance.quotesPending > 0n ? ` · ${owner.rebalance.quotesPending} quotes pending (provisional)` : ""}`}/>
-      {owner.rebalance.trades.map((t, i) => <DetailRow key={`t${i}`} title={`Rebalance · sell ${t.sell.slice(0, 8)} → ${t.buy.slice(0, 8)}`}
+      {owner.rebalance.transfers.map((t, i) => <DetailRow key={`m${i}`} title={`Rebalance · move ${t.asset.slice(0, 8)} ${t.fromWallet.slice(0, 8)} → ${t.toWallet.slice(0, 8)}`}
+        value={`${t.amount} · between the owner's wallets · planned, never executed`}/>)}
+      {owner.rebalance.trades.map((t, i) => <DetailRow key={`t${i}`} title={`Rebalance · ${t.wallet.slice(0, 8)} · sell ${t.sell.slice(0, 8)} → ${t.buy.slice(0, 8)}`}
         value={`${t.amountIn} → ≥ ${t.minimumOut} · cost ${usdMicroDisplay(t.costUsdMicro.toString())} · planned, never traded`}/>)}
-      {owner.rebalance.blocked.map((b) => <DetailRow key={`b${b.asset}`} title={`Rebalance · ${b.asset.slice(0, 8)}`} value={b.reason}/>)}
+      {owner.rebalance.blocked.map((b) => <DetailRow key={`b${b.wallet}${b.asset}`} title={`Rebalance · ${b.wallet.slice(0, 8)} · ${b.asset.slice(0, 8)}`} value={b.reason}/>)}
     </> : null}
     {owner.approval ? <DetailRow title="FE-04 approval"
       value={owner.approval.state === "NONE" ? "none configured · LIVE not authorized (FE-06)"

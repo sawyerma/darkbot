@@ -96,6 +96,7 @@ mod status;
 mod sweep;
 mod telemetry;
 mod threshold;
+mod wallets;
 mod windows;
 
 mod metrics;
@@ -135,11 +136,10 @@ pub(super) struct ShadowOwner {
     /// The run id the owner lock records (`startup::owner_run_id`).
     run_id: String,
     /// P0-PROD-CTRL-04: the owner status projection — its cadence (`owner_status_ms`), the last
-    /// publication, its sequence and the FE-04 accounting read at the journal refresh cadence.
+    /// publication and its sequence.
     status_interval: Duration,
     status_published: Option<std::time::Instant>,
     status_seq: u64,
-    ledger_view: Option<Result<status_view::LedgerView, String>>,
     /// C9/D01: the one blockhash freshness bound of the owner (detection gates and the pipeline's
     /// build limit), from `blockhash_max_age_ms`; never a literal at one gate.
     blockhash_max_age_ns: u64,
@@ -163,31 +163,15 @@ pub(super) struct ShadowOwner {
     required_set: HashSet<Pubkey>,
     optional_set: HashSet<Pubkey>,
     prereq_allowed: Vec<Pubkey>,
-    /// P8-RES-01: the one global wallet reservation book; every offer and attempt sees its holds.
-    reservations: crate::execution::reservation::WalletReservations,
-    /// P8-RES-02: the FE-04 journal directory the book is rebuilt from, and when it last was.
+    /// DEC-17b: every configured signer's wallet (the pilot first: `pilot`) — its own book,
+    /// Safety, FE-04 journal lane, admission, approval and ATAs (`wallets.rs`).
+    wallets: Vec<wallets::OwnerWallet>,
+    /// DEC-17b: this run's wallet choices (`select_wallet`).
+    wallet_selection: wallets::SelectionStats,
+    /// P8-RES-02: the FE-04 journal directory every wallet's book is rebuilt from (one lane,
+    /// `<wallet>.p0j`, per wallet), and when they last were.
     fe04_journal: Option<std::path::PathBuf>,
     fe04_refreshed: std::time::Instant,
-    /// FE-04/C3: the wallet journal of an existing attempt, held for the run (one runtime per
-    /// project): the reservation book follows it and its UNKNOWN attempt is settled here.
-    fe04_held: Option<crate::execution::one_shot::Journal>,
-    /// DEC-10: the configured FE-04 approval (`P0_FE04_APPROVAL`), re-read with the journal.
-    fe04_approval: Option<ApprovalSource>,
-    /// When the next settlement step is due (`None`: a read in flight, or nothing to settle).
-    fe04_settle_due: Option<std::time::Instant>,
-    /// What Safety has still to book for that attempt (`None`: nothing, or booked).
-    fe04_unbooked: Option<fe04::Fe04Unbooked>,
-    /// DEC-03: the latest non-landing read of this run (the Wallets projection).
-    fe04_non_landing: fe04::Fe04NonLanding,
-    /// DEC-13b: the open FE-04 admission of LIVE candidates (journal, attempt approval, current
-    /// wallet facts); `None` while LIVE is not effective, no VALID attempt approval exists or an
-    /// attempt holds the wallet. Handed to the pipeline per detection and taken back.
-    fe04_admission: Option<crate::execution::one_shot::admission::Fe04Admission>,
-    /// S4-04: when the admission may be opened ahead of a candidate again after it could not be
-    /// (`None`: at once).
-    fe04_prewarm_after: Option<std::time::Instant>,
-    /// DEC-13b/DEC-02: this run's admission counters (the Liquidator tab).
-    fe04_admissions: fe04::Fe04AdmissionStats,
     /// DEC-04: the hold mode the pipeline evaluates with (effective mode, the user's N, the
     /// evidence of the FE-04 journals).
     hold_gate: crate::execution::hold_b::HoldGate,
@@ -224,8 +208,6 @@ pub(super) struct ShadowOwner {
     /// P6-MT.1 (MT5b): the per-account ownership table — EXECUTING/SIGNED by a candidate of
     /// this run, SUBMITTED synchronized from the reservation book (`ownership.rs`).
     ownership: crate::execution::ownership::AccountOwnership,
-    /// C11: the liquidator's ATA addresses per mint, derived once.
-    atas: accounts::LiquidatorAtas,
     min_profit: i128,
     integration_probe_enabled: bool,
     integration_probe_limit_per_kind: usize,
@@ -299,12 +281,9 @@ pub(super) struct ShadowOwner {
     operational_failure: Option<&'static str>,
     program: Pubkey,
     group: Pubkey,
-    /// DEC-18 §4.3 (P0-024): the keypair, or the public identity only (the econ4h calibration).
-    payer: crate::execution::payer::OwnerPayer,
     /// P8-CTRL.4: an ephemeral key of this owner only (never a wallet's, never stored): the
     /// synthetic signature of a simulation without a sign permit.
     synthetic_signer: solana_sdk::signature::Keypair,
-    liquidator: Pubkey,
     shutdown: Shutdown,
     /// F-01: the operator stop of a standalone Shadow run (`p0ctl run stop`, SIGTERM/SIGINT);
     /// an econ run stops through its own abort instead.
@@ -335,7 +314,6 @@ pub(super) struct ShadowOwner {
     blockhash: BlockhashCache,
     /// Refresh thread of `blockhash`; joined in `finish` after the shutdown request (M3).
     blockhash_thread: Option<std::thread::JoinHandle<()>>,
-    safety: Safety,
     allowlist: Allowlist,
     /// E2: pinned instruction table the planner gate classifies built instructions with.
     #[cfg(feature = "crate_health")]

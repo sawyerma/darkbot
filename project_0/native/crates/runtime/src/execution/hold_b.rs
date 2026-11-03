@@ -482,6 +482,17 @@ impl BEvidence {
             }
         }
     }
+    /// DEC-17b: another wallet's evidence added to this one (every class summed).
+    pub fn merge(&mut self, other: &BEvidence) {
+        self.exact = self.exact.saturating_add(other.exact);
+        self.underestimated = self.underestimated.saturating_add(other.underestimated);
+        self.unqualified = self.unqualified.saturating_add(other.unqualified);
+        for (class, (ok, under)) in &other.per_kind {
+            let c = self.per_kind.entry(class.clone()).or_default();
+            c.0 = c.0.saturating_add(*ok);
+            c.1 = c.1.saturating_add(*under);
+        }
+    }
     /// A class is qualified with N exact attempts and no underestimation at all.
     pub fn kind_qualified(&self, class: &str, n: u64) -> bool {
         self.underestimated == 0 && self.per_kind.get(class).is_some_and(|(ok, _)| *ok >= n)

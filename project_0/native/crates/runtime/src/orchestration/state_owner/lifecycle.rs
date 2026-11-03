@@ -2,6 +2,41 @@
 use super::*;
 
 impl ShadowOwner {
+    /// P8-RES-02/DEC-17b: one wallet's journal refresh — its book (unless an attempt it holds
+    /// keeps it), the B evidence, its attempt records (the grant quotas), the accounting the
+    /// status projection carries (`tap`) and its approval (`tap`, or while exits are `live`).
+    fn fe04_refresh_wallet(&mut self, i: usize, dir: &std::path::Path, live: bool, tap: bool) {
+        use crate::execution::reservation::WalletReservations;
+        let wallet = self.wallets[i].liquidator.to_string();
+        let w = &mut self.wallets[i];
+        if w.fe04_held.is_none() {
+            // Review M1: an open admission holds the journal and its lock; the book follows that
+            // journal.
+            w.reservations = match &w.fe04_admission {
+                Some(a) => WalletReservations::rebuild(a.journal.active_hold())
+                    .unwrap_or_else(|_| WalletReservations::unreadable()),
+                None => WalletReservations::refreshed(dir, &wallet),
+            };
+        }
+        let ledger = crate::execution::accounting::Ledger::load(dir, &wallet);
+        w.hold_evidence = ledger.as_ref().ok().map(|l| l.b_evidence());
+        // Unreadable now: the records of the last read stay (only this owner writes them).
+        if let Ok(l) = &ledger {
+            w.records = Some(l.attempts.clone());
+        }
+        if tap {
+            w.ledger_view = Some(ledger.map(|l| status_view::LedgerView::of(&l)));
+        }
+        // DEC-10: the approval may be replaced or spent between refreshes; its status is
+        // published only through the tap. DEC-13b: while LIVE is effective the admissions use
+        // it, so it is re-read then too.
+        if tap || live {
+            if let Some(source) = w.fe04_approval.as_mut() {
+                source.refresh(Some(dir), &wallet);
+            }
+        }
+    }
+
     pub(super) fn lifecycle(&mut self) -> bool {
         // P6-MT.10: the run's first fee parity record, and a mismatch at once (synced).
         self.fee_parity_pass();
@@ -9,72 +44,61 @@ impl ShadowOwner {
         if self.host_journaled.is_none() {
             self.host_record();
         }
-        // P8-RES-02: the book follows the durable FE-04 journal (a settlement releases the
-        // attempt, its open positions stay held until exited, UNKNOWN keeps holding, an
-        // unreadable journal blocks every offer).
+        // P8-RES-02: every wallet's book follows its durable FE-04 journal (a settlement releases
+        // the attempt, its open positions stay held until exited, UNKNOWN keeps holding, an
+        // unreadable journal blocks every offer of that wallet — DEC-17b: of that wallet only).
         // FE-04/C3: a held journal changes only through this owner (the book is rebuilt there).
         // DEC-13b (review M2): an admission (and its wallet lock) is open only while LIVE is.
-        #[cfg(feature = "crate_health")]
-        if self.fe04_admission.is_some() && !self.live_effective() {
-            self.fe04_admission = None;
+        if self.wallets.iter().any(|w| w.fe04_admission.is_some()) && !self.live_effective() {
+            for w in &mut self.wallets {
+                w.fe04_admission = None;
+            }
         }
-        // S4-04: while LIVE is, the admission is opened ahead of the first candidate.
-        #[cfg(feature = "crate_health")]
-        self.fe04_prewarm();
-        if let Some(dir) = &self.fe04_journal {
+        // S4-04: while LIVE is, each wallet's admission is opened ahead of the first candidate.
+        for i in 0..self.wallets.len() {
+            if self.wallets[i].runs_candidates() {
+                self.fe04_prewarm(i);
+            }
+        }
+        if let Some(dir) = self.fe04_journal.clone() {
             if self.fe04_refreshed.elapsed() >= self.fe04_refresh {
-                let wallet = self.liquidator.to_string();
-                if self.fe04_held.is_none() {
-                    use crate::execution::reservation::WalletReservations;
-                    // Review M1: an open admission holds the journal and its lock; the book
-                    // follows that journal.
-                    self.reservations = match &self.fe04_admission {
-                        Some(a) => WalletReservations::rebuild(a.journal.active_hold())
-                            .unwrap_or_else(|_| WalletReservations::unreadable()),
-                        None => WalletReservations::refreshed(dir, &wallet),
-                    };
-                }
-                // DEC-04: the B evidence of the journals (unreadable: none, ACTIVE impossible).
-                self.hold_gate.evidence = crate::execution::accounting::Ledger::load(dir, &wallet)
-                    .map(|l| l.b_evidence())
-                    .unwrap_or_default();
+                // P8-CTRL.5: exits (and their approval) need every gate but ECON_ATTEMPT.
+                let live = self.exit_live_effective();
                 // P0-PROD-CTRL-04: the accounting the status projection carries, read only when
                 // a status tap is installed (read-only, no wallet lock).
-                // P8-CTRL.5: exits (and their approval) need every gate but ECON_ATTEMPT.
-                #[cfg(feature = "crate_health")]
-                let live = self.exit_live_effective();
-                #[cfg(feature = "crate_health")]
-                if crate::status_tap::installed().is_some() {
-                    self.ledger_view = Some(status_view::LedgerView::load(dir, &wallet));
-                }
-                // DEC-10: the approval may be replaced or spent between refreshes; its status is
-                // published only through the tap. DEC-13b: while LIVE is effective the
-                // admissions use it, so it is re-read then too.
-                #[cfg(feature = "crate_health")]
-                if crate::status_tap::installed().is_some() || live {
-                    if let Some(source) = self.fe04_approval.as_mut() {
-                        source.refresh(Some(dir), &wallet);
+                let tap = crate::status_tap::installed().is_some();
+                let mut evidence = Some(crate::execution::hold_b::BEvidence::default());
+                for i in 0..self.wallets.len() {
+                    if self.wallets[i].runs_candidates() {
+                        self.fe04_refresh_wallet(i, &dir, live, tap);
+                        evidence = evidence.zip(self.wallets[i].hold_evidence.as_ref()).map(
+                            |(mut all, own)| {
+                                all.merge(own);
+                                all
+                            },
+                        );
                     }
                 }
+                // DEC-04: the B evidence of every wallet's journals (one unreadable: none, ACTIVE
+                // impossible).
+                self.hold_gate.evidence = evidence.unwrap_or_default();
                 self.fe04_refreshed = std::time::Instant::now();
-                // DEC-13b: an open position of the held attempt exits with its approval.
-                #[cfg(feature = "crate_health")]
+                // DEC-13b: an open position of a held attempt exits with its approval.
                 if live {
-                    self.fe04_exit_admission();
+                    for i in 0..self.wallets.len() {
+                        self.fe04_exit_admission(i);
+                    }
                 }
             }
         }
         self.refresh_hold_gate(false);
         // P8-CTRL.3 (review M1): the FE-06 previews at the journal refresh cadence, for the tap.
-        #[cfg(feature = "crate_health")]
         if crate::status_tap::installed().is_some() {
             self.sources
                 .capabilities
                 .refresh_previews(self.fe04_refresh);
         }
-        #[cfg(feature = "crate_health")]
         self.rebalance_observe();
-        #[cfg(feature = "crate_health")]
         self.publish_status();
         // P6-MT.1 (MT5b): the per-account SUBMITTED ownership is the book's target hold —
         // synchronized before this pass judges any result or evaluates any candidate.

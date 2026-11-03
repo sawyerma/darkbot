@@ -32,6 +32,9 @@ pub struct Fe04Admission {
     /// DEC-13b: what the pipeline's `check()` reserved in Safety for the attempt it handed off
     /// (submitted or UNKNOWN); released only by the journal settlement's booking (C3-Rest).
     pub reserved: Option<SafetyReserved>,
+    /// DEC-17b: the attempt records of the owner's other wallets — a grant's quotas and totals
+    /// count every wallet's journal (`Err`: one was never read, the quotas are unknown).
+    pub others: Result<Vec<crate::execution::accounting::AttemptRecord>, String>,
 }
 
 /// DEC-13b: the Safety reservation of an admitted attempt — its capital and worst-case inventory.
@@ -58,16 +61,18 @@ pub(crate) fn economics_known(input: &darkbot_project0::economics::CandidateInpu
 }
 
 /// P8-CTRL.5: a new attempt within its grant's limits — the attempts of this UTC day, of the
-/// grant's campaign and of the grant itself, each against its ceiling of the scope (an unreadable
-/// journal refuses).
+/// grant's campaign and of the grant itself, each against its ceiling of the scope, over this
+/// wallet's journal and `others` (DEC-17b: every wallet's; an unreadable journal refuses).
 pub(super) fn within_limits(
     journal: &Journal,
+    others: &Result<Vec<crate::execution::accounting::AttemptRecord>, String>,
     booking: &super::Fe06Attempt,
     scope: &crate::orchestration::fe06::Scope,
 ) -> Result<(), String> {
     use super::Fe06Quota;
     let records = journal.attempt_records()?;
-    let booked = || records.iter().filter_map(|r| r.fe06.as_ref());
+    let others = others.as_ref().map_err(Clone::clone)?;
+    let booked = || records.iter().chain(others).filter_map(|r| r.fe06.as_ref());
     for (quota, limit) in [
         (
             Fe06Quota::UtcDay(booking.utc_day),
@@ -182,8 +187,8 @@ pub enum Admission {
 
 impl Fe04Admission {
     /// P8-CTRL.3/.5: the admission's own facts of a use — the wallet's free SOL (its balances
-    /// less other attempts' holds and the policy reserve) and what `grant` has booked in this
-    /// wallet's journals (unreadable: unknown).
+    /// less other attempts' holds and the policy reserve) and what `grant` has booked in every
+    /// wallet's journals (DEC-17b; unreadable: unknown).
     pub(crate) fn use_facts(&self, grant: Option<&str>) -> UseFacts {
         UseFacts {
             sol_free_lamports: super::free_sol(
@@ -192,7 +197,8 @@ impl Fe04Admission {
                 &self.policy_reserve,
             ),
             booked: grant.and_then(|g| {
-                let records = self.journal.attempt_records().ok()?;
+                let mut records = self.journal.attempt_records().ok()?;
+                records.extend(self.others.as_ref().ok()?.iter().cloned());
                 super::fe06_grant_totals(&records, g)
             }),
         }
@@ -337,7 +343,7 @@ impl Fe04Admission {
                     utc_day: c.now_unix_ms / 86_400_000,
                     owner_epoch: permit.epoch(),
                 };
-                if let Err(e) = within_limits(&self.journal, &booking, scope) {
+                if let Err(e) = within_limits(&self.journal, &self.others, &booking, scope) {
                     return Admission::Refused(e);
                 }
                 Some(booking)

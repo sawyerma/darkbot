@@ -31,9 +31,4 @@ impl LedgerView {
                 .collect(),
         }
     }
-
-    /// Reads the wallet's journals; an unreadable journal is an error, never an empty ledger.
-    pub(crate) fn load(dir: &std::path::Path, wallet: &str) -> Result<Self, String> {
-        Ledger::load(dir, wallet).map(|l| Self::of(&l))
-    }
 }

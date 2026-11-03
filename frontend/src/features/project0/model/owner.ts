@@ -155,8 +155,10 @@ export interface RebalanceView {
   /** null before the first plan. */
   atUnixMs: bigint | null;
   slot: bigint;
-  trades: ReadonlyArray<{ sell: string; buy: string; amountIn: bigint; minimumOut: bigint; costUsdMicro: bigint }>;
-  blocked: ReadonlyArray<{ asset: string; reason: string }>;
+  /** DEC-17b: the planned moves between the owner's wallets (the only flow between them). */
+  transfers: ReadonlyArray<{ asset: string; fromWallet: string; toWallet: string; amount: bigint }>;
+  trades: ReadonlyArray<{ wallet: string; sell: string; buy: string; amountIn: bigint; minimumOut: bigint; costUsdMicro: bigint }>;
+  blocked: ReadonlyArray<{ wallet: string; asset: string; reason: string }>;
   quotesPending: bigint;
   budgetUsdMicro: bigint;
 }
@@ -253,6 +255,31 @@ export interface WalletsView {
   nonLanding: NonLandingView | null;
   /** DEC-04: null without an owner projection of the B hold mode. */
   holdB: HoldBView | null;
+  /** DEC-17b: every configured signer's wallet (the fields above: the pilot's). */
+  rows: readonly WalletRowView[];
+  selections: bigint;
+  selectionsNoneEligible: bigint;
+  lastNoneEligible: string;
+}
+
+/** DEC-17b: one configured signer's wallet; unknown values are null (never 0). */
+export interface WalletRowView {
+  wallet: string;
+  roles: readonly string[];
+  enabled: boolean;
+  runsCandidates: boolean;
+  /** Why it may not run a candidate now; "" while it may. */
+  blockReason: string;
+  solLamports: bigint | null;
+  freeSolLamports: bigint | null;
+  holds: ReadonlyArray<{ asset: string; units: bigint }>;
+  heldAttempt: string;
+  haltReason: string | null;
+  capitalInUseUsdMicro: bigint;
+  dayAttempts: number;
+  journalRead: boolean;
+  realizedNetUsdMicro: string | null;
+  selected: bigint;
 }
 
 /** DEC-04 (V7): the B hold mode, its evidence, Safety's reserved inventory and capital, and the

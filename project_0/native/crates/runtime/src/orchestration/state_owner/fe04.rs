@@ -152,28 +152,57 @@ impl ShadowOwner {
     /// One owner pass: apply a finished settlement read, then schedule the next step when due —
     /// the attempt first, then its open exit.
     pub(super) fn fe04_settlement(&mut self) {
-        let Some(held) = self.fe04_held.as_ref() else {
-            return;
-        };
-        let open_exit = held.open_exit_id();
-        // One read in flight at most (capacity 1).
+        // One read in flight at most (capacity 1), for the wallet it was read for (DEC-17b).
         if let Some(done) = self.remote.fe04_settlement_results.try_pop() {
-            self.fe04_settle_due = Some(std::time::Instant::now() + self.fe04_settle_retry);
-            let read = done.evidence.non_landing.clone();
-            match done.exit {
-                None => {
-                    self.apply_fe04_evidence(done.evidence);
-                    self.fe04_non_landing_step(None, read);
-                }
-                Some(id) if open_exit.as_ref() == Some(&id) => {
-                    self.apply_fe04_exit_evidence(done.evidence);
-                    self.fe04_non_landing_step(Some(id), read);
-                }
-                Some(id) => owner_log!(self, "fe04_settlement: read of exit {id} is stale"),
+            if let Some(i) = self
+                .wallets
+                .iter()
+                .position(|w| w.liquidator == done.wallet)
+            {
+                self.fe04_settlement_result(i, done);
             }
             return;
         }
-        if self
+        for i in 0..self.wallets.len() {
+            self.fe04_settlement_step(i);
+        }
+    }
+
+    /// A finished settlement read of wallet `i`: applied to what it was read for.
+    fn fe04_settlement_result(
+        &mut self,
+        i: usize,
+        done: crate::orchestration::remote_workers::Fe04SettlementResult,
+    ) {
+        let Some(held) = self.wallets[i].fe04_held.as_ref() else {
+            return;
+        };
+        let open_exit = held.open_exit_id();
+        {
+            self.wallets[i].fe04_settle_due =
+                Some(std::time::Instant::now() + self.fe04_settle_retry);
+            let read = done.evidence.non_landing.clone();
+            match done.exit {
+                None => {
+                    self.apply_fe04_evidence(i, done.evidence);
+                    self.fe04_non_landing_step(i, None, read);
+                }
+                Some(id) if open_exit.as_ref() == Some(&id) => {
+                    self.apply_fe04_exit_evidence(i, done.evidence);
+                    self.fe04_non_landing_step(i, Some(id), read);
+                }
+                Some(id) => owner_log!(self, "fe04_settlement: read of exit {id} is stale"),
+            }
+        }
+    }
+
+    /// The next settlement step of wallet `i` when due: the attempt first, then its open exit.
+    fn fe04_settlement_step(&mut self, i: usize) {
+        let Some(held) = self.wallets[i].fe04_held.as_ref() else {
+            return;
+        };
+        let open_exit = held.open_exit_id();
+        if self.wallets[i]
             .fe04_settle_due
             .is_none_or(|at| std::time::Instant::now() < at)
         {
@@ -185,38 +214,45 @@ impl ShadowOwner {
                 subject: (&intent).into(),
                 observed,
                 exit: None,
+                wallet: self.wallets[i].liquidator,
             }),
             (None, Some((intent, observed))) => Some(Fe04SettlementWork {
                 subject: (&intent).into(),
                 observed,
                 exit: open_exit,
+                wallet: self.wallets[i].liquidator,
             }),
             (None, None) => None,
         };
         let (awaits_booking, exit_awaits_booking) =
             (held.awaits_booking(), held.exit_awaits_booking());
         if let Some(work) = work {
-            self.fe04_settle_due = match self.remote.fe04_settlement_jobs.try_push(work) {
+            self.wallets[i].fe04_settle_due = match self.remote.fe04_settlement_jobs.try_push(work)
+            {
                 // In flight: the next read is scheduled when its result arrives.
                 Ok(()) => None,
                 Err(_) => retry,
             };
         } else if awaits_booking {
-            self.fe04_settle_due = retry;
-            self.apply_fe04_evidence(Default::default());
+            self.wallets[i].fe04_settle_due = retry;
+            self.apply_fe04_evidence(i, Default::default());
         } else if exit_awaits_booking {
-            self.fe04_settle_due = retry;
-            self.apply_fe04_exit_evidence(Default::default());
+            self.wallets[i].fe04_settle_due = retry;
+            self.apply_fe04_exit_evidence(i, Default::default());
         } else {
-            self.fe04_settle_due = None;
+            self.wallets[i].fe04_settle_due = None;
         }
     }
 
     /// DEC-04 (OBSERVE): the typed record of a settled attempt's holds against its finalized
     /// flows (an attempt admitted in OFF has none).
-    fn fe04_hold_flows(&mut self, s: &Settlement) {
+    fn fe04_hold_flows(&mut self, i: usize, s: &Settlement) {
         use crate::execution::hold_b::{a_flows, compare, BHold};
-        let Some(held) = self.fe04_held.as_ref().and_then(|j| j.attempt_holds()) else {
+        let Some(held) = self.wallets[i]
+            .fe04_held
+            .as_ref()
+            .and_then(|j| j.attempt_holds())
+        else {
             return;
         };
         let (Some(hold), a_wallet) = (held.hold, held.a_wallet) else {
@@ -243,13 +279,16 @@ impl ShadowOwner {
 
     /// DEC-03: the non-landing status of the held journal's latest subject with this run's
     /// latest read of it.
-    pub(super) fn fe04_non_landing_status(&self) -> Option<NonLandingStatus> {
-        let latest = self
+    pub(super) fn fe04_non_landing_status(&self, i: usize) -> Option<NonLandingStatus> {
+        let latest = self.wallets[i]
             .fe04_non_landing
             .latest
             .as_ref()
             .map(|(exit, read)| (exit.as_deref(), read));
-        self.fe04_held.as_ref()?.non_landing_status(latest)
+        self.wallets[i]
+            .fe04_held
+            .as_ref()?
+            .non_landing_status(latest)
     }
 
     /// DEC-03: after an applied read of `exit` (`None`: the attempt) — keeps its non-landing
@@ -257,6 +296,7 @@ impl ShadowOwner {
     /// contradiction (holds stay; the next read follows after `fe04_settle_retry`).
     fn fe04_non_landing_step(
         &mut self,
+        i: usize,
         exit: Option<String>,
         read: Option<Result<NonLandingRead, String>>,
     ) {
@@ -266,20 +306,20 @@ impl ShadowOwner {
             None => (None, None),
         };
         if let Some(r) = &read {
-            let same = self
+            let same = self.wallets[i]
                 .fe04_non_landing
                 .latest
                 .as_ref()
                 .is_some_and(|(e, _)| *e == exit);
-            self.fe04_non_landing.reads = if same {
-                self.fe04_non_landing.reads.saturating_add(1)
+            self.wallets[i].fe04_non_landing.reads = if same {
+                self.wallets[i].fe04_non_landing.reads.saturating_add(1)
             } else {
                 1
             };
-            self.fe04_non_landing.latest = Some((exit.clone(), r.clone()));
+            self.wallets[i].fe04_non_landing.latest = Some((exit.clone(), r.clone()));
         }
         let class = self
-            .fe04_non_landing_status()
+            .fe04_non_landing_status(i)
             .filter(|s| s.exit == exit)
             .and_then(|s| s.class);
         if class == Some(Verdict::VetoContradiction) {
@@ -306,9 +346,9 @@ impl ShadowOwner {
 
     /// The reservation book from the held journal (after a successful booking only); the
     /// per-account SUBMITTED ownership follows it (MT5b).
-    fn fe04_rebuild_book(&mut self) {
-        if let Some(j) = self.fe04_held.as_ref() {
-            self.reservations =
+    fn fe04_rebuild_book(&mut self, i: usize) {
+        if let Some(j) = self.wallets[i].fe04_held.as_ref() {
+            self.wallets[i].reservations =
                 crate::execution::reservation::WalletReservations::rebuild(j.active_hold())
                     .unwrap_or_else(|_| {
                         crate::execution::reservation::WalletReservations::unreadable()
@@ -317,7 +357,7 @@ impl ShadowOwner {
         }
     }
 
-    fn apply_fe04_evidence(&mut self, evidence: SettlementEvidence) {
+    fn apply_fe04_evidence(&mut self, i: usize, evidence: SettlementEvidence) {
         // The booking second by the wall clock (unreadable: no step, the attempt is read again).
         let Ok(now_s) = wall_unix_s() else {
             owner_log!(
@@ -326,7 +366,7 @@ impl ShadowOwner {
             );
             return;
         };
-        let Some(mut journal) = self.fe04_held.take() else {
+        let Some(mut journal) = self.wallets[i].fe04_held.take() else {
             return;
         };
         // Settled by an earlier step: booked then (or refused then, retained for the restart).
@@ -337,20 +377,21 @@ impl ShadowOwner {
             now_s,
         );
         let settled = journal.safety_replay().and_then(|r| r.settled);
-        self.fe04_held = Some(journal);
+        self.wallets[i].fe04_held = Some(journal);
         match step {
             Ok(SettleStep::Settled(_)) if settled_before => {}
             Ok(SettleStep::Settled(s)) => {
-                let (Some(unbooked), Some(settled)) = (self.fe04_unbooked, settled) else {
+                let (Some(unbooked), Some(settled)) = (self.wallets[i].fe04_unbooked, settled)
+                else {
                     return;
                 };
-                let booked = book_settlement(&mut self.safety, unbooked, &s, settled);
+                let booked = book_settlement(&mut self.wallets[i].safety, unbooked, &s, settled);
                 if booked.is_ok() {
-                    self.fe04_unbooked = None;
-                    self.fe04_rebuild_book();
+                    self.wallets[i].fe04_unbooked = None;
+                    self.fe04_rebuild_book(i);
                 }
                 // DEC-04 (OBSERVE): A, B and the finalized flows of the attempt, once.
-                self.fe04_hold_flows(&s);
+                self.fe04_hold_flows(i, &s);
                 // C02/F-04: the settlement is the one landing-telemetry path (exactly once: a
                 // repeated or restarted settlement takes the `settled_before` branch).
                 let released = if booked.is_ok() {
@@ -358,7 +399,7 @@ impl ShadowOwner {
                 } else {
                     0
                 };
-                if let Some(record) = self
+                if let Some(record) = self.wallets[i]
                     .fe04_held
                     .as_ref()
                     .and_then(|j| j.landing_record(released))
@@ -394,12 +435,12 @@ impl ShadowOwner {
     /// FE-04 exit: applies the read to the open exit; the step that settles it books it as the
     /// restart replay does (its day, realized net, the released mark) and, only when booked,
     /// rebuilds the book. A refused booking keeps the book; the restart replays the exit.
-    fn apply_fe04_exit_evidence(&mut self, evidence: SettlementEvidence) {
+    fn apply_fe04_exit_evidence(&mut self, i: usize, evidence: SettlementEvidence) {
         let Ok(now_s) = wall_unix_s() else {
             owner_log!(self, "fe04_exit: wall clock unavailable; holds retained");
             return;
         };
-        let Some(mut journal) = self.fe04_held.take() else {
+        let Some(mut journal) = self.wallets[i].fe04_held.take() else {
             return;
         };
         let booked_before = journal.safety_replay().map_or(0, |r| r.exits.len());
@@ -412,14 +453,15 @@ impl ShadowOwner {
             .safety_replay()
             .filter(|r| r.exits.len() > booked_before)
             .and_then(|r| r.exits.last().copied());
-        self.fe04_held = Some(journal);
+        self.wallets[i].fe04_held = Some(journal);
         match (step, booking) {
             (Ok(ExitStep::Settled(x)), Some(booking)) => {
-                let booked = self
-                    .safety
-                    .restore_attempt(booking.unix_s, None, Some(booking));
+                let booked =
+                    self.wallets[i]
+                        .safety
+                        .restore_attempt(booking.unix_s, None, Some(booking));
                 if booked.is_ok() {
-                    self.fe04_rebuild_book();
+                    self.fe04_rebuild_book(i);
                 }
                 owner_log!(
                     self,
@@ -476,6 +518,8 @@ pub(super) struct Fe04AdmissionFacts {
     reserved_elsewhere: std::collections::BTreeMap<String, u64>,
     policy_reserve: std::collections::BTreeMap<String, u64>,
     valid_until_slot: u64,
+    /// DEC-17b: the other wallets' attempt records the grant quotas count too.
+    others: Result<Vec<crate::execution::accounting::AttemptRecord>, String>,
 }
 
 /// DEC-13b: the admission a LIVE candidate is handed to — the open one of the same approval
@@ -567,6 +611,7 @@ pub(super) fn admission_for(
                 valid_until_slot: 0,
                 simulation: Default::default(),
                 reserved: None,
+                others: Ok(vec![]),
             }
         }
     };
@@ -576,6 +621,7 @@ pub(super) fn admission_for(
     admission.reserved_elsewhere = f.reserved_elsewhere;
     admission.policy_reserve = f.policy_reserve;
     admission.valid_until_slot = f.valid_until_slot;
+    admission.others = f.others;
     stats.block_reason.clear();
     Some(admission)
 }
@@ -602,6 +648,7 @@ impl ShadowOwner {
     /// send (`SubmissionAdapter::simulates_without_sending`).
     pub(super) fn sim_only_use_facts(
         &self,
+        i: usize,
         target: &Pubkey,
     ) -> Option<crate::execution::one_shot::admission::UseFacts> {
         use crate::execution::one_shot::{archive, fe06_grant_totals, free_sol};
@@ -610,17 +657,23 @@ impl ShadowOwner {
             return None;
         }
         let elsewhere: std::collections::BTreeMap<String, u64> =
-            [("SOL".to_string(), self.reservations.held("SOL"))].into();
-        let records = match &self.fe04_held {
+            [("SOL".to_string(), self.wallets[i].reservations.held("SOL"))].into();
+        let records = match &self.wallets[i].fe04_held {
             Some(journal) => journal.attempt_records().ok(),
-            None => self
-                .fe04_journal
-                .as_ref()
-                .and_then(|dir| archive::records(dir, &self.liquidator.to_string()).ok()),
+            None => self.fe04_journal.as_ref().and_then(|dir| {
+                archive::records(dir, &self.wallets[i].liquidator.to_string()).ok()
+            }),
         };
+        // DEC-17b: the grant's bookings in every wallet's journals.
+        let records = records
+            .zip(self.other_records(i).ok())
+            .map(|(mut own, others)| {
+                own.extend(others);
+                own
+            });
         Some(crate::execution::one_shot::admission::UseFacts {
             sol_free_lamports: free_sol(
-                &self.fe04_wallet_balances(Some(target)),
+                &self.fe04_wallet_balances(i, Some(target)),
                 &elsewhere,
                 &crate::execution::inventory::reserves(&self.inventory_targets),
             ),
@@ -636,18 +689,23 @@ impl ShadowOwner {
     /// left to the candidate, which refreshes every fact.
     pub(super) fn fe04_admission_facts(
         &self,
+        i: usize,
         target: Option<&Pubkey>,
     ) -> Result<Fe04AdmissionFacts, (String, bool)> {
         use crate::execution::one_shot::approval_file::ApprovalFile;
         // Single flight: an attempt in the held journal blocks every admission; a journal without
         // one (an unused admission of an earlier run, an archived attempt) does not (review H1).
-        if let Some(state) = self.fe04_held.as_ref().and_then(|j| j.step_state()) {
+        if let Some(state) = self.wallets[i]
+            .fe04_held
+            .as_ref()
+            .and_then(|j| j.step_state())
+        {
             return Err((format!("{ATTEMPT_HELD}:{}", state.name()), true));
         }
         let Some(dir) = self.fe04_journal.clone() else {
             return Err(("FE04_JOURNAL_NOT_CONFIGURED".into(), true));
         };
-        let status = self.approval_status();
+        let status = self.approval_status(i);
         if status.state != "VALID" {
             return Err((
                 if status.reason.is_empty() {
@@ -661,7 +719,7 @@ impl ShadowOwner {
         let Some(ApprovalSource {
             read: Ok(ApprovalFile::Attempt(approval)),
             ..
-        }) = &self.fe04_approval
+        }) = &self.wallets[i].fe04_approval
         else {
             return Err(("FE04_APPROVAL_NOT_AN_ATTEMPT".into(), true));
         };
@@ -678,14 +736,17 @@ impl ShadowOwner {
         };
         Ok(Fe04AdmissionFacts {
             dir,
-            wallet: self.liquidator.to_string(),
+            wallet: self.wallets[i].liquidator.to_string(),
             state_generation: self.st.recovery_generation(),
             program_data_hash: self.program_data_baseline_hash.to_string(),
-            balances: self.fe04_wallet_balances(target),
-            reserved_elsewhere: self.reservations.held_by_others(&[&approval.approval_id]),
+            balances: self.fe04_wallet_balances(i, target),
+            reserved_elsewhere: self.wallets[i]
+                .reservations
+                .held_by_others(&[&approval.approval_id]),
             policy_reserve: crate::execution::inventory::reserves(&self.inventory_targets),
             valid_until_slot,
             approval: approval.clone(),
+            others: self.other_records(i),
         })
     }
 
@@ -693,15 +754,21 @@ impl ShadowOwner {
     /// reads it — a reservation never handed off becomes UNKNOWN (the non-landing proof settles
     /// it), a failed write shows what reached the disk. A journal that cannot be read again leaves
     /// the book unreadable (every hold kept, no offer).
-    pub(super) fn fe04_reopen_held(&mut self) {
-        let (Some(journal), Some(dir)) = (self.fe04_held.take(), self.fe04_journal.clone()) else {
+    pub(super) fn fe04_reopen_held(&mut self, i: usize) {
+        let (Some(journal), Some(dir)) =
+            (self.wallets[i].fe04_held.take(), self.fe04_journal.clone())
+        else {
             return;
         };
         drop(journal);
-        match crate::execution::one_shot::Journal::open(&dir, &self.liquidator.to_string()) {
-            Ok(j) => self.fe04_held = Some(j),
+        match crate::execution::one_shot::Journal::open(
+            &dir,
+            &self.wallets[i].liquidator.to_string(),
+        ) {
+            Ok(j) => self.wallets[i].fe04_held = Some(j),
             Err(e) => {
-                self.reservations = crate::execution::reservation::WalletReservations::unreadable();
+                self.wallets[i].reservations =
+                    crate::execution::reservation::WalletReservations::unreadable();
                 owner_log!(
                     self,
                     "fe04_admission: journal not read again {e}; holds retained"
@@ -716,11 +783,12 @@ impl ShadowOwner {
     /// canonical state is absent (unknown): a hold of it is refused.
     pub(super) fn fe04_wallet_balances(
         &self,
+        i: usize,
         target: Option<&Pubkey>,
     ) -> std::collections::BTreeMap<String, u64> {
         let view = StateView(&self.st);
         let mut balances = std::collections::BTreeMap::new();
-        if let Some(r) = self.st.get(&self.liquidator) {
+        if let Some(r) = self.st.get(&self.wallets[i].liquidator) {
             balances.insert("SOL".to_string(), r.lamports);
         }
         let banks = target
@@ -732,7 +800,7 @@ impl ShadowOwner {
                 continue;
             };
             if let Some((_, amount)) =
-                accounts::validated_liquidator_ata(&view, &b.mint, &self.atas)
+                accounts::validated_liquidator_ata(&view, &b.mint, &self.wallets[i].atas)
             {
                 balances.insert(b.mint.to_string(), amount);
             }
@@ -744,12 +812,12 @@ impl ShadowOwner {
     /// opened and locked — is opened ahead of the first candidate, outside its hot path (the
     /// candidate refreshes every fact). An admission that cannot be opened now is tried again
     /// after the FE-04 refresh interval; the candidate's own admission reports why.
-    pub(super) fn fe04_prewarm(&mut self) {
+    pub(super) fn fe04_prewarm(&mut self, i: usize) {
         // The cheap conditions first (review L1): a Shadow pass never computes the LIVE decision.
-        if self.fe04_admission.is_some()
+        if self.wallets[i].fe04_admission.is_some()
             || self.sources.capabilities.live_requested
                 != crate::orchestration::capability_control::LIVE
-            || self
+            || self.wallets[i]
                 .fe04_prewarm_after
                 .is_some_and(|t| std::time::Instant::now() < t)
             || !self.live_effective()
@@ -757,14 +825,11 @@ impl ShadowOwner {
             return;
         }
         let mut quiet = Fe04AdmissionStats::default();
-        let facts = self.fe04_admission_facts(None);
-        self.fe04_admission = admission_for(
-            &mut self.fe04_admission,
-            &mut self.fe04_held,
-            &mut quiet,
-            facts,
-        );
-        self.fe04_prewarm_after = self
+        let facts = self.fe04_admission_facts(i, None);
+        let w = &mut self.wallets[i];
+        w.fe04_admission =
+            admission_for(&mut w.fe04_admission, &mut w.fe04_held, &mut quiet, facts);
+        self.wallets[i].fe04_prewarm_after = self.wallets[i]
             .fe04_admission
             .is_none()
             .then(|| std::time::Instant::now() + self.fe04_refresh);
@@ -778,10 +843,11 @@ impl ShadowOwner {
     /// candidate (nothing durable exists).
     pub(super) fn fe04_admission_back(
         &mut self,
+        i: usize,
         mut admission: crate::execution::one_shot::admission::Fe04Admission,
         rec: &crate::analytics::record::OpportunityRecord,
     ) {
-        let s = &mut self.fe04_admissions.simulation;
+        let s = &mut self.wallets[i].fe04_admissions.simulation;
         let a = std::mem::take(&mut admission.simulation);
         s.reused = s.reused.saturating_add(a.reused);
         s.resimulated = s.resimulated.saturating_add(a.resimulated);
@@ -794,28 +860,33 @@ impl ShadowOwner {
                 reason, ..
             }) = &rec.reason
             {
-                self.fe04_admissions.refused = self.fe04_admissions.refused.saturating_add(1);
-                self.fe04_admissions.last_refusal = reason.clone();
+                self.wallets[i].fe04_admissions.refused =
+                    self.wallets[i].fe04_admissions.refused.saturating_add(1);
+                self.wallets[i].fe04_admissions.last_refusal = reason.clone();
             }
-            self.fe04_admission = Some(admission);
+            self.wallets[i].fe04_admission = Some(admission);
             return;
         };
         let submitted = matches!(rec.decision, Decision::Submitted);
         if submitted {
-            self.fe04_admissions.submitted = self.fe04_admissions.submitted.saturating_add(1);
+            self.wallets[i].fe04_admissions.submitted =
+                self.wallets[i].fe04_admissions.submitted.saturating_add(1);
         } else {
-            self.fe04_admissions.unknown = self.fe04_admissions.unknown.saturating_add(1);
+            self.wallets[i].fe04_admissions.unknown =
+                self.wallets[i].fe04_admissions.unknown.saturating_add(1);
         }
-        self.fe04_held = Some(admission.journal);
+        self.wallets[i].fe04_held = Some(admission.journal);
         if !submitted {
-            self.fe04_reopen_held();
+            self.fe04_reopen_held(i);
         }
-        self.fe04_unbooked = Some(Fe04Unbooked {
+        self.wallets[i].fe04_unbooked = Some(Fe04Unbooked {
             reserved_capital: Some(reserved.capital),
             reserved_inventory: reserved.inventory,
         });
-        self.fe04_settle_due = Some(std::time::Instant::now());
-        self.fe04_rebuild_book();
+        self.wallets[i].fe04_settle_due = Some(std::time::Instant::now());
+        self.fe04_rebuild_book(i);
+        // DEC-17b: its booking counts in every wallet's grant quotas at once.
+        self.refresh_records(i);
         owner_log!(
             self,
             "fe04_admission: attempt {} handed off decision={:?} capital_usd_micro={} inventory_usd_micro={}",
@@ -834,15 +905,15 @@ impl ShadowOwner {
     /// deadline; admitted once (`admit_exit`: reserve, UNKNOWN handoff, one submit) and then
     /// read and booked by the settlement like every exit. An UNKNOWN exit halts Safety and keeps
     /// every hold. Called at the FE-04 refresh cadence.
-    pub(super) fn fe04_exit_admission(&mut self) {
+    pub(super) fn fe04_exit_admission(&mut self, i: usize) {
         use crate::execution::one_shot::admission::Admission;
         use crate::execution::one_shot::approval_file::ApprovalFile;
         use crate::execution::one_shot::exit_admission::{admit_exit, ExitCandidate};
         // An UNKNOWN exit ends the exits of this run (review L4): its holds stay, it is settled.
-        if !self.exit_live_effective() || self.fe04_admissions.exits_unknown > 0 {
+        if !self.exit_live_effective() || self.wallets[i].fe04_admissions.exits_unknown > 0 {
             return;
         }
-        let Some(held) = self.fe04_held.as_ref() else {
+        let Some(held) = self.wallets[i].fe04_held.as_ref() else {
             return;
         };
         if held.open_exit_id().is_some() {
@@ -852,7 +923,7 @@ impl ShadowOwner {
         let Some(ApprovalSource {
             read: Ok(ApprovalFile::Exit(approval)),
             ..
-        }) = &self.fe04_approval
+        }) = &self.wallets[i].fe04_approval
         else {
             return;
         };
@@ -865,9 +936,9 @@ impl ShadowOwner {
         };
         let approval = approval.clone();
         let refuse = |o: &mut Self, reason: String| {
-            o.fe04_admissions.last_exit_refusal = reason;
+            o.wallets[i].fe04_admissions.last_exit_refusal = reason;
         };
-        let status = self.approval_status();
+        let status = self.approval_status(i);
         if status.state != "VALID" {
             return refuse(
                 self,
@@ -892,28 +963,34 @@ impl ShadowOwner {
         };
         // A WSOL position is unwrapped locally (no router); every other mint is sold to SOL.
         let route = if mint == wsol {
-            crate::execution::route::unwrap_exit_route(&self.payer.pubkey(), units)
+            crate::execution::route::unwrap_exit_route(&self.wallets[i].payer.pubkey(), units)
         } else {
             // P6-MT.7: an exit may take every token of Jupiter's bucket.
+            // DEC-17b: the wallet's own sale.
             self.routes
+                .for_taker(self.wallets[i].liquidator)
                 .for_class(crate::execution::route::JupiterClass::Exit)
                 .exit_to_sol(&mint, units, deadline)
         };
         let route = match route {
             Ok(r) => r,
             Err(e) => {
-                self.fe04_admissions.exits_refused =
-                    self.fe04_admissions.exits_refused.saturating_add(1);
+                self.wallets[i].fe04_admissions.exits_refused = self.wallets[i]
+                    .fe04_admissions
+                    .exits_refused
+                    .saturating_add(1);
                 return refuse(self, e);
             }
         };
         let view = StateView(&self.st);
         let mut balances = std::collections::BTreeMap::new();
-        if let Some(r) = self.st.get(&self.liquidator) {
+        if let Some(r) = self.st.get(&self.wallets[i].liquidator) {
             balances.insert("SOL".to_string(), r.lamports);
         }
         for m in [mint, wsol] {
-            if let Some((_, amount)) = accounts::validated_liquidator_ata(&view, &m, &self.atas) {
+            if let Some((_, amount)) =
+                accounts::validated_liquidator_ata(&view, &m, &self.wallets[i].atas)
+            {
                 balances.insert(m.to_string(), amount);
             }
         }
@@ -922,8 +999,13 @@ impl ShadowOwner {
         let unwrap_payout_lamports = (mint == wsol)
             .then(|| {
                 let token: Pubkey = protocol::TOKEN_PROGRAM_ID.parse().ok()?;
-                let own = accounts::associated_token_address(&self.payer.pubkey(), &wsol, &token);
-                let (ata, _) = accounts::validated_liquidator_ata(&view, &wsol, &self.atas)?;
+                let own = accounts::associated_token_address(
+                    &self.wallets[i].payer.pubkey(),
+                    &wsol,
+                    &token,
+                );
+                let (ata, _) =
+                    accounts::validated_liquidator_ata(&view, &wsol, &self.wallets[i].atas)?;
                 let rent =
                     crate::execution::builder::p0::rent_exempt_lamports(&view, TOKEN_ACCOUNT_SPACE)
                         .ok()?;
@@ -931,11 +1013,25 @@ impl ShadowOwner {
             })
             .flatten();
         // DEC-18 §4.3: an exit is signed; a read-only measurement holds no private key.
-        let Some(payer) = self.payer.signer() else {
+        if self.wallets[i].payer.signer().is_none() {
             return refuse(
                 self,
                 "EXIT_SIGNER_UNAVAILABLE: no private key on a read-only path".into(),
             );
+        }
+        // P8-CTRL.5: the exit realizes its attempt's open position — that hold (units and the
+        // exit reserve) is its own, never another's.
+        let reserved_elsewhere = self.wallets[i]
+            .reservations
+            .held_by_others(&[&approval.approval_id, &approval.attempt_approval_id]);
+        let others = self.other_records(i);
+        let w = &mut self.wallets[i];
+        let Some(mut journal) = w.fe04_held.take() else {
+            return;
+        };
+        let Some(payer) = w.payer.signer() else {
+            w.fe04_held = Some(journal);
+            return;
         };
         let candidate = ExitCandidate {
             route: &route,
@@ -950,17 +1046,11 @@ impl ShadowOwner {
             state_valid: self.st.run_state().is_tradable() && !self.program_upgrade_latched,
             balances,
             unwrap_payout_lamports,
-            // P8-CTRL.5: the exit realizes its attempt's open position — that hold (units and the
-            // exit reserve) is its own, never another's.
-            reserved_elsewhere: self
-                .reservations
-                .held_by_others(&[&approval.approval_id, &approval.attempt_approval_id]),
+            reserved_elsewhere,
             policy_reserve: crate::execution::inventory::reserves(&self.inventory_targets),
+            others,
             deadline,
             clock: &self.clock,
-        };
-        let Some(mut journal) = self.fe04_held.take() else {
-            return;
         };
         let admitted = admit_exit(
             &mut journal,
@@ -969,8 +1059,8 @@ impl ShadowOwner {
             &self.submitter,
             Some(&self.sources.live_gates()),
         );
-        self.fe04_held = Some(journal);
-        let s = &mut self.fe04_admissions;
+        self.wallets[i].fe04_held = Some(journal);
+        let s = &mut self.wallets[i].fe04_admissions;
         match admitted {
             Admission::Submitted(ack, _) => {
                 s.exits_submitted = s.exits_submitted.saturating_add(1);
@@ -984,12 +1074,14 @@ impl ShadowOwner {
             Admission::Unknown(reason) => {
                 s.exits_unknown = s.exits_unknown.saturating_add(1);
                 s.last_exit_refusal = reason;
-                self.safety
+                self.wallets[i]
+                    .safety
                     .halt(darkbot_common::error::HaltReason::UnknownEconomics);
-                self.fe04_reopen_held();
+                self.fe04_reopen_held(i);
             }
         }
-        self.fe04_settle_due = Some(std::time::Instant::now());
-        self.fe04_rebuild_book();
+        self.wallets[i].fe04_settle_due = Some(std::time::Instant::now());
+        self.fe04_rebuild_book(i);
+        self.refresh_records(i);
     }
 }

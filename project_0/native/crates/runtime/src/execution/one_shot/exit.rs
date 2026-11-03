@@ -950,11 +950,21 @@ pub(crate) mod tests {
         )
         .unwrap();
         assert_eq!(
-            super::super::exit_admission::within_exit_limit(&j, &booking("g1"), &scope),
+            super::super::exit_admission::within_exit_limit(
+                &j,
+                &Ok(vec![]),
+                &booking("g1"),
+                &scope
+            ),
             Err("FE06_EXIT_LIMIT_GRANT: 1 of 1 exits used".into())
         );
         assert_eq!(
-            super::super::exit_admission::within_exit_limit(&j, &booking("g2"), &scope),
+            super::super::exit_admission::within_exit_limit(
+                &j,
+                &Ok(vec![]),
+                &booking("g2"),
+                &scope
+            ),
             Ok(())
         );
         drop(j);

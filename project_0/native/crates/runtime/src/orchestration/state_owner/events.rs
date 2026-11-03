@@ -745,8 +745,13 @@ impl ShadowOwner {
                     }
                 }
                 let required_now = scan.keys;
-                let optional_now =
-                    ata_candidates_for_bank(&view, &self.program, &bk, &self.liquidator);
+                // DEC-17b: the bank's ATAs of every wallet that runs candidates.
+                let optional_now: Vec<Pubkey> = self
+                    .wallets
+                    .iter()
+                    .filter(|w| w.runs_candidates())
+                    .flat_map(|w| ata_candidates_for_bank(&view, &self.program, &bk, &w.liquidator))
+                    .collect();
                 let new_required: Vec<Pubkey> = required_now
                     .into_iter()
                     .filter(|k| !self.required_set.contains(k))
@@ -997,7 +1002,7 @@ impl ShadowOwner {
                                             };
                                             let projection_plan = tx::TxPlan {
                                                 version: tx::BuildVersion::V0,
-                                                payer: self.liquidator,
+                                                payer: self.wallets[0].liquidator,
                                                 instructions: refreshes,
                                                 lookup_tables: vec![].into(),
                                                 resources: self.resources,

@@ -45,23 +45,29 @@ pub struct ExitCandidate<'a> {
     pub unwrap_payout_lamports: Option<u64>,
     pub reserved_elsewhere: BTreeMap<String, u64>,
     pub policy_reserve: BTreeMap<String, u64>,
+    /// DEC-17b: the attempt records of the owner's other wallets — a grant's exit limit and
+    /// totals count every wallet's journal (`Err`: one was never read, unknown).
+    pub others: Result<Vec<crate::execution::accounting::AttemptRecord>, String>,
     pub deadline: std::time::Instant,
     /// S4-04: the clock `T_handoff` is read on, immediately before the adapter call.
     pub clock: &'a darkbot_common::timing::Clock,
 }
 
 /// P8-CTRL.5: a new exit within its grant's exit limit — the exits booked against the grant in
-/// the wallet's journals (archived and active), against the scope's `max_exits_grant` (an
-/// unreadable journal refuses).
+/// the wallet's journals (archived and active) and in `others` (DEC-17b: every wallet's), against
+/// the scope's `max_exits_grant` (an unreadable journal refuses).
 pub(super) fn within_exit_limit(
     journal: &Journal,
+    others: &Result<Vec<crate::execution::accounting::AttemptRecord>, String>,
     booking: &super::Fe06Attempt,
     scope: &crate::orchestration::fe06::Scope,
 ) -> Result<(), String> {
+    let records = journal.attempt_records()?;
+    let others = others.as_ref().map_err(Clone::clone)?;
     let used = super::Fe06Quota::Grant(&booking.grant).used(
-        journal
-            .attempt_records()?
+        records
             .iter()
+            .chain(others)
             .flat_map(|r| r.exits.iter())
             .filter_map(|e| e.fe06.as_ref())
             .collect::<Vec<_>>(),
@@ -100,7 +106,8 @@ fn exit_use(
         priority_fee_lamports,
         sol_free_lamports: super::free_sol(&c.balances, &c.reserved_elsewhere, &c.policy_reserve),
         booked: grant.and_then(|g| {
-            let records = journal.attempt_records().ok()?;
+            let mut records = journal.attempt_records().ok()?;
+            records.extend(c.others.as_ref().ok()?.iter().cloned());
             super::fe06_grant_totals(&records, g)
         }),
         slippage_bps,
@@ -292,7 +299,7 @@ pub fn admit_exit(
                 utc_day: c.now_unix_ms / 86_400_000,
                 owner_epoch: permit.epoch(),
             };
-            if let Err(e) = within_exit_limit(journal, &booking, scope) {
+            if let Err(e) = within_exit_limit(journal, &c.others, &booking, scope) {
                 return Admission::Refused(e);
             }
             Some(booking)

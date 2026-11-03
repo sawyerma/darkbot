@@ -159,8 +159,9 @@ export function toLiquidatorView(m: LiquidatorState): LiquidatorView {
           mode: m.rebalance.mode,
           atUnixMs: m.rebalance.atUnixMs ?? null,
           slot: m.rebalance.slot,
-          trades: m.rebalance.trades.map((t) => ({ sell: t.sell, buy: t.buy, amountIn: t.amountIn, minimumOut: t.minimumOut, costUsdMicro: t.costUsdMicro })),
-          blocked: m.rebalance.blocked.map((b) => ({ asset: b.asset, reason: b.reason })),
+          transfers: m.rebalance.transfers.map((t) => ({ asset: t.asset, fromWallet: t.fromWallet, toWallet: t.toWallet, amount: t.amount })),
+          trades: m.rebalance.trades.map((t) => ({ wallet: t.wallet, sell: t.sell, buy: t.buy, amountIn: t.amountIn, minimumOut: t.minimumOut, costUsdMicro: t.costUsdMicro })),
+          blocked: m.rebalance.blocked.map((b) => ({ wallet: b.wallet, asset: b.asset, reason: b.reason })),
           quotesPending: m.rebalance.quotesPending,
           budgetUsdMicro: m.rebalance.budgetUsdMicro,
         }
@@ -292,6 +293,26 @@ export function toWalletsView(m: WalletsState): WalletsView {
           : null,
       }
       : null,
+    rows: m.rows.map((r) => ({
+      wallet: r.wallet,
+      roles: [...r.roles],
+      enabled: r.enabled,
+      runsCandidates: r.runsCandidates,
+      blockReason: r.blockReason,
+      solLamports: optional(r.solLamports),
+      freeSolLamports: optional(r.freeSolLamports),
+      holds: amounts(r.holds),
+      heldAttempt: r.heldAttempt,
+      haltReason: r.haltReason ?? null,
+      capitalInUseUsdMicro: r.capitalInUseUsdMicro,
+      dayAttempts: r.dayAttempts,
+      journalRead: r.journalRead,
+      realizedNetUsdMicro: decimal(r.realizedNetUsdMicro),
+      selected: r.selected,
+    })),
+    selections: m.selections,
+    selectionsNoneEligible: m.selectionsNoneEligible,
+    lastNoneEligible: m.lastNoneEligible,
   };
 }
 

@@ -37,7 +37,7 @@ impl ShadowOwner {
             at_unix_ms,
             run_id: self.run_id.clone(),
             mode: self.mode.clone(),
-            wallet: self.liquidator.to_string(),
+            wallet: self.pilot().liquidator.to_string(),
             program_id: self.program.to_string(),
             end_result: self.end_result.map(String::from),
             engine: self.engine_status(),
@@ -62,11 +62,13 @@ impl ShadowOwner {
                 threshold: self.threshold_status(),
             },
             pipeline: self.pipeline_status(),
-            safety: self.safety_status(),
+            // DEC-17b: the pilot's Safety, journal, approval and admission; every wallet's in
+            // the Wallets rows.
+            safety: self.safety_status(0),
             capabilities: self.capabilities(),
-            wallets: self.wallets_status(),
-            approval: self.approval_status(),
-            admission: self.admission_status(),
+            wallets: self.wallets_status(0),
+            approval: self.approval_status(0),
+            admission: self.admission_status(0),
             finance: self.finance_status(),
             rebalance: self.rebalance.projection(self.st.highest_slot()),
             sources: self.sources_status(),
@@ -144,18 +146,18 @@ impl ShadowOwner {
         }
     }
 
-    fn safety_status(&self) -> OwnerSafety {
-        let limits = self.safety.limits();
-        let day = self.safety.day();
+    fn safety_status(&self, i: usize) -> OwnerSafety {
+        let limits = self.wallets[i].safety.limits();
+        let day = self.wallets[i].safety.day();
         OwnerSafety {
-            capital_in_use_usd_micro: self.safety.capital_in_use(),
+            capital_in_use_usd_micro: self.wallets[i].safety.capital_in_use(),
             max_total_capital_usd_micro: limits.max_total_capital,
             max_daily_loss_usd_micro: limits.max_daily_loss,
             max_exposure_per_attempt_usd_micro: limits.max_exposure_per_attempt,
             max_concurrent_positions: limits.max_concurrent_positions,
             max_outstanding_attempts: limits.max_outstanding_attempts,
             max_failed_attempts_per_day: limits.max_failed_attempts_per_day,
-            halt_reason: self.safety.halted().map(|r| format!("{r:?}")),
+            halt_reason: self.wallets[i].safety.halted().map(|r| format!("{r:?}")),
             day_realized_usd_micro: day.realized_pnl,
             day_failed_attempts: day.failed_attempts,
             day_attempts: day.attempts,
@@ -333,16 +335,17 @@ impl ShadowOwner {
                     s.max_attempts_campaign = scope.max_attempts_campaign;
                     s.max_attempts_grant = scope.max_attempts_grant;
                     s.max_exits_grant = scope.max_exits_grant;
-                    if let Some(Ok(view)) = &self.ledger_view {
+                    // DEC-17b: the bookings of every wallet's journals.
+                    if let Some(views) = self.ledger_views() {
                         use crate::execution::one_shot::Fe06Quota;
+                        let bookings = || views.iter().flat_map(|v| &v.bookings);
+                        let exits = || views.iter().flat_map(|v| &v.exit_bookings);
                         let day = super::accounts::wall_unix_s().ok().map(|n| n / 86_400);
-                        s.attempts_today = day.map(|d| Fe06Quota::UtcDay(d).used(&view.bookings));
+                        s.attempts_today = day.map(|d| Fe06Quota::UtcDay(d).used(bookings()));
                         s.attempts_campaign =
-                            Some(Fe06Quota::Campaign(&scope.campaign_id).used(&view.bookings));
-                        s.attempts_grant =
-                            Some(Fe06Quota::Grant(grant.digest()).used(&view.bookings));
-                        s.exits_grant =
-                            Some(Fe06Quota::Grant(grant.digest()).used(&view.exit_bookings));
+                            Some(Fe06Quota::Campaign(&scope.campaign_id).used(bookings()));
+                        s.attempts_grant = Some(Fe06Quota::Grant(grant.digest()).used(bookings()));
+                        s.exits_grant = Some(Fe06Quota::Grant(grant.digest()).used(exits()));
                     }
                 }
                 if !s.in_force {
@@ -381,15 +384,15 @@ impl ShadowOwner {
         c.fe06_evidence.clone()
     }
 
-    fn wallets_status(&self) -> OwnerWallets {
+    fn wallets_status(&self, i: usize) -> OwnerWallets {
         let mut holds: std::collections::BTreeMap<String, u64> = Default::default();
-        for (_, attempt) in self.reservations.attempts() {
+        for (_, attempt) in self.wallets[i].reservations.attempts() {
             for (asset, units) in attempt {
                 let held = holds.entry(asset.clone()).or_default();
                 *held = held.saturating_add(*units);
             }
         }
-        let (journal_read, verdict, unknown_reasons, totals) = match &self.ledger_view {
+        let (journal_read, verdict, unknown_reasons, totals) = match &self.wallets[i].ledger_view {
             Some(Ok(view)) => (
                 true,
                 view.verdict.name().to_string(),
@@ -419,23 +422,72 @@ impl ShadowOwner {
             totals,
             holds,
             policy_reserves: crate::execution::inventory::reserves(&self.inventory_targets),
-            held_attempt: self
+            held_attempt: self.wallets[i]
                 .fe04_held
                 .as_ref()
                 .and_then(|j| j.step_state())
                 .map_or("NONE", |s| s.name()),
-            non_landing: self.non_landing_projection(),
-            hold_b: Some(self.hold_b_projection()),
+            non_landing: self.non_landing_projection(i),
+            hold_b: Some(self.hold_b_projection(i)),
+            rows: (0..self.wallets.len())
+                .map(|j| self.wallet_row(j))
+                .collect(),
+            selections: self.wallet_selection.selections,
+            none_eligible: self.wallet_selection.none_eligible,
+            last_none_eligible: self.wallet_selection.last_none_eligible.clone(),
+        }
+    }
+
+    /// DEC-17b: wallet `i`'s row — roles, switch, why it may not run a candidate now (in the
+    /// effective mode), its SOL, holds, held attempt, Safety, journal and this run's choices.
+    fn wallet_row(&self, i: usize) -> crate::status_tap::OwnerWalletRow {
+        let w = &self.wallets[i];
+        let mut holds: std::collections::BTreeMap<String, u64> = Default::default();
+        for (_, attempt) in w.reservations.attempts() {
+            for (asset, units) in attempt {
+                let held = holds.entry(asset.clone()).or_default();
+                *held = held.saturating_add(*units);
+            }
+        }
+        let view = w.ledger_view.as_ref().and_then(|v| v.as_ref().ok());
+        crate::status_tap::OwnerWalletRow {
+            wallet: w.liquidator.to_string(),
+            roles: w.roles.clone(),
+            enabled: self
+                .sources
+                .capabilities
+                .wallets
+                .iter()
+                .any(|s| s.pubkey == w.liquidator && s.enabled),
+            runs_candidates: w.runs_candidates(),
+            block_reason: self
+                .wallet_eligible(i, self.live_effective())
+                .err()
+                .unwrap_or_default(),
+            sol_lamports: self.st.get(&w.liquidator).map(|r| r.lamports),
+            free_sol_lamports: self.wallet_free_sol(i),
+            holds,
+            held_attempt: w
+                .fe04_held
+                .as_ref()
+                .and_then(|j| j.step_state())
+                .map_or("NONE", |s| s.name()),
+            halt_reason: w.safety.halted().map(|r| format!("{r:?}")),
+            capital_in_use_usd_micro: w.safety.capital_in_use(),
+            day_attempts: w.safety.day().attempts,
+            journal_read: view.is_some(),
+            realized_net_usd_micro: view.and_then(|v| v.totals.realized_net_usd_micro),
+            selected: w.selected,
         }
     }
 
     /// DEC-03: the Wallets non-landing status from the held journal and this run's latest read
     /// of the same subject; without a read in this run, a released subject shows its persisted
     /// release (its usable B operators, C negative).
-    fn non_landing_projection(&self) -> Option<crate::status_tap::OwnerNonLanding> {
+    fn non_landing_projection(&self, i: usize) -> Option<crate::status_tap::OwnerNonLanding> {
         use crate::execution::one_shot::non_landing::Verdict;
-        let s = self.fe04_non_landing_status()?;
-        let read = self
+        let s = self.fe04_non_landing_status(i)?;
+        let read = self.wallets[i]
             .fe04_non_landing
             .latest
             .as_ref()
@@ -470,7 +522,7 @@ impl ShadowOwner {
             calls: read.map(|r| r.calls),
             bytes: read.map(|r| r.bytes),
             reads: if read.is_some() {
-                self.fe04_non_landing.reads
+                self.wallets[i].fe04_non_landing.reads
             } else {
                 0
             },
@@ -479,7 +531,7 @@ impl ShadowOwner {
 
     /// DEC-04: the B hold mode with its evidence, Safety's reserved inventory and capital, and
     /// the held attempt's A, B and finalized flows (every asset of a prediction or of the deltas).
-    fn hold_b_projection(&self) -> crate::status_tap::OwnerHoldB {
+    fn hold_b_projection(&self, i: usize) -> crate::status_tap::OwnerHoldB {
         use crate::execution::hold_b::{a_flows, compare, AssetFlow, BHold};
         use crate::status_tap::{OwnerHoldAttempt, OwnerHoldFlow};
         let rows = |predicted: &std::collections::BTreeMap<String, AssetFlow>,
@@ -509,7 +561,7 @@ impl ShadowOwner {
             }
         };
         let e = &self.hold_gate.evidence;
-        let attempt = self
+        let attempt = self.wallets[i]
             .fe04_held
             .as_ref()
             .and_then(|j| j.attempt_holds())
@@ -553,8 +605,8 @@ impl ShadowOwner {
             evidence_exact: e.exact,
             evidence_underestimated: e.underestimated,
             evidence_unqualified: e.unqualified,
-            inventory_reserved_usd_micro: self.safety.inventory_reserved(),
-            capital_in_use_usd_micro: self.safety.capital_in_use(),
+            inventory_reserved_usd_micro: self.wallets[i].safety.inventory_reserved(),
+            capital_in_use_usd_micro: self.wallets[i].safety.capital_in_use(),
             attempt,
         }
     }
@@ -565,21 +617,25 @@ impl ShadowOwner {
     /// BLOCKED by a held attempt, a Safety halt or the last LIVE candidate's refusal; READY with
     /// an open admission (S4-04: opened ahead of the first LIVE candidate); WAITING while none is
     /// open yet (the candidate's own admission reports why it cannot be) — and this run's counters.
-    fn admission_status(&self) -> crate::status_tap::OwnerAdmission {
-        let a = &self.fe04_admissions;
+    fn admission_status(&self, i: usize) -> crate::status_tap::OwnerAdmission {
+        let a = &self.wallets[i].fe04_admissions;
         let (state, block_reason) = if !self.live_effective() {
             let (_, reason) =
                 crate::orchestration::capability_control::live_decision(&self.sources.live_gates());
             ("OFF", reason)
-        } else if let Some(state) = self.fe04_held.as_ref().and_then(|j| j.step_state()) {
+        } else if let Some(state) = self.wallets[i]
+            .fe04_held
+            .as_ref()
+            .and_then(|j| j.step_state())
+        {
             // Single flight: the held attempt blocks every admission.
             ("BLOCKED", format!("FE04_ATTEMPT_HELD:{}", state.name()))
-        } else if let Some(halt) = self.safety.halted() {
+        } else if let Some(halt) = self.wallets[i].safety.halted() {
             ("BLOCKED", format!("SAFETY_HALTED:{}", halt.as_str()))
         } else if !a.block_reason.is_empty() {
             // The last LIVE candidate's refusal.
             ("BLOCKED", a.block_reason.clone())
-        } else if self.fe04_admission.is_some() {
+        } else if self.wallets[i].fe04_admission.is_some() {
             ("READY", String::new())
         } else {
             ("WAITING", String::new())
@@ -604,9 +660,10 @@ impl ShadowOwner {
 
     pub(super) fn approval_status(
         &self,
+        i: usize,
     ) -> crate::execution::one_shot::approval_file::ApprovalStatus {
         use crate::execution::one_shot::approval_file::{self, Usage};
-        let Some(source) = &self.fe04_approval else {
+        let Some(source) = &self.wallets[i].fe04_approval else {
             return approval_file::status(None, &Default::default(), 0, &Usage::Free);
         };
         let now_unix_s = (self.clock.unix_ns(self.clock.now_ns()) / 1_000_000_000) as u64;
@@ -623,19 +680,39 @@ impl ShadowOwner {
         format!("{}-{}", self.run_id, self.status_seq)
     }
 
-    /// The finance summary: reserved capital from Safety, realized net from the settled steps;
-    /// totals and withdrawable profit need reconciled wallet balances and stay unknown. VERIFIED
-    /// only with every field known and every step settled; PARTIAL once the journal was read.
+    /// DEC-17b: the FE-04 accounting of every wallet that runs candidates (`None`: one was not
+    /// read or is unreadable — a sum over the others would be smaller than the truth).
+    fn ledger_views(&self) -> Option<Vec<&status_view::LedgerView>> {
+        self.wallets
+            .iter()
+            .filter(|w| w.runs_candidates())
+            .map(|w| w.ledger_view.as_ref().and_then(|v| v.as_ref().ok()))
+            .collect()
+    }
+
+    /// The finance summary over every wallet (DEC-17b): reserved capital from their Safety,
+    /// realized net from their settled steps; totals and withdrawable profit need reconciled
+    /// wallet balances and stay unknown. VERIFIED only with every field known and every step
+    /// settled; PARTIAL once every journal was read.
     fn finance_status(&self) -> OwnerFinance {
-        let view = self.ledger_view.as_ref().and_then(|v| v.as_ref().ok());
+        let views = self.ledger_views();
+        let reserved = self
+            .wallets
+            .iter()
+            .try_fold(0u64, |sum, w| sum.checked_add(w.safety.capital_in_use()));
+        let realized = views.as_ref().and_then(|vs| {
+            vs.iter().try_fold(0i128, |sum, v| {
+                sum.checked_add(v.totals.realized_net_usd_micro?)
+            })
+        });
         let mut f = OwnerFinance {
             as_of_slot: self.st.highest_slot(),
             total_capital_usd_micro: None,
             available_capital_usd_micro: None,
-            reserved_capital_usd_micro: Some(i128::from(self.safety.capital_in_use())),
-            realized_net_pnl_usd_micro: view.and_then(|v| v.totals.realized_net_usd_micro),
+            reserved_capital_usd_micro: reserved.map(i128::from),
+            realized_net_pnl_usd_micro: realized,
             withdrawable_profit_usd_micro: None,
-            transferred_to_treasury_usd_micro: view.map(|_| 0),
+            transferred_to_treasury_usd_micro: views.as_ref().map(|_| 0),
             status: "UNKNOWN",
         };
         let complete = [
@@ -648,9 +725,9 @@ impl ShadowOwner {
         ]
         .iter()
         .all(Option::is_some);
-        f.status = match view.map(|v| &v.verdict) {
+        f.status = match &views {
             None => "UNKNOWN",
-            Some(Verdict::Unknown(_)) => "PARTIAL",
+            Some(vs) if vs.iter().any(|v| matches!(v.verdict, Verdict::Unknown(_))) => "PARTIAL",
             Some(_) if complete => "VERIFIED",
             Some(_) => "PARTIAL",
         };

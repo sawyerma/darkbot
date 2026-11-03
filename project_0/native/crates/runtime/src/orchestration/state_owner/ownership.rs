@@ -8,8 +8,8 @@ use super::*;
 use crate::execution::ownership::{Deferred, PendingRevision, Refusal, Submission};
 
 impl ShadowOwner {
-    /// Strict synchronization of SUBMITTED with the reservation book: every target the book
-    /// holds (reserved, handed off with an UNKNOWN outcome, or an open exit — also reopened
+    /// Strict synchronization of SUBMITTED with the reservation books (DEC-17b: every wallet's):
+    /// every target a book holds (reserved, handed off with an UNKNOWN outcome, or an open exit — also reopened
     /// from the journal after a restart) is SUBMITTED with the attempt's bound signature and
     /// `last_valid_block_height`; a target the book no longer holds (released by the FE-04
     /// settlement path) is RELEASED and its pending revision re-armed. Idempotent; called
@@ -17,7 +17,7 @@ impl ShadowOwner {
     pub(super) fn sync_ownership(&mut self) {
         let mut held: Vec<(Pubkey, Submission)> = Vec::new();
         let mut unparsable = 0u64;
-        for (target, hold) in self.reservations.targets() {
+        for (target, hold) in self.wallets.iter().flat_map(|w| w.reservations.targets()) {
             match target.parse::<Pubkey>() {
                 Ok(account) => held.push((
                     account,

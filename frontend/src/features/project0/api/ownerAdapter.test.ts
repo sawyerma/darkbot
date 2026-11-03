@@ -51,8 +51,10 @@ describe("Project 0 owner wire contract (golden frames written by the Rust repor
     expect(liquidator.capabilities[0]).toMatchObject({ name: "LIVE", effective: "BLOCKED" });
     // B01: the rebalancing plan (planned, never traded) as the owner published it.
     expect(liquidator.rebalance?.mode).toBe("OBSERVE");
-    expect(liquidator.rebalance?.trades[0]).toMatchObject({ sell: "SOL", amountIn: 3_000_000_000n, minimumOut: 450_000_000n, costUsdMicro: 1_250_000n });
-    expect(liquidator.rebalance?.blocked[0]).toEqual({ asset: "PREHELD", reason: "INVENTORY_BALANCE_UNKNOWN" });
+    const pilot = "11111111111111111111111111111112";
+    expect(liquidator.rebalance?.trades[0]).toMatchObject({ wallet: pilot, sell: "SOL", amountIn: 3_000_000_000n, minimumOut: 450_000_000n, costUsdMicro: 1_250_000n });
+    expect(liquidator.rebalance?.blocked[0]).toEqual({ wallet: pilot, asset: "PREHELD", reason: "INVENTORY_BALANCE_UNKNOWN" });
+    expect(liquidator.rebalance?.transfers).toEqual([]);
     // S1-02: the applied source controls and the owner's last decision.
     expect(liquidator.sources.map((s) => [s.unit, s.mode, s.canonical])).toEqual([["geyser:publicnode", "observe", false], ["wss", "active", true]]);
     expect(liquidator.lastSourceDecision).toEqual({ seq: 3n, request: "geyser:publicnode active", applied: false, detail: "SOURCE_ACTIVE_REQUIRES_QUALIFICATION" });
@@ -89,6 +91,14 @@ describe("Project 0 owner wire contract (golden frames written by the Rust repor
     expect(liquidator.endResult).toBe("");
     expect(finance.snapshotId).toBe(wallets.financeSnapshotId);
     expect(wallets.policyReserves).toEqual([{ asset: "SOL", units: 50_000_000n }]);
+    // DEC-17b: every configured signer's wallet, with this run's choices.
+    expect(wallets.rows).toEqual([{
+      wallet: "11111111111111111111111111111112", roles: ["LIQUIDATOR", "FEE_PAYER"], enabled: true,
+      runsCandidates: true, blockReason: "", solLamports: 5_000_000_000n, freeSolLamports: 4_950_000_000n,
+      holds: [{ asset: "SOL", units: 0n }], heldAttempt: "NONE", haltReason: null, capitalInUseUsdMicro: 0n,
+      dayAttempts: 0, journalRead: true, realizedNetUsdMicro: "0", selected: 7n,
+    }]);
+    expect([wallets.selections, wallets.selectionsNoneEligible, wallets.lastNoneEligible]).toEqual([7n, 0n, ""]);
   });
 
   it("DEC-03: decodes the N-2 non-landing status; none without a held attempt", () => {

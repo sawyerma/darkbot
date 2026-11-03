@@ -1832,6 +1832,7 @@ fn admission(
         valid_until_slot: 160,
         simulation: Default::default(),
         reserved: None,
+        others: Ok(vec![]),
     }
 }
 /// V2-15 (P9-01b): the handoff is validated against the time and slot at the handoff, not at

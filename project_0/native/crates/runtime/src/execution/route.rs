@@ -441,6 +441,15 @@ impl JupiterV2RouteProvider {
         self
     }
 
+    /// DEC-17b: this router for the swaps of `taker` (another of the owner's wallets; the same
+    /// account bucket).
+    pub fn for_taker(&self, taker: Pubkey) -> Self {
+        Self {
+            taker,
+            ..self.clone()
+        }
+    }
+
     /// This router for `class`'s requests (the same account bucket).
     pub fn for_class(&self, class: JupiterClass) -> Self {
         Self {

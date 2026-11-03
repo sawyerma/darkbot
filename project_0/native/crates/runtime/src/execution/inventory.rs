@@ -309,9 +309,142 @@ pub fn rebalance(
     out
 }
 
+/// DEC-17b (OBSERVE): a planned move of `amount` of one band's asset from one wallet to another —
+/// the only capital flow between the owner's wallets, never executed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Transfer {
+    pub asset: String,
+    pub from: String,
+    pub to: String,
+    pub amount: u64,
+}
+
+/// DEC-17b (OBSERVE): the moves between wallets that bring a wallet below a band's `min` back to
+/// its `target` from wallets above the band's `max`, none of which falls below its own `target`;
+/// a move smaller than the band's `dust` is not planned. `available` holds each wallet's
+/// book-adjusted balances (an asset absent: unknown, never a deficit or a source) and is
+/// updated with the planned moves (what a wallet's own swap plan then starts from).
+/// Deterministic: assets and receiving wallets in key order, each from the largest spare first,
+/// the lowest wallet key on a tie.
+pub fn plan_transfers(
+    available: &mut BTreeMap<String, BTreeMap<String, u64>>,
+    targets: &BTreeMap<String, Target>,
+) -> Vec<Transfer> {
+    let mut out = Vec::new();
+    for (asset, t) in targets {
+        let needs: Vec<(String, u64)> = available
+            .iter()
+            .filter_map(|(w, b)| {
+                let have = *b.get(asset)?;
+                (have < t.min).then(|| (w.clone(), t.target - have))
+            })
+            .collect();
+        for (to, mut need) in needs {
+            loop {
+                let source = available
+                    .iter()
+                    .filter(|(w, _)| **w != to)
+                    .filter_map(|(w, b)| {
+                        let have = *b.get(asset)?;
+                        (have > t.max).then(|| (w.clone(), have - t.target))
+                    })
+                    .max_by(|a, b| a.1.cmp(&b.1).then_with(|| b.0.cmp(&a.0)));
+                let Some((from, spare)) = source else {
+                    break;
+                };
+                let amount = need.min(spare);
+                if amount == 0 || amount < t.dust {
+                    break;
+                }
+                for (w, delta) in [(&from, false), (&to, true)] {
+                    if let Some(have) = available.get_mut(w).and_then(|b| b.get_mut(asset)) {
+                        *have = if delta {
+                            have.saturating_add(amount)
+                        } else {
+                            have.saturating_sub(amount)
+                        };
+                    }
+                }
+                out.push(Transfer {
+                    asset: asset.clone(),
+                    from,
+                    to: to.clone(),
+                    amount,
+                });
+                need -= amount;
+                if need == 0 {
+                    break;
+                }
+            }
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// DEC-17b: a wallet below its band is refilled to its target from the wallets above the
+    /// band (largest spare first, never below their own target); a move below the dust and an
+    /// unknown balance plan nothing; the balances follow the planned moves.
+    #[test]
+    fn dec17b_transfers_refill_a_wallet_from_the_others_surplus() {
+        let band = Target {
+            reserve: 10,
+            min: 100,
+            target: 200,
+            max: 300,
+            dust: 5,
+        };
+        let targets: BTreeMap<String, Target> = [("SOL".to_string(), band)].into();
+        let wallets = |a: &[(&str, Option<u64>)]| -> BTreeMap<String, BTreeMap<String, u64>> {
+            a.iter()
+                .map(|(w, have)| {
+                    (
+                        w.to_string(),
+                        have.map(|h| [("SOL".to_string(), h)].into())
+                            .unwrap_or_default(),
+                    )
+                })
+                .collect()
+        };
+        let mut available = wallets(&[
+            ("A", Some(50)),
+            ("B", Some(320)),
+            ("C", Some(400)),
+            ("D", None),
+        ]);
+        let moves = plan_transfers(&mut available, &targets);
+        let t = |from: &str, amount| Transfer {
+            asset: "SOL".into(),
+            from: from.into(),
+            to: "A".into(),
+            amount,
+        };
+        // A needs 150: C spares 200 (the largest), so C alone gives it; B is not touched.
+        assert_eq!(moves, vec![t("C", 150)]);
+        assert_eq!(available["A"]["SOL"], 200);
+        assert_eq!(available["C"]["SOL"], 250);
+        assert_eq!(available["B"]["SOL"], 320);
+        assert!(available["D"].is_empty());
+        // Two sources: the larger spare first, the other for the rest; a tie at the lower key.
+        let mut available = wallets(&[("A", Some(0)), ("B", Some(310)), ("C", Some(310))]);
+        assert_eq!(
+            plan_transfers(&mut available, &targets),
+            vec![t("B", 110), t("C", 90)]
+        );
+        // Below the dust: nothing; nobody above max: nothing; inside the band: nothing.
+        let mut available = wallets(&[("A", Some(99)), ("B", Some(303))]);
+        assert_eq!(plan_transfers(&mut available, &targets), vec![t("B", 101)]);
+        let mut available = wallets(&[("A", Some(99)), ("B", Some(302))]);
+        let tiny = Target { dust: 200, ..band };
+        assert!(plan_transfers(&mut available, &[("SOL".to_string(), tiny)].into()).is_empty());
+        let mut available = wallets(&[("A", Some(50)), ("B", Some(300))]);
+        assert!(plan_transfers(&mut available, &targets).is_empty());
+        let mut available = wallets(&[("A", Some(150)), ("B", Some(900))]);
+        assert!(plan_transfers(&mut available, &targets).is_empty());
+    }
 
     fn band(min: u64, target: u64, max: u64) -> Target {
         Target {

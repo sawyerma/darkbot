@@ -189,10 +189,12 @@
     - [RebalanceBlocked](#darkbot-project0-v1-RebalanceBlocked)
     - [RebalancePlan](#darkbot-project0-v1-RebalancePlan)
     - [RebalanceTrade](#darkbot-project0-v1-RebalanceTrade)
+    - [RebalanceTransfer](#darkbot-project0-v1-RebalanceTransfer)
     - [SourceControlCommand](#darkbot-project0-v1-SourceControlCommand)
     - [SourceDecision](#darkbot-project0-v1-SourceDecision)
     - [SourceStats](#darkbot-project0-v1-SourceStats)
     - [StateCounters](#darkbot-project0-v1-StateCounters)
+    - [WalletRow](#darkbot-project0-v1-WalletRow)
     - [WalletsState](#darkbot-project0-v1-WalletsState)
 
 - [darkbot/project0/v1/status.proto](#darkbot_project0_v1_status-proto)
@@ -3868,6 +3870,7 @@ An asset the plan does not rebalance.
 | ----- | ---- | ----- | ----------- |
 | asset | [string](#string) |  | Inventory key. |
 | reason | [string](#string) |  | Stable reason (INVENTORY_BALANCE_UNKNOWN, REBALANCE_COST_UNKNOWN, …). |
+| wallet | [string](#string) |  | DEC-17b: the wallet it is not rebalanced in, base58. |
 
 
 
@@ -3889,7 +3892,8 @@ costs; planned, never traded (ACTIVE needs LIVE).
 | trades | [RebalanceTrade](#darkbot-project0-v1-RebalanceTrade) | repeated | Planned trades. |
 | blocked | [RebalanceBlocked](#darkbot-project0-v1-RebalanceBlocked) | repeated | Assets not rebalanced, with the stable reason. |
 | quotes_pending | [uint64](#uint64) |  | Quotes asked and not answered yet (the plan is then provisional). |
-| budget_usd_micro | [uint64](#uint64) |  | The plan&#39;s cost budget. |
+| budget_usd_micro | [uint64](#uint64) |  | The plan&#39;s cost budget (one for every wallet&#39;s trades). |
+| transfers | [RebalanceTransfer](#darkbot-project0-v1-RebalanceTransfer) | repeated | DEC-17b: the planned moves between the owner&#39;s wallets — the only capital flow between them, never executed. |
 
 
 
@@ -3909,6 +3913,25 @@ One planned rebalance trade (ExactIn).
 | amount_in | [uint64](#uint64) |  | Amount sold (base units). |
 | minimum_out | [uint64](#uint64) |  | The on-chain enforced minimum output (base units). |
 | cost_usd_micro | [uint64](#uint64) |  | Conservative cost: value given minus value received plus the planned network fee. |
+| wallet | [string](#string) |  | DEC-17b: the wallet that would trade, base58. |
+
+
+
+
+
+
+<a name="darkbot-project0-v1-RebalanceTransfer"></a>
+
+### RebalanceTransfer
+DEC-17b: one planned move of a band&#39;s asset from one wallet to another (OBSERVE).
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| asset | [string](#string) |  | Inventory key (SOL or a mint). |
+| from_wallet | [string](#string) |  | Giving wallet, base58 (above the band&#39;s max, never below its target). |
+| to_wallet | [string](#string) |  | Receiving wallet, base58 (below the band&#39;s min, refilled to its target). |
+| amount | [uint64](#uint64) |  | Amount moved (base units). |
 
 
 
@@ -3994,11 +4017,43 @@ StateCore write counters (solana/src/state::StateCounters).
 
 
 
+<a name="darkbot-project0-v1-WalletRow"></a>
+
+### WalletRow
+DEC-17b: one configured signer&#39;s wallet — its roles and switch, whether and why not it may run
+a candidate now, its SOL, holds, held attempt, Safety and journal, and the candidates of this run
+it ran. Unknown values are unset (never 0).
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| wallet | [string](#string) |  | Wallet, base58. |
+| roles | [string](#string) | repeated | LIQUIDATOR, FEE_PAYER, TREASURY. |
+| enabled | [bool](#bool) |  | Its switch WALLET:&lt;pubkey&gt; is ENABLED. |
+| runs_candidates | [bool](#bool) |  | It liquidates as its own fee payer (the kind a candidate runs with). |
+| block_reason | [string](#string) |  | Why it may not run a candidate now in the effective mode; empty: it may. |
+| sol_lamports | [uint64](#uint64) | optional | Lamports in canonical state; unset when unknown. |
+| free_sol_lamports | [uint64](#uint64) | optional | Lamports free after its holds (exit reserves included) and the policy reserve; unset when unknown. |
+| holds | [AssetAmount](#darkbot-project0-v1-AssetAmount) | repeated | Holds of its attempts and open positions, per asset. |
+| held_attempt | [string](#string) |  | State of its held attempt: NONE | RESERVED | UNKNOWN | FINALIZED_UNBOOKED | SETTLED. |
+| halt_reason | [string](#string) | optional | Its Safety HALT; unset while not halted. |
+| capital_in_use_usd_micro | [uint64](#uint64) |  | Capital its Safety holds reserved. |
+| day_attempts | [uint32](#uint32) |  | Its attempts of the booking day. |
+| journal_read | [bool](#bool) |  | Its FE-04 journals were read. |
+| realized_net_usd_micro | [int64](#int64) | optional | Realized net of its settled steps; unset unless read and known. |
+| selected | [uint64](#uint64) |  | Candidates of this run it ran. |
+
+
+
+
+
+
 <a name="darkbot-project0-v1-WalletsState"></a>
 
 ### WalletsState
-FE-04 wallet state of the liquidator: STATE topic project0.wallets.state. Read from the
-wallet&#39;s FE-04 journals (execution/accounting.rs) and the reservation book.
+FE-04 wallet state: STATE topic project0.wallets.state. Read from the wallets&#39; FE-04 journals
+(execution/accounting.rs) and reservation books; fields 2–16 are the pilot wallet&#39;s (DEC-17b:
+the first configured signer, its own fee payer), every wallet&#39;s in `rows`.
 
 
 | Field | Type | Label | Description |
@@ -4019,6 +4074,10 @@ wallet&#39;s FE-04 journals (execution/accounting.rs) and the reservation book.
 | held_attempt | [string](#string) |  | State of the attempt held by this run: NONE | RESERVED | UNKNOWN | FINALIZED_UNBOOKED | SETTLED. |
 | non_landing | [NonLanding](#darkbot-project0-v1-NonLanding) |  | DEC-03: the non-landing status of the held attempt or its latest exit; unset without a held FE-04 journal. |
 | hold_b | [HoldB](#darkbot-project0-v1-HoldB) |  | DEC-04: the B hold mode and the held attempt&#39;s A, B and finalized flows; unset without an owner projection. |
+| rows | [WalletRow](#darkbot-project0-v1-WalletRow) | repeated | DEC-17b: every configured signer&#39;s wallet. |
+| selections | [uint64](#uint64) |  | DEC-17b: candidates this run chose a wallet for. |
+| selections_none_eligible | [uint64](#uint64) |  | DEC-17b: of those, the ones no wallet could run (the pilot&#39;s refusal was theirs). |
+| last_none_eligible | [string](#string) |  | DEC-17b: why no wallet could run the last of them (`&lt;wallet&gt;=&lt;reason&gt;, …`). |
 
 
 

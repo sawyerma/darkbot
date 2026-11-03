@@ -1,5 +1,7 @@
 //! B01 (P8-INV-01, CTRL-03): inventory rebalancing in OBSERVE. Every `rebalance_observe_ms` the
-//! owner plans the minimal rebalancing of its bands (`P0_INVENTORY_TARGETS`) from the wallet's
+//! owner plans the minimal rebalancing of its bands (`P0_INVENTORY_TARGETS`) — DEC-17b: of every
+//! wallet, first the moves between wallets (the only capital flow between them, never executed:
+//! no code path builds, signs or sends one), then each wallet's trades — from the wallets'
 //! book-adjusted balances in canonical state (validated ATAs, the liquidator's lamports, minus
 //! every FE-04 hold), real ExactIn quotes and conservative costs (selling at the high, receiving
 //! at the low price, plus the transaction's planned network fee), inside
@@ -110,6 +112,7 @@ impl Observer {
             mode: self.mode.name(),
             at_unix_ms: None,
             slot,
+            transfers: vec![],
             trades: vec![],
             blocked: vec![],
             quotes_pending: 0,
@@ -198,35 +201,52 @@ impl ShadowOwner {
             self.rebalance.quotes.clear();
             self.rebalance_generation();
         }
-        {
-            // L2: an unreadable FE-04 book leaves no balance known — nothing is planned or
-            // recorded (never "no surplus" from a book that could not be read); the running
-            // observation ends.
-            if self.reservations.is_unreadable() {
-                self.rebalance.plan = Some(OwnerRebalance {
-                    mode: self.rebalance.mode.name(),
-                    at_unix_ms: crate::status_tap::unix_ms_now(),
-                    slot: self.st.highest_slot(),
-                    trades: vec![],
-                    blocked: self
-                        .inventory_targets
-                        .keys()
-                        .map(|k| (k.clone(), "RESERVATION_BOOK_UNREADABLE"))
-                        .collect(),
-                    quotes_pending: 0,
-                    budget_usd_micro: self.rebalance.budget_usd_micro,
-                });
-                self.rebalance.round = 0;
-                self.rebalance.due = Some(now + self.rebalance.interval);
-                return;
-            }
-        }
         let (budget, rounds, interval) = (
             self.rebalance.budget_usd_micro,
             self.rebalance.rounds,
             self.rebalance.interval,
         );
-        let available = self.rebalance_balances();
+        // DEC-17b: every wallet that runs candidates, in the owner's order. L2: an unreadable
+        // FE-04 book leaves none of its balances known — nothing of it is planned (never "no
+        // surplus" from a book that could not be read).
+        let mut blocked: Vec<(String, String, &'static str)> = Vec::new();
+        let mut available: BTreeMap<String, BTreeMap<String, u64>> = BTreeMap::new();
+        let mut order: Vec<String> = Vec::new();
+        for (i, w) in self.wallets.iter().enumerate() {
+            if !w.runs_candidates() {
+                continue;
+            }
+            let key = w.liquidator.to_string();
+            if w.reservations.is_unreadable() {
+                blocked.extend(
+                    self.inventory_targets
+                        .keys()
+                        .map(|k| (key.clone(), k.clone(), "RESERVATION_BOOK_UNREADABLE")),
+                );
+                continue;
+            }
+            available.insert(key.clone(), self.rebalance_balances(i));
+            order.push(key);
+        }
+        // No wallet's balances known: nothing is planned or recorded; the observation ends.
+        if order.is_empty() {
+            self.rebalance.plan = Some(OwnerRebalance {
+                mode: self.rebalance.mode.name(),
+                at_unix_ms: crate::status_tap::unix_ms_now(),
+                slot: self.st.highest_slot(),
+                transfers: vec![],
+                trades: vec![],
+                blocked,
+                quotes_pending: 0,
+                budget_usd_micro: budget,
+            });
+            self.rebalance.round = 0;
+            self.rebalance.due = Some(now + interval);
+            return;
+        }
+        // DEC-17b: the moves between wallets first (no swap, no price impact); each wallet's own
+        // plan starts from its balances after them.
+        let transfers = inventory::plan_transfers(&mut available, &self.inventory_targets);
         let fee_lamports = crate::execution::pipeline::planned_fee_lamports(1, &self.resources);
         let cost = |sell: &str, amount_in: u64, buy: &str, out: u64| -> Option<u64> {
             let paid = self.asset_value_high(sell, amount_in)?;
@@ -234,27 +254,47 @@ impl ShadowOwner {
             let fee = self.asset_value_high("SOL", fee_lamports?)?;
             paid.saturating_sub(got).checked_add(fee)
         };
-        // Collateral funds only at a known conservative value (and its trade's answered quote).
-        let collateral_known = |asset: &str| {
-            available
-                .get(asset)
-                .is_some_and(|a| self.asset_value_low(asset, *a).is_some())
-        };
         // A key naming no mint, or one mint on both sides (WSOL against the SOL band: an
         // unwrap, no swap), has no route.
         let routable = |sell: &str, buy: &str| match (mint_of(sell), mint_of(buy)) {
             (Some(a), Some(b)) => a != b,
             _ => false,
         };
-        let (actions, wanted) = inventory::plan_with_quotes(
-            &available,
-            &self.inventory_targets,
-            &collateral_known,
-            &routable,
-            &self.rebalance.quotes,
-            &cost,
-            budget,
-        );
+        let mut trades = Vec::new();
+        let mut wanted: Vec<QuoteKey> = Vec::new();
+        let mut planned: Vec<(String, Action)> = Vec::new();
+        // One budget for the observation: each wallet plans within what the ones before it left.
+        let mut left = budget;
+        for wallet in &order {
+            let balances = &available[wallet];
+            // Collateral funds only at a known conservative value (and its trade's answered
+            // quote).
+            let collateral_known = |asset: &str| {
+                balances
+                    .get(asset)
+                    .is_some_and(|a| self.asset_value_low(asset, *a).is_some())
+            };
+            let (actions, want) = inventory::plan_with_quotes(
+                balances,
+                &self.inventory_targets,
+                &collateral_known,
+                &routable,
+                &self.rebalance.quotes,
+                &cost,
+                left,
+            );
+            for action in &actions {
+                if let Action::Rebalance { cost_usd_micro, .. } = action {
+                    left = left.saturating_sub(*cost_usd_micro);
+                }
+            }
+            for key in want {
+                if !wanted.contains(&key) {
+                    wanted.push(key);
+                }
+            }
+            planned.extend(actions.into_iter().map(|a| (wallet.clone(), a)));
+        }
         let (mut asked, mut refused) = (0u64, 0u64);
         // The assets still waiting for a quote when no round is left (`rebalance_quote_rounds`
         // bounds how many funding sources a band tries: one or two rounds each).
@@ -287,9 +327,7 @@ impl ShadowOwner {
                 }
             }
         }
-        let mut trades = Vec::new();
-        let mut blocked = Vec::new();
-        for action in actions {
+        for (wallet, action) in planned {
             match action {
                 Action::Rebalance {
                     sell,
@@ -298,6 +336,7 @@ impl ShadowOwner {
                     minimum_out,
                     cost_usd_micro,
                 } => trades.push(RebalanceTrade {
+                    wallet,
                     sell,
                     buy,
                     amount_in,
@@ -308,15 +347,16 @@ impl ShadowOwner {
                     asset,
                     reason: "REBALANCE_COST_UNKNOWN",
                 } if exhausted.contains(&asset) => {
-                    blocked.push((asset, "REBALANCE_QUOTE_ROUNDS_EXHAUSTED"))
+                    blocked.push((wallet, asset, "REBALANCE_QUOTE_ROUNDS_EXHAUSTED"))
                 }
-                Action::Blocked { asset, reason } => blocked.push((asset, reason)),
+                Action::Blocked { asset, reason } => blocked.push((wallet, asset, reason)),
             }
         }
         self.rebalance.plan = Some(OwnerRebalance {
             mode: self.rebalance.mode.name(),
             at_unix_ms: crate::status_tap::unix_ms_now(),
             slot: self.st.highest_slot(),
+            transfers,
             trades,
             blocked,
             // A quote the full queue refused is as unanswered as a pending one.
@@ -335,31 +375,48 @@ impl ShadowOwner {
         }
     }
 
-    /// B01: a completed observation's plan as its typed record (a provisional plan, still
+    /// B01/DEC-17b: a completed observation's plan as its typed record (a provisional plan, still
     /// waiting for quotes, has none).
     fn rebalance_record(&mut self) {
-        use crate::analytics::evidence::{OwnerEvidence, RebalanceTradeRecord, RecordEvent};
+        use crate::analytics::evidence::{
+            OwnerEvidence, RebalanceTradeRecord, RecordEvent, WalletTransferRecord,
+        };
         let Some(plan) = &self.rebalance.plan else {
             return;
         };
-        let record = RecordEvent::RebalancePlan {
+        let record = RecordEvent::WalletRebalancePlan {
             slot: plan.slot,
             at_unix_ms: plan.at_unix_ms,
+            transfers: plan
+                .transfers
+                .iter()
+                .map(|t| WalletTransferRecord {
+                    asset: t.asset.clone(),
+                    from: t.from.clone(),
+                    to: t.to.clone(),
+                    amount: t.amount,
+                })
+                .collect(),
             trades: plan
                 .trades
                 .iter()
-                .map(|t| RebalanceTradeRecord {
-                    sell: t.sell.clone(),
-                    buy: t.buy.clone(),
-                    amount_in: t.amount_in,
-                    minimum_out: t.minimum_out,
-                    cost_usd_micro: t.cost_usd_micro,
+                .map(|t| {
+                    (
+                        t.wallet.clone(),
+                        RebalanceTradeRecord {
+                            sell: t.sell.clone(),
+                            buy: t.buy.clone(),
+                            amount_in: t.amount_in,
+                            minimum_out: t.minimum_out,
+                            cost_usd_micro: t.cost_usd_micro,
+                        },
+                    )
                 })
                 .collect(),
             blocked: plan
                 .blocked
                 .iter()
-                .map(|(asset, reason)| (asset.clone(), (*reason).into()))
+                .map(|(wallet, asset, reason)| (wallet.clone(), asset.clone(), (*reason).into()))
                 .collect(),
             budget_usd_micro: plan.budget_usd_micro,
         };
@@ -375,7 +432,8 @@ impl ShadowOwner {
     /// collateral without tokens too. A band's mint without its ATA is absent as well, so no plan
     /// buys into an account it would have to create (rent): ATAs are prewarmed outside
     /// (`p0-prewarm-atas`), as for liquidations.
-    pub(super) fn rebalance_balances(&self) -> BTreeMap<String, u64> {
+    pub(super) fn rebalance_balances(&self, i: usize) -> BTreeMap<String, u64> {
+        let w = &self.wallets[i];
         let view = StateView(&self.st);
         let collateral: BTreeSet<String> = self
             .required_dependency_keys
@@ -393,17 +451,16 @@ impl ShadowOwner {
             .chain(&collateral)
             .filter_map(|key| {
                 let amount = if key == "SOL" {
-                    self.st.get(&self.liquidator).map(|r| r.lamports)
+                    self.st.get(&w.liquidator).map(|r| r.lamports)
                 } else {
                     let mint: Pubkey = key.parse().ok()?;
-                    super::accounts::validated_liquidator_ata(&view, &mint, &self.atas)
-                        .map(|(_, a)| a)
+                    super::accounts::validated_liquidator_ata(&view, &mint, &w.atas).map(|(_, a)| a)
                 };
                 amount.map(|a| (key.clone(), a))
             })
             .collect();
         raw.keys()
-            .filter_map(|k| self.reservations.available(&raw, k).map(|a| (k.clone(), a)))
+            .filter_map(|k| w.reservations.available(&raw, k).map(|a| (k.clone(), a)))
             .filter(|(k, a)| *a > 0 || !collateral.contains(k))
             .collect()
     }

@@ -226,7 +226,7 @@ impl ShadowOwner {
                             required_context_slot(&self.st, base_record.slot, &dependencies);
                         let projection_plan = tx::TxPlan {
                             version: tx::BuildVersion::V0,
-                            payer: self.liquidator,
+                            payer: self.pilot().liquidator,
                             instructions: refreshes,
                             lookup_tables: vec![].into(),
                             resources: self.resources,
@@ -373,13 +373,43 @@ impl ShadowOwner {
                 },
             };
 
-        #[cfg(feature = "crate_health")]
+        // DEC-13: the mode is the controller gate's — LIVE only while LIVE is effective, which
+        // without an FE-06 authorization it never is.
+        let mode =
+            crate::orchestration::capability_control::pipeline_mode(&self.sources.live_gates());
+        let live = mode == crate::execution::pipeline::Mode::Live;
+        // DEC-17b: the wallet this candidate runs with — the most SOL free after its holds and
+        // exit reserve, the lowest key on a tie; none eligible: the pilot, whose refusal is then
+        // the candidate's. What the evaluation needs of the owner besides is read before the
+        // wallet is lent to it: a LIVE candidate's admission facts (DEC-13b), a SIM_ONLY
+        // simulation's use facts (P8-CTRL.4, review N1: only where it may exist at all, a
+        // simulation that can never send — review L-c: no journal read otherwise), the local fee
+        // model's use (P6-MT.10) and the trigger mode.
+        let (w, none_eligible) = self.choose_wallet(live);
+        self.wallet_selection
+            .note(&mut self.wallets[w], none_eligible);
+        let facts = live.then(|| self.fe04_admission_facts(w, Some(&acct)));
+        let use_facts = {
+            use darkbot_solana::submit::SubmissionAdapter;
+            match mode {
+                crate::execution::pipeline::Mode::Shadow
+                    if self.submitter.simulates_without_sending() =>
+                {
+                    self.sim_only_use_facts(w, &acct)
+                }
+                _ => None,
+            }
+        };
+        let fee_model = self.fee_model();
+        let threshold_authority = self.threshold_authority();
+        let wallet = &mut self.wallets[w];
+        // DEC-17b: the wallet's own swaps (the router's one account bucket).
+        let routes = self.routes.for_taker(wallet.liquidator);
         let engine = darkbot_project0::health::crate_impl::CrateHealth {
             state: eval_state,
             group: self.group,
         };
-        #[cfg(feature = "crate_health")]
-        // P8-RES-01: offers see only what no attempt holds (C11).
+        // P8-RES-01: offers see only what no attempt of the wallet holds (C11).
         let inventory = |bank_key: &Pubkey| -> u64 {
             let Some(bank) = bank_from_state(eval_state, &self.program, bank_key) else {
                 return 0;
@@ -395,14 +425,14 @@ impl ShadowOwner {
             available_liquidator_inventory(
                 eval_state,
                 &bank.mint,
-                &self.atas,
-                &self.reservations,
+                &wallet.atas,
+                &wallet.reservations,
                 reserve,
             )
         };
         #[cfg(feature = "crate_health")]
         let ata = |mint: &Pubkey| -> Option<Pubkey> {
-            validated_liquidator_ata(eval_state, mint, &self.atas).map(|(pk, _)| pk)
+            validated_liquidator_ata(eval_state, mint, &wallet.atas).map(|(pk, _)| pk)
         };
         #[cfg(feature = "crate_health")]
         let sizing = ProtocolSizingProvider {
@@ -448,10 +478,10 @@ impl ShadowOwner {
             state: eval_state,
             program: self.program,
             group: self.group,
-            liquidator: self.liquidator,
+            liquidator: wallet.liquidator,
             global_fee_wallet: sizer_for_cost.fee_snapshot().map(|f| f.global_fee_wallet),
             sizing: &sizing,
-            routes: &self.routes,
+            routes: &routes,
             inventory: &inventory,
             ata: &ata,
             lamports_to_usd_micro: &lamports_to_usd_micro,
@@ -491,7 +521,7 @@ impl ShadowOwner {
         // V2-03 (P2-04): in the threshold mode this exact evaluation plans the account's premium
         // wake-up — renewed or removed by every evaluation, exactly as the sweep plans it.
         #[cfg(feature = "crate_health")]
-        if self.threshold_authority() {
+        if threshold_authority {
             let boundary = match &health_result {
                 Ok(h) if !h.liquidatable => engine
                     .premium_decay_per_second(&acct, protocol_now as i64, protocol_slot)
@@ -548,48 +578,25 @@ impl ShadowOwner {
             self.network.drained();
         }
         // [FIX-1] Pipeline (Shadow): Health → Pläne → Economics → Build → Sign → Send-Boundary.
-        // DEC-13: the mode is the controller gate's — LIVE only while LIVE is effective, which
-        // without an FE-06 authorization it never is. DEC-13b: a LIVE candidate is handed the
-        // owner's FE-04 admission (none: the pipeline stops at its send boundary).
-        let mode =
-            crate::orchestration::capability_control::pipeline_mode(&self.sources.live_gates());
-        let mut admission = match mode {
-            crate::execution::pipeline::Mode::Live => {
-                let facts = self.fe04_admission_facts(Some(&acct));
-                fe04::admission_for(
-                    &mut self.fe04_admission,
-                    &mut self.fe04_held,
-                    &mut self.fe04_admissions,
-                    facts,
-                )
-            }
-            crate::execution::pipeline::Mode::Shadow => None,
-        };
-        // P8-CTRL.4 (review N1): a SIM_ONLY simulation's real signature binds the owner's facts —
-        // only where it may exist at all, a simulation that can never send (review L-c: no
-        // journal read otherwise).
-        let use_facts = {
-            use darkbot_solana::submit::SubmissionAdapter;
-            match mode {
-                crate::execution::pipeline::Mode::Shadow
-                    if self.submitter.simulates_without_sending() =>
-                {
-                    self.sim_only_use_facts(&acct)
-                }
-                _ => None,
-            }
-        };
-        // P6-MT.10: what this evaluation does with the local fee model.
-        let fee_model = self.fee_model();
+        // DEC-13b: a LIVE candidate is handed its wallet's FE-04 admission (none: the pipeline
+        // stops at its send boundary).
+        let mut admission = facts.and_then(|facts| {
+            fe04::admission_for(
+                &mut wallet.fe04_admission,
+                &mut wallet.fe04_held,
+                &mut wallet.fe04_admissions,
+                facts,
+            )
+        });
         let mut pipe = Pipeline {
             mode,
             clock: &self.clock,
             health: &engine,
             builder: &builder,
             submitter: &self.submitter,
-            safety: &mut self.safety,
+            safety: &mut wallet.safety,
             blockhash: &self.blockhash,
-            payer: self.payer.as_ref(),
+            payer: wallet.payer.as_ref(),
             allowlist: &self.allowlist,
             failed_costs: &self.failed_costs,
             limits: TxLimits::default(),
@@ -650,7 +657,7 @@ impl ShadowOwner {
         if fe04::reservation_conflict(
             rec.reason.as_ref(),
             rec.loss,
-            &self.fe04_admissions.block_reason,
+            &self.wallets[w].fe04_admissions.block_reason,
         ) {
             darkbot_common::mt0::MT0.record_reservation_conflict();
         }
@@ -707,7 +714,7 @@ impl ShadowOwner {
         }
         // DEC-13b: the admission comes back before anything can return early.
         if let Some(admission) = admission {
-            self.fe04_admission_back(admission, &rec);
+            self.fe04_admission_back(w, admission, &rec);
         }
         // MT4: Jupiter requests of this revision's evaluation (route quotes are made on
         // this thread, so the MT0 delta is this evaluation's); a revision without any is

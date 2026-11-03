@@ -1009,6 +1009,7 @@ fn exit_candidate<'a>(
         unwrap_payout_lamports: None,
         reserved_elsewhere: Default::default(),
         policy_reserve: Default::default(),
+        others: Ok(vec![]),
         deadline: std::time::Instant::now() + std::time::Duration::from_secs(30),
         clock: &EXIT_CLOCK,
     }

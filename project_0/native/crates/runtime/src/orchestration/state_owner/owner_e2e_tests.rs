@@ -91,7 +91,6 @@ fn fixture_with(tag: &str, rpc: Option<&str>) -> Fixture {
         status_interval: Duration::from_millis(1),
         status_published: None,
         status_seq: 0,
-        ledger_view: None,
         blockhash_max_age_ns: OPERATIONAL.blockhash_max_age_ms * 1_000_000,
         fe04_settle_retry: Duration::from_millis(OPERATIONAL.fe04_settle_retry_ms),
         fe04_refresh: Duration::from_millis(OPERATIONAL.fe04_refresh_ms),
@@ -112,17 +111,15 @@ fn fixture_with(tag: &str, rpc: Option<&str>) -> Fixture {
         required_set: HashSet::new(),
         optional_set: HashSet::new(),
         prereq_allowed: vec![],
-        reservations: Default::default(),
+        wallets: vec![super::wallets::OwnerWallet::new(
+            liquidator,
+            darkbot_solana::runtime_config::roles::SIGNING.to_vec(),
+            crate::execution::payer::OwnerPayer::Signer(solana_sdk::signature::Keypair::new()),
+            Safety::new(limits, Allow::default(), false),
+        )],
+        wallet_selection: Default::default(),
         fe04_journal: None,
         fe04_refreshed: std::time::Instant::now(),
-        fe04_held: None,
-        fe04_approval: None,
-        fe04_settle_due: None,
-        fe04_unbooked: None,
-        fe04_non_landing: Default::default(),
-        fe04_admission: None,
-        fe04_prewarm_after: None,
-        fe04_admissions: Default::default(),
         hold_gate: crate::execution::hold_b::HoldGate::OBSERVE,
         inventory_targets: Default::default(),
         jit_funding_bank: None,
@@ -147,7 +144,6 @@ fn fixture_with(tag: &str, rpc: Option<&str>) -> Fixture {
         blockhash_parking: Default::default(),
         blockhash_early: None,
         ownership: Default::default(),
-        atas: accounts::LiquidatorAtas::new(liquidator),
         min_profit: 0,
         integration_probe_enabled: false,
         integration_probe_limit_per_kind: 8,
@@ -199,9 +195,7 @@ fn fixture_with(tag: &str, rpc: Option<&str>) -> Fixture {
         operational_failure: None,
         program,
         group,
-        payer: crate::execution::payer::OwnerPayer::Signer(solana_sdk::signature::Keypair::new()),
         synthetic_signer: solana_sdk::signature::Keypair::new(),
-        liquidator,
         shutdown: shutdown.clone(),
         stop_poll: || false,
         halt: IngressHalt::new(),
@@ -237,7 +231,6 @@ fn fixture_with(tag: &str, rpc: Option<&str>) -> Fixture {
         opt_shared: Arc::new(Mutex::new(vec![])),
         blockhash: BlockhashCache::new(),
         blockhash_thread: None,
-        safety: Safety::new(limits, Allow::default(), false),
         allowlist: Allowlist::default(),
         #[cfg(feature = "crate_health")]
         instruction_table: darkbot_project0::receivership::builders::instruction_table(&program)
@@ -429,7 +422,7 @@ fn owner_projection_carries_real_engine_safety_and_unknown_finance() {
     assert_eq!(s.end_result, None);
     // Review E4: a read journal without reconciled balances is PARTIAL (never VERIFIED while
     // a field is unknown); the run's end reaches the final snapshot.
-    f.owner.ledger_view = Some(Ok(super::status_view::LedgerView::of(
+    f.owner.wallets[0].ledger_view = Some(Ok(super::status_view::LedgerView::of(
         &crate::execution::accounting::Ledger::default(),
     )));
     f.owner.end_result = Some("STATE_RECOVERY_EXHAUSTED");
@@ -2308,7 +2301,10 @@ fn fe04_fixture_held(
     crate::execution::one_shot::non_landing::NonLandingRead,
 ) {
     let mut f = fixture_with(tag, None);
-    let (wallet, dir) = (f.owner.liquidator.to_string(), f.dir.join("fe04"));
+    let (wallet, dir) = (
+        f.owner.wallets[0].liquidator.to_string(),
+        f.dir.join("fe04"),
+    );
     let intent = crate::execution::one_shot::test_unknown_attempt_held(&dir, &wallet, hold);
     let proof = crate::execution::one_shot::non_landing::loopback::proving(
         &crate::execution::one_shot::settlement::SettlementSubject::from(&intent)
@@ -2323,16 +2319,16 @@ fn fe04_fixture_held(
     let dir_s = dir.display().to_string();
     let start = setup::reservation_book(
         &|k| (k == "P0_FE04_JOURNAL_DIR").then(|| dir_s.clone()),
-        &f.owner.liquidator,
+        &f.owner.wallets[0].liquidator,
     )
     .unwrap()
-    .start(&mut f.owner.safety, wall_unix_s().unwrap())
+    .start(&mut f.owner.wallets[0].safety, wall_unix_s().unwrap())
     .unwrap();
-    f.owner.reservations = start.book;
+    f.owner.wallets[0].reservations = start.book;
     f.owner.fe04_journal = start.dir;
-    f.owner.fe04_held = start.held;
-    f.owner.fe04_settle_due = start.settle_due;
-    f.owner.fe04_unbooked = start.unbooked;
+    f.owner.wallets[0].fe04_held = start.held;
+    f.owner.wallets[0].fe04_settle_due = start.settle_due;
+    f.owner.wallets[0].fe04_unbooked = start.unbooked;
     (f, intent, proof)
 }
 
@@ -2358,6 +2354,7 @@ fn fe04_answer_for(
         crate::orchestration::remote_workers::Fe04SettlementResult {
             evidence,
             exit: exit.map(str::to_string),
+            wallet: f.owner.wallets[0].liquidator,
         },
         &f.owner.shutdown,
         &d.space
@@ -2365,7 +2362,8 @@ fn fe04_answer_for(
 }
 
 fn fe04_settled(o: &ShadowOwner) -> bool {
-    o.fe04_held
+    o.wallets[0]
+        .fe04_held
         .as_ref()
         .and_then(|j| j.safety_replay())
         .is_some_and(|r| r.settled.is_some())
@@ -2380,9 +2378,15 @@ fn fe04_settled(o: &ShadowOwner) -> bool {
 fn c3_owner_settles_a_proven_non_landing_exactly_once() {
     use crate::execution::one_shot::settlement::SettlementEvidence;
     let (mut f, intent, proof) = fe04_fixture("fe04_once", "unknown");
-    assert_eq!(f.owner.safety.capital_in_use(), intent.capital_usd_micro);
-    assert_eq!(f.owner.reservations.held("SOL"), intent.holds["SOL"]);
-    run_until(&mut f, |o| o.fe04_settle_due.is_none());
+    assert_eq!(
+        f.owner.wallets[0].safety.capital_in_use(),
+        intent.capital_usd_micro
+    );
+    assert_eq!(
+        f.owner.wallets[0].reservations.held("SOL"),
+        intent.holds["SOL"]
+    );
+    run_until(&mut f, |o| o.wallets[0].fe04_settle_due.is_none());
     let job = fe04_job(&f).expect("the read is handed to the worker");
     assert_eq!(job.subject.signatures, intent.signatures);
     assert_eq!(job.observed, Default::default());
@@ -2392,29 +2396,36 @@ fn c3_owner_settles_a_proven_non_landing_exactly_once() {
     };
     fe04_answer(&f, evidence.clone());
     run_until(&mut f, fe04_settled);
-    let day = f.owner.safety.day();
-    assert_eq!(f.owner.safety.capital_in_use(), 0, "released once");
+    let day = f.owner.wallets[0].safety.day();
+    assert_eq!(
+        f.owner.wallets[0].safety.capital_in_use(),
+        0,
+        "released once"
+    );
     assert_eq!((day.realized_pnl, day.failed_attempts), (0, 1));
     assert!(
-        f.owner.reservations.is_empty(),
+        f.owner.wallets[0].reservations.is_empty(),
         "the book follows the journal"
     );
-    assert!(f.owner.safety.halted().is_some(), "the one-shot HALT stays");
+    assert!(
+        f.owner.wallets[0].safety.halted().is_some(),
+        "the one-shot HALT stays"
+    );
     // A repeated answer and a due step change nothing and send no read.
     fe04_answer(&f, evidence);
     run_until(&mut f, |o| !o.remote.fe04_settlement_results.pending());
-    f.owner.fe04_settle_due = Some(std::time::Instant::now());
-    run_until(&mut f, |o| o.fe04_settle_due.is_none());
+    f.owner.wallets[0].fe04_settle_due = Some(std::time::Instant::now());
+    run_until(&mut f, |o| o.wallets[0].fe04_settle_due.is_none());
     assert!(fe04_job(&f).is_none());
-    assert_eq!(f.owner.safety.day(), day);
-    assert_eq!(f.owner.safety.capital_in_use(), 0);
+    assert_eq!(f.owner.wallets[0].safety.day(), day);
+    assert_eq!(f.owner.wallets[0].safety.capital_in_use(), 0);
     // Restart: the settled journal holds nothing and needs no settlement.
-    f.owner.fe04_held = None;
+    f.owner.wallets[0].fe04_held = None;
     let mut safety = Safety::new(e2e_limits(), Allow::default(), false);
     let dir_s = f.dir.join("fe04").display().to_string();
     let again = setup::reservation_book(
         &|k| (k == "P0_FE04_JOURNAL_DIR").then(|| dir_s.clone()),
-        &f.owner.liquidator,
+        &f.owner.wallets[0].liquidator,
     )
     .unwrap()
     .start(&mut safety, wall_unix_s().unwrap())
@@ -2520,7 +2531,7 @@ fn dec04_owner_records_the_holds_and_gates_active_on_the_evidence() {
     };
     let (mut f, intent, _) = fe04_fixture_held("dec04_owner", "unknown", Some(hold.clone()));
     install_sol_price(&mut f);
-    run_until(&mut f, |o| o.fe04_settle_due.is_none());
+    run_until(&mut f, |o| o.wallets[0].fe04_settle_due.is_none());
     assert!(fe04_job(&f).is_some());
     fe04_answer(&f, exit_observation(&intent.signatures[0], true, -20, &[]));
     run_until(&mut f, fe04_settled);
@@ -2634,7 +2645,7 @@ fn dec03_owner_records_alarms_and_projects_the_non_landing_class() {
     use crate::execution::one_shot::non_landing::{BClass, Verdict};
     use crate::execution::one_shot::settlement::SettlementEvidence;
     let (mut f, intent, proof) = fe04_fixture("dec03_owner", "unknown");
-    run_until(&mut f, |o| o.fe04_settle_due.is_none());
+    run_until(&mut f, |o| o.wallets[0].fe04_settle_due.is_none());
     assert!(fe04_job(&f).is_some());
     let mut seeing = proof.clone();
     seeing.b[0].class = BClass::Sighting(intent.signatures[0].clone());
@@ -2648,7 +2659,10 @@ fn dec03_owner_records_alarms_and_projects_the_non_landing_class() {
         },
     );
     run_until(&mut f, |o| !o.remote.fe04_settlement_results.pending());
-    assert_eq!(f.owner.reservations.held("SOL"), intent.holds["SOL"]);
+    assert_eq!(
+        f.owner.wallets[0].reservations.held("SOL"),
+        intent.holds["SOL"]
+    );
     let n = f.owner.owner_snapshot(0).wallets.non_landing.unwrap();
     assert_eq!(
         (n.subject, n.result_class, n.alarm, n.c_result),
@@ -2663,8 +2677,8 @@ fn dec03_owner_records_alarms_and_projects_the_non_landing_class() {
     );
     assert_eq!((n.calls, n.bytes, n.reads), (Some(7), Some(1_234), 1));
     assert!(n.hold_ms.is_some());
-    f.owner.fe04_settle_due = Some(std::time::Instant::now());
-    run_until(&mut f, |o| o.fe04_settle_due.is_none());
+    f.owner.wallets[0].fe04_settle_due = Some(std::time::Instant::now());
+    run_until(&mut f, |o| o.wallets[0].fe04_settle_due.is_none());
     assert!(fe04_job(&f).is_some(), "read again");
     fe04_answer(
         &f,
@@ -2680,7 +2694,7 @@ fn dec03_owner_records_alarms_and_projects_the_non_landing_class() {
         ("B_C_CONFIRMED", false, None, 2)
     );
     // Without a read in this run (a restart), the persisted release is shown.
-    let latest = std::mem::take(&mut f.owner.fe04_non_landing);
+    let latest = std::mem::take(&mut f.owner.wallets[0].fe04_non_landing);
     let n = f.owner.owner_snapshot(0).wallets.non_landing.unwrap();
     assert_eq!(
         (n.result_class, n.c_result, n.calls, n.reads),
@@ -2693,7 +2707,7 @@ fn dec03_owner_records_alarms_and_projects_the_non_landing_class() {
             ("op-b".to_string(), "USABLE".to_string())
         ]
     );
-    f.owner.fe04_non_landing = latest;
+    f.owner.wallets[0].fe04_non_landing = latest;
     let dir = f.dir.clone();
     f.owner.finish().unwrap();
     let mut reader =
@@ -2732,7 +2746,7 @@ fn c02_fe04_settlement_emits_the_one_landing_telemetry_record() {
     use crate::execution::one_shot::settlement::SettlementEvidence;
     use crate::execution::pending::ReconcileRecord;
     let (mut f, intent, proof) = fe04_fixture("c02_landing", "unknown");
-    run_until(&mut f, |o| o.fe04_settle_due.is_none());
+    run_until(&mut f, |o| o.wallets[0].fe04_settle_due.is_none());
     assert!(fe04_job(&f).is_some());
     let evidence = SettlementEvidence {
         observations: vec![],
@@ -2774,7 +2788,7 @@ fn c3_owner_keeps_unknown_holds_and_retries_after_the_backoff() {
         "NON_LANDING_BLOCKHASH_NOT_EXPIRED",
         "NON_LANDING_HEIGHT_UNAVAILABLE",
     ] {
-        run_until(&mut f, |o| o.fe04_settle_due.is_none());
+        run_until(&mut f, |o| o.wallets[0].fe04_settle_due.is_none());
         assert!(fe04_job(&f).is_some());
         let sent = std::time::Instant::now();
         fe04_answer(
@@ -2784,16 +2798,26 @@ fn c3_owner_keeps_unknown_holds_and_retries_after_the_backoff() {
                 non_landing: Some(Err(reason.into())),
             },
         );
-        run_until(&mut f, |o| o.fe04_settle_due.is_some());
-        assert!(f.owner.fe04_settle_due.unwrap() >= sent + f.owner.fe04_settle_retry);
+        run_until(&mut f, |o| o.wallets[0].fe04_settle_due.is_some());
+        assert!(f.owner.wallets[0].fe04_settle_due.unwrap() >= sent + f.owner.fe04_settle_retry);
         assert!(!fe04_settled(&f.owner));
-        assert_eq!(f.owner.safety.capital_in_use(), intent.capital_usd_micro);
-        assert_eq!(f.owner.reservations.held("SOL"), intent.holds["SOL"]);
-        assert_eq!(f.owner.safety.day().failed_attempts, 0, "nothing booked");
+        assert_eq!(
+            f.owner.wallets[0].safety.capital_in_use(),
+            intent.capital_usd_micro
+        );
+        assert_eq!(
+            f.owner.wallets[0].reservations.held("SOL"),
+            intent.holds["SOL"]
+        );
+        assert_eq!(
+            f.owner.wallets[0].safety.day().failed_attempts,
+            0,
+            "nothing booked"
+        );
         // Before the backoff ends no read is sent.
         f.owner.remote_apply().unwrap();
         assert!(fe04_job(&f).is_none());
-        f.owner.fe04_settle_due = Some(std::time::Instant::now());
+        f.owner.wallets[0].fe04_settle_due = Some(std::time::Instant::now());
     }
     cleanup(f);
 }
@@ -2803,16 +2827,18 @@ fn c3_owner_keeps_unknown_holds_and_retries_after_the_backoff() {
 #[test]
 fn c3_owner_books_a_finalized_attempt_without_a_read() {
     let (mut f, _, _) = fe04_fixture("fe04_final", "finalized");
-    assert_eq!(f.owner.safety.capital_in_use(), 0);
-    assert!(f.owner.reservations.is_empty() && f.owner.fe04_settle_due.is_some());
+    assert_eq!(f.owner.wallets[0].safety.capital_in_use(), 0);
+    assert!(
+        f.owner.wallets[0].reservations.is_empty() && f.owner.wallets[0].fe04_settle_due.is_some()
+    );
     run_until(&mut f, fe04_settled);
     assert!(
         fe04_job(&f).is_none(),
         "no RPC read for a finalized attempt"
     );
-    assert_eq!(f.owner.safety.capital_in_use(), 0);
-    f.owner.fe04_settle_due = Some(std::time::Instant::now());
-    run_until(&mut f, |o| o.fe04_settle_due.is_none());
+    assert_eq!(f.owner.wallets[0].safety.capital_in_use(), 0);
+    f.owner.wallets[0].fe04_settle_due = Some(std::time::Instant::now());
+    run_until(&mut f, |o| o.wallets[0].fe04_settle_due.is_none());
     assert!(fe04_settled(&f.owner) && fe04_job(&f).is_none());
     cleanup(f);
 }
@@ -2825,12 +2851,12 @@ fn c3_owner_books_a_finalized_attempt_without_a_read() {
 fn c3_owner_refused_safety_booking_retains_holds_and_the_restart_books_it() {
     use crate::execution::one_shot::settlement::SettlementEvidence;
     let (mut f, intent, proof) = fe04_fixture("fe04_refused", "unknown");
-    f.owner
+    f.owner.wallets[0]
         .safety
         .release_without_outcome(intent.capital_usd_micro, 0)
         .unwrap();
     let day = (0, 0);
-    run_until(&mut f, |o| o.fe04_settle_due.is_none());
+    run_until(&mut f, |o| o.wallets[0].fe04_settle_due.is_none());
     assert!(fe04_job(&f).is_some());
     let evidence = SettlementEvidence {
         observations: vec![],
@@ -2840,10 +2866,13 @@ fn c3_owner_refused_safety_booking_retains_holds_and_the_restart_books_it() {
     run_until(&mut f, fe04_settled);
     let retained = |o: &ShadowOwner| {
         (
-            o.fe04_unbooked,
-            o.reservations.held("SOL"),
-            (o.safety.day().realized_pnl, o.safety.day().failed_attempts),
-            o.safety.halted().is_some(),
+            o.wallets[0].fe04_unbooked,
+            o.wallets[0].reservations.held("SOL"),
+            (
+                o.wallets[0].safety.day().realized_pnl,
+                o.wallets[0].safety.day().failed_attempts,
+            ),
+            o.wallets[0].safety.halted().is_some(),
         )
     };
     let expected = (
@@ -2864,13 +2893,13 @@ fn c3_owner_refused_safety_booking_retains_holds_and_the_restart_books_it() {
         "a repeated answer books nothing"
     );
     // Restart: the journal's settlement is booked by the replay.
-    f.owner.fe04_held = None;
+    f.owner.wallets[0].fe04_held = None;
     let mut safety = Safety::new(e2e_limits(), Allow::default(), false);
     let dir_s = f.dir.join("fe04").display().to_string();
     let now = wall_unix_s().unwrap();
     let again = setup::reservation_book(
         &|k| (k == "P0_FE04_JOURNAL_DIR").then(|| dir_s.clone()),
-        &f.owner.liquidator,
+        &f.owner.wallets[0].liquidator,
     )
     .unwrap()
     .start(&mut safety, now)
@@ -3122,22 +3151,22 @@ fn fe04_exit_fixture(tag: &str) -> (Fixture, crate::execution::one_shot::exit::E
     let dir = f.dir.join("fe04");
     let exit = crate::execution::one_shot::exit::tests::handed_off_exit_journal(
         &dir,
-        &f.owner.liquidator.to_string(),
+        &f.owner.wallets[0].liquidator.to_string(),
         wall_unix_s().unwrap(),
     );
     let dir_s = dir.display().to_string();
     let start = setup::reservation_book(
         &|k| (k == "P0_FE04_JOURNAL_DIR").then(|| dir_s.clone()),
-        &f.owner.liquidator,
+        &f.owner.wallets[0].liquidator,
     )
     .unwrap()
-    .start(&mut f.owner.safety, wall_unix_s().unwrap())
+    .start(&mut f.owner.wallets[0].safety, wall_unix_s().unwrap())
     .unwrap();
-    f.owner.reservations = start.book;
+    f.owner.wallets[0].reservations = start.book;
     f.owner.fe04_journal = start.dir;
-    f.owner.fe04_held = start.held;
-    f.owner.fe04_settle_due = start.settle_due;
-    f.owner.fe04_unbooked = start.unbooked;
+    f.owner.wallets[0].fe04_held = start.held;
+    f.owner.wallets[0].fe04_settle_due = start.settle_due;
+    f.owner.wallets[0].fe04_unbooked = start.unbooked;
     (f, exit)
 }
 
@@ -3167,7 +3196,8 @@ fn exit_observation(
 }
 
 fn exit_open(o: &ShadowOwner) -> bool {
-    o.fe04_held
+    o.wallets[0]
+        .fe04_held
         .as_ref()
         .is_some_and(|j| j.open_exit_id().is_some())
 }
@@ -3180,9 +3210,12 @@ fn exit_open(o: &ShadowOwner) -> bool {
 fn fe04_exit_owner_settles_the_sold_position_and_books_it_once() {
     let (mut f, exit) = fe04_exit_fixture("fe04_exit_once");
     install_sol_price(&mut f);
-    assert_eq!(f.owner.safety.inventory_outstanding(), 1_000);
-    assert_eq!(f.owner.reservations.held(&exit.mint), exit.amount_in);
-    run_until(&mut f, |o| o.fe04_settle_due.is_none());
+    assert_eq!(f.owner.wallets[0].safety.inventory_outstanding(), 1_000);
+    assert_eq!(
+        f.owner.wallets[0].reservations.held(&exit.mint),
+        exit.amount_in
+    );
+    run_until(&mut f, |o| o.wallets[0].fe04_settle_due.is_none());
     let job = fe04_job(&f).expect("the exit read is handed to the worker");
     assert_eq!(job.exit.as_deref(), Some("exit-1"));
     assert_eq!(job.subject.signatures, exit.signatures);
@@ -3195,7 +3228,7 @@ fn fe04_exit_owner_settles_the_sold_position_and_books_it_once() {
         ]
         .into()
     );
-    let day_before = f.owner.safety.day().realized_pnl;
+    let day_before = f.owner.wallets[0].safety.day().realized_pnl;
     let sig = &exit.signatures[0];
     let sold = exit_observation(sig, true, 5_000, &[(&exit.mint, -1_000)]);
     fe04_answer_for(&f, sold.clone(), Some("exit-1"));
@@ -3203,9 +3236,9 @@ fn fe04_exit_owner_settles_the_sold_position_and_books_it_once() {
     // +5000 lamports at 150 USD/SOL = 750 USD micro, a gain rounded down (749), realized; the
     // mark 1000 released.
     let booked = (
-        f.owner.safety.day().realized_pnl - day_before,
-        f.owner.safety.inventory_outstanding(),
-        f.owner.reservations.is_empty(),
+        f.owner.wallets[0].safety.day().realized_pnl - day_before,
+        f.owner.wallets[0].safety.inventory_outstanding(),
+        f.owner.wallets[0].reservations.is_empty(),
     );
     assert_eq!(booked, (749, 0, true));
     for exit_tag in [Some("exit-1"), Some("exit-0"), None] {
@@ -3213,9 +3246,9 @@ fn fe04_exit_owner_settles_the_sold_position_and_books_it_once() {
         run_until(&mut f, |o| !o.remote.fe04_settlement_results.pending());
         assert_eq!(
             (
-                f.owner.safety.day().realized_pnl - day_before,
-                f.owner.safety.inventory_outstanding(),
-                f.owner.reservations.is_empty(),
+                f.owner.wallets[0].safety.day().realized_pnl - day_before,
+                f.owner.wallets[0].safety.inventory_outstanding(),
+                f.owner.wallets[0].reservations.is_empty(),
             ),
             booked,
             "{exit_tag:?} books nothing again"
@@ -3231,9 +3264,14 @@ fn fe04_exit_owner_settles_the_sold_position_and_books_it_once() {
 fn fe04_exit_owner_keeps_a_partial_sale_unknown_with_its_holds() {
     let (mut f, exit) = fe04_exit_fixture("fe04_exit_partial");
     install_sol_price(&mut f);
-    run_until(&mut f, |o| o.fe04_settle_due.is_none());
+    run_until(&mut f, |o| o.wallets[0].fe04_settle_due.is_none());
     assert!(fe04_job(&f).is_some());
-    let ledger = |o: &ShadowOwner| (o.safety.day(), o.safety.inventory_outstanding());
+    let ledger = |o: &ShadowOwner| {
+        (
+            o.wallets[0].safety.day(),
+            o.wallets[0].safety.inventory_outstanding(),
+        )
+    };
     let before = ledger(&f.owner);
     let sig = &exit.signatures[0];
     // A read made for another exit never applies to this one, even a complete sale.
@@ -3244,8 +3282,8 @@ fn fe04_exit_owner_keeps_a_partial_sale_unknown_with_its_holds() {
     );
     run_until(&mut f, |o| !o.remote.fe04_settlement_results.pending());
     assert!(exit_open(&f.owner) && ledger(&f.owner) == before);
-    f.owner.fe04_settle_due = Some(std::time::Instant::now());
-    run_until(&mut f, |o| o.fe04_settle_due.is_none());
+    f.owner.wallets[0].fe04_settle_due = Some(std::time::Instant::now());
+    run_until(&mut f, |o| o.wallets[0].fe04_settle_due.is_none());
     assert!(fe04_job(&f).is_some());
     let sent = std::time::Instant::now();
     fe04_answer_for(
@@ -3253,11 +3291,14 @@ fn fe04_exit_owner_keeps_a_partial_sale_unknown_with_its_holds() {
         exit_observation(sig, true, 5_000, &[(&exit.mint, -500)]),
         Some("exit-1"),
     );
-    run_until(&mut f, |o| o.fe04_settle_due.is_some());
+    run_until(&mut f, |o| o.wallets[0].fe04_settle_due.is_some());
     assert!(exit_open(&f.owner));
-    assert_eq!(f.owner.reservations.held(&exit.mint), exit.amount_in);
+    assert_eq!(
+        f.owner.wallets[0].reservations.held(&exit.mint),
+        exit.amount_in
+    );
     assert_eq!(ledger(&f.owner), before);
-    assert!(f.owner.fe04_settle_due.unwrap() >= sent + f.owner.fe04_settle_retry);
+    assert!(f.owner.wallets[0].fe04_settle_due.unwrap() >= sent + f.owner.fe04_settle_retry);
     f.owner.remote_apply().unwrap();
     assert!(fe04_job(&f).is_none(), "no read before the backoff ends");
     cleanup(f);
@@ -3269,9 +3310,12 @@ fn fe04_exit_owner_keeps_a_partial_sale_unknown_with_its_holds() {
 #[test]
 fn fe04_exit_owner_books_a_finalized_exit_once_sol_is_priced() {
     let (mut f, exit) = fe04_exit_fixture("fe04_exit_unpriced");
-    run_until(&mut f, |o| o.fe04_settle_due.is_none());
+    run_until(&mut f, |o| o.wallets[0].fe04_settle_due.is_none());
     assert!(fe04_job(&f).is_some());
-    let before = (f.owner.safety.day(), f.owner.safety.inventory_outstanding());
+    let before = (
+        f.owner.wallets[0].safety.day(),
+        f.owner.wallets[0].safety.inventory_outstanding(),
+    );
     let sig = &exit.signatures[0];
     fe04_answer_for(
         &f,
@@ -3279,21 +3323,28 @@ fn fe04_exit_owner_books_a_finalized_exit_once_sol_is_priced() {
         Some("exit-1"),
     );
     run_until(&mut f, |o| {
-        o.fe04_held
+        o.wallets[0]
+            .fe04_held
             .as_ref()
             .is_some_and(|j| j.exit_awaits_booking())
     });
     assert_eq!(
-        (f.owner.safety.day(), f.owner.safety.inventory_outstanding()),
+        (
+            f.owner.wallets[0].safety.day(),
+            f.owner.wallets[0].safety.inventory_outstanding()
+        ),
         before
     );
-    assert_eq!(f.owner.reservations.held(&exit.mint), exit.amount_in);
+    assert_eq!(
+        f.owner.wallets[0].reservations.held(&exit.mint),
+        exit.amount_in
+    );
     install_sol_price(&mut f);
-    f.owner.fe04_settle_due = Some(std::time::Instant::now());
+    f.owner.wallets[0].fe04_settle_due = Some(std::time::Instant::now());
     run_until(&mut f, |o| !exit_open(o));
     assert!(fe04_job(&f).is_none(), "settled from the journal alone");
-    assert_eq!(f.owner.safety.inventory_outstanding(), 0);
-    assert!(f.owner.reservations.is_empty());
+    assert_eq!(f.owner.wallets[0].safety.inventory_outstanding(), 0);
+    assert!(f.owner.wallets[0].reservations.is_empty());
     cleanup(f);
 }
 
@@ -4018,8 +4069,7 @@ fn mt5b_submitted_follows_the_fe04_journal_and_defers_the_targets_detection() {
     let target: Pubkey = intent.target.parse().unwrap();
     assert_eq!(f.owner.ownership.state(&target), None, "nothing synced yet");
     assert!(f.owner.lifecycle(), "the owner pass synchronizes the table");
-    let attempt = f
-        .owner
+    let attempt = f.owner.wallets[0]
         .reservations
         .targets()
         .map(|(_, h)| h.attempt.clone())
@@ -4060,7 +4110,7 @@ fn mt5b_submitted_follows_the_fe04_journal_and_defers_the_targets_detection() {
     assert_eq!(f.owner.ownership.state(&target), Some(submitted));
     // The settlement path (C3): the proven non-landing settles the attempt, the book follows
     // the journal and the ownership follows the book.
-    run_until(&mut f, |o| o.fe04_settle_due.is_none());
+    run_until(&mut f, |o| o.wallets[0].fe04_settle_due.is_none());
     assert!(fe04_job(&f).is_some());
     fe04_answer(
         &f,
@@ -4071,7 +4121,7 @@ fn mt5b_submitted_follows_the_fe04_journal_and_defers_the_targets_detection() {
     );
     f.owner.remote_apply().unwrap();
     assert!(fe04_settled(&f.owner));
-    assert!(f.owner.reservations.is_empty());
+    assert!(f.owner.wallets[0].reservations.is_empty());
     assert_eq!(
         f.owner.ownership.state(&target),
         None,
@@ -4184,7 +4234,7 @@ fn mt5b_projection_results_are_judged_against_ownership_and_newest_revision() {
     let message = |identity| mt5_result(candidate, real, vec![], fingerprint, identity);
     let identity = test_identity(&f.owner, candidate, &[]);
     // SUBMITTED by a durable attempt (the book's target hold): dropped foreign.
-    f.owner.reservations = WalletReservations::rebuild([ActiveHold {
+    f.owner.wallets[0].reservations = WalletReservations::rebuild([ActiveHold {
         attempt: "A1".into(),
         target: candidate.to_string(),
         unknown_outcome: true,
@@ -4208,7 +4258,7 @@ fn mt5b_projection_results_are_judged_against_ownership_and_newest_revision() {
     assert_eq!(f.owner.projection_stats.requeued, 0);
     assert_eq!(f.owner.ownership.counts().submitted, 1, "untouched");
     // Released by the book: an older revision than the account's newest yields to it.
-    f.owner.reservations = WalletReservations::default();
+    f.owner.wallets[0].reservations = WalletReservations::default();
     f.owner.sync_ownership();
     assert!(f.owner.ownership.is_empty());
     f.owner.candidate_revisions.insert(candidate, 2);
@@ -4251,9 +4301,9 @@ fn f01_operator_stop_ends_a_standalone_shadow_owner() {
 fn d07_fe04_replay_without_a_wall_clock_is_refused() {
     let (mut f, _, _) = fe04_fixture("fe04_d07", "finalized");
     run_until(&mut f, fe04_settled);
-    f.owner.fe04_held = None;
+    f.owner.wallets[0].fe04_held = None;
     let dir_s = f.dir.join("fe04").display().to_string();
-    let liquidator = f.owner.liquidator;
+    let liquidator = f.owner.wallets[0].liquidator;
     let book = || {
         setup::reservation_book(
             &|k| (k == "P0_FE04_JOURNAL_DIR").then(|| dir_s.clone()),
@@ -4353,15 +4403,15 @@ fn b01_rebalancing_observe_plans_from_real_balances_and_quotes_without_trading()
         })
     };
     f.owner.st.on_event(account(
-        f.owner.liquidator,
+        f.owner.wallets[0].liquidator,
         Pubkey::default(),
         10_000_000_000,
         vec![],
     ));
-    let (token_program, ata) = f.owner.atas.of(&mint)[0];
+    let (token_program, ata) = f.owner.wallets[0].atas.of(&mint)[0];
     let mut data = vec![0u8; 165];
     data[..32].copy_from_slice(mint.as_ref());
-    data[32..64].copy_from_slice(f.owner.liquidator.as_ref());
+    data[32..64].copy_from_slice(f.owner.wallets[0].liquidator.as_ref());
     data[64..72].copy_from_slice(&50u64.to_le_bytes());
     data[108] = 1;
     f.owner
@@ -4414,9 +4464,10 @@ fn b01_rebalancing_observe_plans_from_real_balances_and_quotes_without_trading()
         r.trades.is_empty(),
         "nothing is traded without a known cost"
     );
+    let w = f.owner.wallets[0].liquidator.to_string();
     assert_eq!(
         r.blocked,
-        vec![(mint.to_string(), "REBALANCE_COST_UNKNOWN")]
+        vec![(w, mint.to_string(), "REBALANCE_COST_UNKNOWN")]
     );
     assert_eq!(r.budget_usd_micro, OPERATIONAL.rebalance_budget_usd_micro);
     let cap = s
@@ -4441,22 +4492,22 @@ fn b01_rebalancing_observe_plans_from_real_balances_and_quotes_without_trading()
     f.owner.required_dependency_keys.push(bank_key);
     assert!(
         !f.owner
-            .rebalance_balances()
+            .rebalance_balances(0)
             .contains_key(&collateral.to_string()),
         "no tokens: no collateral"
     );
-    let (token_program, ata) = f.owner.atas.of(&collateral)[0];
+    let (token_program, ata) = f.owner.wallets[0].atas.of(&collateral)[0];
     let mut data = vec![0u8; 165];
     data[..32].copy_from_slice(collateral.as_ref());
-    data[32..64].copy_from_slice(f.owner.liquidator.as_ref());
+    data[32..64].copy_from_slice(f.owner.wallets[0].liquidator.as_ref());
     data[64..72].copy_from_slice(&70u64.to_le_bytes());
     data[108] = 1;
     f.owner
         .st
         .on_event(account(ata, token_program, 2_039_280, data));
-    assert_eq!(f.owner.rebalance_balances()[&collateral.to_string()], 70);
+    assert_eq!(f.owner.rebalance_balances(0)[&collateral.to_string()], 70);
     // What an FE-04 attempt or its open position holds of it is never collateral.
-    f.owner.reservations = crate::execution::reservation::WalletReservations::rebuild([
+    f.owner.wallets[0].reservations = crate::execution::reservation::WalletReservations::rebuild([
         crate::execution::one_shot::ActiveHold {
             attempt: "P1".into(),
             target: Pubkey::new_unique().to_string(),
@@ -4467,10 +4518,11 @@ fn b01_rebalancing_observe_plans_from_real_balances_and_quotes_without_trading()
         },
     ])
     .unwrap();
-    assert_eq!(f.owner.rebalance_balances()[&collateral.to_string()], 40);
-    f.owner.reservations = Default::default();
+    assert_eq!(f.owner.rebalance_balances(0)[&collateral.to_string()], 40);
+    f.owner.wallets[0].reservations = Default::default();
     // The completed observation is one typed record; its provisional plans are none.
     let slot = r.slot;
+    let wallet = f.owner.wallets[0].liquidator.to_string();
     let dir = f.dir.clone();
     f.owner.finish().unwrap();
     let mut reader =
@@ -4478,7 +4530,7 @@ fn b01_rebalancing_observe_plans_from_real_balances_and_quotes_without_trading()
     let mut records = vec![];
     while let Some(frame) = reader.next_frame().unwrap() {
         if frame.kind == RecordEvent::KIND {
-            if let RecordEvent::RebalancePlan {
+            if let RecordEvent::WalletRebalancePlan {
                 slot,
                 trades,
                 blocked,
@@ -4495,7 +4547,7 @@ fn b01_rebalancing_observe_plans_from_real_balances_and_quotes_without_trading()
         vec![(
             slot,
             vec![],
-            vec![(mint.to_string(), "REBALANCE_COST_UNKNOWN".into())],
+            vec![(wallet, mint.to_string(), "REBALANCE_COST_UNKNOWN".into())],
             OPERATIONAL.rebalance_budget_usd_micro
         )]
     );
@@ -4669,7 +4721,7 @@ fn b01_observing(tag: &str) -> (Fixture, Pubkey) {
         (mint.to_string(), band(100, 200, 300)),
     ]
     .into();
-    let liquidator = f.owner.liquidator;
+    let liquidator = f.owner.wallets[0].liquidator;
     b01_account(
         &mut f,
         liquidator,
@@ -4698,10 +4750,10 @@ fn b01_account(f: &mut Fixture, pubkey: Pubkey, owner: Pubkey, lamports: u64, da
 
 /// The liquidator's Token-program ATA of `mint` holding `amount`.
 fn b01_ata(f: &mut Fixture, mint: &Pubkey, amount: u64) {
-    let (token_program, ata) = f.owner.atas.of(mint)[0];
+    let (token_program, ata) = f.owner.wallets[0].atas.of(mint)[0];
     let mut data = vec![0u8; 165];
     data[..32].copy_from_slice(mint.as_ref());
-    data[32..64].copy_from_slice(f.owner.liquidator.as_ref());
+    data[32..64].copy_from_slice(f.owner.wallets[0].liquidator.as_ref());
     data[64..72].copy_from_slice(&amount.to_le_bytes());
     data[108] = 1;
     b01_account(f, ata, token_program, 2_039_280, data);
@@ -4710,17 +4762,18 @@ fn b01_ata(f: &mut Fixture, mint: &Pubkey, amount: u64) {
 /// A B01 plan record: slot, number of trades, the blocked assets with their reason.
 type B01Record = (u64, usize, Vec<(String, std::borrow::Cow<'static, str>)>);
 
-/// The B01 plan records of a finished owner's journal.
+/// The B01 plan records of a finished owner's journal (DEC-17b: every row the pilot's).
 fn b01_records(f: Fixture) -> Vec<B01Record> {
     use crate::analytics::payload::{decode, Payload};
     let dir = f.dir.clone();
+    let wallet = f.owner.wallets[0].liquidator.to_string();
     f.owner.finish().unwrap();
     let mut reader =
         crate::analytics::journal::Reader::open(&dir.join("opportunities.p0j")).unwrap();
     let mut records = vec![];
     while let Some(frame) = reader.next_frame().unwrap() {
         if frame.kind == RecordEvent::KIND {
-            if let RecordEvent::RebalancePlan {
+            if let RecordEvent::WalletRebalancePlan {
                 slot,
                 trades,
                 blocked,
@@ -4732,6 +4785,9 @@ fn b01_records(f: Fixture) -> Vec<B01Record> {
                     Some(slot),
                     "the frame carries the plan's slot"
                 );
+                assert!(trades.iter().all(|(w, _)| *w == wallet));
+                assert!(blocked.iter().all(|(w, _, _)| *w == wallet));
+                let blocked = blocked.into_iter().map(|(_, a, r)| (a, r)).collect();
                 records.push((slot, trades.len(), blocked));
             }
         }
@@ -4826,18 +4882,20 @@ fn b01_an_unreadable_book_or_a_swapless_pair_is_never_planned_as_a_trade() {
     use crate::execution::inventory::Target;
     let (mut f, mint) = b01_observing("b01_book_wsol");
     let (jobs, _results) = f.owner.remote.detached_rebalance();
-    f.owner.reservations = crate::execution::reservation::WalletReservations::unreadable();
+    f.owner.wallets[0].reservations =
+        crate::execution::reservation::WalletReservations::unreadable();
     f.owner.rebalance_observe();
     let r = f.owner.owner_snapshot(1).rebalance.unwrap();
     // Every band, in the bands' order.
+    let w = f.owner.wallets[0].liquidator.to_string();
     let mut every = vec![
-        ("SOL".to_string(), "RESERVATION_BOOK_UNREADABLE"),
-        (mint.to_string(), "RESERVATION_BOOK_UNREADABLE"),
+        (w.clone(), "SOL".to_string(), "RESERVATION_BOOK_UNREADABLE"),
+        (w.clone(), mint.to_string(), "RESERVATION_BOOK_UNREADABLE"),
     ];
     every.sort();
     assert_eq!(r.blocked, every);
     assert!(jobs.try_pop().is_none());
-    f.owner.reservations = Default::default();
+    f.owner.wallets[0].reservations = Default::default();
     // WSOL above its band, SOL below its band: an unwrap, not a swap.
     let wsol: Pubkey = darkbot_project0::protocol::NATIVE_SOL_MINT.parse().unwrap();
     let band = |min, target, max| Target {
@@ -4863,7 +4921,10 @@ fn b01_an_unreadable_book_or_a_swapless_pair_is_never_planned_as_a_trade() {
     let r = f.owner.owner_snapshot(1).rebalance.unwrap();
     assert_eq!(
         (r.quotes_pending, r.blocked),
-        (0, vec![("SOL".to_string(), "REBALANCE_COST_UNKNOWN")])
+        (
+            0,
+            vec![(w.clone(), "SOL".to_string(), "REBALANCE_COST_UNKNOWN")]
+        )
     );
     let records = b01_records(f);
     assert_eq!(records.len(), 1, "only the completed observation");
@@ -4884,7 +4945,7 @@ fn dec10_projection_shows_the_configured_approval_status() {
     };
     let mut f = fixture("dec10");
     assert_eq!(f.owner.owner_snapshot(1).approval.state, "NONE");
-    let wallet = f.owner.liquidator.to_string();
+    let wallet = f.owner.wallets[0].liquidator.to_string();
     let file = f.dir.join("approval.conf");
     let hash = solana_sdk::hash::Hash::new_unique().to_string();
     let expires = darkbot_common::timing::wall_now().unwrap().as_secs() + 3_600;
@@ -4923,14 +4984,14 @@ fn dec10_projection_shows_the_configured_approval_status() {
     };
     // Without an FE-04 journal the single use cannot be checked: never VALID.
     source.refresh(None, &wallet);
-    f.owner.fe04_approval = Some(source);
+    f.owner.wallets[0].fe04_approval = Some(source);
     let s = f.owner.owner_snapshot(1).approval;
     assert_eq!(
         (s.state, s.reason.as_str()),
         ("INVALID", "FE04_JOURNAL_NOT_CONFIGURED")
     );
     let refresh = |f: &mut Fixture| {
-        f.owner
+        f.owner.wallets[0]
             .fe04_approval
             .as_mut()
             .unwrap()
@@ -5382,7 +5443,7 @@ fn dec17b_a_treasury_is_read_only_and_a_wallet_blocks_only_itself() {
     let mut f = fixture_with("dec17b_wallets", None);
     let dir = f.dir.join("data/capability-control");
     let project = f.dir.clone();
-    let pilot = f.owner.liquidator;
+    let pilot = f.owner.wallets[0].liquidator;
     let (fee_payer, treasury) = (Pubkey::new_unique(), Pubkey::new_unique());
     let key = operator_auth::register(&project, true).unwrap();
     {
@@ -5452,7 +5513,7 @@ fn p8ctrl01_the_owner_decides_switches_per_epoch_and_live_needs_every_gate() {
     let mut f = fixture_with("p8ctrl01", None);
     let dir = f.dir.join("data/capability-control");
     let project = f.dir.clone();
-    let signer = f.owner.liquidator;
+    let signer = f.owner.wallets[0].liquidator;
     let key = operator_auth::register(&project, true).unwrap();
     {
         let c = &mut f.owner.sources.capabilities;
@@ -5713,7 +5774,7 @@ fn p8ctrl02_no_grant_without_the_operator_and_a_revocation_ends_it_at_once() {
     let mut f = fixture_with("p8ctrl02", None);
     let dir = f.dir.join("capability-control");
     let scope = fe06::parse(
-        fe06::tests::text(&f.owner.liquidator, &[]).as_bytes(),
+        fe06::tests::text(&f.owner.wallets[0].liquidator, &[]).as_bytes(),
         &fe06::tests::ceilings(),
     )
     .unwrap();
@@ -7056,7 +7117,7 @@ fn dec13b_live(f: &mut Fixture, fe06: bool) {
         c.econ.set(e, true);
     }
     let mut signer = cap::WalletSwitch::configured(
-        f.owner.liquidator,
+        f.owner.wallets[0].liquidator,
         &[cap::ROLE_LIQUIDATOR, cap::ROLE_FEE_PAYER],
     );
     signer.enabled = true;
@@ -7098,11 +7159,11 @@ fn dec13b_fixture_with(
     let mut f = fixture_with(tag, None);
     let payer = solana_sdk::signature::Keypair::new();
     let liquidator = payer.pubkey();
-    (f.owner.liquidator, f.owner.payer) = (
+    (f.owner.wallets[0].liquidator, f.owner.wallets[0].payer) = (
         liquidator,
         crate::execution::payer::OwnerPayer::Signer(payer),
     );
-    f.owner.atas = accounts::LiquidatorAtas::new(liquidator);
+    f.owner.wallets[0].atas = accounts::LiquidatorAtas::new(liquidator);
     f.owner.zero_prefund_enabled = true;
     let calls = dec13b_live_node(&mut f, send_ok, sim_delay_ms, sim_fee);
     let num = |v: f64| WrappedI80F48 {
@@ -7257,7 +7318,7 @@ fn dec13b_fixture_with(
     let mut allow = Allow::default();
     allow.execution_classes.insert("longtail");
     allow.assets.extend([asset_mint, liab_mint]);
-    f.owner.safety = Safety::new(open, allow, fe06);
+    f.owner.wallets[0].safety = Safety::new(open, allow, fe06);
     // As in the owner's setup: the protocol and the pinned swap program.
     let jup: Pubkey = protocol::JUP_SWAP_PROGRAM_ID.parse().unwrap();
     f.owner.allowlist.swap_programs.insert(jup);
@@ -7294,7 +7355,7 @@ fn dec13b_fixture_with(
         usage: Usage::Unchecked("APPROVAL_NOT_READ".into()),
     };
     source.refresh(Some(&journal), &wallet);
-    f.owner.fe04_approval = Some(source);
+    f.owner.wallets[0].fe04_approval = Some(source);
     f.owner.fe04_journal = Some(journal);
     (f, target, calls)
 }
@@ -7372,9 +7433,9 @@ fn dec13b_jupiter(taker: Pubkey, token_program: Pubkey, input: Pubkey, output: P
 fn dec13b_a_live_candidate_is_admitted_sent_once_and_released_by_the_settlement() {
     use crate::execution::one_shot::settlement::{SettlementEvidence, SettlementSubject};
     let (mut f, target, calls) = dec13b_fixture("dec13b_live", true);
-    assert_eq!(f.owner.approval_status().state, "VALID");
+    assert_eq!(f.owner.approval_status(0).state, "VALID");
     // The admission checks its holds against the lamports and every target bank's ATA amount.
-    let balances = f.owner.fe04_wallet_balances(Some(&target));
+    let balances = f.owner.fe04_wallet_balances(0, Some(&target));
     assert_eq!(balances["SOL"], 10_000_000_000);
     assert_eq!(
         balances
@@ -7404,24 +7465,22 @@ fn dec13b_a_live_candidate_is_admitted_sent_once_and_released_by_the_settlement(
         ],
         "one simulation, reused at the handoff, and one send"
     );
-    let a = &f.owner.fe04_admissions;
+    let a = &f.owner.wallets[0].fe04_admissions;
     assert_eq!((a.submitted, a.refused, a.unknown), (1, 0, 0));
     assert_eq!((a.simulation.reused, a.simulation.resimulated), (1, 0));
-    let unbooked = f
-        .owner
+    let unbooked = f.owner.wallets[0]
         .fe04_unbooked
         .expect("the check() reservation waits for the booking");
     assert_eq!(
         unbooked.reserved_capital,
-        Some(f.owner.safety.capital_in_use())
+        Some(f.owner.wallets[0].safety.capital_in_use())
     );
     assert!(unbooked.reserved_inventory > 0);
     assert_eq!(
-        f.owner.safety.inventory_reserved(),
+        f.owner.wallets[0].safety.inventory_reserved(),
         unbooked.reserved_inventory
     );
-    let (intent, _) = f
-        .owner
+    let (intent, _) = f.owner.wallets[0]
         .fe04_held
         .as_ref()
         .unwrap()
@@ -7446,15 +7505,18 @@ fn dec13b_a_live_candidate_is_admitted_sent_once_and_released_by_the_settlement(
         )))
         .unwrap());
     assert_eq!(methods().len(), 4);
-    let (dir, wallet) = (f.dir.join("fe04"), f.owner.liquidator.to_string());
-    f.owner
+    let (dir, wallet) = (
+        f.dir.join("fe04"),
+        f.owner.wallets[0].liquidator.to_string(),
+    );
+    f.owner.wallets[0]
         .fe04_approval
         .as_mut()
         .unwrap()
         .refresh(Some(&dir), &wallet);
-    assert_eq!(f.owner.approval_status().state, "CONSUMED");
+    assert_eq!(f.owner.approval_status(0).state, "CONSUMED");
     // The settlement reads the sent signature; its proven non-landing books the attempt once.
-    run_until(&mut f, |o| o.fe04_settle_due.is_none());
+    run_until(&mut f, |o| o.wallets[0].fe04_settle_due.is_none());
     let job = fe04_job(&f).expect("the first read is due at once");
     assert_eq!(job.subject.signatures, intent.signatures);
     let proof = crate::execution::one_shot::non_landing::loopback::proving(
@@ -7469,22 +7531,22 @@ fn dec13b_a_live_candidate_is_admitted_sent_once_and_released_by_the_settlement(
         },
     );
     run_until(&mut f, fe04_settled);
-    assert_eq!(f.owner.fe04_unbooked, None);
+    assert_eq!(f.owner.wallets[0].fe04_unbooked, None);
     assert_eq!(
         (
-            f.owner.safety.capital_in_use(),
-            f.owner.safety.inventory_reserved()
+            f.owner.wallets[0].safety.capital_in_use(),
+            f.owner.wallets[0].safety.inventory_reserved()
         ),
         (0, 0),
         "released once by the booking"
     );
-    assert_eq!(f.owner.safety.day().failed_attempts, 1);
+    assert_eq!(f.owner.wallets[0].safety.day().failed_attempts, 1);
     assert_eq!(
-        f.owner.safety.halted(),
+        f.owner.wallets[0].safety.halted(),
         Some(darkbot_common::error::HaltReason::LimitBreached),
         "a consumed one-shot halts as its restart replay does"
     );
-    assert!(f.owner.reservations.is_empty());
+    assert!(f.owner.wallets[0].reservations.is_empty());
     assert_eq!(methods().len(), 4, "nothing sent again");
     cleanup(f);
 }
@@ -7514,7 +7576,7 @@ fn p8ctrl03_a_grant_whose_scope_lacks_the_adapter_permits_no_send() {
 #[test]
 fn dec13b_without_fe06_a_live_request_admits_and_sends_nothing() {
     let (mut f, target, calls) = dec13b_fixture("dec13b_shadow", false);
-    assert_eq!(f.owner.approval_status().state, "VALID");
+    assert_eq!(f.owner.approval_status(0).state, "VALID");
     f.owner
         .detect(Some((
             target,
@@ -7539,8 +7601,8 @@ fn dec13b_without_fe06_a_live_request_admits_and_sends_nothing() {
             .load(std::sync::atomic::Ordering::Relaxed),
         0
     );
-    assert!(f.owner.fe04_held.is_none() && f.owner.fe04_admission.is_none());
-    assert_eq!(f.owner.fe04_admissions, Default::default());
+    assert!(f.owner.wallets[0].fe04_held.is_none() && f.owner.wallets[0].fe04_admission.is_none());
+    assert_eq!(f.owner.wallets[0].fe04_admissions, Default::default());
     let s = f.owner.owner_snapshot(1).admission;
     assert_eq!(
         (s.state, s.block_reason.as_str()),
@@ -7550,8 +7612,11 @@ fn dec13b_without_fe06_a_live_request_admits_and_sends_nothing() {
         )
     );
     // The wallet lock is free: no admission holds the journal.
-    crate::execution::one_shot::Journal::open(&f.dir.join("fe04"), &f.owner.liquidator.to_string())
-        .unwrap();
+    crate::execution::one_shot::Journal::open(
+        &f.dir.join("fe04"),
+        &f.owner.wallets[0].liquidator.to_string(),
+    )
+    .unwrap();
     cleanup(f);
 }
 
@@ -7561,11 +7626,15 @@ fn dec13b_without_fe06_a_live_request_admits_and_sends_nothing() {
 #[test]
 fn dec13b_an_admission_needs_every_condition_and_names_the_missing_one() {
     let (mut f, target, calls) = dec13b_fixture("dec13b_refused", true);
-    let reason = |f: &ShadowOwner| f.fe04_admission_facts(Some(&target)).err().map(|(r, _)| r);
+    let reason = |f: &ShadowOwner| {
+        f.fe04_admission_facts(0, Some(&target))
+            .err()
+            .map(|(r, _)| r)
+    };
     assert_eq!(reason(&f.owner), None);
     let other = Pubkey::new_unique();
     assert_eq!(
-        f.owner.fe04_admission_facts(Some(&other)).err(),
+        f.owner.fe04_admission_facts(0, Some(&other)).err(),
         Some(("FE04_TARGET_NOT_APPROVED".into(), false))
     );
     f.owner.program_upgrade_latched = true;
@@ -7585,11 +7654,11 @@ fn dec13b_an_admission_needs_every_condition_and_names_the_missing_one() {
     f.owner.blockhash.set(bh);
     let journal = f.owner.fe04_journal.take();
     assert_eq!(
-        f.owner.fe04_admission_facts(Some(&target)).err(),
+        f.owner.fe04_admission_facts(0, Some(&target)).err(),
         Some(("FE04_JOURNAL_NOT_CONFIGURED".into(), true))
     );
     f.owner.fe04_journal = journal;
-    let approval = f.owner.fe04_approval.take();
+    let approval = f.owner.wallets[0].fe04_approval.take();
     assert_eq!(reason(&f.owner).as_deref(), Some("FE04_APPROVAL_NONE"));
     // The detection stops at the send boundary with that reason projected; nothing is sent.
     f.owner
@@ -7609,16 +7678,20 @@ fn dec13b_an_admission_needs_every_condition_and_names_the_missing_one() {
         (s.state, s.block_reason.as_str()),
         ("BLOCKED", "FE04_APPROVAL_NONE")
     );
-    f.owner.fe04_approval = approval;
+    f.owner.wallets[0].fe04_approval = approval;
     let dir = f.dir.join("fe04");
-    crate::execution::one_shot::test_unknown_attempt(&dir, &f.owner.liquidator.to_string());
-    f.owner.fe04_held = Some(
-        crate::execution::one_shot::Journal::open(&dir, &f.owner.liquidator.to_string()).unwrap(),
+    crate::execution::one_shot::test_unknown_attempt(
+        &dir,
+        &f.owner.wallets[0].liquidator.to_string(),
+    );
+    f.owner.wallets[0].fe04_held = Some(
+        crate::execution::one_shot::Journal::open(&dir, &f.owner.wallets[0].liquidator.to_string())
+            .unwrap(),
     );
     assert!(reason(&f.owner).unwrap().starts_with("FE04_ATTEMPT_HELD"));
     // A halted Safety is shown as the block of every admission.
-    f.owner.fe04_held = None;
-    f.owner
+    f.owner.wallets[0].fe04_held = None;
+    f.owner.wallets[0]
         .safety
         .halt(darkbot_common::error::HaltReason::LimitBreached);
     let s = f.owner.owner_snapshot(2).admission;
@@ -7762,11 +7835,11 @@ fn dec13b_exit_fixture_of(
     let mut f = fixture_with(tag, None);
     let payer = solana_sdk::signature::Keypair::new();
     let liquidator = payer.pubkey();
-    (f.owner.liquidator, f.owner.payer) = (
+    (f.owner.wallets[0].liquidator, f.owner.wallets[0].payer) = (
         liquidator,
         crate::execution::payer::OwnerPayer::Signer(payer),
     );
-    f.owner.atas = accounts::LiquidatorAtas::new(liquidator);
+    f.owner.wallets[0].atas = accounts::LiquidatorAtas::new(liquidator);
     let (dir, wallet) = (f.dir.join("fe04"), liquidator.to_string());
     let now_s = wall_unix_s().unwrap();
     let mint_s = match wsol_units {
@@ -7811,12 +7884,12 @@ fn dec13b_exit_fixture_of(
         &liquidator,
     )
     .unwrap()
-    .start(&mut f.owner.safety, now_s)
+    .start(&mut f.owner.wallets[0].safety, now_s)
     .unwrap();
-    f.owner.reservations = start.book;
+    f.owner.wallets[0].reservations = start.book;
     f.owner.fe04_journal = start.dir;
-    f.owner.fe04_held = start.held;
-    f.owner.fe04_unbooked = start.unbooked;
+    f.owner.wallets[0].fe04_held = start.held;
+    f.owner.wallets[0].fe04_unbooked = start.unbooked;
     let source = ApprovalSource {
         path: file,
         binding: ApprovalBinding {
@@ -7830,7 +7903,7 @@ fn dec13b_exit_fixture_of(
         usage: Usage::Unchecked("APPROVAL_NOT_READ".into()),
     };
     // Not read yet: while LIVE is effective the owner's FE-04 refresh reads it (no status tap).
-    f.owner.fe04_approval = Some(source);
+    f.owner.wallets[0].fe04_approval = Some(source);
     // The state the exit is checked against: the position's ATA, an empty WSOL ATA, lamports.
     let token: Pubkey = protocol::TOKEN_PROGRAM_ID.parse().unwrap();
     let wsol: Pubkey = crate::execution::route::WSOL_MINT.parse().unwrap();
@@ -7947,16 +8020,19 @@ fn a_wsol_position_exits_by_its_unwrap_and_never_with_foreign_wsol() {
     ] {
         let (mut f, calls, sent, e) =
             dec13b_exit_fixture_of(&format!("wsol_exit_{name}"), true, Some(w));
-        let (dir, wallet) = (f.dir.join("fe04"), f.owner.liquidator.to_string());
-        f.owner
+        let (dir, wallet) = (
+            f.dir.join("fe04"),
+            f.owner.wallets[0].liquidator.to_string(),
+        );
+        f.owner.wallets[0]
             .fe04_approval
             .as_mut()
             .unwrap()
             .refresh(Some(&dir), &wallet);
-        assert_eq!(f.owner.approval_status().state, "VALID", "{name}");
+        assert_eq!(f.owner.approval_status(0).state, "VALID", "{name}");
         dec13b_live(&mut f, true);
-        f.owner.fe04_exit_admission();
-        let a = &f.owner.fe04_admissions;
+        f.owner.fe04_exit_admission(0);
+        let a = &f.owner.wallets[0].fe04_admissions;
         match refusal {
             None => {
                 assert_eq!(
@@ -7965,11 +8041,11 @@ fn a_wsol_position_exits_by_its_unwrap_and_never_with_foreign_wsol() {
                     "{a:?}"
                 );
                 assert_eq!(a.exits_submitted, 1);
-                let held = f.owner.fe04_held.as_ref().unwrap();
+                let held = f.owner.wallets[0].fe04_held.as_ref().unwrap();
                 assert_eq!(held.open_exit_id(), Some(e.approval_id.clone()));
                 // What was signed and sent: compute budget, close, create; one signer.
                 let tx = sent.lock().unwrap()[0].clone();
-                let taker = f.owner.payer.pubkey();
+                let taker = f.owner.wallets[0].payer.pubkey();
                 let keys = tx.message.static_account_keys();
                 assert_eq!(
                     (tx.message.header().num_required_signatures, keys[0]),
@@ -8021,18 +8097,21 @@ fn a_wsol_position_exits_by_its_unwrap_and_never_with_foreign_wsol() {
 fn dec13b_an_open_position_exits_once_with_its_approval_while_live() {
     let (mut f, calls, e) = dec13b_exit_fixture("dec13b_exit", true);
     // Without FE-06 nothing exits (the approval read and VALID).
-    let (dir, wallet) = (f.dir.join("fe04"), f.owner.liquidator.to_string());
-    f.owner
+    let (dir, wallet) = (
+        f.dir.join("fe04"),
+        f.owner.wallets[0].liquidator.to_string(),
+    );
+    f.owner.wallets[0]
         .fe04_approval
         .as_mut()
         .unwrap()
         .refresh(Some(&dir), &wallet);
-    assert_eq!(f.owner.approval_status().state, "VALID");
+    assert_eq!(f.owner.approval_status(0).state, "VALID");
     dec13b_live(&mut f, false);
-    f.owner.fe04_exit_admission();
+    f.owner.fe04_exit_admission(0);
     assert!(calls.lock().unwrap().is_empty());
     // Not read again yet: while LIVE is effective the FE-04 refresh reads it (no status tap).
-    f.owner.fe04_approval.as_mut().unwrap().read = Err("APPROVAL_NOT_READ".into());
+    f.owner.wallets[0].fe04_approval.as_mut().unwrap().read = Err("APPROVAL_NOT_READ".into());
     dec13b_live(&mut f, true);
     // P8-CTRL.5: ECON_ATTEMPT DISABLED stops new liquidations, never this exit.
     f.owner.sources.capabilities.econ.set(
@@ -8043,21 +8122,21 @@ fn dec13b_an_open_position_exits_once_with_its_approval_while_live() {
         .checked_sub(f.owner.fe04_refresh + Duration::from_millis(1))
         .unwrap();
     f.owner.lifecycle();
-    assert_eq!(f.owner.approval_status().state, "VALID");
+    assert_eq!(f.owner.approval_status(0).state, "VALID");
     assert_eq!(
         calls.lock().unwrap().clone(),
         ["getFeeForMessage", "simulateTransaction", "sendTransaction"],
         "{:?}",
-        f.owner.fe04_admissions
+        f.owner.wallets[0].fe04_admissions
     );
-    assert_eq!(f.owner.fe04_admissions.exits_submitted, 1);
-    let held = f.owner.fe04_held.as_ref().unwrap();
+    assert_eq!(f.owner.wallets[0].fe04_admissions.exits_submitted, 1);
+    let held = f.owner.wallets[0].fe04_held.as_ref().unwrap();
     assert_eq!(held.open_exit_id(), Some(e.approval_id.clone()));
     // An open exit admits no second one.
-    f.owner.fe04_exit_admission();
+    f.owner.fe04_exit_admission(0);
     assert_eq!(calls.lock().unwrap().len(), 3);
     // The settlement reads exactly this exit.
-    run_until(&mut f, |o| o.fe04_settle_due.is_none());
+    run_until(&mut f, |o| o.wallets[0].fe04_settle_due.is_none());
     let job = fe04_job(&f).expect("the exit read is due at once");
     assert_eq!(job.exit, Some(e.approval_id.clone()));
     cleanup(f);
@@ -8071,12 +8150,15 @@ fn dec13b_an_open_position_exits_once_with_its_approval_while_live() {
 #[test]
 fn dec13b_a_refused_candidate_releases_at_once_and_an_unused_journal_blocks_nothing() {
     let (mut f, target, calls) = dec13b_fixture("dec13b_refused_check", true);
-    let (dir, wallet) = (f.dir.join("fe04"), f.owner.liquidator.to_string());
+    let (dir, wallet) = (
+        f.dir.join("fe04"),
+        f.owner.wallets[0].liquidator.to_string(),
+    );
     let file = f.dir.join("approval.conf");
     let approval = std::fs::read_to_string(&file).unwrap();
     let set_approval = |f: &mut Fixture, text: &str| {
         std::fs::write(&file, text).unwrap();
-        f.owner
+        f.owner.wallets[0]
             .fe04_approval
             .as_mut()
             .unwrap()
@@ -8100,19 +8182,22 @@ fn dec13b_a_refused_candidate_releases_at_once_and_an_unused_journal_blocks_noth
             .unwrap()
     };
     detect(&mut f, 100);
-    let a = &f.owner.fe04_admissions;
+    let a = &f.owner.wallets[0].fe04_admissions;
     assert_eq!((a.submitted, a.refused, a.unknown), (0, 1, 0));
     assert_eq!(a.last_refusal, "APPROVAL_BUDGET_EXCEEDED:SOL_DEBIT");
     assert_eq!(
         (
-            f.owner.safety.capital_in_use(),
-            f.owner.safety.inventory_reserved()
+            f.owner.wallets[0].safety.capital_in_use(),
+            f.owner.wallets[0].safety.inventory_reserved()
         ),
         (0, 0),
         "released at once, before anything durable"
     );
-    assert!(f.owner.fe04_unbooked.is_none() && f.owner.fe04_held.is_none());
-    assert!(f.owner.fe04_admission.is_some(), "the admission stays open");
+    assert!(f.owner.wallets[0].fe04_unbooked.is_none() && f.owner.wallets[0].fe04_held.is_none());
+    assert!(
+        f.owner.wallets[0].fe04_admission.is_some(),
+        "the admission stays open"
+    );
     assert!(!calls
         .lock()
         .unwrap()
@@ -8123,33 +8208,38 @@ fn dec13b_a_refused_candidate_releases_at_once_and_an_unused_journal_blocks_noth
         .unwrap();
     f.owner.lifecycle();
     assert!(
-        !f.owner.reservations.is_unreadable(),
+        !f.owner.wallets[0].reservations.is_unreadable(),
         "the book follows the open journal"
     );
     // Restart: the unused journal is the held one and blocks nothing.
-    f.owner.fe04_admission = None;
+    f.owner.wallets[0].fe04_admission = None;
     let dir_s = dir.display().to_string();
     let start = setup::reservation_book(
         &|k| (k == "P0_FE04_JOURNAL_DIR").then(|| dir_s.clone()),
-        &f.owner.liquidator,
+        &f.owner.wallets[0].liquidator,
     )
     .unwrap()
-    .start(&mut f.owner.safety, wall_unix_s().unwrap())
+    .start(&mut f.owner.wallets[0].safety, wall_unix_s().unwrap())
     .unwrap();
     assert!(start
         .held
         .as_ref()
         .is_some_and(|j| j.step_state().is_none()));
-    f.owner.fe04_held = start.held;
+    f.owner.wallets[0].fe04_held = start.held;
     set_approval(&mut f, &approval);
-    assert_eq!(f.owner.fe04_admission_facts(Some(&target)).err(), None);
+    assert_eq!(f.owner.fe04_admission_facts(0, Some(&target)).err(), None);
     detect(&mut f, 101);
     assert_eq!(
-        f.owner.fe04_admissions.submitted, 1,
+        f.owner.wallets[0].fe04_admissions.submitted, 1,
         "{:?}",
-        f.owner.fe04_admissions
+        f.owner.wallets[0].fe04_admissions
     );
-    assert!(f.owner.fe04_held.as_ref().unwrap().step_state().is_some());
+    assert!(f.owner.wallets[0]
+        .fe04_held
+        .as_ref()
+        .unwrap()
+        .step_state()
+        .is_some());
     cleanup(f);
 }
 
@@ -8159,7 +8249,10 @@ fn dec13b_a_refused_candidate_releases_at_once_and_an_unused_journal_blocks_noth
 #[test]
 fn dec13b_live_ending_closes_the_admission_and_a_foreign_attempt_is_never_admitted_over() {
     let (mut f, target, calls) = dec13b_fixture("dec13b_foreign", true);
-    let (dir, wallet) = (f.dir.join("fe04"), f.owner.liquidator.to_string());
+    let (dir, wallet) = (
+        f.dir.join("fe04"),
+        f.owner.wallets[0].liquidator.to_string(),
+    );
     let file = f.dir.join("approval.conf");
     let approval = std::fs::read_to_string(&file).unwrap();
     std::fs::write(
@@ -8170,7 +8263,7 @@ fn dec13b_live_ending_closes_the_admission_and_a_foreign_attempt_is_never_admitt
         ),
     )
     .unwrap();
-    f.owner
+    f.owner.wallets[0]
         .fe04_approval
         .as_mut()
         .unwrap()
@@ -8183,11 +8276,14 @@ fn dec13b_live_ending_closes_the_admission_and_a_foreign_attempt_is_never_admitt
             "account_update",
         )))
         .unwrap();
-    assert!(f.owner.fe04_admission.is_some());
+    assert!(f.owner.wallets[0].fe04_admission.is_some());
     f.owner.sources.capabilities.live_requested =
         crate::orchestration::capability_control::LIVE_OFF;
     f.owner.lifecycle();
-    assert!(f.owner.fe04_admission.is_none(), "closed with LIVE");
+    assert!(
+        f.owner.wallets[0].fe04_admission.is_none(),
+        "closed with LIVE"
+    );
     // An attempt another owner left (UNKNOWN) in the wallet journal.
     crate::execution::one_shot::test_unknown_attempt(&dir, &wallet);
     f.owner.sources.capabilities.live_requested = crate::orchestration::capability_control::LIVE;
@@ -8200,11 +8296,11 @@ fn dec13b_live_ending_closes_the_admission_and_a_foreign_attempt_is_never_admitt
         )))
         .unwrap();
     assert_eq!(
-        f.owner.fe04_admissions.block_reason,
+        f.owner.wallets[0].fe04_admissions.block_reason,
         "FE04_JOURNAL_HAS_ATTEMPT:UNKNOWN"
     );
-    assert!(f.owner.fe04_admission.is_none() && f.owner.fe04_held.is_none());
-    assert_eq!(f.owner.safety.capital_in_use(), 0);
+    assert!(f.owner.wallets[0].fe04_admission.is_none() && f.owner.wallets[0].fe04_held.is_none());
+    assert_eq!(f.owner.wallets[0].safety.capital_in_use(), 0);
     assert!(!calls
         .lock()
         .unwrap()
@@ -8234,25 +8330,25 @@ fn dec13b_an_unknown_send_keeps_every_hold_until_the_settlement_books_it_once() 
         .lock()
         .unwrap()
         .contains(&"sendTransaction".to_string()));
-    let a = &f.owner.fe04_admissions;
+    let a = &f.owner.wallets[0].fe04_admissions;
     assert_eq!((a.submitted, a.unknown), (0, 1));
     assert_eq!(
-        f.owner.safety.halted(),
+        f.owner.wallets[0].safety.halted(),
         Some(darkbot_common::error::HaltReason::UnknownEconomics)
     );
-    let held = f.owner.fe04_held.as_ref().unwrap();
+    let held = f.owner.wallets[0].fe04_held.as_ref().unwrap();
     assert_eq!(
         held.step_state(),
         Some(crate::execution::accounting::StepState::Unknown)
     );
-    let unbooked = f.owner.fe04_unbooked.unwrap();
+    let unbooked = f.owner.wallets[0].fe04_unbooked.unwrap();
     assert!(unbooked.reserved_inventory > 0);
     assert_eq!(
-        f.owner.safety.inventory_reserved(),
+        f.owner.wallets[0].safety.inventory_reserved(),
         unbooked.reserved_inventory
     );
     let (intent, _) = held.settlement_job().unwrap();
-    run_until(&mut f, |o| o.fe04_settle_due.is_none());
+    run_until(&mut f, |o| o.wallets[0].fe04_settle_due.is_none());
     assert_eq!(fe04_job(&f).unwrap().subject.signatures, intent.signatures);
     let evidence = SettlementEvidence {
         observations: vec![],
@@ -8267,17 +8363,17 @@ fn dec13b_an_unknown_send_keeps_every_hold_until_the_settlement_books_it_once() 
     run_until(&mut f, fe04_settled);
     assert_eq!(
         (
-            f.owner.safety.capital_in_use(),
-            f.owner.safety.inventory_reserved()
+            f.owner.wallets[0].safety.capital_in_use(),
+            f.owner.wallets[0].safety.inventory_reserved()
         ),
         (0, 0)
     );
-    let day = f.owner.safety.day();
+    let day = f.owner.wallets[0].safety.day();
     fe04_answer(&f, evidence);
     run_until(&mut f, |o| !o.remote.fe04_settlement_results.pending());
-    assert_eq!(f.owner.safety.day(), day, "booked once");
+    assert_eq!(f.owner.wallets[0].safety.day(), day, "booked once");
     assert_eq!(
-        f.owner.safety.halted(),
+        f.owner.wallets[0].safety.halted(),
         Some(darkbot_common::error::HaltReason::UnknownEconomics),
         "no ledger violation"
     );
@@ -8295,24 +8391,28 @@ fn dec13b_an_unknown_exit_halts_and_ends_the_exits_of_the_run() {
         .unwrap();
     f.owner.lifecycle();
     assert_eq!(
-        f.owner.fe04_admissions.exits_unknown, 1,
+        f.owner.wallets[0].fe04_admissions.exits_unknown, 1,
         "{:?}",
-        f.owner.fe04_admissions
+        f.owner.wallets[0].fe04_admissions
     );
     // Halted (the replayed one-shot already was; the first reason stays).
-    assert!(f.owner.safety.halted().is_some());
+    assert!(f.owner.wallets[0].safety.halted().is_some());
     assert_eq!(
-        f.owner.fe04_held.as_ref().unwrap().open_exit_id(),
+        f.owner.wallets[0]
+            .fe04_held
+            .as_ref()
+            .unwrap()
+            .open_exit_id(),
         Some(e.approval_id.clone())
     );
     let sends = calls.lock().unwrap().len();
-    f.owner.fe04_exit_admission();
+    f.owner.fe04_exit_admission(0);
     assert_eq!(
         calls.lock().unwrap().len(),
         sends,
         "no second exit in this run"
     );
-    run_until(&mut f, |o| o.fe04_settle_due.is_none());
+    run_until(&mut f, |o| o.wallets[0].fe04_settle_due.is_none());
     assert_eq!(fe04_job(&f).unwrap().exit, Some(e.approval_id.clone()));
     cleanup(f);
 }
@@ -8324,7 +8424,10 @@ fn dec13b_an_unknown_exit_halts_and_ends_the_exits_of_the_run() {
 #[test]
 fn dec13b_a_reservation_the_handoff_refused_is_read_back_unknown_for_the_settlement() {
     let (mut f, target, calls) = dec13b_fixture_with("dec13b_aged", true, true, 1_200, None);
-    let (dir, wallet) = (f.dir.join("fe04"), f.owner.liquidator.to_string());
+    let (dir, wallet) = (
+        f.dir.join("fe04"),
+        f.owner.wallets[0].liquidator.to_string(),
+    );
     let file = f.dir.join("approval.conf");
     let approval = std::fs::read_to_string(&file).unwrap();
     std::fs::write(
@@ -8332,7 +8435,7 @@ fn dec13b_a_reservation_the_handoff_refused_is_read_back_unknown_for_the_settlem
         approval.replace("max_state_age_ms = 60000", "max_state_age_ms = 1000"),
     )
     .unwrap();
-    f.owner
+    f.owner.wallets[0]
         .fe04_approval
         .as_mut()
         .unwrap()
@@ -8350,18 +8453,18 @@ fn dec13b_a_reservation_the_handoff_refused_is_read_back_unknown_for_the_settlem
         .unwrap()
         .contains(&"sendTransaction".to_string()));
     assert_eq!(
-        f.owner.fe04_admissions.unknown, 1,
+        f.owner.wallets[0].fe04_admissions.unknown, 1,
         "{:?}",
-        f.owner.fe04_admissions
+        f.owner.wallets[0].fe04_admissions
     );
-    let held = f.owner.fe04_held.as_ref().unwrap();
+    let held = f.owner.wallets[0].fe04_held.as_ref().unwrap();
     assert_eq!(
         held.step_state(),
         Some(crate::execution::accounting::StepState::Unknown),
         "never RESERVED for the rest of the run"
     );
-    assert!(f.owner.fe04_unbooked.is_some());
-    run_until(&mut f, |o| o.fe04_settle_due.is_none());
+    assert!(f.owner.wallets[0].fe04_unbooked.is_some());
+    run_until(&mut f, |o| o.wallets[0].fe04_settle_due.is_none());
     assert!(fe04_job(&f).is_some(), "the settlement reads it");
     cleanup(f);
 }
@@ -8377,7 +8480,7 @@ fn p8ctrl04_the_status_names_the_grant_its_usage_and_this_epochs_previews() {
     use crate::execution::one_shot::Fe06Attempt;
     use crate::orchestration::{capability_control as cap, fe06};
     let mut f = fixture_with("p8ctrl04_status", None);
-    let signer = f.owner.liquidator;
+    let signer = f.owner.wallets[0].liquidator;
     let now = super::accounts::wall_unix_s().unwrap();
     let scope = |epoch: u64, campaign: &str, from: u64, until: u64| {
         fe06::parse(
@@ -8424,7 +8527,7 @@ fn p8ctrl04_the_status_names_the_grant_its_usage_and_this_epochs_previews() {
         utc_day,
         owner_epoch: Some(3),
     };
-    f.owner.ledger_view = Some(Ok(super::status_view::LedgerView {
+    f.owner.wallets[0].ledger_view = Some(Ok(super::status_view::LedgerView {
         totals: Default::default(),
         verdict: crate::execution::accounting::Verdict::NoTrade,
         bookings: vec![
@@ -8532,7 +8635,7 @@ fn p8ctrl04_the_status_names_the_grant_its_usage_and_this_epochs_previews() {
         .iter()
         .any(|p| p.digest == later_digest));
     // An unreadable journal: the usage is unknown, never 0.
-    f.owner.ledger_view = Some(Err("JOURNAL_CORRUPT".into()));
+    f.owner.wallets[0].ledger_view = Some(Err("JOURNAL_CORRUPT".into()));
     let s = f.owner.owner_snapshot(4).fe06;
     assert_eq!(
         (
@@ -8619,7 +8722,7 @@ fn p8ctrl03_scoped(
         fields.push((k, v));
     }
     let scope = fe06::parse(
-        fe06::tests::text(&f.owner.liquidator, &fields).as_bytes(),
+        fe06::tests::text(&f.owner.wallets[0].liquidator, &fields).as_bytes(),
         &fe06::tests::ceilings(),
     )
     .unwrap();
@@ -8630,7 +8733,11 @@ fn p8ctrl03_scoped(
         code_sha: Some(scope.code_sha.clone()),
         binary_sha256: Some(scope.binary_sha256.clone()),
         runtime_config_sha256: scope.runtime_config_sha256.clone(),
-        signers: [format!("{}:LIQUIDATOR+FEE_PAYER", f.owner.liquidator)].into(),
+        signers: [format!(
+            "{}:LIQUIDATOR+FEE_PAYER",
+            f.owner.wallets[0].liquidator
+        )]
+        .into(),
         owner_epoch: scope.owner_epoch,
     };
     edit(&mut running);
@@ -8670,12 +8777,12 @@ fn p8ctrl03_only_a_scope_that_binds_what_runs_and_the_attempt_sends() {
         1,
         "{:?} {:?}",
         methods(&calls),
-        f.owner.fe04_admissions
+        f.owner.wallets[0].fe04_admissions
     );
     // P8-CTRL.5 (WP1): the attempt holds its SOL debit and, beside it, the exit reserve — the
     // grant's exit ceiling for each mint it can leave open (asset and liability; native SOL
     // needs no exit).
-    let held = f.owner.fe04_held.as_ref().unwrap();
+    let held = f.owner.wallets[0].fe04_held.as_ref().unwrap();
     let debit = held.attempt_records().unwrap()[0]
         .sol_debit_lamports
         .unwrap();
@@ -8717,7 +8824,7 @@ fn p8ctrl03_only_a_scope_that_binds_what_runs_and_the_attempt_sends() {
         detect(&mut f, target);
         let m = methods(&calls);
         assert!(!m.iter().any(|m| m == "sendTransaction"), "{tag}: {m:?}");
-        assert!(f.owner.fe04_held.is_none(), "{tag}");
+        assert!(f.owner.wallets[0].fe04_held.is_none(), "{tag}");
         cleanup(f);
     }
     // One fact of the attempt outside the scope: refused by its sign permit, nothing durable.
@@ -8790,7 +8897,10 @@ fn p8ctrl03_refused(
             .any(|m| m == "sendTransaction" || m == "simulateTransaction"),
         "{tag}: {m:?}"
     );
-    assert!(f.owner.fe04_held.is_none(), "{tag}: nothing durable");
+    assert!(
+        f.owner.wallets[0].fe04_held.is_none(),
+        "{tag}: nothing durable"
+    );
     let dir = f.dir.clone();
     f.owner.finish().unwrap();
     let journal = std::fs::read(dir.join("opportunities.p0j")).unwrap();
@@ -8855,7 +8965,7 @@ fn p8ctrl06_l07_a_disable_is_linearized_before_or_after_the_egress_never_inside(
         .unwrap();
     assert!(!f.owner.live_effective());
     assert!(!calls.lock().unwrap().iter().any(|m| m == "sendTransaction"));
-    assert!(f.owner.fe04_held.is_none());
+    assert!(f.owner.wallets[0].fe04_held.is_none());
     cleanup(f);
     // During (review M5): a DISABLE durably requested while the candidate is being simulated —
     // p0ctl's request log, the real control thread — waits as a counted stop before the owner's
@@ -8949,8 +9059,11 @@ fn p8ctrl06_l07_a_disable_is_linearized_before_or_after_the_egress_never_inside(
             .count()
     };
     assert_eq!(sent(&calls), 0, "the waiting stop prevented the egress");
-    assert!(f.owner.fe04_held.is_none(), "nothing durable");
-    assert_eq!(f.owner.fe04_admissions.last_refusal, cap::STOP_PENDING);
+    assert!(f.owner.wallets[0].fe04_held.is_none(), "nothing durable");
+    assert_eq!(
+        f.owner.wallets[0].fe04_admissions.last_refusal,
+        cap::STOP_PENDING
+    );
     // The owner's next step decides it: from then on LIVE is BLOCKED by it.
     let t = std::time::Instant::now();
     while f.owner.sources.capabilities.stop.pending() {
@@ -8990,7 +9103,7 @@ fn p8ctrl06_l07_a_disable_is_linearized_before_or_after_the_egress_never_inside(
     );
     assert!(!f.owner.live_effective());
     assert!(
-        f.owner.fe04_held.is_some() && f.owner.fe04_unbooked.is_some(),
+        f.owner.wallets[0].fe04_held.is_some() && f.owner.wallets[0].fe04_unbooked.is_some(),
         "the handed-off attempt keeps every hold"
     );
     cleanup(f);
@@ -9007,8 +9120,11 @@ fn p8ctrl06_l11_exit_only_exits_exactly_its_positions_and_never_past_a_stop() {
     // ALL (review M18): only the positions it names or of attempts booked against it — the
     // fixture's attempt was made under no grant.
     let (mut f, calls, e) = dec13b_exit_fixture("p8ctrl06_l11_all", true);
-    let (dir, wallet) = (f.dir.join("fe04"), f.owner.liquidator.to_string());
-    f.owner
+    let (dir, wallet) = (
+        f.dir.join("fe04"),
+        f.owner.wallets[0].liquidator.to_string(),
+    );
+    f.owner.wallets[0]
         .fe04_approval
         .as_mut()
         .unwrap()
@@ -9025,12 +9141,12 @@ fn p8ctrl06_l11_exit_only_exits_exactly_its_positions_and_never_past_a_stop() {
         .iter()
         .any(|m| m == "sendTransaction" || m == "simulateTransaction"));
     assert!(
-        f.owner
+        f.owner.wallets[0]
             .fe04_admissions
             .last_exit_refusal
             .starts_with("FE06_SCOPE_USE: exit_position "),
         "{:?}",
-        f.owner.fe04_admissions
+        f.owner.wallets[0].fe04_admissions
     );
     cleanup(f);
     for (tag, named, stop) in [
@@ -9041,8 +9157,11 @@ fn p8ctrl06_l11_exit_only_exits_exactly_its_positions_and_never_past_a_stop() {
         ("revoked", true, Some(cap::FE06_REVOKE)),
     ] {
         let (mut f, calls, e) = dec13b_exit_fixture(&format!("p8ctrl06_l11_{tag}"), true);
-        let (dir, wallet) = (f.dir.join("fe04"), f.owner.liquidator.to_string());
-        f.owner
+        let (dir, wallet) = (
+            f.dir.join("fe04"),
+            f.owner.wallets[0].liquidator.to_string(),
+        );
+        f.owner.wallets[0]
             .fe04_approval
             .as_mut()
             .unwrap()
@@ -9094,9 +9213,8 @@ fn p8ctrl06_l11_exit_only_exits_exactly_its_positions_and_never_past_a_stop() {
             .count();
         match tag {
             "named" => {
-                assert_eq!(sends, 1, "{:?}", f.owner.fe04_admissions);
-                let records = f
-                    .owner
+                assert_eq!(sends, 1, "{:?}", f.owner.wallets[0].fe04_admissions);
+                let records = f.owner.wallets[0]
                     .fe04_held
                     .as_ref()
                     .unwrap()
@@ -9118,12 +9236,12 @@ fn p8ctrl06_l11_exit_only_exits_exactly_its_positions_and_never_past_a_stop() {
                     .iter()
                     .any(|m| m == "sendTransaction" || m == "simulateTransaction"));
                 assert!(
-                    f.owner
+                    f.owner.wallets[0]
                         .fe04_admissions
                         .last_exit_refusal
                         .starts_with("FE06_SCOPE_USE: exit_position "),
                     "{:?}",
-                    f.owner.fe04_admissions
+                    f.owner.wallets[0].fe04_admissions
                 );
             }
             _ => {
@@ -9163,12 +9281,12 @@ fn p8ctrl06_l16_a_restart_resets_the_switches_and_keeps_every_hold_and_booking()
         .unwrap();
     assert!(calls.lock().unwrap().iter().any(|m| m == "sendTransaction"));
     // The restart: the owner's state is gone; the journal is replayed as at every start.
-    f.owner.fe04_held = None;
+    f.owner.wallets[0].fe04_held = None;
     let mut safety = Safety::new(e2e_limits(), Allow::default(), false);
     let dir_s = f.dir.join("fe04").display().to_string();
     let start = setup::reservation_book(
         &|k| (k == "P0_FE04_JOURNAL_DIR").then(|| dir_s.clone()),
-        &f.owner.liquidator,
+        &f.owner.wallets[0].liquidator,
     )
     .unwrap()
     .start(&mut safety, wall_unix_s().unwrap())
@@ -9189,7 +9307,7 @@ fn p8ctrl06_l16_a_restart_resets_the_switches_and_keeps_every_hold_and_booking()
     );
     let records = crate::execution::one_shot::archive::records(
         &f.dir.join("fe04"),
-        &f.owner.liquidator.to_string(),
+        &f.owner.wallets[0].liquidator.to_string(),
     )
     .unwrap();
     assert_eq!(
@@ -9268,7 +9386,7 @@ fn p8ctrl06_l15_a_sim_only_grant_never_hands_the_wallets_signature_to_a_sending_
                 |_| {},
             );
             // The binding facts exist; only the sending simulator rules the real signature out.
-            assert!(f.owner.sim_only_use_facts(&target).is_some(), "{tag}");
+            assert!(f.owner.sim_only_use_facts(0, &target).is_some(), "{tag}");
         } else {
             f.owner.sources.capabilities.fe06 = None;
         }
@@ -9329,20 +9447,21 @@ fn s4_04_core_stage_baseline() {
         let (mut f, target, calls) = dec13b_fixture(&format!("s4_04_{i}"), true);
         p8ctrl03_scoped(&mut f, &[], |_| {});
         let opened = std::time::Instant::now();
-        let facts = f.owner.fe04_admission_facts(Some(&target));
+        let facts = f.owner.fe04_admission_facts(0, Some(&target));
+        let w = &mut f.owner.wallets[0];
         let admission = fe04::admission_for(
-            &mut f.owner.fe04_admission,
-            &mut f.owner.fe04_held,
-            &mut f.owner.fe04_admissions,
+            &mut w.fe04_admission,
+            &mut w.fe04_held,
+            &mut w.fe04_admissions,
             facts,
         );
         admission_open.push(opened.elapsed().as_nanos() as u64);
         assert!(
             admission.is_some(),
             "run {i}: {:?}",
-            f.owner.fe04_admissions
+            f.owner.wallets[0].fe04_admissions
         );
-        f.owner.fe04_admission = admission;
+        f.owner.wallets[0].fe04_admission = admission;
         let record = f
             .owner
             .st
@@ -9482,15 +9601,16 @@ fn b01_a_book_unreadable_mid_observation_or_rounds_run_out_are_their_own_reasons
         })
         .ok()
         .unwrap();
-    f.owner.reservations = crate::execution::reservation::WalletReservations::unreadable();
+    f.owner.wallets[0].reservations =
+        crate::execution::reservation::WalletReservations::unreadable();
     f.owner.rebalance_observe();
     assert!(jobs.try_pop().is_none(), "nothing more is asked");
     let r = f.owner.owner_snapshot(1).rebalance.unwrap();
     assert!(r
         .blocked
         .iter()
-        .all(|(_, reason)| *reason == "RESERVATION_BOOK_UNREADABLE"));
-    f.owner.reservations = Default::default();
+        .all(|(_, _, reason)| *reason == "RESERVATION_BOOK_UNREADABLE"));
+    f.owner.wallets[0].reservations = Default::default();
     f.owner.rebalance_request("OFF").unwrap();
     f.owner.rebalance_request("OBSERVE").unwrap();
     // A queue that stays full: one round per pass, then the waiting band's own reason.
@@ -9518,7 +9638,11 @@ fn b01_a_book_unreadable_mid_observation_or_rounds_run_out_are_their_own_reasons
         (r.quotes_pending, r.blocked),
         (
             0,
-            vec![(mint.to_string(), "REBALANCE_QUOTE_ROUNDS_EXHAUSTED")]
+            vec![(
+                f.owner.wallets[0].liquidator.to_string(),
+                mint.to_string(),
+                "REBALANCE_QUOTE_ROUNDS_EXHAUSTED"
+            )]
         )
     );
     drop(jobs);
@@ -9621,10 +9745,10 @@ fn p6_mt10_the_owner_counts_and_journals_the_fee_parity() {
 #[test]
 fn s4_04_the_fe04_admission_is_opened_ahead_of_the_first_live_candidate() {
     let (mut f, target, calls) = dec13b_fixture("s4_04_prewarm", true);
-    assert!(f.owner.fe04_admission.is_none());
+    assert!(f.owner.wallets[0].fe04_admission.is_none());
     f.owner.lifecycle();
     assert!(
-        f.owner.fe04_admission.is_some(),
+        f.owner.wallets[0].fe04_admission.is_some(),
         "opened ahead of a candidate"
     );
     let now = f.owner.clock.now_ns();
@@ -9641,45 +9765,54 @@ fn s4_04_the_fe04_admission_is_opened_ahead_of_the_first_live_candidate() {
         1,
         "{:?} {:?}",
         calls.lock().unwrap(),
-        f.owner.fe04_admissions
+        f.owner.wallets[0].fe04_admissions
     );
     cleanup(f);
     // LIVE ending closes it; one that cannot be opened waits for the refresh interval.
     let (mut f, _, _) = dec13b_fixture("s4_04_prewarm_off", true);
     f.owner.lifecycle();
-    assert!(f.owner.fe04_admission.is_some());
+    assert!(f.owner.wallets[0].fe04_admission.is_some());
     f.owner.sources.capabilities.live_requested =
         crate::orchestration::capability_control::LIVE_OFF;
     f.owner.lifecycle();
-    assert!(f.owner.fe04_admission.is_none(), "closed with LIVE");
+    assert!(
+        f.owner.wallets[0].fe04_admission.is_none(),
+        "closed with LIVE"
+    );
     f.owner.sources.capabilities.live_requested = crate::orchestration::capability_control::LIVE;
-    let approval = f.owner.fe04_approval.take();
+    let approval = f.owner.wallets[0].fe04_approval.take();
     f.owner.lifecycle();
-    assert!(f.owner.fe04_admission.is_none());
-    assert!(f.owner.fe04_prewarm_after.is_some(), "tried again later");
-    f.owner.fe04_approval = approval;
+    assert!(f.owner.wallets[0].fe04_admission.is_none());
+    assert!(
+        f.owner.wallets[0].fe04_prewarm_after.is_some(),
+        "tried again later"
+    );
+    f.owner.wallets[0].fe04_approval = approval;
     f.owner.lifecycle();
     assert!(
-        f.owner.fe04_admission.is_none(),
+        f.owner.wallets[0].fe04_admission.is_none(),
         "not before the refresh interval"
     );
-    f.owner.fe04_prewarm_after = Some(std::time::Instant::now());
+    f.owner.wallets[0].fe04_prewarm_after = Some(std::time::Instant::now());
     f.owner.lifecycle();
-    assert!(f.owner.fe04_admission.is_some(), "after it");
+    assert!(f.owner.wallets[0].fe04_admission.is_some(), "after it");
     cleanup(f);
     // Opened without a target, it still refuses a candidate its approval does not name (review
     // L2): unsent, the reason projected, the admission kept open.
     let (mut f, target, calls) = dec13b_fixture("s4_04_prewarm_target", true);
     f.owner.lifecycle();
-    assert!(f.owner.fe04_admission.is_some());
+    assert!(f.owner.wallets[0].fe04_admission.is_some());
     let file = f.dir.join("approval.conf");
     let text = std::fs::read_to_string(&file).unwrap().replace(
         &format!("allowed_targets = {target}"),
         &format!("allowed_targets = {}", Pubkey::new_unique()),
     );
     std::fs::write(&file, text).unwrap();
-    let (journal, wallet) = (f.dir.join("fe04"), f.owner.liquidator.to_string());
-    f.owner
+    let (journal, wallet) = (
+        f.dir.join("fe04"),
+        f.owner.wallets[0].liquidator.to_string(),
+    );
+    f.owner.wallets[0]
         .fe04_approval
         .as_mut()
         .unwrap()
@@ -9690,10 +9823,10 @@ fn s4_04_the_fe04_admission_is_opened_ahead_of_the_first_live_candidate() {
         .unwrap();
     assert!(!calls.lock().unwrap().iter().any(|c| c == "sendTransaction"));
     assert_eq!(
-        f.owner.fe04_admissions.block_reason,
+        f.owner.wallets[0].fe04_admissions.block_reason,
         "FE04_TARGET_NOT_APPROVED"
     );
-    assert!(f.owner.fe04_admission.is_some(), "kept open");
+    assert!(f.owner.wallets[0].fe04_admission.is_some(), "kept open");
     cleanup(f);
 }
 
@@ -10205,7 +10338,7 @@ fn dec17a_a_signed_grant_is_taken_and_changed_evidence_blocks_it() {
         let (from, until, evidence) = (from.to_string(), until.to_string(), evidence.join(","));
         fe06::parse(
             fe06::tests::text(
-                &f.owner.liquidator,
+                &f.owner.wallets[0].liquidator,
                 &[
                     ("evidence", &evidence),
                     ("not_before_unix_s", &from),
@@ -10347,20 +10480,23 @@ fn dec17a_a_signed_grant_is_taken_and_changed_evidence_blocks_it() {
 #[test]
 fn dec17g_a_safety_halt_blocks_new_attempts_never_an_exit() {
     let (mut f, calls, e) = dec13b_exit_fixture("dec17g_exit", true);
-    let (dir, wallet) = (f.dir.join("fe04"), f.owner.liquidator.to_string());
-    f.owner
+    let (dir, wallet) = (
+        f.dir.join("fe04"),
+        f.owner.wallets[0].liquidator.to_string(),
+    );
+    f.owner.wallets[0]
         .fe04_approval
         .as_mut()
         .unwrap()
         .refresh(Some(&dir), &wallet);
-    f.owner.fe04_approval.as_mut().unwrap().read = Err("APPROVAL_NOT_READ".into());
+    f.owner.wallets[0].fe04_approval.as_mut().unwrap().read = Err("APPROVAL_NOT_READ".into());
     dec13b_live(&mut f, true);
-    f.owner
+    f.owner.wallets[0]
         .safety
         .halt(darkbot_common::error::HaltReason::LimitBreached);
     let now = super::accounts::wall_unix_s().unwrap();
     assert!(matches!(
-        f.owner
+        f.owner.wallets[0]
             .safety
             .check(now, 1, 0, 0, 0, &[], "ZERO_PREFUND_SAME_TX"),
         Err(darkbot_project0::safety::Deny::Halted(_))
@@ -10369,16 +10505,365 @@ fn dec17g_a_safety_halt_blocks_new_attempts_never_an_exit() {
         .checked_sub(f.owner.fe04_refresh + Duration::from_millis(1))
         .unwrap();
     f.owner.lifecycle();
-    assert!(f.owner.safety.halted().is_some());
+    assert!(f.owner.wallets[0].safety.halted().is_some());
     assert_eq!(
         calls.lock().unwrap().clone(),
         ["getFeeForMessage", "simulateTransaction", "sendTransaction"],
         "{:?}",
-        f.owner.fe04_admissions
+        f.owner.wallets[0].fe04_admissions
     );
     assert_eq!(
-        f.owner.fe04_held.as_ref().unwrap().open_exit_id(),
+        f.owner.wallets[0]
+            .fe04_held
+            .as_ref()
+            .unwrap()
+            .open_exit_id(),
         Some(e.approval_id.clone())
     );
+    cleanup(f);
+}
+
+/// DEC-17b: another wallet of the owner beside the pilot — its own Safety and book, its switch
+/// (DISABLED) — with `lamports` of SOL in canonical state (`None`: its account unknown).
+fn dec17b_wallet(f: &mut Fixture, roles: &[&'static str], lamports: Option<u64>) -> Pubkey {
+    use crate::orchestration::capability_control as cap;
+    use solana_sdk::signer::Signer;
+    let kp = solana_sdk::signature::Keypair::new();
+    let pk = kp.pubkey();
+    let payer = if roles == darkbot_solana::runtime_config::roles::SIGNING {
+        crate::execution::payer::OwnerPayer::Signer(kp)
+    } else {
+        crate::execution::payer::OwnerPayer::PublicOnly(pk)
+    };
+    f.owner.wallets.push(super::wallets::OwnerWallet::new(
+        pk,
+        roles.to_vec(),
+        payer,
+        Safety::new(e2e_limits(), Allow::default(), false),
+    ));
+    f.owner
+        .sources
+        .capabilities
+        .wallets
+        .push(cap::WalletSwitch::configured(pk, roles));
+    if let Some(lamports) = lamports {
+        b01_account(f, pk, Pubkey::default(), lamports, vec![]);
+    }
+    pk
+}
+
+/// DEC-17b: each candidate runs with the wallet with the most SOL free after its holds (an open
+/// position's exit reserve included), the lowest key on a tie — the same one every time, never
+/// round robin; a treasury, a halted wallet, an unreadable book or an unknown balance is passed
+/// over (that wallet only: the others run, its row says why); none eligible: the pilot, with
+/// every wallet's reason. The choice is counted per wallet.
+#[test]
+fn dec17b_the_wallet_choice_is_deterministic_and_a_failing_wallet_blocks_only_itself() {
+    use crate::execution::reservation::WalletReservations;
+    use darkbot_common::error::HaltReason;
+    use darkbot_solana::runtime_config::roles;
+    // A Ready owner (canonical state accepts the wallets' accounts), no bands.
+    let (mut f, _) = b01_observing("dec17b_choice");
+    f.owner.inventory_targets.clear();
+    let pilot = f.owner.wallets[0].liquidator;
+    b01_account(&mut f, pilot, Pubkey::default(), 3_000_000_000, vec![]);
+    let a = dec17b_wallet(&mut f, &roles::SIGNING, Some(7_000_000_000));
+    let b = dec17b_wallet(&mut f, &roles::SIGNING, Some(7_000_000_000));
+    let t = dec17b_wallet(&mut f, &[roles::TREASURY], Some(100_000_000_000));
+    let (low, high) = if a.to_bytes() < b.to_bytes() {
+        (1, 2)
+    } else {
+        (2, 1)
+    };
+    for _ in 0..3 {
+        assert_eq!(
+            f.owner.choose_wallet(false),
+            (low, None),
+            "a tie: the lower key"
+        );
+    }
+    // The lower one's open position holds 1 lamport of its SOL: the other has more free.
+    f.owner.wallets[low].reservations =
+        WalletReservations::rebuild([crate::execution::one_shot::ActiveHold {
+            attempt: "P1".into(),
+            target: Pubkey::new_unique().to_string(),
+            unknown_outcome: false,
+            holds: [("SOL".to_string(), 1)].into(),
+            signature: None,
+            last_valid_block_height: None,
+        }])
+        .unwrap();
+    assert_eq!(f.owner.choose_wallet(false), (high, None));
+    // A HALT blocks its wallet only.
+    f.owner.wallets[high].safety.halt(HaltReason::LimitBreached);
+    assert_eq!(f.owner.choose_wallet(false), (low, None));
+    // An unreadable book blocks its wallet only: the pilot is left.
+    f.owner.wallets[low].reservations = WalletReservations::unreadable();
+    assert_eq!(f.owner.choose_wallet(false), (0, None));
+    let rows = f.owner.owner_snapshot(1).wallets.rows;
+    let row = |k: Pubkey| rows.iter().find(|r| r.wallet == k.to_string()).unwrap();
+    assert_eq!(row(pilot).block_reason, "");
+    assert_eq!(row(pilot).free_sol_lamports, Some(3_000_000_000));
+    assert_eq!(
+        row(f.owner.wallets[high].liquidator).block_reason,
+        "SAFETY_HALTED:LIMIT_BREACHED"
+    );
+    assert_eq!(
+        row(f.owner.wallets[low].liquidator).block_reason,
+        "RESERVATION_BOOK_UNREADABLE"
+    );
+    assert_eq!(row(t).block_reason, "WALLET_NOT_ITS_OWN_FEE_PAYER");
+    assert!(!row(t).runs_candidates);
+    assert_eq!(row(t).sol_lamports, Some(100_000_000_000));
+    // An unknown balance blocks its wallet only.
+    let u = dec17b_wallet(&mut f, &roles::SIGNING, None);
+    assert_eq!(
+        f.owner.wallet_eligible(f.owner.wallets.len() - 1, false),
+        Err("WALLET_SOL_UNKNOWN".into())
+    );
+    // None eligible: the pilot (its own refusal is the candidate's), with every reason.
+    f.owner.wallets[0].safety.halt(HaltReason::UnknownEconomics);
+    let (i, why) = f.owner.choose_wallet(false);
+    assert_eq!(i, 0);
+    let why = why.unwrap();
+    for part in [
+        format!("{pilot}=SAFETY_HALTED:UNKNOWN_ECONOMICS"),
+        format!(
+            "{}=SAFETY_HALTED:LIMIT_BREACHED",
+            f.owner.wallets[high].liquidator
+        ),
+        format!(
+            "{}=RESERVATION_BOOK_UNREADABLE",
+            f.owner.wallets[low].liquidator
+        ),
+        format!("{t}=WALLET_NOT_ITS_OWN_FEE_PAYER"),
+        format!("{u}=WALLET_SOL_UNKNOWN"),
+    ] {
+        assert!(why.contains(&part), "{part} in {why}");
+    }
+    // The counters: per wallet, and the candidates no wallet could run.
+    f.owner
+        .wallet_selection
+        .note(&mut f.owner.wallets[0], Some(why.clone()));
+    let w = f.owner.owner_snapshot(2).wallets;
+    assert_eq!((w.selections, w.none_eligible), (1, 1));
+    assert_eq!(w.last_none_eligible, why);
+    assert_eq!(row(pilot).selected, 0, "the earlier snapshot");
+    assert_eq!(
+        w.rows
+            .iter()
+            .find(|r| r.wallet == pilot.to_string())
+            .unwrap()
+            .selected,
+        1
+    );
+    cleanup(f);
+}
+
+/// DEC-17b: under LIVE a wallet runs a candidate only with its switch ENABLED, admitted by the
+/// grant's scope, no attempt of its own in flight and its own VALID FE-04 approval — through the
+/// real detect path a richer wallet without an approval is passed over and the pilot's attempt is
+/// sent once; then the pilot holds an attempt (single flight per wallet) and the other is still
+/// not admitted. In Shadow the richer one runs.
+#[test]
+fn dec17b_live_runs_only_a_wallet_that_may_send_and_single_flight_is_per_wallet() {
+    use darkbot_solana::runtime_config::roles;
+    let (mut f, target, calls) = dec13b_fixture("dec17b_live", true);
+    let rich = dec17b_wallet(&mut f, &roles::SIGNING, Some(50_000_000_000));
+    let r = f.owner.wallets.len() - 1;
+    assert_eq!(
+        f.owner.wallet_eligible(r, true),
+        Err(format!("WALLET:{rich} DISABLED"))
+    );
+    f.owner.sources.capabilities.wallets[1].enabled = true;
+    assert_eq!(
+        f.owner.wallet_eligible(r, true),
+        Err("FE04_APPROVAL_NONE".into())
+    );
+    assert_eq!(
+        f.owner.choose_wallet(false),
+        (r, None),
+        "Shadow: the most SOL"
+    );
+    assert_eq!(
+        f.owner.choose_wallet(true),
+        (0, None),
+        "LIVE: the wallet that may send"
+    );
+    f.owner
+        .detect(Some((
+            target,
+            f.owner.clock.now_ns(),
+            100,
+            "account_update",
+        )))
+        .unwrap();
+    let sends = calls
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|m| *m == "sendTransaction")
+        .count();
+    assert_eq!(sends, 1, "the pilot's attempt, once");
+    assert_eq!(
+        (f.owner.wallets[0].selected, f.owner.wallets[r].selected),
+        (1, 0)
+    );
+    assert_eq!(f.owner.wallets[0].fe04_admissions.submitted, 1);
+    assert!(f.owner.wallets[r].fe04_held.is_none());
+    // Single flight per wallet: the pilot's attempt holds the pilot only.
+    assert!(f
+        .owner
+        .wallet_eligible(0, true)
+        .unwrap_err()
+        .starts_with(fe04::ATTEMPT_HELD));
+    assert_eq!(
+        f.owner.wallet_eligible(r, true),
+        Err("FE04_APPROVAL_NONE".into())
+    );
+    let rows = f.owner.owner_snapshot(1).wallets.rows;
+    assert_eq!(rows[0].held_attempt, "UNKNOWN", "sent, not settled yet");
+    assert_eq!(rows[1].held_attempt, "NONE");
+    assert_eq!(rows[1].block_reason, "FE04_APPROVAL_NONE");
+    cleanup(f);
+}
+
+/// DEC-17b: a grant's quotas count every wallet's bookings — a wallet whose journals were never
+/// read leaves them unknown (refused, never counted as none); once read, its bookings count.
+#[test]
+fn dec17b_grant_quotas_need_every_wallets_records() {
+    use darkbot_solana::runtime_config::roles;
+    let mut f = fixture("dec17b_quota");
+    f.owner.refresh_records(0);
+    assert_eq!(f.owner.other_records(0), Ok(vec![]));
+    let w = dec17b_wallet(&mut f, &roles::SIGNING, Some(1));
+    let t = dec17b_wallet(&mut f, &[roles::TREASURY], None);
+    let _ = t;
+    assert_eq!(
+        f.owner.other_records(0),
+        Err(format!(
+            "FE06_QUOTA_UNKNOWN: the journals of wallet {w} were never read"
+        ))
+    );
+    f.owner.refresh_records(1);
+    assert_eq!(
+        f.owner.other_records(0),
+        Ok(vec![]),
+        "a treasury books nothing"
+    );
+    cleanup(f);
+}
+
+/// DEC-17b (P8-INV, OBSERVE): the only capital flow between wallets is the explicit plan — a
+/// wallet below its band is refilled from one above it, planned and recorded, never executed: no
+/// code of the observation builds, signs or sends a transaction.
+#[test]
+fn dec17b_capital_moves_between_wallets_only_as_an_observed_plan() {
+    use crate::execution::inventory::{Target, Transfer};
+    use darkbot_solana::runtime_config::roles;
+    let (mut f, _mint) = b01_observing("dec17b_transfer");
+    // Only the SOL band: the pilot holds 10 SOL (above its max), the other 0.5 (below its min).
+    f.owner.inventory_targets = [(
+        "SOL".to_string(),
+        Target {
+            reserve: 0,
+            min: 1_000_000_000,
+            target: 2_000_000_000,
+            max: 3_000_000_000,
+            dust: 5,
+        },
+    )]
+    .into();
+    let pilot = f.owner.wallets[0].liquidator.to_string();
+    let other = dec17b_wallet(&mut f, &roles::SIGNING, Some(500_000_000)).to_string();
+    f.owner.rebalance_observe();
+    let r = f.owner.owner_snapshot(1).rebalance.unwrap();
+    assert_eq!(
+        r.transfers,
+        vec![Transfer {
+            asset: "SOL".into(),
+            from: pilot.clone(),
+            to: other.clone(),
+            amount: 1_500_000_000,
+        }]
+    );
+    let dir = f.dir.clone();
+    f.owner.finish().unwrap();
+    let mut reader =
+        crate::analytics::journal::Reader::open(&dir.join("opportunities.p0j")).unwrap();
+    let mut planned = vec![];
+    while let Some(frame) = reader.next_frame().unwrap() {
+        use crate::analytics::payload::{decode, Payload};
+        if frame.kind == RecordEvent::KIND {
+            if let RecordEvent::WalletRebalancePlan { transfers, .. } =
+                decode(frame.kind, frame.schema, &frame.payload).unwrap()
+            {
+                planned.push(transfers);
+            }
+        }
+    }
+    assert_eq!(
+        planned,
+        vec![vec![crate::analytics::evidence::WalletTransferRecord {
+            asset: "SOL".into(),
+            from: pilot,
+            to: other,
+            amount: 1_500_000_000,
+        }]]
+    );
+    // No transfer path: neither the observation nor the planner touches a transaction.
+    for (name, source) in [
+        ("rebalance.rs", include_str!("rebalance.rs")),
+        ("inventory.rs", include_str!("../../execution/inventory.rs")),
+    ] {
+        let code: String = source
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        for token in ["tx::", "TxPlan", "submit", "sign", "Instruction", "send"] {
+            assert!(!code.contains(token), "{name} uses {token}");
+        }
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// DEC-17b: the owner subscribes every configured signer's own account (its SOL in canonical
+/// state — before, not even the pilot's was, so every LIVE admission saw its SOL unknown) and
+/// the ATAs (both token programs) of each bank's mint of every wallet that runs candidates —
+/// never a treasury's.
+#[test]
+fn dec17b_every_wallets_account_and_atas_are_subscribed() {
+    use darkbot_solana::runtime_config::roles;
+    let (f, _, _) = dec13b_fixture("dec17b_subscribed", false);
+    let (pilot, other, treasury) = (
+        f.owner.wallets[0].liquidator,
+        Pubkey::new_unique(),
+        Pubkey::new_unique(),
+    );
+    let banks = [f.marks["asset_bank"], f.marks["liab_bank"]];
+    let keys = super::setup::wallet_accounts(
+        &StateView(&f.owner.st),
+        &f.owner.program,
+        &banks,
+        &[
+            (pilot, roles::SIGNING.to_vec()),
+            (other, roles::SIGNING.to_vec()),
+            (treasury, vec![roles::TREASURY]),
+        ],
+    );
+    for wallet in [pilot, other, treasury] {
+        assert!(keys.contains(&wallet), "{wallet}: its own account");
+    }
+    for wallet in [pilot, other] {
+        for bank in &banks {
+            for ata in
+                ata_candidates_for_bank(&StateView(&f.owner.st), &f.owner.program, bank, &wallet)
+            {
+                assert!(keys.contains(&ata), "{wallet}: its ATA {ata}");
+            }
+        }
+    }
+    assert_eq!(keys.len(), 3 + 2 * 2 * 2, "no treasury ATA");
     cleanup(f);
 }

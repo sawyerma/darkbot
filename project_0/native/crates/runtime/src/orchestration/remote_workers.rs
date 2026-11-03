@@ -206,12 +206,15 @@ pub struct Fe04SettlementWork {
     pub subject: crate::execution::one_shot::settlement::SettlementSubject,
     pub observed: crate::execution::one_shot::settlement::Observed,
     pub exit: Option<String>,
+    /// DEC-17b: the wallet whose journal holds the subject.
+    pub wallet: solana_sdk::pubkey::Pubkey,
 }
 
 pub struct Fe04SettlementResult {
     pub evidence: crate::execution::one_shot::settlement::SettlementEvidence,
-    /// The work's `exit`: the result applies only to what it was read for.
+    /// The work's `exit` and wallet: the result applies only to what it was read for.
     pub exit: Option<String>,
+    pub wallet: solana_sdk::pubkey::Pubkey,
 }
 
 /// Test seam of `RemoteWorkers::detached`: the producers a test drives as the workers, the
@@ -391,6 +394,7 @@ impl RemoteWorkers {
                             Fe04SettlementResult {
                                 evidence,
                                 exit: work.exit,
+                                wallet: work.wallet,
                             },
                             &fe04_shutdown,
                             &fe04_space,

@@ -23,8 +23,8 @@ use proto::project0::{
     MarketCounters, NonLanding, NonLandingSource, OperationalConfig, OperationalParameter,
     OwnerEngine, OwnerPipeline, OwnerRun, OwnerSafety, OwnerThreshold, OwnerTrigger, PhaseStatus,
     ProgramPin, ProviderBudget, ReasonCount, RebalanceBlocked, RebalancePlan, RebalanceTrade,
-    ReceiverTotal, RunInfo, SourceDecision, SourceStats, StateCounters, SystemStatus,
-    TransportStatus, WalletsState, WriterLane,
+    RebalanceTransfer, ReceiverTotal, RunInfo, SourceDecision, SourceStats, StateCounters,
+    SystemStatus, TransportStatus, WalletRow, WalletsState, WriterLane,
 };
 use std::{
     fs::{self, OpenOptions},
@@ -274,6 +274,7 @@ pub fn liquidator_state(o: &OwnerSnapshot) -> LiquidatorState {
                 .trades
                 .iter()
                 .map(|t| RebalanceTrade {
+                    wallet: t.wallet.clone(),
                     sell: t.sell.clone(),
                     buy: t.buy.clone(),
                     amount_in: t.amount_in,
@@ -284,13 +285,24 @@ pub fn liquidator_state(o: &OwnerSnapshot) -> LiquidatorState {
             blocked: r
                 .blocked
                 .iter()
-                .map(|(asset, reason)| RebalanceBlocked {
+                .map(|(wallet, asset, reason)| RebalanceBlocked {
+                    wallet: wallet.clone(),
                     asset: asset.clone(),
                     reason: (*reason).into(),
                 })
                 .collect(),
             quotes_pending: r.quotes_pending,
             budget_usd_micro: r.budget_usd_micro,
+            transfers: r
+                .transfers
+                .iter()
+                .map(|t| RebalanceTransfer {
+                    asset: t.asset.clone(),
+                    from_wallet: t.from.clone(),
+                    to_wallet: t.to.clone(),
+                    amount: t.amount,
+                })
+                .collect(),
         }),
         sources: o
             .sources
@@ -443,6 +455,33 @@ pub fn wallets_state(o: &OwnerSnapshot) -> WalletsState {
                     .and_then(|v| i64::try_from(v).ok()),
             }),
         }),
+        // DEC-17b: every configured signer's wallet.
+        rows: w
+            .rows
+            .iter()
+            .map(|r| WalletRow {
+                wallet: r.wallet.clone(),
+                roles: r.roles.iter().map(|x| x.to_string()).collect(),
+                enabled: r.enabled,
+                runs_candidates: r.runs_candidates,
+                block_reason: r.block_reason.clone(),
+                sol_lamports: r.sol_lamports,
+                free_sol_lamports: r.free_sol_lamports,
+                holds: amounts(&r.holds),
+                held_attempt: r.held_attempt.into(),
+                halt_reason: r.halt_reason.clone(),
+                capital_in_use_usd_micro: r.capital_in_use_usd_micro,
+                day_attempts: r.day_attempts,
+                journal_read: r.journal_read,
+                realized_net_usd_micro: r
+                    .realized_net_usd_micro
+                    .and_then(|v| i64::try_from(v).ok()),
+                selected: r.selected,
+            })
+            .collect(),
+        selections: w.selections,
+        selections_none_eligible: w.none_eligible,
+        last_none_eligible: w.last_none_eligible.clone(),
     }
 }
 
@@ -2052,6 +2091,26 @@ mod contract_tests {
                 held_attempt: "NONE",
                 non_landing: None,
                 hold_b: None,
+                rows: vec![darkbot_runner::status_tap::OwnerWalletRow {
+                    wallet: "11111111111111111111111111111112".into(),
+                    roles: vec!["LIQUIDATOR", "FEE_PAYER"],
+                    enabled: true,
+                    runs_candidates: true,
+                    block_reason: "".into(),
+                    sol_lamports: Some(5_000_000_000),
+                    free_sol_lamports: Some(4_950_000_000),
+                    holds: [("SOL".to_string(), 0)].into(),
+                    held_attempt: "NONE",
+                    halt_reason: None,
+                    capital_in_use_usd_micro: 0,
+                    day_attempts: 0,
+                    journal_read: true,
+                    realized_net_usd_micro: Some(0),
+                    selected: 7,
+                }],
+                selections: 7,
+                none_eligible: 0,
+                last_none_eligible: String::new(),
             },
             finance: OwnerFinance {
                 as_of_slot: 400_000_200,
@@ -2067,14 +2126,20 @@ mod contract_tests {
                 mode: "OBSERVE",
                 at_unix_ms: Some(1_760_000_000_900),
                 slot: 400_000_200,
+                transfers: vec![],
                 trades: vec![darkbot_runner::status_tap::RebalanceTrade {
+                    wallet: "11111111111111111111111111111112".into(),
                     sell: "SOL".into(),
                     buy: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v".into(),
                     amount_in: 3_000_000_000,
                     minimum_out: 450_000_000,
                     cost_usd_micro: 1_250_000,
                 }],
-                blocked: vec![("PREHELD".into(), "INVENTORY_BALANCE_UNKNOWN")],
+                blocked: vec![(
+                    "11111111111111111111111111111112".into(),
+                    "PREHELD".into(),
+                    "INVENTORY_BALANCE_UNKNOWN",
+                )],
                 quotes_pending: 0,
                 budget_usd_micro: 5_000_000,
             }),

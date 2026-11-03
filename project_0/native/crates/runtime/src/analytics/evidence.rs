@@ -183,9 +183,8 @@ pub enum RecordEvent {
         a_checks: Vec<crate::execution::hold_b::FlowCheck>,
         b_checks: Vec<crate::execution::hold_b::FlowCheck>,
     },
-    /// B01 (OBSERVE): one completed rebalancing observation — the plan from the wallet's real
-    /// balances, real quotes and conservative costs at `slot`, never traded: its trades, the
-    /// assets it does not rebalance with the stable reason, its budget.
+    /// B01 (OBSERVE): one completed rebalancing observation of the one wallet before DEC-17b —
+    /// read in earlier journals, no longer written (`WalletRebalancePlan`).
     RebalancePlan {
         slot: u64,
         at_unix_ms: Option<u64>,
@@ -193,6 +192,26 @@ pub enum RecordEvent {
         blocked: Vec<(String, Cow<'static, str>)>,
         budget_usd_micro: u64,
     },
+    /// B01/DEC-17b (OBSERVE): one completed rebalancing observation over every wallet — the plan
+    /// from each wallet's real balances, real quotes and conservative costs at `slot`, never
+    /// traded: the moves between wallets, each wallet's trades, the assets a wallet does not
+    /// rebalance with the stable reason (`(wallet, asset, reason)`), the budget.
+    WalletRebalancePlan {
+        slot: u64,
+        at_unix_ms: Option<u64>,
+        transfers: Vec<WalletTransferRecord>,
+        trades: Vec<(String, RebalanceTradeRecord)>,
+        blocked: Vec<(String, String, Cow<'static, str>)>,
+        budget_usd_micro: u64,
+    },
+}
+/// DEC-17b: one planned move between wallets (`RecordEvent::WalletRebalancePlan`), never executed.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WalletTransferRecord {
+    pub asset: String,
+    pub from: String,
+    pub to: String,
+    pub amount: u64,
 }
 /// B01: one planned rebalance trade (`RecordEvent::RebalancePlan`): `amount_in` of `sell` for at
 /// least `minimum_out` of `buy` at the conservative cost `cost_usd_micro`.
@@ -237,7 +256,9 @@ impl RecordEvent {
             }
             Self::Health { slot, t_rx_ns, .. } => (Some(*slot), Some(*t_rx_ns)),
             Self::BlockhashPark { entry, .. } => (Some(entry.slot), Some(entry.t_rx_ns)),
-            Self::RebalancePlan { slot, .. } => (Some(*slot), None),
+            Self::RebalancePlan { slot, .. } | Self::WalletRebalancePlan { slot, .. } => {
+                (Some(*slot), None)
+            }
             _ => (None, None),
         }
     }

@@ -2495,7 +2495,9 @@ mod tests {
             )
             .unwrap()
         };
-        let check = |b: Fe06Attempt, s: &fe06::Scope| super::admission::within_limits(&j, &b, s);
+        let check = |b: Fe06Attempt, s: &fe06::Scope| {
+            super::admission::within_limits(&j, &Ok(vec![]), &b, s)
+        };
         assert_eq!(
             check(booking("g1", "k1", 10), &scope("1", "5", "5")),
             Err("FE06_ATTEMPT_LIMIT_UTC_DAY: 1 of 1 attempts used".into())
@@ -2520,7 +2522,32 @@ mod tests {
             check(booking("g2", "k2", 11), &scope("5", "5", "1")),
             Ok(())
         );
+        // DEC-17b: another wallet's bookings count against the same quotas (its journal holds
+        // the attempt, this one none); its records unknown refuse.
+        let records = j.attempt_records().unwrap();
         drop(j);
+        let other =
+            Journal::open(&dir, &solana_sdk::pubkey::Pubkey::new_unique().to_string()).unwrap();
+        let check_other = |others: &Result<Vec<_>, String>, b: Fe06Attempt, s: &fe06::Scope| {
+            super::admission::within_limits(&other, others, &b, s)
+        };
+        assert_eq!(
+            check_other(&Ok(vec![]), booking("g1", "k1", 10), &scope("1", "5", "5")),
+            Ok(())
+        );
+        assert_eq!(
+            check_other(&Ok(records), booking("g1", "k1", 10), &scope("1", "5", "5")),
+            Err("FE06_ATTEMPT_LIMIT_UTC_DAY: 1 of 1 attempts used".into())
+        );
+        assert_eq!(
+            check_other(
+                &Err("FE06_QUOTA_UNKNOWN".into()),
+                booking("g1", "k1", 10),
+                &scope("5", "5", "5")
+            ),
+            Err("FE06_QUOTA_UNKNOWN".into())
+        );
+        drop(other);
         fs::remove_dir_all(dir).unwrap();
     }
 

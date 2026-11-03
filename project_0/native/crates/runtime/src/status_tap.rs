@@ -277,6 +277,8 @@ pub struct OwnerSourceStats {
 /// B01: one planned rebalance trade (OBSERVE: planned, never sent).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RebalanceTrade {
+    /// DEC-17b: the wallet that would trade.
+    pub wallet: String,
     pub sell: String,
     pub buy: String,
     pub amount_in: u64,
@@ -293,9 +295,11 @@ pub struct OwnerRebalance {
     pub at_unix_ms: Option<u64>,
     /// Highest slot of the canonical state the plan read.
     pub slot: u64,
+    /// DEC-17b: the planned moves between wallets (the only capital flow between them).
+    pub transfers: Vec<crate::execution::inventory::Transfer>,
     pub trades: Vec<RebalanceTrade>,
-    /// Assets that are not rebalanced, with the stable reason.
-    pub blocked: Vec<(String, &'static str)>,
+    /// Assets a wallet does not rebalance, with the stable reason: `(wallet, asset, reason)`.
+    pub blocked: Vec<(String, String, &'static str)>,
     /// Quotes asked and not answered yet (the plan is then provisional).
     pub quotes_pending: u64,
     pub budget_usd_micro: u64,
@@ -543,6 +547,38 @@ pub struct OwnerWallets {
     pub non_landing: Option<OwnerNonLanding>,
     /// DEC-04: the B hold mode and the held attempt's A, B and finalized flows.
     pub hold_b: Option<OwnerHoldB>,
+    /// DEC-17b: every configured signer's wallet (the fields above: the pilot's, the first).
+    pub rows: Vec<OwnerWalletRow>,
+    /// DEC-17b: this run's wallet choices — candidates, those no wallet could run (the pilot's
+    /// refusal was theirs) and why for the last one.
+    pub selections: u64,
+    pub none_eligible: u64,
+    pub last_none_eligible: String,
+}
+
+/// DEC-17b: one configured signer's wallet — its roles and switch, whether it runs candidates
+/// and why it may not run one now, its SOL (reconciled and free after its holds and the policy
+/// reserve), its holds, held attempt, Safety and journal, and the candidates of this run it ran.
+/// Unknown values stay `None` (never 0).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct OwnerWalletRow {
+    pub wallet: String,
+    pub roles: Vec<&'static str>,
+    pub enabled: bool,
+    pub runs_candidates: bool,
+    /// Why it may not run a candidate now in the effective mode ("": it may).
+    pub block_reason: String,
+    pub sol_lamports: Option<u64>,
+    pub free_sol_lamports: Option<u64>,
+    pub holds: std::collections::BTreeMap<String, u64>,
+    /// NONE | RESERVED | UNKNOWN | FINALIZED_UNBOOKED | SETTLED.
+    pub held_attempt: &'static str,
+    pub halt_reason: Option<String>,
+    pub capital_in_use_usd_micro: u64,
+    pub day_attempts: u32,
+    pub journal_read: bool,
+    pub realized_net_usd_micro: Option<i128>,
+    pub selected: u64,
 }
 
 /// DEC-04: the B hold mode (requested, effective, why not, the user's N and the journals'

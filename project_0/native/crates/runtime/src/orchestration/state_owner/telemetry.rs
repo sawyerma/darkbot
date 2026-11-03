@@ -285,11 +285,17 @@ impl ShadowOwner {
     /// journals the mandatory telemetry the MT0 snapshot does not carry every
     /// `mt0_interval_seconds`, or now (`force`: the shutdown).
     pub(super) fn mt13_record(&mut self, force: bool) {
+        // DEC-17b: one intent per wallet whose journal holds an attempt.
         let live = self
-            .fe04_held
-            .as_ref()
-            .is_some_and(|j| j.step_state().is_some());
-        darkbot_common::mt0::MT0.set_intents_live(u64::from(live));
+            .wallets
+            .iter()
+            .filter(|w| {
+                w.fe04_held
+                    .as_ref()
+                    .is_some_and(|j| j.step_state().is_some())
+            })
+            .count();
+        darkbot_common::mt0::MT0.set_intents_live(live as u64);
         let interval = std::time::Duration::from_secs(
             darkbot_solana::runtime_config::active()
                 .limits
