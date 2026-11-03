@@ -262,19 +262,9 @@ fn run() -> Result<(), Box<dyn Error>> {
         &tool_permit::operator_confirmation(&project, Tool::PrewarmAtas),
     )?;
     transaction.signatures = permit.sign(&message, &[&payer])?;
-    // The exact signed message verifies before it is sent.
-    let verified = rpc.simulate_transaction_with_config(
-        &transaction,
-        RpcSimulateTransactionConfig {
-            sig_verify: true,
-            replace_recent_blockhash: false,
-            commitment: Some(CommitmentConfig::confirmed()),
-            ..RpcSimulateTransactionConfig::default()
-        },
-    )?;
-    if let Some(err) = verified.value.err {
-        return Err(format!("prewarm signed simulation failed: {err:?}").into());
-    }
+    // The exact signed message verifies locally — nothing signed leaves before the send's own
+    // check (review L4).
+    transaction.verify()?;
     permit.admit_send()?;
     let signature = rpc.send_and_confirm_transaction(&transaction)?;
     println!("PREWARM_SENT signature={}", signature);

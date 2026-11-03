@@ -1,12 +1,13 @@
 //! DEC-17f (P8-CTRL-03d): the operator tools (`p0-prewarm-atas`, `p0-probe-costs`,
 //! `p0-probe-v1`) sign and send under the owner's own permits — no second path. A tool's real
 //! signature needs, in the epoch of the running owner, its durable receipts `WALLET:<signer>` and
-//! `ECON_SIGN` ENABLED (a send also `ECON_SEND`), no stop waiting in the request log, the tool's
-//! typed cost limit ([`Tool::cost_limit`]) and the operator's confirmation: the operator key over
-//! the tool, the epoch with its nonce, the signers, the exact messages, whether one is sent and
-//! its cost ([`issue`]). No ECON_ATTEMPT, no ECON_ARM: a tool makes no liquidation attempt. Each
-//! permit is recorded once (`data/operator-tools/`); the same messages are never permitted
-//! twice. Without a permit a tool signs nothing (a dry run simulates unsigned).
+//! `ECON_SIGN` ENABLED (a send also `ECON_SEND`), no stop waiting in the request log, its cost
+//! within the tool's typed limit ([`Tool::cost_limit`]) and the operator's confirmation: the
+//! operator key over the tool, the epoch with its nonce, the signers, the exact messages, whether
+//! one is sent, its cost and limit ([`issue`]). No ECON_ATTEMPT, no ECON_ARM: a tool makes no
+//! liquidation attempt. The gates hold again at every signature and immediately before the send.
+//! Each permitted message is recorded once (`data/operator-tools/`) and never permitted again.
+//! Without a permit a tool signs nothing (a dry run simulates unsigned).
 use super::capability_control as cap;
 use crate::analytics::journal;
 use crate::analytics::payload::Payload;
@@ -31,13 +32,16 @@ pub enum Tool {
     ProbeV1,
 }
 
-/// A tool's typed cost limit.
+/// A tool's typed cost limit: the lamports its signed messages may cost — the prewarm's fee and
+/// rent when it sends them; a probe's fee exposure (it never sends, but its signed messages reach
+/// the provider for simulation, and one that landed would cost its fee). 0: none configured.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ToolCost {
-    /// It never sends: it signs for simulations only, at no cost.
-    NoSend,
-    /// It sends for at most this many lamports, fee and rent (0: no ceiling configured — no send).
-    Lamports(u64),
+pub struct ToolCost {
+    pub max_lamports: u64,
+    /// The tool sends (else it only simulates).
+    pub sends: bool,
+    /// The parameter that sets it.
+    pub parameter: &'static str,
 }
 
 impl Tool {
@@ -50,11 +54,19 @@ impl Tool {
     }
 
     /// The tool's cost limit under `limits`: the prewarm sends within `prewarm_max_lamports`, a
-    /// probe never sends.
+    /// probe never sends and exposes at most `probe_max_lamports`.
     pub fn cost_limit(self, limits: &darkbot_solana::runtime_config::Limits) -> ToolCost {
         match self {
-            Tool::PrewarmAtas => ToolCost::Lamports(limits.prewarm_max_lamports),
-            Tool::ProbeCosts | Tool::ProbeV1 => ToolCost::NoSend,
+            Tool::PrewarmAtas => ToolCost {
+                max_lamports: limits.prewarm_max_lamports,
+                sends: true,
+                parameter: "prewarm_max_lamports",
+            },
+            Tool::ProbeCosts | Tool::ProbeV1 => ToolCost {
+                max_lamports: limits.probe_max_lamports,
+                sends: false,
+                parameter: "probe_max_lamports",
+            },
         }
     }
 }
@@ -81,7 +93,7 @@ pub struct OperatorToolUse {
     pub messages_sha256: Vec<String>,
     pub send: bool,
     pub cost_lamports: u64,
-    /// The tool's cost limit (0 for a tool that never sends).
+    /// The tool's cost limit.
     pub cost_limit_lamports: u64,
     pub permitted_unix_s: u64,
     /// The operator's confirmation ([`statement`]).
@@ -131,6 +143,9 @@ fn gates(project: &Path, signers: &[Pubkey], send: bool) -> Result<(u64, u32), S
             "{TOOL_NOT_PERMITTED}: capability epoch {epoch} is not the running owner's (pid {pid})"
         ));
     }
+    // The receipts' end first, then the decisions: a decision written in between is a request
+    // after that end — seen below as a stop waiting (review M1).
+    let decided_up_to = cap::latest_outcome(&dir)?.map_or(0, |o| o.seq);
     let decided = cap::epoch_decisions(&dir, epoch)?;
     let enabled = |c: &str| {
         decided
@@ -150,13 +165,20 @@ fn gates(project: &Path, signers: &[Pubkey], send: bool) -> Result<(u64, u32), S
     if !missing.is_empty() {
         return Err(format!("{TOOL_NOT_PERMITTED}: {}", missing.join("; ")));
     }
-    // A request the owner has not decided yet that is a stop (or unreadable: it may be one) —
-    // nothing is signed or sent ahead of it.
-    let decided_up_to = cap::latest_outcome(&dir)?.map_or(0, |o| o.seq);
-    for seq in cap::requests_after(&dir, decided_up_to)? {
-        match cap::request_at(&dir, seq) {
-            Ok(r) if !cap::is_stop(&r.capability, &r.requested) => {}
-            _ => return Err(cap::STOP_PENDING.into()),
+    // A stop waiting for the owner — nothing is signed or sent ahead of it: a request after the
+    // receipts that is a stop (or unreadable: it may be one), or a stop of this epoch without its
+    // receipt (one the owner applied but could not record stands applied, review L3).
+    for seq in cap::requests_after(&dir, 0)? {
+        let waits = match cap::request_at(&dir, seq) {
+            Ok(r) if cap::is_stop(&r.capability, &r.requested) => {
+                seq > decided_up_to
+                    || (r.owner_epoch == epoch && cap::outcome_at(&dir, seq)?.is_none())
+            }
+            Ok(_) => false,
+            Err(_) => seq > decided_up_to,
+        };
+        if waits {
+            return Err(cap::STOP_PENDING.into());
         }
     }
     Ok((epoch, pid))
@@ -194,25 +216,28 @@ pub fn issue(
     if u.signers.is_empty() || u.messages.is_empty() {
         return Err(format!("{TOOL_NOT_PERMITTED}: no signer or no message"));
     }
-    let limit = match (u.tool.cost_limit(&config.limits), u.send) {
-        (ToolCost::NoSend, true) => {
-            return Err(format!("TOOL_COST_LIMIT: {} never sends", u.tool.name()))
-        }
-        (ToolCost::NoSend, false) => 0,
-        (ToolCost::Lamports(0), true) => {
-            return Err(format!(
-                "TOOL_COST_LIMIT: {} has no cost ceiling configured (prewarm_max_lamports)",
-                u.tool.name()
-            ))
-        }
-        (ToolCost::Lamports(max), true) if u.cost_lamports > max => return Err(format!(
-            "TOOL_COST_LIMIT: {} costs {} lamports, its ceiling is {max} (prewarm_max_lamports)",
-            u.tool.name(),
-            u.cost_lamports
-        )),
-        (ToolCost::Lamports(max), _) => max,
-    };
+    let limit = u.tool.cost_limit(&config.limits);
+    let name = u.tool.name();
+    if u.send && !limit.sends {
+        return Err(format!("TOOL_COST_LIMIT: {name} never sends"));
+    }
+    if limit.max_lamports == 0 {
+        return Err(format!(
+            "TOOL_COST_LIMIT: {name} has no cost limit configured ({})",
+            limit.parameter
+        ));
+    }
+    if u.cost_lamports > limit.max_lamports {
+        return Err(format!(
+            "TOOL_COST_LIMIT: {name} costs {} lamports, its limit is {} ({})",
+            u.cost_lamports, limit.max_lamports, limit.parameter
+        ));
+    }
     let (epoch, owner_pid) = gates(project, u.signers, u.send)?;
+    // The operator is asked only with the configured, registered key (review M2).
+    super::operator_auth::configured_key(project, &config.operator_key_sha256)?;
+    let store = project.join(STORE);
+    let path_of = |sha: &str| store.join(format!("{}.p0j", &sha[..32]));
     let nonce = cap::epoch_nonce(&cap::request_dir(project), epoch)?;
     let mut record = OperatorToolUse {
         tool: u.tool.name().into(),
@@ -221,11 +246,37 @@ pub fn issue(
         signers: u.signers.iter().map(Pubkey::to_string).collect(),
         messages_sha256: u.messages.iter().map(|m| sha(m)).collect(),
         send: u.send,
-        cost_lamports: if u.send { u.cost_lamports } else { 0 },
-        cost_limit_lamports: limit,
+        cost_lamports: u.cost_lamports,
+        cost_limit_lamports: limit.max_lamports,
         permitted_unix_s: now_unix_s,
         operator_signature: vec![],
     };
+    if let Some(sha) = record
+        .messages_sha256
+        .iter()
+        .find(|m| path_of(m).symlink_metadata().is_ok())
+    {
+        return Err(format!(
+            "TOOL_USE_REPLAYED: message {} was permitted before",
+            &sha[..16]
+        ));
+    }
+    // What the operator confirms, shown before the confirmation (review L7).
+    eprintln!(
+        "[{name}] owner epoch {epoch} · signers {} · {} message(s) {} · {} · cost {} of limit {} lamports ({})",
+        record.signers.join(","),
+        record.messages_sha256.len(),
+        record
+            .messages_sha256
+            .iter()
+            .map(|m| &m[..16])
+            .collect::<Vec<_>>()
+            .join(","),
+        if u.send { "SENT" } else { "simulated only" },
+        u.cost_lamports,
+        limit.max_lamports,
+        limit.parameter
+    );
     let text = statement(&record, &nonce);
     let signature = confirm(&text)?;
     super::operator_auth::verify_message(project, &config.operator_key_sha256, &text, &signature)?;
@@ -236,20 +287,18 @@ pub fn issue(
         ));
     }
     record.operator_signature = signature;
-    let store = project.join(STORE);
     std::fs::create_dir_all(&store).map_err(|e| format!("TOOL_PERMIT_STORE: {e}"))?;
-    let digest = sha(record.messages_sha256.concat().as_bytes());
-    journal::create_typed_value(
-        &store.join(format!("{}.p0j", &digest[..32])),
-        journal::source::CAPABILITY_CONTROL,
-        &record,
-    )
-    .map_err(|e| match e.kind() {
-        std::io::ErrorKind::AlreadyExists => {
-            "TOOL_USE_REPLAYED: these messages were permitted before".to_string()
-        }
-        _ => format!("TOOL_PERMIT_STORE: {e}"),
-    })?;
+    // One record per message, written once: a message is never permitted twice (review L6).
+    for sha in &record.messages_sha256 {
+        journal::create_typed_value(&path_of(sha), journal::source::CAPABILITY_CONTROL, &record)
+            .map_err(|e| match e.kind() {
+                std::io::ErrorKind::AlreadyExists => format!(
+                    "TOOL_USE_REPLAYED: message {} was permitted before",
+                    &sha[..16]
+                ),
+                _ => format!("TOOL_PERMIT_STORE: {e}"),
+            })?;
+    }
     Ok(ToolPermit {
         project: project.to_path_buf(),
         epoch,
@@ -266,7 +315,7 @@ pub fn issue(
 
 impl ToolPermit {
     /// The real signatures of one permitted message (each once) by exactly the permitted signers,
-    /// in their order.
+    /// in their order — while the gates still hold in the same owner epoch (review L4).
     pub fn sign(&mut self, message: &[u8], keys: &[&Keypair]) -> Result<Vec<Signature>, String> {
         let hash = solana_sdk::hash::hash(message);
         let at = self
@@ -277,6 +326,7 @@ impl ToolPermit {
         if keys.iter().map(|k| k.pubkey()).collect::<Vec<_>>() != self.signers {
             return Err("TOOL_PERMIT_SIGNERS: the permit is other signers'".into());
         }
+        self.holds()?;
         self.unsigned.remove(at);
         Ok(keys.iter().map(|k| k.sign_message(message)).collect())
     }
@@ -287,7 +337,12 @@ impl ToolPermit {
         if !self.send {
             return Err("TOOL_PERMIT_NO_SEND: the permit is for simulations only".into());
         }
-        if gates(&self.project, &self.signers, true)? != (self.epoch, self.owner_pid) {
+        self.holds()
+    }
+
+    /// The gates of the permit's use, in its owner epoch.
+    fn holds(&self) -> Result<(), String> {
+        if gates(&self.project, &self.signers, self.send)? != (self.epoch, self.owner_pid) {
             return Err(format!(
                 "{TOOL_NOT_PERMITTED}: the owner epoch changed since the confirmation"
             ));
@@ -321,6 +376,7 @@ pub fn operator_confirmation(
 mod tests {
     use super::*;
     use crate::analytics::payload::CapabilityControlOutcome;
+    use darkbot_solana::runtime_config::{Limits, RuntimeConfig};
 
     fn project(tag: &str) -> PathBuf {
         let p = std::env::temp_dir().join(format!(
@@ -332,12 +388,11 @@ mod tests {
         p
     }
 
-    /// The owner's decision of `capability value` (its request and its receipt) in `epoch`.
-    fn decide(p: &Path, epoch: u64, capability: &str, value: &str) {
-        let dir = cap::request_dir(p);
+    /// A request of `capability value` in `epoch` (not decided yet).
+    fn request(p: &Path, epoch: u64, capability: &str, value: &str) -> (u64, String) {
         let id = cap::new_request_id().unwrap();
         let w = cap::write_request(
-            &dir,
+            &cap::request_dir(p),
             &cap::NewRequest {
                 capability,
                 requested: value,
@@ -348,10 +403,21 @@ mod tests {
             },
         )
         .unwrap();
+        (w.seq, id)
+    }
+
+    /// The owner's decision of `capability value` (its request and its receipt) in `epoch`.
+    fn decide(p: &Path, epoch: u64, capability: &str, value: &str) {
+        let (seq, id) = request(p, epoch, capability, value);
+        receipt(p, epoch, (seq, id), capability, value);
+    }
+
+    /// The owner's receipt of request `seq` (`id`): `capability value` applied.
+    fn receipt(p: &Path, epoch: u64, (seq, id): (u64, String), capability: &str, value: &str) {
         cap::write_outcome(
-            &dir,
+            &cap::request_dir(p),
             &CapabilityControlOutcome {
-                seq: w.seq,
+                seq,
                 request: cap::shown(capability, value),
                 applied: true,
                 requested: value.into(),
@@ -368,38 +434,80 @@ mod tests {
         .unwrap();
     }
 
-    fn probe<'a>(signers: &'a [Pubkey], messages: &'a [&'a [u8]]) -> ToolUse<'a> {
+    /// The running owner (its lock) and its epoch.
+    fn owner(p: &Path) -> (super::super::control::OwnerLock, u64) {
+        let lock = super::super::control::acquire_owner(
+            &super::super::control::default_lock_path(p),
+            "tool_test",
+            "shadow",
+        )
+        .unwrap();
+        let (epoch, _) =
+            cap::open_epoch_with_nonce(&cap::request_dir(p), std::process::id(), None).unwrap();
+        (lock, epoch)
+    }
+
+    fn config(operator_key_sha256: &str, prewarm: u64, probe: u64) -> RuntimeConfig {
+        RuntimeConfig {
+            operator_key_sha256: operator_key_sha256.into(),
+            limits: Limits {
+                prewarm_max_lamports: prewarm,
+                probe_max_lamports: probe,
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+
+    fn probe<'a>(signers: &'a [Pubkey], messages: &'a [&'a [u8]], cost: u64) -> ToolUse<'a> {
         ToolUse {
             tool: Tool::ProbeCosts,
             signers,
             messages,
             send: false,
-            cost_lamports: 0,
+            cost_lamports: cost,
         }
     }
 
-    /// Before any confirmation: no owner, or an owner without the switches, permits nothing;
-    /// a probe never sends; a send needs ECON_SEND and the tool's ceiling.
+    /// Before any confirmation: a cost beyond the tool's limit (none configured, above it, a
+    /// probe that would send), no owner, an owner without the switches, a stop waiting — decided
+    /// meanwhile, not decided yet, or applied without its receipt — or no configured operator key
+    /// permits nothing, and the operator is never asked.
     #[test]
     fn dec17f_a_tool_needs_the_owners_switches_and_its_cost_limit() {
         let p = project("gates");
         let payer = Keypair::new();
         let signers = [payer.pubkey()];
         let messages: [&[u8]; 1] = [b"m"];
-        let config = darkbot_solana::runtime_config::RuntimeConfig::default();
         let never = |_: &[u8]| -> Result<Vec<u8>, String> { panic!("no confirmation") };
-        let refused = |u: &ToolUse, config| issue(&p, config, u, 1, &never).unwrap_err();
-        let e = refused(&probe(&signers, &messages), &config);
+        let refused = |u: &ToolUse, c: &RuntimeConfig| issue(&p, c, u, 1, &never).unwrap_err();
+        let limited = config("", 10, 10);
+        // The cost limits.
+        let e = refused(&probe(&signers, &messages, 0), &config("", 10, 0));
+        assert!(
+            e.contains("no cost limit configured (probe_max_lamports)"),
+            "{e}"
+        );
+        let e = refused(&probe(&signers, &messages, 11), &limited);
+        assert!(e.contains("its limit is 10 (probe_max_lamports)"), "{e}");
+        let sent = ToolUse {
+            send: true,
+            ..probe(&signers, &messages, 1)
+        };
+        assert!(refused(&sent, &limited).contains("never sends"));
+        let prewarm = |cost| ToolUse {
+            tool: Tool::PrewarmAtas,
+            send: true,
+            cost_lamports: cost,
+            ..probe(&signers, &messages, 0)
+        };
+        assert!(refused(&prewarm(1), &config("", 0, 10)).contains("(prewarm_max_lamports)"));
+        assert!(refused(&prewarm(11), &limited).contains("its limit is 10"));
+        // The owner and its switches.
+        let e = refused(&probe(&signers, &messages, 1), &limited);
         assert!(e.contains("no runtime owner runs"), "{e}");
-        let _lock = super::super::control::acquire_owner(
-            &super::super::control::default_lock_path(&p),
-            "tool_test",
-            "shadow",
-        )
-        .unwrap();
-        let (epoch, _) =
-            cap::open_epoch_with_nonce(&cap::request_dir(&p), std::process::id(), None).unwrap();
-        let e = refused(&probe(&signers, &messages), &config);
+        let (_lock, epoch) = owner(&p);
+        let e = refused(&probe(&signers, &messages, 1), &limited);
         assert!(
             e.contains("ECON_SIGN DISABLED")
                 && e.contains(&format!("WALLET:{} DISABLED", signers[0])),
@@ -407,52 +515,41 @@ mod tests {
         );
         decide(&p, epoch, cap::ECON_SIGN, cap::ENABLED);
         decide(&p, epoch, &format!("WALLET:{}", signers[0]), cap::ENABLED);
-        // A probe never sends.
-        let send = ToolUse {
-            send: true,
-            ..probe(&signers, &messages)
-        };
-        assert!(refused(&send, &config).starts_with("TOOL_COST_LIMIT"));
-        // A prewarm send: no ceiling configured, above it, without ECON_SEND.
-        let prewarm = |cost| ToolUse {
-            tool: Tool::PrewarmAtas,
-            send: true,
-            cost_lamports: cost,
-            ..probe(&signers, &messages)
-        };
-        assert!(refused(&prewarm(1), &config).contains("no cost ceiling"));
-        let mut capped = config.clone();
-        capped.limits.prewarm_max_lamports = 10;
-        assert!(refused(&prewarm(11), &capped).contains("ceiling is 10"));
-        assert!(refused(&prewarm(10), &capped).contains("ECON_SEND DISABLED"));
-        // A later DISABLE decided takes the switch back; one not decided yet holds everything.
+        assert!(refused(&prewarm(10), &limited).contains("ECON_SEND DISABLED"));
+        // Every gate holds: without a configured operator key the operator is never asked.
+        let e = refused(&probe(&signers, &messages, 1), &limited);
+        assert!(e.contains("no operator key configured"), "{e}");
+        // A decided DISABLE takes the switch back.
         decide(&p, epoch, cap::ECON_SIGN, cap::DISABLED);
-        assert!(refused(&probe(&signers, &messages), &config).contains("ECON_SIGN DISABLED"));
+        assert!(refused(&probe(&signers, &messages, 1), &limited).contains("ECON_SIGN DISABLED"));
         decide(&p, epoch, cap::ECON_SIGN, cap::ENABLED);
-        let id = cap::new_request_id().unwrap();
-        cap::write_request(
-            &cap::request_dir(&p),
-            &cap::NewRequest {
-                capability: cap::ECON_SEND,
-                requested: cap::DISABLED,
-                request_id: &id,
-                owner_epoch: epoch,
-                expected: None,
-                now_unix_s: 1,
-            },
-        )
-        .unwrap();
+        // A stop not decided yet holds everything …
+        let (stop, _) = request(&p, epoch, cap::ECON_SEND, cap::DISABLED);
         assert_eq!(
-            refused(&probe(&signers, &messages), &config),
+            refused(&probe(&signers, &messages, 1), &limited),
+            cap::STOP_PENDING
+        );
+        // … also once later requests are decided: its receipt was never written.
+        decide(&p, epoch, cap::ECON_ARM, cap::DISABLED);
+        assert!(
+            cap::latest_outcome(&cap::request_dir(&p))
+                .unwrap()
+                .unwrap()
+                .seq
+                > stop
+        );
+        assert_eq!(
+            refused(&probe(&signers, &messages, 1), &limited),
             cap::STOP_PENDING
         );
         let _ = std::fs::remove_dir_all(&p);
     }
 
     /// DEC-17f, the operator's confirmation (the registered test key): a confirmed use signs
-    /// exactly its messages once each, by exactly its signers, is recorded once and never
-    /// permitted again; a send is admitted only while its switches hold; a foreign or missing
-    /// confirmation permits nothing.
+    /// exactly its messages once each, by exactly its signers, while the gates hold; each message
+    /// is recorded once and never permitted again, in no list; a send is admitted while its
+    /// switches hold and refused once a stop waits; a stop during the confirmation, a declined
+    /// one or another key's permits nothing.
     #[cfg(feature = "operator-test-signer")]
     #[test]
     fn dec17f_a_confirmed_tool_use_signs_its_messages_once() {
@@ -461,101 +558,105 @@ mod tests {
         let payer = Keypair::new();
         let signers = [payer.pubkey()];
         let key = operator_auth::register(&p, true).unwrap();
-        let config = darkbot_solana::runtime_config::RuntimeConfig {
-            operator_key_sha256: operator_auth::key_sha256(&key.public_key),
-            limits: darkbot_solana::runtime_config::Limits {
-                prewarm_max_lamports: 10,
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-        let _lock = super::super::control::acquire_owner(
-            &super::super::control::default_lock_path(&p),
-            "tool_test",
-            "shadow",
-        )
-        .unwrap();
-        let (epoch, _) =
-            cap::open_epoch_with_nonce(&cap::request_dir(&p), std::process::id(), None).unwrap();
+        let config = config(&operator_auth::key_sha256(&key.public_key), 10, 10);
+        let (_lock, epoch) = owner(&p);
         for c in [cap::ECON_SIGN, cap::ECON_SEND] {
             decide(&p, epoch, c, cap::ENABLED);
         }
         decide(&p, epoch, &format!("WALLET:{}", signers[0]), cap::ENABLED);
         let confirm = operator_confirmation(&p, Tool::ProbeCosts);
-        // Declined, or confirmed with another key: nothing permitted, nothing recorded.
         let messages: [&[u8]; 2] = [b"one", b"two"];
+        // Declined, or confirmed with another registered key: nothing permitted, nothing recorded.
         let declined = |_: &[u8]| -> Result<Vec<u8>, String> { Err("OPERATOR_DECLINED".into()) };
         assert_eq!(
-            issue(&p, &config, &probe(&signers, &messages), 1, &declined).unwrap_err(),
+            issue(&p, &config, &probe(&signers, &messages, 1), 1, &declined).unwrap_err(),
             "OPERATOR_DECLINED"
         );
-        let foreign = |_: &[u8]| -> Result<Vec<u8>, String> { Ok(vec![0x30, 0x02, 0x01, 0x01]) };
-        assert!(issue(&p, &config, &probe(&signers, &messages), 1, &foreign)
-            .unwrap_err()
-            .starts_with(operator_auth::OPERATOR_AUTH_REQUIRED));
+        let other = project("other-key");
+        operator_auth::register(&other, true).unwrap();
+        let foreign = |t: &[u8]| operator_auth::sign(&other, t);
+        assert!(
+            issue(&p, &config, &probe(&signers, &messages, 1), 1, &foreign)
+                .unwrap_err()
+                .starts_with(operator_auth::OPERATOR_AUTH_REQUIRED)
+        );
+        // A stop requested while the operator confirms: refused after the confirmation.
+        let during = std::cell::RefCell::new(None);
+        let stopping = |t: &[u8]| {
+            *during.borrow_mut() = Some(request(&p, epoch, cap::ECON_SIGN, cap::DISABLED));
+            operator_auth::sign(&p, t)
+        };
+        assert_eq!(
+            issue(&p, &config, &probe(&signers, &messages, 1), 1, &stopping).unwrap_err(),
+            cap::STOP_PENDING
+        );
+        let stopped = during.take().unwrap();
+        receipt(&p, epoch, stopped, cap::ECON_SIGN, cap::DISABLED);
+        decide(&p, epoch, cap::ECON_SIGN, cap::ENABLED);
+        assert!(!p.join(STORE).exists() || std::fs::read_dir(p.join(STORE)).unwrap().count() == 0);
         // Confirmed: each message once, by exactly the permitted signer; no send.
-        let mut permit = issue(&p, &config, &probe(&signers, &messages), 1, &confirm).unwrap();
-        let other = Keypair::new();
+        let mut permit = issue(&p, &config, &probe(&signers, &messages, 1), 1, &confirm).unwrap();
+        let intruder = Keypair::new();
         assert!(permit
-            .sign(b"one", &[&other])
+            .sign(b"one", &[&intruder])
             .unwrap_err()
             .starts_with("TOOL_PERMIT_SIGNERS"));
         let s = permit.sign(b"one", &[&payer]).unwrap();
         assert!(s[0].verify(payer.pubkey().as_ref(), b"one"));
-        assert!(permit
-            .sign(b"one", &[&payer])
-            .unwrap_err()
-            .starts_with("TOOL_PERMIT_MESSAGE"));
-        assert!(permit
-            .sign(b"three", &[&payer])
-            .unwrap_err()
-            .starts_with("TOOL_PERMIT_MESSAGE"));
+        for again in [b"one".as_slice(), b"three"] {
+            assert!(permit
+                .sign(again, &[&payer])
+                .unwrap_err()
+                .starts_with("TOOL_PERMIT_MESSAGE"));
+        }
+        // A stop waiting holds the next signature; once decided — a switch a tool never needs
+        // (ECON_ARM) — it signs.
+        let waiting = request(&p, epoch, cap::ECON_ARM, cap::DISABLED);
+        assert_eq!(
+            permit.sign(b"two", &[&payer]).unwrap_err(),
+            cap::STOP_PENDING
+        );
+        receipt(&p, epoch, waiting, cap::ECON_ARM, cap::DISABLED);
         permit.sign(b"two", &[&payer]).unwrap();
         assert!(permit
             .admit_send()
             .unwrap_err()
             .starts_with("TOOL_PERMIT_NO_SEND"));
-        // The same messages are never permitted twice.
-        assert!(issue(&p, &config, &probe(&signers, &messages), 2, &confirm)
+        // No message is permitted twice, in any list.
+        let mixed: [&[u8]; 2] = [b"four", b"one"];
+        assert!(issue(&p, &config, &probe(&signers, &mixed, 1), 2, &confirm)
             .unwrap_err()
             .starts_with("TOOL_USE_REPLAYED"));
-        // A send: admitted while its switches hold, refused once a stop waits.
-        let tx: [&[u8]; 1] = [b"prewarm"];
-        let send = |cost_lamports| ToolUse {
+        // A send: admitted while its switches hold …
+        let send = |message: &'static [u8]| ToolUse {
             tool: Tool::PrewarmAtas,
             send: true,
-            cost_lamports,
-            ..probe(&signers, &tx)
+            cost_lamports: 10,
+            signers: &signers,
+            messages: Box::leak(Box::new([message])),
         };
-        let permit = issue(&p, &config, &send(10), 3, &confirm).unwrap();
-        let record = std::fs::read_dir(p.join(STORE))
-            .unwrap()
-            .filter_map(|e| journal::read_typed_value::<OperatorToolUse>(&e.unwrap().path()).ok())
-            .find(|r| r.send)
-            .unwrap();
+        let permit = issue(&p, &config, &send(b"prewarm-1"), 3, &confirm).unwrap();
+        permit.admit_send().unwrap();
+        let record: OperatorToolUse = journal::read_typed_value(
+            &p.join(STORE)
+                .join(format!("{}.p0j", &sha(b"prewarm-1")[..32])),
+        )
+        .unwrap();
         assert_eq!(
             (
                 record.tool.as_str(),
                 record.owner_epoch,
+                record.send,
                 record.cost_lamports,
                 record.cost_limit_lamports
             ),
-            ("p0-prewarm-atas", epoch, 10, 10)
+            ("p0-prewarm-atas", epoch, true, 10, 10)
         );
-        let id = cap::new_request_id().unwrap();
-        cap::write_request(
-            &cap::request_dir(&p),
-            &cap::NewRequest {
-                capability: cap::ECON_SEND,
-                requested: cap::DISABLED,
-                request_id: &id,
-                owner_epoch: epoch,
-                expected: None,
-                now_unix_s: 1,
-            },
-        )
-        .unwrap();
+        // … refused once a stop waits.
+        let permit = issue(&p, &config, &send(b"prewarm-2"), 4, &confirm).unwrap();
+        request(&p, epoch, cap::ECON_SEND, cap::DISABLED);
         assert_eq!(permit.admit_send().unwrap_err(), cap::STOP_PENDING);
         let _ = std::fs::remove_dir_all(&p);
+        let _ = std::fs::remove_dir_all(&other);
     }
 }

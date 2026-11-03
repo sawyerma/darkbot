@@ -1,6 +1,7 @@
 //! FIX-129: read-only RPC fee/simulation evidence. No send method. DEC-17f (P8-CTRL-03d): its
 //! three messages are signed by the wallet under one permit of the owner's — WALLET and
-//! ECON_SIGN ENABLED in the running owner's epoch, the operator's confirmation (`tool_permit`).
+//! ECON_SIGN ENABLED in the running owner's epoch, the operator's confirmation, their fee
+//! exposure (quoted before any signature) within `probe_max_lamports` (`tool_permit`).
 use darkbot_runner::orchestration::tool_permit::{self, Tool, ToolUse};
 use darkbot_solana::{
     submit::{rpc::RpcSubmitter, SubmissionAdapter},
@@ -59,6 +60,26 @@ fn main() -> Result<(), Box<dyn Error>> {
         let tx = tx::build(&plan, hash, &TxLimits::default())?.tx;
         built.push((name, price, plan, tx));
     }
+    // N2: one probe call per message, bounded like the provider's own per-call limit — before any
+    // signature: their sum is the fee exposure the permit bounds.
+    let quotes: Vec<_> = built
+        .iter()
+        .map(|(.., t)| {
+            adapter.fee_for_message(
+                t,
+                std::time::Instant::now() + std::time::Duration::from_secs(30),
+            )
+        })
+        .collect();
+    let mut exposure = 0u64;
+    for q in &quotes {
+        let fee = q
+            .as_ref()
+            .map_err(|e| format!("TOOL_COST_UNKNOWN: a fee quote failed: {e:?}"))?;
+        exposure = exposure
+            .checked_add(fee.lamports)
+            .ok_or("TOOL_COST_UNKNOWN")?;
+    }
     // DEC-17f: one permit, one confirmation, for exactly these three messages.
     let messages: Vec<Vec<u8>> = built.iter().map(|(.., t)| t.message.serialize()).collect();
     let project = std::path::PathBuf::from(env::var("P0_PROJECT_DIR")?);
@@ -70,7 +91,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             signers: &[payer.pubkey()],
             messages: &messages.iter().map(Vec::as_slice).collect::<Vec<_>>(),
             send: false,
-            cost_lamports: 0,
+            cost_lamports: exposure,
         },
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)?
@@ -78,13 +99,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         &tool_permit::operator_confirmation(&project, Tool::ProbeCosts),
     )?;
     let mut scenarios = vec![];
-    for ((name, price, plan, mut tx), message) in built.into_iter().zip(&messages) {
+    for (((name, price, plan, mut tx), message), quote) in
+        built.into_iter().zip(&messages).zip(quotes)
+    {
         tx.signatures = permit.sign(message, &[&payer])?;
-        // N2: one probe call, bounded like the provider's own per-call limit.
-        let quote = adapter.fee_for_message(
-            &tx,
-            std::time::Instant::now() + std::time::Duration::from_secs(30),
-        );
         let sim = adapter
             .client()
             .simulate_transaction_with_config(

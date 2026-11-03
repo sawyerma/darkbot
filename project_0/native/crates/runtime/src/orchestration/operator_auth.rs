@@ -162,15 +162,9 @@ pub fn verify(
     )
 }
 
-/// The check of the operator's signature of any statement (a request's, a tool use's — each
-/// under its own domain): the registered key is the configured one, a production build's key a
-/// Secure Enclave key, the signature over exactly `message` valid.
-pub fn verify_message(
-    project: &Path,
-    configured_sha256: &str,
-    message: &[u8],
-    signature: &[u8],
-) -> Result<(), String> {
+/// The registered operator key, when it is the configured one and (a production build) a Secure
+/// Enclave key — checked before the operator is asked to confirm anything.
+pub fn configured_key(project: &Path, configured_sha256: &str) -> Result<OperatorKey, String> {
     if configured_sha256.is_empty() {
         return Err(format!(
             "{OPERATOR_AUTH_REQUIRED}: no operator key configured (operator_key_sha256)"
@@ -190,6 +184,19 @@ pub fn verify_message(
             "{OPERATOR_AUTH_REQUIRED}: the registered operator key is not the configured one"
         ));
     }
+    Ok(key)
+}
+
+/// The check of the operator's signature of any statement (a request's, a tool use's — each
+/// under its own domain): the registered key is the configured one, a production build's key a
+/// Secure Enclave key, the signature over exactly `message` valid.
+pub fn verify_message(
+    project: &Path,
+    configured_sha256: &str,
+    message: &[u8],
+    signature: &[u8],
+) -> Result<(), String> {
+    let key = configured_key(project, configured_sha256)?;
     if signature.is_empty() {
         return Err(format!(
             "{OPERATOR_AUTH_REQUIRED}: unsigned (confirm locally: p0ctl … --confirm)"

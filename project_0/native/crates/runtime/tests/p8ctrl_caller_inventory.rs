@@ -78,6 +78,13 @@ fn p8ctrl03_every_real_signer_and_sender_is_behind_the_permit_boundary() {
         ".submit_bundle(",
         "send_and_confirm_transaction(",
         "send_transaction(",
+        // DEC-17f review L5: every other signing or sending form.
+        "send_transaction_with_config(",
+        "RpcRequest::SendTransaction",
+        "Transaction::new(",
+        "try_sign(",
+        "partial_sign(",
+        "signed_v1_wire_with(",
     ]);
     let expected: BTreeMap<(String, String), usize> = [
         // The wallet's own signature: only `SignPermit::sign`.
@@ -98,6 +105,8 @@ fn p8ctrl03_every_real_signer_and_sender_is_behind_the_permit_boundary() {
         // DEC-17f (P8-CTRL-03d): the operator tools sign only through `ToolPermit::sign` and the
         // prewarm sends only after `ToolPermit::admit_send`.
         (("sign_message(", "orchestration/tool_permit.rs"), 1),
+        // The v1 wire of the probe's permitted signatures (`ToolPermit::sign` inside it).
+        (("signed_v1_wire_with(", "bin/p0-probe-v1.rs"), 1),
         (
             ("send_and_confirm_transaction(", "bin/p0-prewarm-atas.rs"),
             1,

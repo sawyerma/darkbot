@@ -290,9 +290,11 @@ parameters! {
     measure_subscription_types = defaults::C11_SUBSCRIPTION_TYPES_MAX, "types", "P0_MEASURE_SUBSCRIPTION_TYPES";
     measure_subscriptions_active = defaults::C11_SUBSCRIPTIONS_ACTIVE_MAX, "subscriptions", "P0_MEASURE_SUBSCRIPTIONS_ACTIVE";
     measure_subscription_seconds = defaults::C11_SUBSCRIPTION_SECONDS, "s", "P0_MEASURE_SUBSCRIPTION_SECONDS";
-    // DEC-17f (P8-CTRL-03d): the prewarm tool's cost ceiling, fee and rent (revision 23; 0: none
-    // configured — the tool sends nothing).
+    // DEC-17f (P8-CTRL-03d): the operator tools' cost limits (revision 23; 0: none configured —
+    // the tool signs nothing): the prewarm's fee and rent; a probe's fee exposure (its signed
+    // messages reach the provider for simulation — one that landed would cost its fee).
     prewarm_max_lamports = 0, "lamports", "P0_PREWARM_MAX_LAMPORTS";
+    probe_max_lamports = 0, "lamports", "P0_PROBE_MAX_LAMPORTS";
 }
 /// Layout revision of [`Limits`]: bumped with every change of its field list, since each typed
 /// record that embeds it (`OPERATIONAL_CONFIG`, `RUN_MANIFEST`) changes its binary layout and its
@@ -316,8 +318,8 @@ parameters! {
 /// provider bindings appended to [`EffectiveConfig`] (DEC-18, [`PROVIDERS_REVISION`]); 21:
 /// `measure_seconds` … `measure_subscription_seconds` (DEC-18 §3.5, the C-11 pre-measurement); 22:
 /// no new parameter — the registered operator key's SHA-256 appended to [`EffectiveConfig`]
-/// (DEC-17a, [`OPERATOR_REVISION`]); 23: `prewarm_max_lamports` (DEC-17f, the operator tool's
-/// cost limit).
+/// (DEC-17a, [`OPERATOR_REVISION`]); 23: `prewarm_max_lamports`, `probe_max_lamports` (DEC-17f,
+/// the operator tools' cost limits).
 pub const LIMITS_REVISION: u16 = 23;
 
 /// The first revision whose [`EffectiveConfig`] ends with the operator key's SHA-256 (DEC-17a);
@@ -436,7 +438,8 @@ impl Parameter {
             | "min_profit_usd_micro"
             | "priority_micro_lamports_per_cu"
             | "integration_probe_limit_per_kind"
-            | "prewarm_max_lamports" => 0,
+            | "prewarm_max_lamports"
+            | "probe_max_lamports" => 0,
             "recovery_root_catchup_seconds" | "recovery_root_hard_max_seconds" => 30,
             "recovery_root_stall_seconds" => 5,
             "boot_token_ttl_seconds" => defaults::BOOT_TOKEN_TTL_MIN_SECONDS,
@@ -471,6 +474,7 @@ impl Parameter {
             | "max_tip"
             | "priority_micro_lamports_per_cu"
             | "prewarm_max_lamports"
+            | "probe_max_lamports"
             | "max_opportunity_age_ns"
             | "execution_deadline_ns" => u64::MAX,
             "min_profit_usd_micro" => i64::MAX as u64,
@@ -2590,8 +2594,8 @@ mod tests {
             ),
             (
                 23,
-                168,
-                "38JSDgcoSXiM12vF62k48PxWn46uAHS9kGg8b26F5uWH".to_string()
+                169,
+                "8bmdvVBeM7FwuLb3gm3XbpF5CHbWJbumcE1XdNZkcxrX".to_string()
             )
         );
     }

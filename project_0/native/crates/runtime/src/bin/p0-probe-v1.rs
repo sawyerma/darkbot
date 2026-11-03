@@ -1,7 +1,8 @@
 //! Explicit read-only provider capability probe; never calls sendTransaction. DEC-17f
 //! (P8-CTRL-03d): its messages are signed by the wallet under one permit of the owner's — WALLET
-//! and ECON_SIGN ENABLED in the running owner's epoch, the operator's confirmation
-//! (`tool_permit`).
+//! and ECON_SIGN ENABLED in the running owner's epoch, the operator's confirmation, their fee
+//! exposure within `probe_max_lamports` (`tool_permit`), under the operational configuration
+//! (the operator key's hash, the limits).
 use base64::Engine;
 use darkbot_runner::orchestration::tool_permit::{self, Tool, ToolUse};
 use darkbot_solana::tx::{self, BuildVersion, Resources, TxLimits, TxPlan};
@@ -15,6 +16,8 @@ use solana_sdk::{
 use std::{env, error::Error, str::FromStr};
 
 fn main() -> Result<(), Box<dyn Error>> {
+    // The operational configuration (the operator key's hash, the limits) — review M2.
+    darkbot_solana::runtime_config::Resolved::parse(&[], &|k| env::var(k).ok())?.activate()?;
     // F-01/C07: through the process provider budget like every other client (no plain client).
     // DEC-18: a local node only (a remote provider is the registry's; its measurement is
     // `p0ctl provider measure`, C-11).
@@ -75,12 +78,23 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut control = small.clone();
     control.version = BuildVersion::V0;
     let mut control = tx::build(&control, hash, &TxLimits::default())?;
+    // Their fee exposure, quoted before any signature: the control's fee (one signature, no
+    // priority fee) is each message's — the v1 ones carry the same signature and no priority.
+    let solana_sdk::message::VersionedMessage::V0(quoted) = &control.tx.message else {
+        return Err("TOOL_COST_UNKNOWN: the control is no v0 message".into());
+    };
+    let fee = rpc
+        .get_fee_for_message(quoted)
+        .map_err(|_| "TOOL_COST_UNKNOWN: the fee quote failed")?;
     // DEC-17f: one permit, one confirmation, for exactly these three messages.
     let messages = [
         tx::v1_message_bytes(&small, hash, &TxLimits::default())?,
         tx::v1_message_bytes(&over, hash, &TxLimits::default())?,
         control.tx.message.serialize(),
     ];
+    let exposure = fee
+        .checked_mul(messages.len() as u64)
+        .ok_or("TOOL_COST_UNKNOWN")?;
     let project = std::path::PathBuf::from(env::var("P0_PROJECT_DIR")?);
     let mut permit = tool_permit::issue(
         &project,
@@ -90,7 +104,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             signers: &[payer.pubkey()],
             messages: &messages.iter().map(Vec::as_slice).collect::<Vec<_>>(),
             send: false,
-            cost_lamports: 0,
+            cost_lamports: exposure,
         },
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)?
