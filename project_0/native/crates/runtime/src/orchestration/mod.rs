@@ -15,6 +15,7 @@ pub mod fe06;
 pub mod fe_freeze;
 #[cfg(feature = "crate_health")]
 pub mod fe_qualification;
+pub mod journal_archive;
 pub mod operator_auth;
 pub mod provider_evidence;
 #[cfg(feature = "crate_health")]

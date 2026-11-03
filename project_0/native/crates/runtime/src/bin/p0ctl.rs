@@ -2776,6 +2776,60 @@ fn capability_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
 
 const LIVE_USAGE: &str = "usage: p0ctl live scope --file FILE | p0ctl live grant --digest D --expect-version N --expect-epoch E --request-id ID --confirm (DEC-17a: the operator signs, Touch ID) | p0ctl live revoke --digest D --expect-version N --expect-epoch E --request-id ID | p0ctl live status | p0ctl live attempts --journal-dir DIR --wallet PUBKEY [--digest D]";
 
+const JOURNAL_USAGE: &str = "usage: p0ctl journal archive --journal PATH --reason TEXT   (DEC-17e: a corrupt journal of a run — unsealed or undecodable — moved byte for byte into data/archive with its manifest; never repaired, never deleted; not while a runtime owner runs) | p0ctl journal archived";
+
+/// DEC-17e: `journal archive|archived`.
+fn journal_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
+    use darkbot_runner::orchestration::journal_archive;
+    match args {
+        [archive, rest @ ..] if archive == "archive" => {
+            let journal = value(rest, "--journal").ok_or(JOURNAL_USAGE)?;
+            let reason = value(rest, "--reason").ok_or(JOURNAL_USAGE)?;
+            if rest.len() != 4 {
+                return Err(JOURNAL_USAGE.into());
+            }
+            if let control::OwnerState::Running { pid, .. } =
+                control::owner_state(&lock_path(project))?
+            {
+                return Err(format!("JOURNAL_ARCHIVE_OWNER_RUNS: runtime owner pid {pid} runs; archive after it stopped"));
+            }
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_err(|_| "JOURNAL_ARCHIVE_CLOCK")?
+                .as_secs();
+            let (m, target) = journal_archive::archive(project, Path::new(&journal), &reason, now)?;
+            println!(
+                "[p0ctl] {} {} → {} sha256={} bytes={} screen={} reason={}",
+                m.status,
+                m.original,
+                target.display(),
+                m.sha256,
+                m.bytes,
+                m.screen,
+                m.reason
+            );
+            Ok(true)
+        }
+        [list] if list == "archived" => {
+            for (dir, m) in journal_archive::archived(project)? {
+                println!(
+                    "{} {} sha256={} bytes={} screen={} archived_unix_s={} reason={} ({})",
+                    m.status,
+                    m.original,
+                    m.sha256,
+                    m.bytes,
+                    m.screen,
+                    m.archived_unix_s,
+                    m.reason,
+                    dir.display()
+                );
+            }
+            Ok(true)
+        }
+        _ => Err(JOURNAL_USAGE.into()),
+    }
+}
+
 const OPERATOR_USAGE: &str = "usage: p0ctl operator register   (DEC-17a: once — the operator key in this Mac's Secure Enclave; configure its printed operator_key_sha256) | p0ctl operator status";
 
 /// DEC-17a (P8-CTRL-02): the operator key — `register` makes it once, `status` names it.
@@ -3446,6 +3500,7 @@ fn main() -> ExitCode {
             (Some("c01"), _) => c01_cmd(&project, &rest),
             (Some("release"), Some("identity")) => release_identity_cmd(&project, &rest[1..]),
             (Some("operator"), _) => operator_cmd(&project, &rest),
+            (Some("journal"), _) => journal_cmd(&project, &rest),
             (Some("live"), _) => live_cmd(&project, &rest),
             (Some("boot"), _) => boot_cmd(&project, &rest),
             (Some("horizon"), _) => horizon_cmd(&project, &rest),

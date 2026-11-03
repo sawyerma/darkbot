@@ -234,6 +234,10 @@ pub struct ReleaseSource {
 impl payload::Payload for ReleaseSource {
     const KIND: u16 = journal::kind::RELEASE_SOURCE;
 }
+/// The roots runs are written to under a project (their journals are screened, qualified and
+/// archived only there).
+pub const RUN_ROOTS: [&str; 3] = ["data/runs", "data/econ4h", "data/market"];
+
 /// The release identity record beside the executables of a release.
 pub const RELEASE_IDENTITY: &str = "p0-release.p0j";
 /// The executables a release ships for its boot flows: control and raw capture (an econ4h or
@@ -440,10 +444,7 @@ impl OfflineInputs {
             runtime_lock: std::env::var_os("P0_RUNTIME_LOCK")
                 .map(PathBuf::from)
                 .unwrap_or_else(|| control::default_lock_path(project)),
-            run_roots: ["data/runs", "data/econ4h", "data/market"]
-                .iter()
-                .map(|r| project.join(r))
-                .collect(),
+            run_roots: RUN_ROOTS.iter().map(|r| project.join(r)).collect(),
             run_output_root: econ_run_root(project, &|k| std::env::var(k).ok()),
             binary: binary_identity_for(mode),
             runtime: runtime_name(mode),

@@ -257,6 +257,9 @@ pub mod kind {
     /// DEC-17a (P8-CTRL-02): the registered operator key (`operator_auth::OperatorKey`),
     /// `data/operator/key.p0j`.
     pub const OPERATOR_KEY: u16 = 1117;
+    /// DEC-17e: an archived corrupt journal's manifest (`journal_archive::JournalArchive`),
+    /// `data/archive/<sha256 prefix>/manifest.p0j`.
+    pub const JOURNAL_ARCHIVE: u16 = 1118;
     pub const ALL: &[u16] = &[
         OWNER_RECORD,
         OWNER_OPPORTUNITY,
@@ -358,6 +361,7 @@ pub mod kind {
         C01_FE01_PLAN,
         RELEASE_SOURCE,
         OPERATOR_KEY,
+        JOURNAL_ARCHIVE,
         super::MANIFEST,
     ];
 }

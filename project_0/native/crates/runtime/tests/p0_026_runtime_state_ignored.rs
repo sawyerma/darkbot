@@ -5,8 +5,8 @@
 use darkbot_runner::analytics::{backtest, h0, jobs};
 use darkbot_runner::execution::fee_parity;
 use darkbot_runner::orchestration::{
-    boot_control, c01_records, capability_control, control, fe06, operator_auth, provider_evidence,
-    provider_measurement, provider_registry, source_control, until_stopped,
+    boot_control, c01_records, capability_control, control, fe06, journal_archive, operator_auth,
+    provider_evidence, provider_measurement, provider_registry, source_control, until_stopped,
 };
 use std::path::{Path, PathBuf};
 
@@ -32,6 +32,7 @@ fn p0_026_every_runtime_state_directory_of_a_project_is_ignored() {
         provider_measurement::STORE.into(),
         c01_records::STORE.into(),
         operator_auth::STORE.into(),
+        journal_archive::STORE.into(),
         until_stopped::STORE.into(),
         fe06::STORE.into(),
         jobs::JOB_DIR.into(),
@@ -95,6 +96,7 @@ fn p0_026_the_audited_identity_is_stable_over_the_runtime_state() {
         provider_measurement::STORE.into(),
         c01_records::STORE.into(),
         operator_auth::STORE.into(),
+        journal_archive::STORE.into(),
         until_stopped::STORE.into(),
         fe06::STORE.into(),
         jobs::JOB_DIR.into(),
