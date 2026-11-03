@@ -285,7 +285,11 @@ fn hex_quantities_and_data_are_strict() {
     );
     assert_eq!(quantity_u256(&format!("0x{}", "f".repeat(65))), None);
     assert_eq!(data_vec("0x"), Some(vec![]));
-    assert_eq!(data_vec("0xABcd"), Some(vec![0xab, 0xcd]));
+    assert_eq!(data_vec("0xabcd"), Some(vec![0xab, 0xcd]));
+    // Audit E 4.3: lowercase only, as the canonical follower (execution-apis).
+    assert_eq!(data_vec("0xABcd"), None);
+    assert_eq!(quantity_u64("0xA"), None);
+    assert_eq!(data_fixed::<2>("0xABCD"), None);
     assert_eq!(data_vec("0xabc"), None);
     assert_eq!(data_fixed::<2>("0xabcd"), Some([0xab, 0xcd]));
     assert_eq!(data_fixed::<2>("0xab"), None);

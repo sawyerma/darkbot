@@ -49,7 +49,7 @@ use crate::chain_follower::jsonrpc::{
     data_fixed, data_vec, envelope, parse_quantity, quantity_u64,
 };
 use crate::chain_follower::{
-    Field, FollowerConfigError, FollowerLimits, RequestError, authority_and_path, connect_bounds,
+    Field, FollowerConfigError, FollowerLimits, RequestError, connect_bounds, https_endpoint,
 };
 use crate::wss::DisconnectReason;
 use crate::wss::endpoint::{Endpoint, connect_tls, tls_config};
@@ -317,16 +317,12 @@ struct Target {
 impl Target {
     fn of(endpoint: &str, limits: &FollowerLimits) -> Result<Self, ProbeError> {
         let config = ProbeError::Config;
-        let rest = endpoint
-            .strip_prefix("https://")
-            .ok_or_else(|| config(FollowerConfigError::NotHttps))?;
-        let target = Endpoint::parse(&format!("wss://{rest}"))
-            .map_err(|e| config(FollowerConfigError::Url(e)))?;
+        let target = https_endpoint(endpoint).map_err(config)?;
         limits
             .validate()
             .map_err(|e| config(FollowerConfigError::Limits(e)))?;
         let tls = tls_config().map_err(|_| config(FollowerConfigError::Tls))?;
-        let (authority, path) = authority_and_path(target.url());
+        let (authority, path) = target.authority_and_path();
         Ok(Target {
             endpoint: target,
             tls,

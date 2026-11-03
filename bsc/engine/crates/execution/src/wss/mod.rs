@@ -30,7 +30,7 @@ use std::time::{Duration, Instant};
 use darkbot_bsc_trading::signer::SignerError;
 
 pub(crate) mod endpoint;
-mod jsonrpc;
+pub(crate) mod jsonrpc;
 mod session;
 mod verify;
 
@@ -131,8 +131,9 @@ pub enum WssConfigError {
 /// Why a source URL is refused.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum UrlError {
-    /// The scheme is not `wss://`.
-    NotWss,
+    /// Another scheme than the endpoint's (`wss://` for a source,
+    /// `https://` for the canonical follower).
+    WrongScheme,
     /// The authority carries user information.
     Credentials,
     /// The URL has a query or a fragment.

@@ -13,9 +13,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::Instant;
 
-use crate::chain_follower::{
-    FollowerLimits, authority_and_path, connect_bounds, http, https_endpoint,
-};
+use crate::chain_follower::{FollowerLimits, connect_bounds, http, https_endpoint};
 use crate::wss::DisconnectReason;
 use crate::wss::endpoint::{connect_tls, tls_config};
 
@@ -93,7 +91,7 @@ impl PublicExit {
                 let endpoint = https_endpoint(url).map_err(|e| format!("{e:?}"))?;
                 let tls = tls_config().map_err(|e| e.to_string())?;
                 let bounds = connect_bounds(&limits);
-                let (authority, path) = authority_and_path(endpoint.url());
+                let (authority, path) = endpoint.authority_and_path();
                 worker.spawn(move || {
                     let connect = |stop: &AtomicBool| {
                         connect_tls(&endpoint, &tls, &bounds, stop, Instant::now())

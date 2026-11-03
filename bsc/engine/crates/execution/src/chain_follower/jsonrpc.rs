@@ -1,10 +1,9 @@
 //! The JSON-RPC wire boundary. A response body goes in, typed values come
 //! out; nothing past this file sees JSON.
 //!
-//! Hex follows the JSON-RPC encoding (EIP-1474) as BSC nodes write it, in
-//! lowercase: a quantity is `0x` with the shortest non-empty digit string
-//! (`0x0` for zero), data is `0x` with two digits per byte, of exactly the
-//! field's width where it has one. Anything else is refused.
+//! Hex is the WSS source's (`crate::wss::jsonrpc`, Audit E 4.3): lowercase,
+//! canonical quantities, data of the field's width; anything else is
+//! refused.
 
 use alloy_primitives::keccak256;
 use darkbot_bsc_tx_encoding::rlp::{encode_bytes, encode_list, encode_u64, encode_uint_be};
@@ -12,11 +11,9 @@ use serde_json::{Map, Value};
 
 use super::{Call, Field, Integrity, RequestError};
 use crate::wss::{ParsedTx, RateLimitSignal, RejectReason, parse_tx_map};
-
-/// The JSON-RPC error codes that mean rate limiting: EIP-1474 "limit
-/// exceeded" and the HTTP status some providers reuse (the codes of the
-/// WSS source's `jsonrpc::RATE_LIMIT_CODES`).
-const RATE_LIMIT_CODES: [i64; 2] = [-32005, 429];
+// The one hex decoder and rate-limit rule (Audit E 4.3).
+use crate::wss::jsonrpc::is_rate_limit_code;
+pub(crate) use crate::wss::jsonrpc::{data_fixed, data_vec, quantity_be, quantity_u64};
 
 /// Most topics of one log (`LOG4`).
 const MAX_TOPICS: usize = 4;
@@ -679,7 +676,7 @@ pub(crate) fn envelope(body: &[u8], id: u64) -> Result<Value, RequestError> {
             .get("code")
             .and_then(Value::as_i64)
             .ok_or(RequestError::Shape(Field::ErrorCode))?;
-        return Err(if RATE_LIMIT_CODES.contains(&code) {
+        return Err(if is_rate_limit_code(code) {
             RequestError::RateLimited(RateLimitSignal::RpcError(code))
         } else {
             RequestError::Rpc(code)
@@ -712,79 +709,4 @@ fn fixed<const N: usize>(
     field: Field,
 ) -> Result<[u8; N], RequestError> {
     data_fixed::<N>(text(obj, name, field)?).ok_or(RequestError::Shape(field))
-}
-
-fn nibble(b: u8) -> Option<u8> {
-    match b {
-        b'0'..=b'9' => Some(b - b'0'),
-        b'a'..=b'f' => Some(b - b'a' + 10),
-        _ => None,
-    }
-}
-
-/// A canonical quantity of at most 64 bits.
-pub(crate) fn quantity_u64(s: &str) -> Option<u64> {
-    let digits = s.strip_prefix("0x")?.as_bytes();
-    let canonical = match digits {
-        [] => false,
-        [_] => true,
-        [first, ..] => *first != b'0',
-    };
-    if !canonical || digits.len() > 16 {
-        return None;
-    }
-    digits
-        .iter()
-        .try_fold(0u64, |v, &d| Some((v << 4) | u64::from(nibble(d)?)))
-}
-
-/// R7: a canonical quantity of at most 256 bits, its big-endian bytes
-/// without leading zeros (none for zero).
-pub(crate) fn quantity_be(s: &str) -> Option<Vec<u8>> {
-    let digits = s.strip_prefix("0x")?.as_bytes();
-    let canonical = match digits {
-        [] => false,
-        [_] => true,
-        [first, ..] => *first != b'0',
-    };
-    if !canonical || digits.len() > 64 {
-        return None;
-    }
-    let (head, rest) = digits.split_at(digits.len() % 2);
-    let mut out = Vec::with_capacity(digits.len().div_ceil(2));
-    if let [d] = head {
-        out.push(nibble(*d)?);
-    }
-    for pair in rest.chunks_exact(2) {
-        out.push((nibble(pair[0])? << 4) | nibble(pair[1])?);
-    }
-    if out == [0] {
-        out.clear();
-    }
-    Some(out)
-}
-
-/// `0x` and two digits per byte.
-pub(crate) fn data_vec(s: &str) -> Option<Vec<u8>> {
-    let digits = s.strip_prefix("0x")?.as_bytes();
-    if !digits.len().is_multiple_of(2) {
-        return None;
-    }
-    digits
-        .chunks_exact(2)
-        .map(|pair| Some((nibble(pair[0])? << 4) | nibble(pair[1])?))
-        .collect()
-}
-
-/// `0x` and exactly `2 * N` digits.
-pub(crate) fn data_fixed<const N: usize>(s: &str) -> Option<[u8; N]> {
-    let digits = s.strip_prefix("0x")?.as_bytes();
-    if digits.len() != 2 * N {
-        return None;
-    }
-    let mut out = [0u8; N];
-    for (byte, pair) in out.iter_mut().zip(digits.chunks_exact(2)) {
-        *byte = (nibble(pair[0])? << 4) | nibble(pair[1])?;
-    }
-    Some(out)
 }

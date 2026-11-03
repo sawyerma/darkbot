@@ -1,9 +1,12 @@
 //! The JSON-RPC wire boundary. A frame's bytes go in, typed values come
 //! out; nothing past this file sees JSON.
 //!
-//! Hex follows the JSON-RPC encoding (EIP-1474): a quantity is `0x` with
-//! the shortest non-empty digit string (`0x0` for zero), data is `0x` with
-//! two digits per byte, of exactly the field's width where it has one.
+//! Hex follows the JSON-RPC encoding (EIP-1474) as BSC nodes write it, in
+//! lowercase (the execution-apis schema): a quantity is `0x` with the
+//! shortest non-empty digit string (`0x0` for zero), data is `0x` with two
+//! digits per byte, of exactly the field's width where it has one. Anything
+//! else is refused. The one decoder of the WSS source and the canonical
+//! follower, with the one rate-limit rule (Audit E 4.3).
 
 use serde_json::{Map, Value};
 
@@ -21,7 +24,7 @@ pub(super) const SUBSCRIBE_REQUEST: &str =
 /// exceeded" and the HTTP status some providers reuse.
 const RATE_LIMIT_CODES: [i64; 2] = [-32005, 429];
 
-pub(super) fn is_rate_limit_code(code: i64) -> bool {
+pub(crate) fn is_rate_limit_code(code: i64) -> bool {
     RATE_LIMIT_CODES.contains(&code)
 }
 
@@ -279,7 +282,6 @@ fn nibble(b: u8) -> Option<u8> {
     match b {
         b'0'..=b'9' => Some(b - b'0'),
         b'a'..=b'f' => Some(b - b'a' + 10),
-        b'A'..=b'F' => Some(b - b'A' + 10),
         _ => None,
     }
 }
@@ -295,7 +297,7 @@ fn quantity_digits(s: &str, max_digits: usize) -> Option<&[u8]> {
     (canonical && digits.len() <= max_digits).then_some(digits)
 }
 
-pub(super) fn quantity_u64(s: &str) -> Option<u64> {
+pub(crate) fn quantity_u64(s: &str) -> Option<u64> {
     let mut v = 0u64;
     for &d in quantity_digits(s, 16)? {
         v = (v << 4) | u64::from(nibble(d)?);
@@ -304,7 +306,7 @@ pub(super) fn quantity_u64(s: &str) -> Option<u64> {
 }
 
 /// A canonical quantity of up to 256 bits, as 32 big-endian bytes.
-pub(super) fn quantity_u256(s: &str) -> Option<[u8; 32]> {
+pub(crate) fn quantity_u256(s: &str) -> Option<[u8; 32]> {
     let digits = quantity_digits(s, 64)?;
     let mut out = [0u8; 32];
     for (i, &d) in digits.iter().rev().enumerate() {
@@ -314,8 +316,16 @@ pub(super) fn quantity_u256(s: &str) -> Option<[u8; 32]> {
     Some(out)
 }
 
+/// R7: a canonical quantity of up to 256 bits as its big-endian bytes
+/// without leading zeros (none for zero), the RLP integer of it.
+pub(crate) fn quantity_be(s: &str) -> Option<Vec<u8>> {
+    let word = quantity_u256(s)?;
+    let first = word.iter().position(|b| *b != 0).unwrap_or(word.len());
+    Some(word[first..].to_vec())
+}
+
 /// `0x` and two digits per byte.
-pub(super) fn data_vec(s: &str) -> Option<Vec<u8>> {
+pub(crate) fn data_vec(s: &str) -> Option<Vec<u8>> {
     let digits = s.strip_prefix("0x")?.as_bytes();
     if !digits.len().is_multiple_of(2) {
         return None;
@@ -327,7 +337,7 @@ pub(super) fn data_vec(s: &str) -> Option<Vec<u8>> {
 }
 
 /// `0x` and exactly `2 * N` digits.
-pub(super) fn data_fixed<const N: usize>(s: &str) -> Option<[u8; N]> {
+pub(crate) fn data_fixed<const N: usize>(s: &str) -> Option<[u8; N]> {
     let digits = s.strip_prefix("0x")?.as_bytes();
     if digits.len() != 2 * N {
         return None;

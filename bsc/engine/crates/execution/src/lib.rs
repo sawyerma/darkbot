@@ -18,6 +18,9 @@
     deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)
 )]
 
+/// HTTP/1.1 response framing, shared by the follower and the builders
+/// (Audit E 4.4).
+pub(crate) mod http1;
 pub mod submission;
 
 /// G0.7 acceptance guard: the compiled-in, fail-closed check of the binary

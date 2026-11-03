@@ -649,7 +649,7 @@ pub fn run_follower(
     let mut rpcs: Vec<_> = targets
         .iter()
         .map(|target| {
-            let (authority, path) = authority_and_path(target.url());
+            let (authority, path) = target.authority_and_path();
             let (tls, bounds) = (&tls, &bounds);
             let connect =
                 move |stop: &AtomicBool| connect_tls(target, tls, bounds, stop, Instant::now());
@@ -691,7 +691,7 @@ pub fn run_confirmer(
     limits.validate().map_err(FollowerConfigError::Limits)?;
     let tls = tls_config().map_err(|_| FollowerConfigError::Tls)?;
     let bounds = connect_bounds(limits);
-    let (authority, path) = authority_and_path(target.url());
+    let (authority, path) = target.authority_and_path();
     let connect = |stop: &AtomicBool| connect_tls(&target, &tls, &bounds, stop, Instant::now());
     let mut rpc = follow::Rpc::new(http::Client::new(connect, authority, path, limits));
     confirm::run(&mut rpc, limits, stop, sink);
@@ -730,10 +730,10 @@ pub fn recover_transaction(
         .map_err(|e| RecoveryFault::Config(FollowerConfigError::Limits(e)))?;
     let tls = tls_config().map_err(|_| RecoveryFault::Config(FollowerConfigError::Tls))?;
     let bounds = connect_bounds(limits);
-    let (authority, path) = authority_and_path(ours.url());
+    let (authority, path) = ours.authority_and_path();
     let connect = |stop: &AtomicBool| connect_tls(&ours, &tls, &bounds, stop, Instant::now());
     let mut primary = follow::Rpc::new(http::Client::new(connect, authority, path, limits));
-    let (authority, path) = authority_and_path(theirs.url());
+    let (authority, path) = theirs.authority_and_path();
     let connect = |stop: &AtomicBool| connect_tls(&theirs, &tls, &bounds, stop, Instant::now());
     let mut second = follow::Rpc::new(http::Client::new(connect, authority, path, limits));
     let mut sources = recover::Sources {
@@ -745,21 +745,20 @@ pub fn recover_transaction(
         .map_err(RecoveryFault::Fault)
 }
 
-/// `endpoint` as the follower connects it: `https://` and `wss://` share
-/// the authority and path rules and the default port 443, the WSS
-/// endpoint checks and connects both.
+/// `endpoint` as the follower connects it: an `https://` URL under the
+/// authority and path rules of the WSS endpoint, which connects both.
 pub(crate) fn https_endpoint(endpoint: &str) -> Result<Endpoint, FollowerConfigError> {
-    let rest = endpoint
-        .strip_prefix("https://")
-        .ok_or(FollowerConfigError::NotHttps)?;
-    Endpoint::parse(&format!("wss://{rest}")).map_err(FollowerConfigError::Url)
+    if !endpoint.starts_with("https://") {
+        return Err(FollowerConfigError::NotHttps);
+    }
+    Endpoint::parse_https(endpoint).map_err(FollowerConfigError::Url)
 }
 
 /// The host (authority) of an endpoint the follower accepts, never its
 /// path or query: what the status may show of it.
 pub(crate) fn endpoint_host(endpoint: &str) -> Result<String, FollowerConfigError> {
     let target = https_endpoint(endpoint)?;
-    Ok(authority_and_path(target.url()).0)
+    Ok(target.authority_and_path().0)
 }
 
 /// An endpoint as one place: its host in lower case without the default
@@ -767,7 +766,7 @@ pub(crate) fn endpoint_host(endpoint: &str) -> Result<String, FollowerConfigErro
 /// two endpoints the same, or a second source not independent).
 pub(crate) fn endpoint_key(endpoint: &str) -> Result<(String, String), FollowerConfigError> {
     let target = https_endpoint(endpoint)?;
-    let (authority, path) = authority_and_path(target.url());
+    let (authority, path) = target.authority_and_path();
     let host = authority.to_ascii_lowercase();
     let host = host
         .strip_suffix(":443")
@@ -775,16 +774,6 @@ pub(crate) fn endpoint_key(endpoint: &str) -> Result<(String, String), FollowerC
     let path = path.trim_end_matches('/');
     let path = if path.is_empty() { "/" } else { path };
     Ok((host, path.to_string()))
-}
-
-/// `wss://authority/path` (as [`Endpoint::url`] normalizes it) split into
-/// the `Host` header value and the request target.
-pub(crate) fn authority_and_path(url: &str) -> (String, String) {
-    let rest = url.strip_prefix("wss://").unwrap_or(url);
-    match rest.find('/') {
-        Some(at) => (rest[..at].to_owned(), rest[at..].to_owned()),
-        None => (rest.to_owned(), "/".to_owned()),
-    }
 }
 
 /// The bounds [`connect_tls`] applies: it reads `connect_timeout`,

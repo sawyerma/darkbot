@@ -372,9 +372,9 @@ fn configuration_is_refused_before_any_connect() {
         result
     };
     for (url, want) in [
-        ("ws://example.org/", NotWss),
-        ("https://example.org/", NotWss),
-        ("WSS://example.org/", NotWss),
+        ("ws://example.org/", WrongScheme),
+        ("https://example.org/", WrongScheme),
+        ("WSS://example.org/", WrongScheme),
         ("wss://user:secret@example.org/", Credentials),
         ("wss://example.org/ws?key=1", QueryOrFragment),
         ("wss://example.org/#frag", QueryOrFragment),

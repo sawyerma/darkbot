@@ -221,6 +221,15 @@ fn the_body_must_be_framed_exactly_once() {
         body.len()
     );
     assert_eq!(parse(lower.as_bytes()), Some(ResponseOutcome::Ack));
+    // Audit E 4.4 (the follower's framer): chunk extensions and trailer
+    // fields are read and ignored.
+    let extended = format!(
+        "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n\
+         {:x};ext=1\r\n{}\r\n0\r\nX-Trailer: 1\r\n\r\n",
+        body.len(),
+        body
+    );
+    assert_eq!(parse(extended.as_bytes()), Some(ResponseOutcome::Ack));
 
     // No framing: the end cannot be known.
     let unframed = format!("HTTP/1.1 200 OK\r\n\r\n{body}");
@@ -247,6 +256,23 @@ fn the_body_must_be_framed_exactly_once() {
         "HTTP/2 200\r\nContent-Length: 2\r\n\r\n{}".to_string(),
         "HTTP/1.1 2x0 OK\r\nContent-Length: 2\r\n\r\n{}".to_string(),
         "HTTP/1.1 200 OK\r\nno colon\r\nContent-Length: 2\r\n\r\n{}".to_string(),
+        // Audit E 4.4: a content coding, a bare LF, another 1.x version.
+        format!(
+            "HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\nContent-Length: {}\r\n\r\n{body}",
+            body.len()
+        ),
+        format!(
+            "HTTP/1.1 200 OK\nX: 1\r\nContent-Length: {}\r\n\r\n{body}",
+            body.len()
+        ),
+        format!(
+            "HTTP/1.1 200 OK\r\nX: a\nb\r\nContent-Length: {}\r\n\r\n{body}",
+            body.len()
+        ),
+        format!(
+            "HTTP/1.2 200 OK\r\nContent-Length: {}\r\n\r\n{body}",
+            body.len()
+        ),
     ] {
         assert_eq!(
             parse(refused.as_bytes()),

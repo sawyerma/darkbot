@@ -218,9 +218,9 @@ fn live_dataseed_follows_consecutive_canonical_blocks() {
 /// `eth_getBlockReceipts(n)` for `numbers`, fetched again through the
 /// follower's own client (failed requests are left out).
 fn response_sizes(limits: &FollowerLimits, numbers: &[u64]) -> (Vec<usize>, Vec<usize>) {
-    let target = Endpoint::parse("wss://bsc-dataseed.bnbchain.org").unwrap();
+    let target = Endpoint::parse_https("https://bsc-dataseed.bnbchain.org").unwrap();
     let tls = tls_config().unwrap();
-    let (authority, path) = authority_and_path(target.url());
+    let (authority, path) = target.authority_and_path();
     let bounds = connect_bounds(limits);
     let connect = |stop: &AtomicBool| connect_tls(&target, &tls, &bounds, stop, Instant::now());
     let mut client = http::Client::new(connect, authority, path, limits);

@@ -465,11 +465,11 @@ impl RuntimeConfig {
         let canonical = match canonical_rpc {
             None => None,
             Some(url) => {
-                let rest = url
-                    .strip_prefix("https://")
-                    .ok_or("BSC_CANONICAL_RPC must be https://")?;
-                // The follower's own rule (the authority and path rules of wss://).
-                Endpoint::parse(&format!("wss://{rest}"))
+                if !url.starts_with("https://") {
+                    return Err("BSC_CANONICAL_RPC must be https://".into());
+                }
+                // The follower's own rule (Audit E 5.14: parsed as https://).
+                Endpoint::parse_https(url)
                     .map_err(|e| format!("BSC_CANONICAL_RPC is refused: {e:?}"))?;
                 let limits = FollowerLimits {
                     poll: ms(take("BSC_CANONICAL_POLL_MS", 50, 60_000)?),

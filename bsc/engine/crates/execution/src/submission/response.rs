@@ -86,6 +86,9 @@ pub struct ResponseBuffer {
     buf: Vec<u8>,
     len: usize,
     body: Vec<u8>,
+    /// The status and the body framer once the head arrived: the body is
+    /// framed on from where the last read stopped.
+    framer: Option<(u16, crate::http1::Body)>,
 }
 
 impl ResponseBuffer {
@@ -95,6 +98,7 @@ impl ResponseBuffer {
             buf: vec![0u8; capacity],
             len: 0,
             body: Vec::with_capacity(capacity),
+            framer: None,
         }
     }
 
@@ -102,6 +106,7 @@ impl ResponseBuffer {
     pub fn reset(&mut self) {
         self.len = 0;
         self.body.clear();
+        self.framer = None;
     }
 
     /// The part of the storage that is still free, to read into.
@@ -115,7 +120,13 @@ impl ResponseBuffer {
     /// fills the storage without being complete is oversize.
     pub fn advance(&mut self, count: usize, request_id: &[u8]) -> Option<ResponseOutcome> {
         self.len = (self.len + count).min(self.buf.len());
-        let outcome = parse(&self.buf[..self.len], &mut self.body, request_id);
+        let outcome = parse(
+            &self.buf[..self.len],
+            self.buf.len(),
+            &mut self.framer,
+            &mut self.body,
+            request_id,
+        );
         if outcome.is_none() && self.len == self.buf.len() {
             return Some(ResponseOutcome::Protocol(ProtocolFailure::Oversize));
         }
@@ -123,163 +134,49 @@ impl ResponseBuffer {
     }
 }
 
-/// Parses `data` as far as it goes. `None` means incomplete.
-fn parse(data: &[u8], body: &mut Vec<u8>, request_id: &[u8]) -> Option<ResponseOutcome> {
-    let malformed = Some(ResponseOutcome::Protocol(ProtocolFailure::MalformedHttp));
-    let head_end = find(data, b"\r\n\r\n")?;
-    let head = &data[..head_end];
-    let rest = &data[head_end + 4..];
-
-    // Status line: "HTTP/1.x NNN ...".
-    let mut lines = head.split(|b| *b == b'\n');
-    let status_line = lines.next().unwrap_or(&[]);
-    if status_line.len() < 12 || !status_line.starts_with(b"HTTP/1.") || status_line[8] != b' ' {
-        return malformed;
-    }
-    let mut status = 0u16;
-    for digit in &status_line[9..12] {
-        if !digit.is_ascii_digit() {
-            return malformed;
-        }
-        status = status * 10 + u16::from(*digit - b'0');
-    }
-
-    // Headers that frame the body.
-    let mut content_length: Option<usize> = None;
-    let mut chunked = false;
-    for line in lines {
-        let line = line.strip_suffix(b"\r").unwrap_or(line);
-        let Some(colon) = line.iter().position(|b| *b == b':') else {
-            return malformed;
-        };
-        let name = &line[..colon];
-        let value = trim(&line[colon + 1..]);
-        if name.eq_ignore_ascii_case(b"content-length") {
-            let mut length = 0usize;
-            if value.is_empty() || content_length.is_some() {
-                return malformed;
-            }
-            for digit in value {
-                if !digit.is_ascii_digit() {
-                    return malformed;
-                }
-                let next = length
-                    .checked_mul(10)
-                    .and_then(|l| l.checked_add(usize::from(*digit - b'0')));
-                let Some(next) = next else {
-                    return malformed;
-                };
-                length = next;
-            }
-            content_length = Some(length);
-        } else if name.eq_ignore_ascii_case(b"transfer-encoding") {
-            if !value.eq_ignore_ascii_case(b"chunked") {
-                return malformed;
-            }
-            chunked = true;
-        }
-    }
-
-    // Both framings at once is ambiguous; it is refused, not resolved.
-    if chunked && content_length.is_some() {
-        return malformed;
-    }
-
-    // The complete body.
-    body.clear();
-    let complete: &[u8] = if chunked {
-        match dechunk(rest, body) {
-            Chunks::Complete => body.as_slice(),
-            Chunks::Incomplete => return None,
-            Chunks::Malformed => return malformed,
-        }
-    } else if let Some(length) = content_length {
-        if rest.len() < length {
-            return None;
-        }
-        if rest.len() > length {
-            return malformed;
-        }
-        rest
-    } else {
-        return Some(ResponseOutcome::Protocol(ProtocolFailure::UnframedBody));
+/// Parses `data` as far as it goes, within storage of `capacity` bytes
+/// (`crate::http1`, the framer the canonical follower shares: one
+/// `Content-Length` or `chunked`, nothing else), resuming the framer in
+/// `state` across reads. `None` means incomplete.
+fn parse(
+    data: &[u8],
+    capacity: usize,
+    state: &mut Option<(u16, crate::http1::Body)>,
+    body: &mut Vec<u8>,
+    request_id: &[u8],
+) -> Option<ResponseOutcome> {
+    use crate::http1::{self, Fault, Step};
+    let failure = |fault: Fault| {
+        Some(ResponseOutcome::Protocol(match fault {
+            Fault::Unframed => ProtocolFailure::UnframedBody,
+            Fault::TooLarge => ProtocolFailure::Oversize,
+            _ => ProtocolFailure::MalformedHttp,
+        }))
     };
-
-    Some(match status {
-        200 => classify(complete, request_id),
+    if state.is_none() {
+        let head_len = http1::head_len(data)?;
+        let head = match http1::parse_head(&data[..head_len]) {
+            Ok(head) => head,
+            Err(fault) => return failure(fault),
+        };
+        let framing = match head.framing {
+            Ok(framing) => framing,
+            Err(fault) => return failure(fault),
+        };
+        body.clear();
+        *state = Some((head.status, http1::Body::new(framing, head_len)));
+    }
+    let (status, framer) = state.as_mut()?;
+    match framer.advance(data, body, capacity) {
+        Step::More => return None,
+        Step::Fault(fault) => return failure(fault),
+        Step::Done => {}
+    }
+    Some(match *status {
+        200 => classify(framer.body(data, body), request_id),
         429 => ResponseOutcome::RateLimited,
         other => ResponseOutcome::Protocol(ProtocolFailure::HttpStatus(other)),
     })
-}
-
-fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    haystack
-        .windows(needle.len())
-        .position(|window| window == needle)
-}
-
-fn trim(mut bytes: &[u8]) -> &[u8] {
-    while let [b' ' | b'\t', rest @ ..] = bytes {
-        bytes = rest;
-    }
-    while let [rest @ .., b' ' | b'\t'] = bytes {
-        bytes = rest;
-    }
-    bytes
-}
-
-enum Chunks {
-    Complete,
-    Incomplete,
-    Malformed,
-}
-
-/// Decodes a chunked body into `out`, which never grows beyond its
-/// capacity.
-fn dechunk(mut data: &[u8], out: &mut Vec<u8>) -> Chunks {
-    loop {
-        let Some(line_end) = find(data, b"\r\n") else {
-            return Chunks::Incomplete;
-        };
-        // Chunk extensions are not used by these providers.
-        let mut size = 0usize;
-        if line_end == 0 {
-            return Chunks::Malformed;
-        }
-        for digit in &data[..line_end] {
-            let Some(value) = (*digit as char).to_digit(16) else {
-                return Chunks::Malformed;
-            };
-            let next = size
-                .checked_mul(16)
-                .and_then(|s| s.checked_add(value as usize));
-            let Some(next) = next else {
-                return Chunks::Malformed;
-            };
-            size = next;
-        }
-        data = &data[line_end + 2..];
-        if size == 0 {
-            // The last chunk. Trailers are not used; the body ends with the
-            // empty line.
-            return match data {
-                [b'\r', b'\n'] => Chunks::Complete,
-                [] | [b'\r'] => Chunks::Incomplete,
-                _ => Chunks::Malformed,
-            };
-        }
-        let Some(needed) = size.checked_add(2) else {
-            return Chunks::Malformed;
-        };
-        if data.len() < needed {
-            return Chunks::Incomplete;
-        }
-        if &data[size..needed] != b"\r\n" || size > out.capacity() - out.len() {
-            return Chunks::Malformed;
-        }
-        out.extend_from_slice(&data[..size]);
-        data = &data[needed..];
-    }
 }
 
 /// Classifies a JSON-RPC response body to the request `request_id`.

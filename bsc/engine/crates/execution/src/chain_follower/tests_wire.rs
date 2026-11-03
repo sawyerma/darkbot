@@ -108,7 +108,7 @@ fn non_200_statuses_are_returned_without_their_body() {
 
 #[test]
 fn framing_violations_are_typed() {
-    let cases: [(&[u8], RequestError); 10] = [
+    let cases: [(&[u8], RequestError); 13] = [
         (
             b"HTTP/2 200 OK\r\nContent-Length: 0\r\n\r\n",
             RequestError::Http(HttpFault::StatusLine),
@@ -132,6 +132,20 @@ fn framing_violations_are_typed() {
         (
             b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nContent-Length: 3\r\n\r\nabc",
             RequestError::Http(HttpFault::Framing),
+        ),
+        // Audit E 4.4 (the builders' rule): one length, given once.
+        (
+            b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nContent-Length: 2\r\n\r\nab",
+            RequestError::Http(HttpFault::Framing),
+        ),
+        // RFC 9112: a bare LF ends no line.
+        (
+            b"HTTP/1.1 200 OK\nX: 1\r\nContent-Length: 2\r\n\r\nab",
+            RequestError::Http(HttpFault::StatusLine),
+        ),
+        (
+            b"HTTP/1.1 200 OK\r\nX: a\nb\r\nContent-Length: 2\r\n\r\nab",
+            RequestError::Http(HttpFault::Header),
         ),
         (
             b"HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\nContent-Length: 2\r\n\r\nab",
@@ -643,11 +657,24 @@ fn limits_and_endpoint_are_refused_before_any_connect() {
 #[test]
 fn host_and_target_come_from_the_normalized_url() {
     assert_eq!(
-        authority_and_path("wss://node.example:8545/v1/rpc"),
+        https_endpoint("https://node.example:8545/v1/rpc")
+            .unwrap()
+            .authority_and_path(),
         ("node.example:8545".to_owned(), "/v1/rpc".to_owned())
     );
     assert_eq!(
-        authority_and_path("wss://node.example/"),
+        https_endpoint("https://node.example")
+            .unwrap()
+            .authority_and_path(),
         ("node.example".to_owned(), "/".to_owned())
     );
+    // Audit E 5.14: an https:// endpoint is one, never rewritten as wss://.
+    assert_eq!(
+        https_endpoint("https://node.example/v1").unwrap().url(),
+        "https://node.example/v1"
+    );
+    assert!(matches!(
+        https_endpoint("wss://node.example/"),
+        Err(FollowerConfigError::NotHttps)
+    ));
 }

@@ -87,7 +87,10 @@ impl TlsSetup {
         Self::from_roots(roots)
     }
 
-    fn from_roots(roots: RootCertStore) -> Result<Self, SetupError> {
+    /// Trusts exactly `roots`: the one client setup of every BSC TLS
+    /// connection (builders, WSS sources, the canonical follower; Audit E
+    /// 4.5).
+    pub(crate) fn from_roots(roots: RootCertStore) -> Result<Self, SetupError> {
         if roots.is_empty() {
             return Err(SetupError::NoTrustAnchors);
         }

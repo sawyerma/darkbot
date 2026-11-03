@@ -2,7 +2,8 @@
 //! stream (in production the rustls stream of `crate::wss::endpoint`).
 //!
 //! One request at a time, no pipelining. A response is framed by
-//! `Content-Length` or `chunked` (RFC 9112 §6, §7.1) and bounded by
+//! `Content-Length` or `chunked` (RFC 9112 §6, §7.1; `crate::http1`, the
+//! framer the builders' responses share) and bounded by
 //! `max_response_bytes` in all and by `request_timeout` from the first
 //! byte written. The connection is kept after a complete 200 response
 //! unless the server closes it, and dropped after anything else.
@@ -12,6 +13,7 @@ use std::sync::atomic::AtomicBool;
 use std::time::{Duration, Instant};
 
 use super::{FollowerLimits, HttpFault, RequestError, stopped};
+use crate::http1;
 use crate::wss::endpoint::{classify_io, is_tick};
 use crate::wss::{DisconnectReason, RateLimitSignal};
 
@@ -185,8 +187,8 @@ pub(super) fn round_trip<S: Read + Write>(
         stop,
     };
     let head_len = inbound.head()?;
-    let head =
-        parse_head(&inbound.buf[..head_len]).map_err(|f| Failure::after(RequestError::Http(f)))?;
+    let head = http1::parse_head(&inbound.buf[..head_len])
+        .map_err(|f| Failure::after(RequestError::Http(http_fault(f))))?;
     if head.status != HTTP_OK {
         return Ok(Response {
             status: head.status,
@@ -194,13 +196,10 @@ pub(super) fn round_trip<S: Read + Write>(
             close: true,
         });
     }
-    let body = match head
+    let framing = head
         .framing
-        .map_err(|f| Failure::after(RequestError::Http(f)))?
-    {
-        Framing::Length(len) => inbound.exact(head_len, len)?,
-        Framing::Chunked => inbound.chunked(head_len)?,
-    };
+        .map_err(|f| Failure::after(RequestError::Http(http_fault(f))))?;
+    let body = inbound.body(framing, head_len)?;
     Ok(Response {
         status: head.status,
         body,
@@ -234,98 +233,18 @@ fn write_all<S: Write>(
     }
 }
 
-/// How the body of a 200 response is delimited.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Framing {
-    Length(usize),
-    Chunked,
-}
-
-#[derive(Debug)]
-struct Head {
-    status: u16,
-    /// Checked only for a 200 response.
-    framing: Result<Framing, HttpFault>,
-    close: bool,
-}
-
-/// Parses the status line and the headers (`head` ends with the blank
-/// line). Only framing, coding and connection headers are interpreted.
-fn parse_head(head: &[u8]) -> Result<Head, HttpFault> {
-    if !head.is_ascii() {
-        return Err(HttpFault::Header);
+/// The follower's fault of a framing fault: a response without framing is
+/// a framing fault too.
+fn http_fault(fault: http1::Fault) -> HttpFault {
+    match fault {
+        http1::Fault::StatusLine => HttpFault::StatusLine,
+        http1::Fault::Header => HttpFault::Header,
+        http1::Fault::Unframed | http1::Fault::Framing => HttpFault::Framing,
+        http1::Fault::Coding => HttpFault::Coding,
+        http1::Fault::Chunk => HttpFault::Chunk,
+        http1::Fault::Trailing => HttpFault::Trailing,
+        http1::Fault::TooLarge => HttpFault::TooLarge,
     }
-    let text = std::str::from_utf8(head).map_err(|_| HttpFault::Header)?;
-    let text = text.strip_suffix("\r\n\r\n").ok_or(HttpFault::Header)?;
-    let mut lines = text.split("\r\n");
-    let status_line = lines.next().ok_or(HttpFault::StatusLine)?;
-    let (version, rest) = status_line.split_once(' ').ok_or(HttpFault::StatusLine)?;
-    let mut close = match version {
-        "HTTP/1.1" => false,
-        "HTTP/1.0" => true,
-        _ => return Err(HttpFault::StatusLine),
-    };
-    let (code, reason) = rest.split_at_checked(3).ok_or(HttpFault::StatusLine)?;
-    if !code.bytes().all(|b| b.is_ascii_digit()) || !(reason.is_empty() || reason.starts_with(' '))
-    {
-        return Err(HttpFault::StatusLine);
-    }
-    let status: u16 = code.parse().map_err(|_| HttpFault::StatusLine)?;
-
-    let mut length: Option<usize> = None;
-    let mut chunked = false;
-    let mut framing_fault = None;
-    for line in lines {
-        let (name, value) = line.split_once(':').ok_or(HttpFault::Header)?;
-        if name.is_empty() || !name.bytes().all(is_token_char) {
-            return Err(HttpFault::Header);
-        }
-        let value = value.trim_matches([' ', '\t']);
-        if name.eq_ignore_ascii_case("content-length") {
-            let parsed = value
-                .bytes()
-                .all(|b| b.is_ascii_digit())
-                .then(|| value.parse::<usize>().ok())
-                .flatten();
-            match parsed {
-                Some(n) if length.is_none_or(|l| l == n) => length = Some(n),
-                _ => framing_fault = Some(HttpFault::Framing),
-            }
-        } else if name.eq_ignore_ascii_case("transfer-encoding") {
-            if chunked || !value.eq_ignore_ascii_case("chunked") {
-                framing_fault = Some(HttpFault::Coding);
-            }
-            chunked = true;
-        } else if name.eq_ignore_ascii_case("content-encoding") {
-            if !value.eq_ignore_ascii_case("identity") {
-                framing_fault = Some(HttpFault::Coding);
-            }
-        } else if name.eq_ignore_ascii_case("connection") {
-            for option in value.split(',').map(|o| o.trim_matches([' ', '\t'])) {
-                if option.eq_ignore_ascii_case("close") {
-                    close = true;
-                } else if option.eq_ignore_ascii_case("keep-alive") && version == "HTTP/1.0" {
-                    close = false;
-                }
-            }
-        }
-    }
-    let framing = match (framing_fault, length, chunked) {
-        (Some(fault), _, _) => Err(fault),
-        (None, Some(n), false) => Ok(Framing::Length(n)),
-        (None, None, true) => Ok(Framing::Chunked),
-        (None, _, _) => Err(HttpFault::Framing),
-    };
-    Ok(Head {
-        status,
-        framing,
-        close,
-    })
-}
-
-/// RFC 9110 `tchar`.
-fn is_token_char(b: u8) -> bool {
-    b.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&b)
 }
 
 /// The response bytes read so far and the means to read more.
@@ -376,100 +295,29 @@ impl<S: Read> Inbound<'_, S> {
     fn head(&mut self) -> Result<usize, Failure> {
         let mut searched = 0;
         loop {
-            if let Some(at) = find(&self.buf[searched..], b"\r\n\r\n") {
-                return Ok(searched + at + 4);
+            if let Some(len) = http1::head_len(&self.buf[searched..]) {
+                return Ok(searched + len);
             }
             searched = self.buf.len().saturating_sub(3);
             self.fill()?;
         }
     }
 
-    /// Reads up to a CRLF at or after `from`; the index of its CR.
-    fn line(&mut self, from: usize) -> Result<usize, Failure> {
-        let mut searched = from;
+    /// The body after a head of `start` bytes, read to the end of the
+    /// response (trailer fields of a chunked one are read and ignored).
+    fn body(&mut self, framing: http1::Framing, start: usize) -> Result<Vec<u8>, Failure> {
+        let mut framer = http1::Body::new(framing, start);
+        let mut chunks = Vec::new();
         loop {
-            if let Some(at) = self
-                .buf
-                .get(searched..)
-                .and_then(|rest| find(rest, b"\r\n"))
-            {
-                return Ok(searched + at);
+            match framer.advance(&self.buf, &mut chunks, self.bounds.max) {
+                http1::Step::Done => break,
+                http1::Step::More => self.fill()?,
+                http1::Step::Fault(fault) => return Err(self.fault(http_fault(fault))),
             }
-            searched = self.buf.len().saturating_sub(1).max(from);
-            self.fill()?;
         }
+        Ok(match framing {
+            http1::Framing::Length(_) => self.buf.split_off(start),
+            http1::Framing::Chunked => chunks,
+        })
     }
-
-    /// A `Content-Length` body starting at `from`, the end of the response.
-    fn exact(&mut self, from: usize, len: usize) -> Result<Vec<u8>, Failure> {
-        let end = from
-            .checked_add(len)
-            .filter(|end| *end <= self.bounds.max)
-            .ok_or_else(|| self.fault(HttpFault::TooLarge))?;
-        while self.buf.len() < end {
-            self.fill()?;
-        }
-        if self.buf.len() > end {
-            return Err(self.fault(HttpFault::Trailing));
-        }
-        Ok(self.buf.split_off(from))
-    }
-
-    /// A chunked body starting at `from`; trailer fields are read and
-    /// ignored.
-    fn chunked(&mut self, from: usize) -> Result<Vec<u8>, Failure> {
-        let mut body = Vec::new();
-        let mut pos = from;
-        loop {
-            let line_end = self.line(pos)?;
-            let size =
-                chunk_size(&self.buf[pos..line_end]).ok_or_else(|| self.fault(HttpFault::Chunk))?;
-            pos = line_end + 2;
-            if size == 0 {
-                break;
-            }
-            let end = pos
-                .checked_add(size)
-                .and_then(|end| end.checked_add(2))
-                .filter(|end| *end <= self.bounds.max)
-                .ok_or_else(|| self.fault(HttpFault::TooLarge))?;
-            while self.buf.len() < end {
-                self.fill()?;
-            }
-            if self.buf[end - 2..end] != *b"\r\n" {
-                return Err(self.fault(HttpFault::Chunk));
-            }
-            body.extend_from_slice(&self.buf[pos..end - 2]);
-            pos = end;
-        }
-        loop {
-            let line_end = self.line(pos)?;
-            let empty = line_end == pos;
-            pos = line_end + 2;
-            if empty {
-                break;
-            }
-        }
-        if self.buf.len() > pos {
-            return Err(self.fault(HttpFault::Trailing));
-        }
-        Ok(body)
-    }
-}
-
-/// `chunk-size [; chunk-ext]`: hex digits, either case.
-fn chunk_size(line: &[u8]) -> Option<usize> {
-    let size = match line.iter().position(|b| *b == b';') {
-        Some(at) => &line[..at],
-        None => line,
-    };
-    let size = size.trim_ascii_end();
-    if size.is_empty() || !size.iter().all(u8::is_ascii_hexdigit) {
-        return None;
-    }
-    usize::from_str_radix(std::str::from_utf8(size).ok()?, 16).ok()
-}
-
-fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    haystack.windows(needle.len()).position(|w| w == needle)
 }

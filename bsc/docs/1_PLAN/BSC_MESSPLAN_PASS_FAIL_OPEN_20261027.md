@@ -173,7 +173,8 @@ Gate = Workspace im T63-Umfang (`--workspace --all-features --no-fail-fast`, `bs
 | T79 | R10 `fad44af7` | 1.716/1/27 (Lastflake `the_granted_losses_refuse_buys_from_the_ledger`; Lib-Wiederholung 487/0) | 8/8 / 0 / PASS | – | **LOCAL_PASS** |
 | T80 | R11 `4524c72d` | 1.724/1/27 (Lastflake `live_ledger` operator.lock; Lib-Wiederholung 488/0) | 8/8 / 0 / PASS nach Repin | `runtime_process.rs` 7/7 (§3b, s. u.), 12 Mutanten RED; CI grün | **LOCAL_PASS + CI_PASS** |
 | T81 | Audit E3 `9f330f4a` | 1.726/1/27 (`test_bsc_control.py`: zwei 30-s-Timeouts im parallelen Lauf; Einzellauf 6/6) | 8/8 / 0 / PASS (3.539 Felder) | Gateway, Vitest, tsc, Protokollvertrag; 11 Mutanten RED | **LOCAL_PASS + CI_PASS** (Runs 41651211015, 41651210615, 41651210683) |
-| T82 | Audit E2 (Commit mit dieser Zeile) | 1.727/0/27 | 8/8 / 0 / PASS; Release-Sätze aus `ops/darkbotctl` 5/5 Clippy 0 | Release-Build `--features runtime` (seit E3) und `--features g07-mainnet` (seit R8) kompilierten nicht; behoben; Review PASS (5 LOW behoben) | **LOCAL_PASS** |
+| T82 | Audit E2 `f7b572c1` | 1.727/0/27 | 8/8 / 0 / PASS; Release-Sätze aus `ops/darkbotctl` 5/5 Clippy 0 | Release-Build `--features runtime` (seit E3) und `--features g07-mainnet` (seit R8) kompilierten nicht; behoben; Review PASS (5 LOW behoben) | **LOCAL_PASS + CI_PASS** ubuntu/frontend (Run 41681262050), macOS NOT_RUN (Runner nicht zugeteilt; Code von T83 mit abgedeckt) |
+| T83 | Audit E6 (Commit mit dieser Zeile) | 1.729/0/27 | 8/8 / 0 / PASS; Release-Sätze 5/5 Clippy 0 | 10 Mutanten RED (`tools/mut_e6.py`); Builder-ACK p50 208→250 ns (CL), 167→250 ns (chunked), nach dem Senden; WSS-Tx-Prüfung 21,0 µs unverändert; Review PASS + Delta-Re-Check PASS (LOWs behoben; danach nur http1-Härtung: gezielte Tests grün, 3 Mutanten RED) | **LOCAL_PASS** |
 
 ---
 
