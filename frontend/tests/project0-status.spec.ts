@@ -367,8 +367,13 @@ test("P8-CTRL-05: economic switches, FE-06 and the signer take the one command p
   expect(command(2)).toEqual(["FE06_GRANT", digest, 2n]);
   // Wallets: the signer with its roles beside the frozen panel, through the same path.
   await tab(page, "Wallets");
-  await expect(line("11111111111111111111111111111112 · LIQUIDATOR · FEE_PAYER")).toContainText("ENABLED");
-  await page.getByRole("button", { name: "Disable WALLET:11111111111111111111111111111112" }).click();
+  // The signer's switch line (its own Disable button), never the read-only row of the same
+  // signer in "Wallets · per signer" — both are shown.
+  await expect(page.getByRole("heading", { name: "Wallets · per signer" })).toBeVisible();
+  const disable = page.getByRole("button", { name: "Disable WALLET:11111111111111111111111111111112" });
+  await expect(page.locator(".p0-line", { hasText: "11111111111111111111111111111112 · LIQUIDATOR · FEE_PAYER", has: disable }))
+    .toContainText("ENABLED");
+  await disable.click();
   await expect.poll(() => sent.length).toBe(4);
   expect(command(3)).toEqual(["WALLET:11111111111111111111111111111112", "DISABLED", 2n]);
   await expect(page.getByTestId("p0-signer-command-receipt")).toContainText("COMPLETED");
