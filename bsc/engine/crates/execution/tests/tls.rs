@@ -932,7 +932,6 @@ fn the_last_check_lies_between_tls_preparation_and_the_first_socket_write() {
     assert_eq!(record.outcome, SendOutcome::HandedOff);
     assert_eq!(record.t_prepermit_check_ns, Some(500));
     assert_eq!(record.t_write_check_ns, Some(999_999));
-    assert_eq!(record.t_socket_write_start_ns(), Some(999_999));
     assert_eq!(record.elapsed_at_write_check_ns, Some(999_999));
     assert_eq!(record.t_boundary_ns, Some(1_250_000));
     assert_eq!(record.write_check_to_boundary_ns(), Some(250_001));

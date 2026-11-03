@@ -156,7 +156,7 @@ Code `b72bf2ed`…`4b0139ee` (Owner `sources.rs`, Projektion, `darkbot.bsc.v1`, 
 
 ### 2a.5 REV.1.0 — Gate je Paket ab R4 (R1–R3b: `STATUS.md`, Tabelle „BSC-Gate je Paket“)
 
-Gate = Workspace im T63-Umfang (`--workspace --all-features --no-fail-fast`, `bsc/engine`) + T62 (8 Werkzeugtests) + Clippy (Workspace, alle Features/Targets, `-D warnings`) + F0-VAR, alles auf demselben unveränderten Baum. Ein Lastflake zählt nur mit grünem Wiederholungslauf der betroffenen Suite auf identischem Baum.
+Gate = Workspace im T63-Umfang (`--workspace --all-features --no-fail-fast`, `bsc/engine`) + T62 (8 Werkzeugtests) + Clippy (Workspace, alle Features/Targets, `-D warnings`) + F0-VAR (ab T82 zusätzlich Clippy der Release-Feature-Sätze aus `ops/darkbotctl`), alles auf demselben unveränderten Baum. Ein Lastflake zählt nur mit grünem Wiederholungslauf der betroffenen Suite auf identischem Baum.
 
 | Test-ID | Paket, SHA | Workspace PASS/FAIL/ignored | Werkzeugtests / Clippy / F0-VAR | Zusätzlich | Status |
 |---|---|---|---|---|---|
@@ -172,7 +172,8 @@ Gate = Workspace im T63-Umfang (`--workspace --all-features --no-fail-fast`, `bs
 | T78 | R9 `9e9f067d` | 1.712/0/27 | 8/8 / 0 / PASS | – | **LOCAL_PASS** |
 | T79 | R10 `fad44af7` | 1.716/1/27 (Lastflake `the_granted_losses_refuse_buys_from_the_ledger`; Lib-Wiederholung 487/0) | 8/8 / 0 / PASS | – | **LOCAL_PASS** |
 | T80 | R11 `4524c72d` | 1.724/1/27 (Lastflake `live_ledger` operator.lock; Lib-Wiederholung 488/0) | 8/8 / 0 / PASS nach Repin | `runtime_process.rs` 7/7 (§3b, s. u.), 12 Mutanten RED; CI grün | **LOCAL_PASS + CI_PASS** |
-| T81 | Audit E3 (Commit mit dieser Zeile) | 1.726/1/27 (`test_bsc_control.py`: zwei 30-s-Timeouts im parallelen Lauf; Einzellauf 6/6) | 8/8 / 0 / PASS (3.539 Felder) | Gateway, Vitest, tsc, Protokollvertrag; 11 Mutanten RED | **LOCAL_PASS** |
+| T81 | Audit E3 `9f330f4a` | 1.726/1/27 (`test_bsc_control.py`: zwei 30-s-Timeouts im parallelen Lauf; Einzellauf 6/6) | 8/8 / 0 / PASS (3.539 Felder) | Gateway, Vitest, tsc, Protokollvertrag; 11 Mutanten RED | **LOCAL_PASS + CI_PASS** (Runs 41651211015, 41651210615, 41651210683) |
+| T82 | Audit E2 (Commit mit dieser Zeile) | 1.727/0/27 | 8/8 / 0 / PASS; Release-Sätze aus `ops/darkbotctl` 5/5 Clippy 0 | Release-Build `--features runtime` (seit E3) und `--features g07-mainnet` (seit R8) kompilierten nicht; behoben; Review PASS (5 LOW behoben) | **LOCAL_PASS** |
 
 ---
 

@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use darkbot_bsc_trading::submission_policy::capability::AdapterKind;
-use rustls::pki_types::{CertificateDer, ServerName};
+use rustls::pki_types::ServerName;
 use rustls::{ClientConfig, RootCertStore};
 
 use crate::submission::frame::Endpoint;
@@ -75,12 +75,13 @@ impl TlsSetup {
         Self::from_roots(roots)
     }
 
-    /// Trusts exactly the given DER certificates.
+    /// Trusts exactly the given DER certificates (tests only).
+    #[cfg(any(test, feature = "test-support"))]
     pub fn with_trust_anchors(certificates: &[&[u8]]) -> Result<Self, SetupError> {
         let mut roots = RootCertStore::empty();
         for der in certificates {
             roots
-                .add(CertificateDer::from(der.to_vec()))
+                .add(rustls::pki_types::CertificateDer::from(der.to_vec()))
                 .map_err(|_| SetupError::InvalidTrustAnchor)?;
         }
         Self::from_roots(roots)

@@ -373,6 +373,7 @@ pub struct OutboundMetrics {
 }
 
 impl OutboundMetrics {
+    #[cfg(test)]
     pub fn metric(&self, name: &str) -> Option<&common::Stats> {
         self.metrics
             .iter()

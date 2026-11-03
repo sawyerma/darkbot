@@ -744,7 +744,7 @@ Aus dem bereits abgeschlossenen eigenstaendigen Scan aller 32 `execution/src/**/
 cd bsc/engine
 cargo test --locked -p darkbot-bsc-execution --lib startup
 cargo test --locked -p darkbot-bsc-execution --test dispatch
-cargo test --locked -p darkbot-bsc-execution --test tls
+cargo test --locked -p darkbot-bsc-execution --features test-support --test tls
 cargo test --locked -p darkbot-bsc-execution --test hotpath_alloc
 cargo test --locked -p darkbot-bsc-execution --test release
 cargo fmt --all -- --check

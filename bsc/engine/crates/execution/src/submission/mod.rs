@@ -27,8 +27,8 @@
 
 pub mod blockrazor;
 pub mod club48;
-// The local node's FastLane egress lane (geth_ipc) is the runtime's.
-#[cfg(feature = "runtime")]
+// The local node's FastLane egress lane (geth_ipc): no runtime path uses it yet.
+#[cfg(feature = "local-egress")]
 pub mod egress;
 pub mod frame;
 pub mod local_geth;

@@ -761,7 +761,7 @@
         "darkbot_runner::inclusion::transport::Transport::max_request_len",
         "darkbot_runner::inclusion::send::UnknownCause::Prepare",
         "darkbot_runner::inclusion::send::DispatchError::RequestTooLarge",
-        "darkbot_runner::inclusion::send::AdapterReport::t_socket_write_start_ns"
+        "darkbot_runner::inclusion::send::AdapterReport::t_write_check_ns"
       ],
       "tests": [
         "darkbot-runner::tls::the_owner_connects_outside_any_dispatch_and_is_ready_only_after_the_handshake",
@@ -799,7 +799,7 @@
       "result": "PASS on the user's arm64 macOS target (2026-10-05): cargo fmt --all -- --check PASS; cargo build --workspace --locked --offline PASS; cargo build --workspace --release --locked --offline PASS; cargo test --workspace --locked --offline PASS; cargo test --workspace --release --locked --offline PASS; cargo clippy --workspace --all-targets --locked --offline -- -D warnings PASS. The chained acceptance command completed with UNIT5_TLS_ALL_GATES_PASS. Combined workspace inventory is 271 tests: previous 240 + 31 Unit-5 TLS transport tests. Cargo.lock added exactly 16 TLS-related packages; existing packages remained unchanged and new checksums matched bsc/gates/gate0/Cargo.lock.",
       "definitions": {
         "two_stage_send": "After start_write and the BUY encoding the runner calls Transport::prepare with the complete request (TLS: encrypted into records in rustls, no socket I/O), then reads the clock for the final deadline check (t_write_check), then calls write, whose first action for a prepared TLS request is the first write_tls to the socket; flush drains the rest. A failure of prepare or a miss at the final check writes nothing to the wire and is Unknown with zero bytes, because the permit is consumed.",
-        "t_write_check_ns": "Clock read of the final deadline check, after the transport prepared the request and immediately before the first Transport::write is called. Also returned by AdapterReport::t_socket_write_start_ns.",
+        "t_write_check_ns": "Clock read of the final deadline check, after the transport prepared the request and immediately before the first Transport::write is called.",
         "boundary": "TlsTransport::flush returns once every ciphertext byte of the request was accepted by the kernel send(): the TlsUserspaceWriteFlushReturned boundary; says nothing about NIC or wire. TlsTransport::wire_bytes counts the bytes the kernel accepted on the connection.",
         "request_size": "TlsPolicy::max_plaintext_request_len is the largest HTTP request in plaintext bytes; Transport::max_request_len reports it and the dispatch refuses a larger frame before the admission (DispatchError::RequestTooLarge). The rustls output buffer is tls_output_capacity(max): plaintext plus 64 bytes per 16 KiB record plus 4 KiB.",
         "eligibility": "Ready only with a connection, no pending ciphertext and no prepared-but-unsent request, and idle time within max_idle; otherwise Stale.",

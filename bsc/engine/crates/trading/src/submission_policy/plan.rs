@@ -862,6 +862,7 @@ impl SubmissionPlan {
     }
 
     /// What the signed BUY itself enforces about time: nothing.
+    #[cfg(test)]
     #[inline]
     pub fn buy_validity(&self) -> TransactionValidity {
         TransactionValidity::NoTimeBound
@@ -1135,6 +1136,7 @@ impl Disclosure {
     /// Whether the submitted BUY may still execute as far as this adapter
     /// is concerned. No rejection, expiry or local bookkeeping changes
     /// that once bytes may have left; only chain evidence does.
+    #[cfg(any(test, feature = "test-support"))]
     #[inline]
     pub fn may_still_execute(self) -> bool {
         self.bytes_may_have_left()

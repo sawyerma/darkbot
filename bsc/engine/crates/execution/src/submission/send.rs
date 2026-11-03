@@ -329,12 +329,6 @@ impl AdapterReport {
         )
     }
 
-    /// Queue-commit time: the local node's egress lane commit (Phase I
-    /// gate M4); `None` for an adapter without a queue. Not a send.
-    pub fn t_queue_commit_ns(&self) -> Option<u64> {
-        self.t_queue_ns
-    }
-
     /// The send time, as far as it is known.
     pub fn send_time(&self) -> SendTime {
         let Some(t_boundary) = self.t_boundary_ns else {
@@ -368,22 +362,10 @@ impl AdapterReport {
         }
     }
 
-    /// When the first write to the wire started, as closely as this clock
-    /// can say: the write check, after which only the deadline comparison
-    /// and the call come. The same read as `t_write_check_ns`.
-    pub fn t_socket_write_start_ns(&self) -> Option<u64> {
-        self.t_write_check_ns
-    }
-
     /// From the write check to the local boundary. A diagnostic duration;
     /// a send latency only if the send time is qualified.
     pub fn write_check_to_boundary_ns(&self) -> Option<u64> {
         self.t_boundary_ns?.checked_sub(self.t_write_check_ns?)
-    }
-
-    /// From the write check to the qualified send time.
-    pub fn write_check_to_send_ns(&self) -> Option<u64> {
-        self.t_send_ns()?.checked_sub(self.t_write_check_ns?)
     }
 
     /// From the qualified send time to the acknowledgement.

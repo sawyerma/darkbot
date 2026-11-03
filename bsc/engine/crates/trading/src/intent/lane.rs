@@ -213,13 +213,14 @@ impl IntentLane {
         self.halt
     }
 
-    /// Counters of refused and blocked work.
-    #[inline]
     /// Cumulative exposure of the session against its cap (E5-1).
+    #[cfg(test)]
     pub fn session_exposure(&self) -> SessionExposure {
         self.exposure
     }
 
+    /// Counters of refused and blocked work.
+    #[inline]
     pub fn stats(&self) -> LaneStats {
         self.stats
     }
@@ -399,6 +400,7 @@ impl IntentLane {
     ///
     /// An intent with later reservations behind it cannot be withdrawn:
     /// their nonces would no longer be contiguous.
+    #[cfg(test)]
     pub fn withdraw(&mut self, ticket: Ticket) -> Result<(), LaneError> {
         if self.halt.is_some() {
             return Err(LaneError::Halted);

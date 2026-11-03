@@ -3103,7 +3103,7 @@ pub struct BuyDay {
 }
 
 /// Milliseconds of one UTC day.
-const DAY_MS: u64 = 86_400_000;
+pub const DAY_MS: u64 = 86_400_000;
 
 /// The UTC day of `unix_ms`, days since 1970-01-01 (no text).
 pub fn day_index(unix_ms: u64) -> u64 {
@@ -3388,8 +3388,9 @@ pub fn total_usage(dir: &Path, max: u32) -> Result<TotalUsage, String> {
     })
 }
 
-/// The owner state the LIVE gate reads at `now_ms`: the generation, today's
-/// and the campaign's BUY attempts.
+/// Tests only: the owner state at `now_ms` (the generation, today's and the
+/// campaign's BUY attempts); the LIVE gate reads it through `GateReads`.
+#[cfg(test)]
 pub fn live_inputs(
     dir: &Path,
     now_ms: u64,
@@ -4067,6 +4068,7 @@ impl Store {
 
     /// [`Store::consume_buy_attempt`] for an attempt under the LIVE grant
     /// written at `grant_generation` (0: none).
+    #[cfg(any(test, feature = "test-support"))]
     pub fn consume_attempt(
         &self,
         attempt_id: &str,
@@ -5014,8 +5016,9 @@ fn highest_generation(dir: &Path) -> Result<Option<u64>, String> {
     Ok(highest)
 }
 
-/// Read-only, for the status projection: the current generation's file and
-/// record, validated against the owner's rule; `None` before `init`.
+/// Tests only: the current generation's file and record, validated against
+/// the owner's rule; `None` before `init`.
+#[cfg(test)]
 pub fn current_record(dir: &Path) -> Result<Option<(PathBuf, Record)>, String> {
     Ok(current_record_and_generation(dir)?.map(|(path, record, _)| (path, record)))
 }

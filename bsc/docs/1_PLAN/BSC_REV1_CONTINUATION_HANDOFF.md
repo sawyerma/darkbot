@@ -438,10 +438,10 @@ Paketschlüssel: E1 Texte, E2 Totcode/Platzhalter, E3 Konfiguration, E4 Projekti
 | 5.3 | classify vor dedup | FIX gemessen/E5 | OFFEN |
 | 5.4 | C2-pending()/Builder-Polling vor LIVE-BUY | FIX gemessen/E5 | OFFEN |
 | 5.6 | `awaiting_granted` VecDeque mit linearer Suche (Bound 262144) → HashSet + Ring | FIX gemessen/E5 | OFFEN |
-| 5.7 | `egress.rs` nur für Tests → Feature | FIX/E2 | OFFEN |
-| 5.8 | `pub fn` nur mit Test-Aufrufern | FIX/E2 | OFFEN |
+| 5.7 | `egress.rs` nur für Tests → Feature | FIX/E2 | DONE (E2) |
+| 5.8 | `pub fn` nur mit Test-Aufrufern | FIX/E2 | DONE (E2) |
 | 5.10/5.11 | Store-Reste, BACKEND_UNAVAILABLE dreifach | FIX/E2 | DONE `8a9584d9` |
-| 5.12 | verwaiste Doku | FIX/E2 | OFFEN |
+| 5.12 | verwaiste Doku | FIX/E2 | DONE (E2) |
 | 5.13 | Gott-Module | FIX+REPIN/E11 | OFFEN (schwerer Re-Pin; spät) |
 
 Fehlende Prozess-, Browser- und Integrationsprüfungen (Kategorie aus dem Auftrag):

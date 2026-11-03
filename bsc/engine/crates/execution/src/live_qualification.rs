@@ -321,7 +321,7 @@ fn source_binds(v: &Record, source: SourceId) -> Result<(), String> {
         && v.opt_b256(gv::PRECOMMIT_SHA256).map_err(re)?.is_some()
         && flap
         && first > 0
-        && v.u64(gv::CAMPAIGN_MS).map_err(re)? >= crate::g04_criteria::DAY_MS;
+        && v.u64(gv::CAMPAIGN_MS).map_err(re)? >= crate::sources::DAY_MS;
     if !bound {
         return Err(
             "no G0.4 verdict CONTINUE for Flap on committed criteria of a campaign of at least a day in whose census it delivered an actionable launch first"
@@ -1047,7 +1047,7 @@ pub(crate) mod tests {
         v.set(gv::CRITERIA_STATE, gv::CONFIRMED)
             .set(gv::VERDICT, gv::CONTINUE)
             .set(gv::PRECOMMIT_SHA256, Value::B256([3; 32]))
-            .set(gv::CAMPAIGN_MS, 7 * crate::g04_criteria::DAY_MS)
+            .set(gv::CAMPAIGN_MS, 7 * crate::sources::DAY_MS)
             .push(gv::VENUES, flap.into_nested())
             .push(gv::SOURCES, source.into_nested());
         v
@@ -1332,7 +1332,7 @@ pub(crate) mod tests {
             }),
             // R8 review M1: a run shorter than a day.
             with(&|v| {
-                v.set(gv::CAMPAIGN_MS, crate::g04_criteria::DAY_MS - 1);
+                v.set(gv::CAMPAIGN_MS, crate::sources::DAY_MS - 1);
             }),
         ] {
             fs::write(root.join("ev/g04.dbrec"), v.encode().unwrap()).unwrap();

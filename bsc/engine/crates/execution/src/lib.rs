@@ -22,9 +22,10 @@ pub mod submission;
 
 /// G0.7 acceptance guard: the compiled-in, fail-closed check of the binary
 /// acceptance contract (V5 the only authorizing version; V3/V4 historical
-/// only, BSC3-022), and that contract's reviewed values. Built only
-/// with the `acceptance-guard` feature; the production runner build does not
-/// contain them.
+/// only, BSC3-022), and that contract's reviewed values. Built with the
+/// `acceptance-guard` feature, which `runtime` includes only for the frozen
+/// G0.7 accounts it refuses (`refused_g07_accounts`); the runtime never calls
+/// the guard, which stays UNARMED.
 #[cfg(feature = "acceptance-guard")]
 pub mod acceptance_contract;
 #[cfg(feature = "acceptance-guard")]

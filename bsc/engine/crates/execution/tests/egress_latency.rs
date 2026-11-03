@@ -6,12 +6,12 @@
 //! measured region. Measured: the dispatch's start to `T_queue`, and the
 //! write check to `T_queue` (the commit itself); allocations of each
 //! measured region are counted. Run with
-//! `cargo test --release -p darkbot-bsc-execution --features runtime --test egress_latency -- --ignored --nocapture`;
+//! `cargo test --release -p darkbot-bsc-execution --features local-egress --test egress_latency -- --ignored --nocapture`;
 //! with `BSC_C3_LATENCY_EVIDENCE_DIR` set, the statistics and the raw totals
 //! are written there as one binary record (gate L-c). `T_queue` is a local
 //! queue commit: no node reads the arena here, nothing is sent; not
 //! `T_send`, not the Linux target.
-#![cfg(feature = "runtime")]
+#![cfg(feature = "local-egress")]
 
 mod common;
 
@@ -174,7 +174,7 @@ fn egress_queue_commit_latency() {
         let used = allocations() - before;
         let record = *report.adapter(adapter(LOCAL)).unwrap();
         assert_eq!(record.outcome, SendOutcome::HandedOff);
-        let queued = record.t_queue_commit_ns().unwrap();
+        let queued = record.t_queue_ns.unwrap();
         let checked = record.t_write_check_ns.unwrap();
         // The node's coordinator takes the record (frees the slot).
         let received = coordinator.try_consume().unwrap().unwrap();

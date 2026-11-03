@@ -28,7 +28,7 @@ pub const STOP: &str = "STOP";
 
 /// A calendar day: the shortest campaign that may rate a source for LIVE
 /// (R8 review M1: a run in minutes never does).
-pub const DAY_MS: u64 = 86_400_000;
+pub use crate::sources::DAY_MS;
 const MINUTE_MS: u64 = 60_000;
 
 /// The decision a pre-commitment binds.

@@ -36,6 +36,8 @@ protox = { version = "=0.7.2", optional = true }
 [dev-dependencies]
 # A loopback TLS server for the offline end-to-end tests.
 rustls = { workspace = true }
+# The execution crate's test helpers (a test CA's trust, an attempt under a grant).
+darkbot-bsc-execution = { path = "../execution", features = ["test-support"] }
 
 [features]
 default = []

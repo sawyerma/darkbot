@@ -167,7 +167,7 @@ fn a_release_over_bound_transports_reports_the_qualified_send_time() {
     assert!(club48.transport_qualified);
     // Reads: select 100, pre-permit 150, write check 200, boundary 300.
     assert_eq!(club48.send_time(), SendTime::Qualified(300));
-    assert_eq!(club48.write_check_to_send_ns(), Some(100));
+    assert_eq!(club48.t_write_check_ns, Some(200));
     assert_eq!(report.select_to_send_ns(adapter(CLUB48)), Some(200));
     assert_eq!(
         record(&report, BLOCKRAZOR).send_time(),

@@ -50,13 +50,22 @@ acceptance-guard = ["dep:darkbot-bsc-record"]
 rpc-wire = []
 # The BSC runtime's native configuration owners (C0/C1): binary records only.
 # serde_json only at the WSS source's JSON-RPC wire (`wss::jsonrpc`).
-runtime = ["dep:darkbot-bsc-record", "dep:tungstenite", "dep:serde_json", "dep:darkbot-bsc-tx-encoding", "dep:darkbot-bsc-geth-ipc", "dep:darkbot-bsc-journal", "dep:signal-hook", "dep:zeroize", "dep:sha2", "dep:secp256k1"]
+# acceptance-guard: the runtime refuses the acceptance contract's G0.7
+# accounts (Audit E 3.12); the guard stays UNARMED and unused by it.
+runtime = ["acceptance-guard", "dep:darkbot-bsc-record", "dep:tungstenite", "dep:serde_json", "dep:darkbot-bsc-tx-encoding", "dep:darkbot-bsc-geth-ipc", "dep:darkbot-bsc-journal", "dep:signal-hook", "dep:zeroize", "dep:sha2", "dep:secp256k1"]
 g07-mainnet = ["acceptance-guard", "rpc-wire", "dep:serde_json", "dep:sha2", "dep:hex", "dep:darkbot-bsc-journal", "dep:alloy-sol-types", "dep:k256", "dep:zeroize"]
 # REV.1.0 R11: the harness build of bsc_runtime for the Messplan §3b cases:
 # its TLS clients also trust the test CA of tests/fixtures/tls, so the real
 # process reaches loopback mock WSS/RPC servers. Never enabled by the
 # production build (darkbotctl build: --features runtime).
 loopback-harness = ["runtime"]
+# Audit E2: the local node's FastLane egress transport (C1.7, Phase I gate
+# M4). No runtime path uses it yet; its tests and the M4 measurement only.
+# Never enabled by the production build.
+local-egress = ["runtime"]
+# Makes the crate's test helpers available to its integration tests and to
+# the tests of dependent crates. Never enabled by the production build.
+test-support = []
 
 [lints.rust]
 # BSC3-063 review: under `secp256k1_fuzz` libsecp256k1 recovers a key from
@@ -162,4 +171,8 @@ required-features = ["runtime"]
 # REV.1.0 R11: the Messplan §3b cases on the real runtime process.
 [[test]]
 name = "runtime_process"
-required-features = ["loopback-harness"]
+required-features = ["loopback-harness", "test-support"]
+
+[[test]]
+name = "tls"
+required-features = ["test-support"]
