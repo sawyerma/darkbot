@@ -10207,3 +10207,45 @@ fn dec17a_a_signed_grant_is_taken_and_changed_evidence_blocks_it() {
     assert!(f.owner.sources.capabilities.fe06.is_none());
     cleanup(f);
 }
+
+/// DEC-17g: a Safety HALT stops new attempts, never an exit — the open position still exits with
+/// its approval under ECON_LIVE, its wallet, SIGN and SEND (only ECON_LIVE DISABLED or a STOP
+/// would end it).
+#[test]
+fn dec17g_a_safety_halt_blocks_new_attempts_never_an_exit() {
+    let (mut f, calls, e) = dec13b_exit_fixture("dec17g_exit", true);
+    let (dir, wallet) = (f.dir.join("fe04"), f.owner.liquidator.to_string());
+    f.owner
+        .fe04_approval
+        .as_mut()
+        .unwrap()
+        .refresh(Some(&dir), &wallet);
+    f.owner.fe04_approval.as_mut().unwrap().read = Err("APPROVAL_NOT_READ".into());
+    dec13b_live(&mut f, true);
+    f.owner
+        .safety
+        .halt(darkbot_common::error::HaltReason::LimitBreached);
+    let now = super::accounts::wall_unix_s().unwrap();
+    assert!(matches!(
+        f.owner
+            .safety
+            .check(now, 1, 0, 0, 0, &[], "ZERO_PREFUND_SAME_TX"),
+        Err(darkbot_project0::safety::Deny::Halted(_))
+    ));
+    f.owner.fe04_refreshed = std::time::Instant::now()
+        .checked_sub(f.owner.fe04_refresh + Duration::from_millis(1))
+        .unwrap();
+    f.owner.lifecycle();
+    assert!(f.owner.safety.halted().is_some());
+    assert_eq!(
+        calls.lock().unwrap().clone(),
+        ["getFeeForMessage", "simulateTransaction", "sendTransaction"],
+        "{:?}",
+        f.owner.fe04_admissions
+    );
+    assert_eq!(
+        f.owner.fe04_held.as_ref().unwrap().open_exit_id(),
+        Some(e.approval_id.clone())
+    );
+    cleanup(f);
+}
