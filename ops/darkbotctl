@@ -33,6 +33,9 @@ CAPTURE_BUILD="$ROOT/project_0/native/target/release/p0-market-capture-reported"
 CAPTURE_BIN="$APP_HOME/current/p0-market-capture-reported"
 P0CTL_BUILD="$ROOT/project_0/native/target/release/p0ctl"
 P0A_BUILD="$ROOT/project_0/native/target/release/p0-analytics-reporter"
+# P0-027: the runtime of econ4h/shadow boot flows and the release's source identity record.
+LONGTAIL_BUILD="$ROOT/project_0/native/target/release/p0-longtail"
+P0REL_BUILD="$ROOT/project_0/native/target/release/p0-release.p0j"
 APP_CONF="${DARKBOT_APP_CONF:-$HOME/.darkbot/app.conf}"
 LOCKFILE="$RUNDIR/lifecycle.lock"
 RESULT_FILE="$RUNDIR/capture.result"
@@ -316,7 +319,10 @@ cmd_build() {
   command -v cargo >/dev/null || die "cargo nicht im PATH – im Terminal ausführen"
   (cd "$ROOT/frontend" && npm run lint && npm run lint:boundaries && npm run lint:css && npm run check:freeze && npm run build)
   (cd "$ROOT/gateway" && cargo build --release --locked --offline)
-  (cd "$ROOT/project_0/native" && cargo build --release --locked --offline -p darkbot-p0-reporter --bin p0-market-capture-reported --bin p0-analytics-reporter && cargo build --release --locked --offline -p darkbot-runner --bin p0ctl)
+  (cd "$ROOT/project_0/native" && cargo build --release --locked --offline -p darkbot-p0-reporter --bin p0-market-capture-reported --bin p0-analytics-reporter --bin p0-longtail && cargo build --release --locked --offline -p darkbot-runner --bin p0ctl)
+  # P0-027: the source identity of exactly these executables (BOOT-01 of the deployed release).
+  rm -f "$P0REL_BUILD"
+  "$P0CTL_BUILD" --project "$ROOT/project_0" release identity --output "$P0REL_BUILD" >/dev/null
   (cd "$ROOT/bsc/engine" && cargo build --release --locked --offline -p darkbot-bsc-qualification --features status-reporter --bin bsc-status-reporter && cargo build --release --locked --offline -p darkbot-bsc-qualification --bin g08_mainnet_verify && cargo build --release --locked --offline -p darkbot-bsc-execution --features g07-mainnet --bin g07_pre_live_readiness --bin g07_candidate --bin g07_mainnet_self_launch_buy --bin g07_builder_probe --bin g07_attempt_authority && cargo build --release --locked --offline -p darkbot-bsc-execution --features runtime --bin bsc_runtime && cargo build --release --locked --offline -p darkbot-bsc-record --bin dbrec_show)
   /usr/bin/python3 "$ROOT/ops/release_manifest.py" --write
   say "build ok – weiter mit: darkbotctl deploy"
@@ -336,6 +342,8 @@ cmd_deploy() {
   [ -x "$CAPTURE_BUILD" ] || die "Capture nicht gebaut: darkbotctl build"
   [ -x "$P0CTL_BUILD" ] || die "p0ctl nicht gebaut: darkbotctl build"
   [ -x "$P0A_BUILD" ] || die "p0-analytics-reporter nicht gebaut: darkbotctl build"
+  [ -x "$LONGTAIL_BUILD" ] || die "p0-longtail nicht gebaut: darkbotctl build"
+  [ -f "$P0REL_BUILD" ] || die "Release-Identität fehlt: darkbotctl build"
   if capture_running && [ -f "$APP_HOME/current/SCHEMA_ID" ] && ! cmp -s "$ROOT/protocol/schema_id.txt" "$APP_HOME/current/SCHEMA_ID"; then
     die "Schema geändert: Capture zuerst geordnet stoppen; Deploy und Neustart gemeinsam durchführen"
   fi
@@ -357,6 +365,8 @@ cmd_deploy() {
   cp "$CAPTURE_BUILD" "$rel/p0-market-capture-reported"
   cp "$P0CTL_BUILD" "$rel/p0ctl"
   cp "$P0A_BUILD" "$rel/p0-analytics-reporter"
+  cp "$LONGTAIL_BUILD" "$rel/p0-longtail"
+  cp "$P0REL_BUILD" "$rel/p0-release.p0j"
   cp "$ROOT/ops/darkbotctl" "$rel/darkbotctl"
   cp "$ROOT/ops/bsc-control.sh" "$rel/bsc-control.sh"
   cp "$ROOT/bsc/engine/target/release/bsc-status-reporter" "$ROOT/bsc/engine/target/release/g07_pre_live_readiness" "$ROOT/bsc/engine/target/release/g07_candidate" "$ROOT/bsc/engine/target/release/bsc_runtime" "$rel/"

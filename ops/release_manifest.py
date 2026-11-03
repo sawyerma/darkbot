@@ -3,7 +3,7 @@
 import hashlib,json,pathlib,sys
 root=pathlib.Path(__file__).resolve().parents[1]
 target=root/'gateway/target/darkbot-release.json'
-files=['gateway/target/release/darkbot-gateway','project_0/native/target/release/p0-market-capture-reported','project_0/native/target/release/p0ctl','project_0/native/target/release/p0-analytics-reporter','bsc/engine/target/release/bsc-status-reporter','bsc/engine/target/release/g07_pre_live_readiness','bsc/engine/target/release/g07_candidate','bsc/engine/target/release/bsc_runtime','ops/darkbotctl','ops/bsc-control.sh','bsc/tools/readiness_job.py']
+files=['gateway/target/release/darkbot-gateway','project_0/native/target/release/p0-market-capture-reported','project_0/native/target/release/p0ctl','project_0/native/target/release/p0-analytics-reporter','project_0/native/target/release/p0-longtail','project_0/native/target/release/p0-release.p0j','bsc/engine/target/release/bsc-status-reporter','bsc/engine/target/release/g07_pre_live_readiness','bsc/engine/target/release/g07_candidate','bsc/engine/target/release/bsc_runtime','ops/darkbotctl','ops/bsc-control.sh','bsc/tools/readiness_job.py']
 # BSC REV.1.0 R8: the operator's G0.7/G0.8 tools, the record viewer, the status sync and the BSC configs.
 files += ['bsc/engine/target/release/'+b for b in ('g07_mainnet_self_launch_buy','g07_builder_probe','g07_attempt_authority','g08_mainnet_verify','dbrec_show')]
 files += ['bsc/tools/status_sync.py'] + sorted(str(p.relative_to(root)) for p in (root/'bsc/config').glob('*.env'))
