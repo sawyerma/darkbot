@@ -407,7 +407,12 @@ pub struct Pipeline<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAd
     pub safety: &'a mut Safety,
     pub blockhash: &'a BlockhashCache,
     /// DEC-18 §4.3 (P0-024): its keypair, or its public key only (a read-only measurement).
+    /// The fee payer: the first key of every transaction (DEC-17b B4: the liquidator's own, or
+    /// the fee payer paying for it).
     pub payer: crate::execution::payer::Payer<'a>,
+    /// DEC-17b B4: the liquidator (the marginfi authority, the swaps' taker) when another wallet
+    /// pays — it signs beside the payer where a transaction requires it (`None`: the payer).
+    pub authority: Option<crate::execution::payer::Payer<'a>>,
     /// P8-CTRL.4: the owner's ephemeral synthetic signer (never a wallet's key, never stored):
     /// the signature of a simulation without a sign permit.
     pub synthetic: &'a Keypair,
@@ -457,6 +462,8 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
     /// P8-CTRL.4: one payload transaction's signature — the wallet's key under a sign permit of
     /// this evaluation's purpose (LIVE: a new attempt; Shadow: a simulation under a SIM_ONLY
     /// grant), else in Shadow the synthetic signer's; LIVE never signs without a permit.
+    /// DEC-17b B4: every signer the message requires — the fee payer and, where it is one, the
+    /// liquidator it pays for — under one permit naming exactly them; any other signer is refused.
     fn sign(
         &self,
         tx: &mut solana_sdk::transaction::VersionedTransaction,
@@ -467,25 +474,43 @@ impl<'a, H: HealthEngine, B: ReceivershipBuilder, S: SubmissionAdapter> Pipeline
             Mode::Live => SignPurpose::NewAttempt,
             Mode::Shadow => SignPurpose::Simulation,
         };
-        let payer = self.payer.pubkey();
+        let n = usize::from(tx.message.header().num_required_signatures);
+        let required: Vec<Pubkey> = tx
+            .message
+            .static_account_keys()
+            .iter()
+            .take(n)
+            .copied()
+            .collect();
+        let ours = [Some(self.payer), self.authority];
+        let of = |k: &Pubkey| ours.iter().flatten().find(|p| p.pubkey() == *k);
+        let foreign = required.iter().any(|k| of(k).is_none());
+        // DEC-18 §4.3 (P0-024): without a private key (a read-only measurement) none is asked for.
+        let keys: Option<Vec<&Keypair>> = required
+            .iter()
+            .map(|k| of(k).and_then(|p| p.signer()))
+            .collect();
         // P8-CTRL.4 (review): a simulation's real signature only where the simulation can never
-        // send it — else no SIM_ONLY permit is even asked for (a synthetic signature). DEC-18
-        // §4.3 (P0-024): without a private key (a read-only measurement) none is asked for either.
+        // send it — else no SIM_ONLY permit is even asked for (a synthetic signature).
         let sends =
             purpose == SignPurpose::Simulation && !self.submitter.simulates_without_sending();
-        let signer = self.payer.signer();
-        let permit = signer
+        let permit = keys
+            .as_ref()
+            .filter(|k| !foreign && !k.is_empty())
             .and(self.egress.as_ref())
             .filter(|_| !sends)
-            .map(|g| SignPermit::issue(g, purpose, &[payer], &tx.message, bound));
-        match (permit, signer, self.mode) {
-            (Some(Ok(p)), Some(kp), _) => p
-                .sign(tx, &[kp])
+            .map(|g| SignPermit::issue(g, purpose, &required, &tx.message, bound));
+        match (permit, keys, self.mode) {
+            (Some(Ok(p)), Some(kps), _) => p
+                .sign(tx, &kps)
                 .map(|()| Signing::Wallet)
                 .map_err(darkbot_solana::tx::BuildError::Sign),
-            (refused, _, Mode::Live) => Err(darkbot_solana::tx::BuildError::Sign(
+            (refused, keys, Mode::Live) => Err(darkbot_solana::tx::BuildError::Sign(
                 refused.and_then(Result::err).unwrap_or_else(|| {
-                    if signer.is_none() {
+                    if foreign {
+                        "SIGN_NOT_PERMITTED: a signer is neither the fee payer nor its liquidator"
+                            .into()
+                    } else if keys.is_none() {
                         "SIGN_NOT_PERMITTED: no private key on a read-only path (DEC-18 §4.3)"
                             .into()
                     } else {

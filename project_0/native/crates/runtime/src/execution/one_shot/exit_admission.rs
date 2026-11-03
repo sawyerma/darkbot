@@ -24,7 +24,10 @@ use std::collections::BTreeMap;
 /// Everything one exit admission needs besides the journal, the approval and the adapter.
 pub struct ExitCandidate<'a> {
     pub route: &'a Route,
+    /// The fee payer: the wallet itself, or (DEC-17b B4) the wallet paying its attempt.
     pub payer: &'a Keypair,
+    /// DEC-17b B4: the wallet selling its position when another wallet pays (`None`: the payer).
+    pub authority: Option<&'a Keypair>,
     pub blockhash: Hash,
     /// `lastValidBlockHeight` of `blockhash`.
     pub last_valid_block_height: u64,
@@ -133,6 +136,16 @@ pub fn admit_exit(
 ) -> Admission {
     let refuse = |s: &str| Admission::Refused(s.into());
     let payer = c.payer.pubkey();
+    // DEC-17b B4: the position's wallet sells; the attempt's fee payer pays (its exit reserve is
+    // held there).
+    let seller = c.authority.map_or(payer, |a| a.pubkey());
+    if payer.to_string()
+        != journal
+            .fee_payer()
+            .map_or(seller.to_string(), str::to_string)
+    {
+        return refuse("EXIT_FEE_PAYER_MISMATCH");
+    }
     let r = c.route;
     let Ok(mint) = approval.mint.parse() else {
         return refuse("INVALID_OR_UNAUTHORIZED_EXIT_APPROVAL");
@@ -140,14 +153,14 @@ pub fn admit_exit(
     // A WSOL position is unwrapped (one to one, no slippage); every other mint is sold.
     let unwrap = approval.mint == WSOL_MINT;
     let terms = if unwrap {
-        unwrap_route_shape(&r.instructions, &payer).map(|()| SwapTerms {
+        unwrap_route_shape(&r.instructions, &seller).map(|()| SwapTerms {
             in_amount: r.amount_in,
             quoted_out: r.amount_in,
             slippage_bps: 0,
             minimum_out: r.amount_in,
         })
     } else {
-        exit_route_terms(&r.instructions, &payer, &mint)
+        exit_route_terms(&r.instructions, &seller, &mint)
     };
     let terms = match terms {
         Ok(t) => t,
@@ -203,12 +216,34 @@ pub fn admit_exit(
             g,
         )
     });
-    // P8-CTRL.4/.7: the exit is signed with the wallet's key only under its sign permit.
+    // P8-CTRL.4/.7: the exit is signed with the wallet's key only under its sign permit —
+    // DEC-17b B4: every key the message requires (the payer and the seller), no other.
+    let n = usize::from(built.tx.message.header().num_required_signatures);
+    let required: Vec<solana_sdk::pubkey::Pubkey> = built
+        .tx
+        .message
+        .static_account_keys()
+        .iter()
+        .take(n)
+        .copied()
+        .collect();
+    let Some(keys) = required
+        .iter()
+        .map(|k| {
+            [Some(c.payer), c.authority]
+                .into_iter()
+                .flatten()
+                .find(|kp| kp.pubkey() == *k)
+        })
+        .collect::<Option<Vec<&Keypair>>>()
+    else {
+        return refuse("SIGN_NOT_PERMITTED: a signer is neither the fee payer nor the seller");
+    };
     let permit = match gates.map(|g| {
         crate::orchestration::capability_control::SignPermit::issue(
             g,
             crate::orchestration::capability_control::SignPurpose::Exit,
-            &[payer],
+            &required,
             &built.tx.message,
             use_.as_ref().map(|u| (u, adapter.path())),
         )
@@ -217,7 +252,7 @@ pub fn admit_exit(
         Some(Err(e)) => return Admission::Refused(e),
         None => return refuse("SIGN_NOT_PERMITTED: no authority"),
     };
-    if permit.sign(&mut built.tx, &[c.payer]).is_err() {
+    if permit.sign(&mut built.tx, &keys).is_err() {
         return refuse("EXIT_SIGN");
     }
     let payload = match SignedPayload::new(vec![built.tx], adapter.path(), payer) {
@@ -241,7 +276,7 @@ pub fn admit_exit(
     let intent = ExitIntent {
         code_sha: approval.code_sha.clone(),
         binary_sha256: approval.binary_sha256.clone(),
-        wallet: payer.to_string(),
+        wallet: seller.to_string(),
         mint: approval.mint.clone(),
         route_program: r.swap_program.to_string(),
         amount_in: terms.in_amount,

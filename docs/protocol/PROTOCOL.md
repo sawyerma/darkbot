@@ -4030,7 +4030,7 @@ it ran. Unknown values are unset (never 0).
 | wallet | [string](#string) |  | Wallet, base58. |
 | roles | [string](#string) | repeated | LIQUIDATOR, FEE_PAYER, TREASURY. |
 | enabled | [bool](#bool) |  | Its switch WALLET:&lt;pubkey&gt; is ENABLED. |
-| runs_candidates | [bool](#bool) |  | It liquidates as its own fee payer (the kind a candidate runs with). |
+| runs_candidates | [bool](#bool) |  | It liquidates (as its own fee payer, or paid by a fee payer: DEC-17b B4). |
 | block_reason | [string](#string) |  | Why it may not run a candidate now in the effective mode; empty: it may. |
 | sol_lamports | [uint64](#uint64) | optional | Lamports in canonical state; unset when unknown. |
 | free_sol_lamports | [uint64](#uint64) | optional | Lamports free after its holds (exit reserves included) and the policy reserve; unset when unknown. |
@@ -4042,6 +4042,8 @@ it ran. Unknown values are unset (never 0).
 | journal_read | [bool](#bool) |  | Its FE-04 journals were read. |
 | realized_net_usd_micro | [int64](#int64) | optional | Realized net of its settled steps; unset unless read and known. |
 | selected | [uint64](#uint64) |  | Candidates of this run it ran. |
+| fee_payer | [string](#string) | optional | DEC-17b B4: the wallet paying its candidates now (itself, or the fee payer it runs with); unset when it runs none or no fee payer may pay now. |
+| sol_held_for_others | [uint64](#uint64) |  | DEC-17b B4: lamports held on it for the attempts of the liquidators it pays. |
 
 
 

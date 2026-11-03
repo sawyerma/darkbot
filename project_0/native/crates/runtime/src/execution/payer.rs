@@ -84,8 +84,9 @@ pub struct OwnerSigner {
 /// keypair as LIQUIDATOR+FEE_PAYER). A signing one's keypair is `P0_SIGNER_KEYPAIRS`' file for
 /// its key (`<pubkey>=<path>,…`) or else `P0_KEYPAIR_PATH`, its public key checked against the
 /// configured one; a treasury has no key (one named for it is refused); the econ4h calibration
-/// loads none. The first is the wallet the owner runs — the first one that is its own fee payer
-/// (DEC-17b, the first pilot: one wallet, LIQUIDATOR and FEE_PAYER).
+/// loads none. The first is the pilot wallet — the first one that is its own fee payer (DEC-17b,
+/// the first pilot: one wallet, LIQUIDATOR and FEE_PAYER), else (B4) the first liquidator. A
+/// liquidator without its own fees needs a fee payer alone to pay it (`SIGNERS_NO_FEE_PAYER`).
 pub fn owner_signers(
     configured: &[String],
     get: &dyn Fn(&str) -> Option<String>,
@@ -147,10 +148,17 @@ pub fn owner_signers(
             payer,
         });
     }
+    let liquidates = |s: &OwnerSigner| s.roles.contains(&roles::LIQUIDATOR);
+    if out.iter().any(|s| s.roles == [roles::LIQUIDATOR])
+        && !out.iter().any(|s| s.roles == [roles::FEE_PAYER])
+    {
+        return Err("SIGNERS_NO_FEE_PAYER: a LIQUIDATOR without its own FEE_PAYER role is paid by a signer that is FEE_PAYER alone (DEC-17b B4)".into());
+    }
     let first = out
         .iter()
         .position(|s| s.roles == roles::SIGNING)
-        .ok_or("SIGNERS_NO_PILOT_WALLET: the owner runs a wallet that is LIQUIDATOR and its own FEE_PAYER (DEC-17b)")?;
+        .or_else(|| out.iter().position(liquidates))
+        .ok_or("SIGNERS_NO_PILOT_WALLET: the owner runs a LIQUIDATOR — its own FEE_PAYER, or paid by one (DEC-17b)")?;
     out.swap(0, first);
     Ok(out)
 }
@@ -252,6 +260,35 @@ mod tests {
         .starts_with("SIGNER_KEY_MISMATCH"));
         assert!(e(&configured, String::new()).starts_with("SIGNER_KEYPAIR_MISSING"));
         assert!(e(&configured[..1], keys.clone()).starts_with("SIGNERS_NO_PILOT_WALLET"));
+        // DEC-17b B4: a liquidator without its own fees is the pilot when no wallet pays itself,
+        // paid by a fee payer alone — never without one (a wallet with both roles pays itself).
+        let liquidator = Keypair::new();
+        let split = vec![
+            format!("{}:LIQUIDATOR", liquidator.pubkey()),
+            format!("{}:FEE_PAYER", fee_payer.pubkey()),
+        ];
+        let split_keys = format!(
+            "{}={},{}={}",
+            liquidator.pubkey(),
+            write(&liquidator),
+            fee_payer.pubkey(),
+            write(&fee_payer)
+        );
+        let signers = owner_signers(&split, &env(split_keys.clone()), false).unwrap();
+        assert_eq!(
+            signers.iter().map(|s| s.pubkey).collect::<Vec<_>>(),
+            [liquidator.pubkey(), fee_payer.pubkey()]
+        );
+        assert!(e(&split[..1], split_keys.clone()).starts_with("SIGNERS_NO_FEE_PAYER"));
+        let with_pilot = vec![
+            split[0].clone(),
+            format!("{}:LIQUIDATOR+FEE_PAYER", pilot.pubkey()),
+        ];
+        assert!(e(
+            &with_pilot,
+            format!("{split_keys},{}={}", pilot.pubkey(), write(&pilot))
+        )
+        .starts_with("SIGNERS_NO_FEE_PAYER"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

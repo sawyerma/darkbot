@@ -21,6 +21,68 @@ pub struct FinalizedObservation {
     pub wallet_sol_delta_lamports: i128,
     pub wallet_token_deltas: Option<BTreeMap<String, i128>>,
     pub unknown_reasons: Vec<String>,
+    /// DEC-17b B4 (journal schema 11): the SOL delta of the transaction's fee payer when another
+    /// of the owner's wallets pays this wallet's attempt or exit (its fee, tip and rent); `None`:
+    /// the wallet paid itself (every observation before schema 11).
+    #[serde(default)]
+    pub payer_sol_delta_lamports: Option<i128>,
+}
+
+/// Journal schema-2…10 layout of `FinalizedObservation` (before the DEC-17b B4 fee payer).
+#[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize)]
+#[cfg_attr(test, derive(serde::Serialize))]
+pub struct FinalizedObservationV10 {
+    pub signature: String,
+    pub slot: u64,
+    pub success: bool,
+    pub fee_lamports: u64,
+    pub wallet_sol_delta_lamports: i128,
+    pub wallet_token_deltas: Option<BTreeMap<String, i128>>,
+    pub unknown_reasons: Vec<String>,
+}
+impl From<FinalizedObservationV10> for FinalizedObservation {
+    fn from(v: FinalizedObservationV10) -> Self {
+        Self {
+            signature: v.signature,
+            slot: v.slot,
+            success: v.success,
+            fee_lamports: v.fee_lamports,
+            wallet_sol_delta_lamports: v.wallet_sol_delta_lamports,
+            wallet_token_deltas: v.wallet_token_deltas,
+            unknown_reasons: v.unknown_reasons,
+            payer_sol_delta_lamports: None,
+        }
+    }
+}
+/// Tests write the earlier layouts from today's observations (a self-paid one).
+#[cfg(test)]
+impl From<FinalizedObservation> for FinalizedObservationV10 {
+    fn from(v: FinalizedObservation) -> Self {
+        Self {
+            signature: v.signature,
+            slot: v.slot,
+            success: v.success,
+            fee_lamports: v.fee_lamports,
+            wallet_sol_delta_lamports: v.wallet_sol_delta_lamports,
+            wallet_token_deltas: v.wallet_token_deltas,
+            unknown_reasons: v.unknown_reasons,
+        }
+    }
+}
+/// Tests write the earlier layouts from today's observations.
+#[cfg(test)]
+pub(super) fn observations_down(
+    v: &BTreeMap<String, FinalizedObservation>,
+) -> BTreeMap<String, FinalizedObservationV10> {
+    v.iter()
+        .map(|(k, o)| (k.clone(), o.clone().into()))
+        .collect()
+}
+/// The observations of an earlier layout in today's.
+pub(super) fn observations_of(
+    v: BTreeMap<String, FinalizedObservationV10>,
+) -> BTreeMap<String, FinalizedObservation> {
+    v.into_iter().map(|(k, o)| (k, o.into())).collect()
 }
 
 impl FinalizedObservation {
@@ -33,24 +95,28 @@ impl FinalizedObservation {
 
 /// Uses finalized getTransaction via the shared RPC transport. Caller owns
 /// provider quotas/timeouts; this function does not poll, retry or submit.
+/// DEC-17b B4: `payer` — the fee payer when another wallet pays (`None`: the wallet itself).
 pub fn fetch_finalized(
     rpc: &RpcClient,
     signature: &Signature,
     wallet: &Pubkey,
+    payer: Option<&Pubkey>,
     minimum_slot: u64,
     expected_assets: &BTreeSet<String>,
 ) -> Result<FinalizedObservation, String> {
     let tx = darkbot_solana::submit::rpc::finalized_transaction(rpc, signature)
         .map_err(|_| err("FINALIZED_TRANSACTION_UNAVAILABLE"))?;
-    parse_finalized(tx, signature, wallet, minimum_slot, expected_assets)
+    parse_finalized(tx, signature, wallet, payer, minimum_slot, expected_assets)
 }
 
 // Private: historical JSON or a caller's `finalized: true` must not enter the
-// runtime as a fresh finalized RPC response.
+// runtime as a fresh finalized RPC response. The fee payer is the first account key: the wallet
+// itself, or (DEC-17b B4) `payer`, with the wallet a signer of the transaction.
 fn parse_finalized(
     tx: EncodedConfirmedTransactionWithStatusMeta,
     signature: &Signature,
     wallet: &Pubkey,
+    payer: Option<&Pubkey>,
     minimum_slot: u64,
     expected_assets: &BTreeSet<String>,
 ) -> Result<FinalizedObservation, String> {
@@ -85,8 +151,22 @@ fn parse_finalized(
         _ if !lookups.is_empty() => return Err(err("RECEIPT_LOADED_KEYS_MISSING")),
         _ => {}
     }
-    if keys.first() != Some(&wallet.to_string())
-        || keys.iter().any(|k| k.parse::<Pubkey>().is_err())
+    // The wallet's index: the first key when it pays itself; when another wallet pays (DEC-17b
+    // B4) that one is the first key and the wallet a later key, or absent (a tip transaction of
+    // the payer alone): a transaction writes only the accounts it names, its SOL did not move.
+    let split = payer.filter(|p| *p != wallet);
+    let at = match split {
+        None => (keys.first() == Some(&wallet.to_string())).then_some(Some(0)),
+        Some(p) => (keys.first() == Some(&p.to_string())).then(|| {
+            keys.iter()
+                .position(|k| *k == wallet.to_string())
+                .filter(|i| *i > 0)
+        }),
+    };
+    let Some(at) = at else {
+        return Err(err("RECEIPT_WALLET_OR_BALANCES_INVALID"));
+    };
+    if keys.iter().any(|k| k.parse::<Pubkey>().is_err())
         || keys.iter().collect::<BTreeSet<_>>().len() != keys.len()
         || meta.pre_balances.len() != keys.len()
         || meta.post_balances.len() != keys.len()
@@ -97,6 +177,18 @@ fn parse_finalized(
     {
         return Err(err("RECEIPT_WALLET_OR_BALANCES_INVALID"));
     }
+    // DEC-11/DEC-17b B4: a transaction that invokes only the System and ComputeBudget programs (a
+    // bundle's tip) moves no token at all — not even through a CPI.
+    let moves_no_token = {
+        let plain = [
+            darkbot_project0::receivership::SYSTEM_PROGRAM,
+            darkbot_project0::protocol::COMPUTE_BUDGET_PROGRAM_ID,
+        ];
+        message.instructions.iter().all(|ix| {
+            keys.get(usize::from(ix.program_id_index))
+                .is_some_and(|p| plain.contains(&p.as_str()))
+        })
+    };
     let tokens = match (&meta.pre_token_balances, &meta.post_token_balances) {
         (OptionSerializer::Some(pre), OptionSerializer::Some(post)) => token_deltas(
             pre,
@@ -105,6 +197,7 @@ fn parse_finalized(
             &meta.post_balances,
             wallet,
             expected_assets,
+            moves_no_token,
         ),
         _ => Err(err("TOKEN_BALANCE_METADATA_MISSING")),
     };
@@ -117,10 +210,13 @@ fn parse_finalized(
         slot: tx.slot,
         success: meta.err.is_none(),
         fee_lamports: meta.fee,
-        wallet_sol_delta_lamports: i128::from(meta.post_balances[0])
-            - i128::from(meta.pre_balances[0]),
+        wallet_sol_delta_lamports: at.map_or(0, |at| {
+            i128::from(meta.post_balances[at]) - i128::from(meta.pre_balances[at])
+        }),
         wallet_token_deltas,
         unknown_reasons,
+        payer_sol_delta_lamports: split
+            .map(|_| i128::from(meta.post_balances[0]) - i128::from(meta.pre_balances[0])),
     })
 }
 
@@ -131,6 +227,7 @@ fn token_deltas(
     post_sol: &[u64],
     wallet: &Pubkey,
     expected_assets: &BTreeSet<String>,
+    moves_no_token: bool,
 ) -> Result<BTreeMap<String, i128>, String> {
     struct TokenBalance<'a> {
         owner: &'a str,
@@ -209,12 +306,15 @@ fn token_deltas(
             .checked_add(i128::from(new) - i128::from(old))
             .ok_or_else(|| err("TOKEN_DELTA_OVERFLOW"))?;
     }
-    // Absence from a transaction does not prove the wallet holds zero of a mint.
-    if expected_assets
-        .iter()
-        .any(|mint| mint != "SOL" && !deltas.contains_key(mint))
-    {
-        return Err(err("EXPECTED_ASSET_NOT_OBSERVED"));
+    // Absence from a transaction does not prove the wallet holds zero of a mint — unless the
+    // transaction moves no token at all: then each expected mint's delta is 0.
+    for mint in expected_assets.iter().filter(|m| *m != "SOL") {
+        if !deltas.contains_key(mint) {
+            if !moves_no_token {
+                return Err(err("EXPECTED_ASSET_NOT_OBSERVED"));
+            }
+            deltas.insert(mint.clone(), 0);
+        }
     }
     Ok(deltas)
 }
@@ -229,7 +329,7 @@ mod tests {
         let mint = Pubkey::new_unique().to_string();
         let sig = Signature::new_unique();
         let token = |amount: &str| json!({"accountIndex":1,"mint":mint,"owner":wallet.to_string(),"programId":"TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA","uiTokenAmount":{"amount":amount,"decimals":6,"uiAmount":null,"uiAmountString":"DO_NOT_USE"}});
-        let v = json!({"slot":55,"blockTime":123,"transaction":{"signatures":[sig.to_string()],"message":{"header":{"numRequiredSignatures":1,"numReadonlySignedAccounts":0,"numReadonlyUnsignedAccounts":0},"accountKeys":[wallet.to_string(),Pubkey::new_unique().to_string()],"recentBlockhash":solana_sdk::hash::Hash::new_unique().to_string(),"instructions":[]}},"meta":{"err":null,"status":{"Ok":null},"fee":7123,"preBalances":[100000,2039280],"postBalances":[92877,2039280],"preTokenBalances":[token("18446744073709551000")],"postTokenBalances":[token("18446744073709551007")],"loadedAddresses":{"writable":[],"readonly":[]}}});
+        let v = json!({"slot":55,"blockTime":123,"transaction":{"signatures":[sig.to_string()],"message":{"header":{"numRequiredSignatures":1,"numReadonlySignedAccounts":0,"numReadonlyUnsignedAccounts":0},"accountKeys":[wallet.to_string(),Pubkey::new_unique().to_string()],"recentBlockhash":solana_sdk::hash::Hash::new_unique().to_string(),"instructions":[{"programIdIndex":1,"accounts":[0],"data":""}]}},"meta":{"err":null,"status":{"Ok":null},"fee":7123,"preBalances":[100000,2039280],"postBalances":[92877,2039280],"preTokenBalances":[token("18446744073709551000")],"postTokenBalances":[token("18446744073709551007")],"loadedAddresses":{"writable":[],"readonly":[]}}});
         let expected = ["SOL".into(), mint.clone()].into_iter().collect();
         (v, sig, wallet, mint, expected)
     }
@@ -243,9 +343,126 @@ mod tests {
             serde_json::from_value(v).unwrap(),
             sig,
             wallet,
+            None,
             50,
             expected,
         )
+    }
+    /// DEC-17b B4: another wallet pays — it is the first key, the liquidator a later key (its
+    /// SOL at its own index, its tokens) or absent (its SOL did not move); the payer's SOL delta
+    /// beside it. A payer that is not the first key is refused; a self-paid one names no payer.
+    #[test]
+    fn dec17b_b4_a_split_payer_is_observed_beside_the_wallet() {
+        let (v, sig, wallet, mint, expected) = fixture();
+        let payer = Pubkey::new_unique();
+        let split = |keys: Vec<String>| {
+            let mut v = v.clone();
+            v["transaction"]["message"]["header"]["numRequiredSignatures"] = json!(2);
+            v["transaction"]["message"]["accountKeys"] = json!(keys);
+            v["meta"]["preBalances"] = json!([100000, 3000, 2039280]);
+            v["meta"]["postBalances"] = json!([92877, 3500, 2039280]);
+            v["meta"]["preTokenBalances"] = json!([{"accountIndex":2,"mint":mint,"owner":wallet.to_string(),"programId":"TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA","uiTokenAmount":{"amount":"10","decimals":6,"uiAmount":null,"uiAmountString":"DO_NOT_USE"}}]);
+            v["meta"]["postTokenBalances"] = json!([{"accountIndex":2,"mint":mint,"owner":wallet.to_string(),"programId":"TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA","uiTokenAmount":{"amount":"17","decimals":6,"uiAmount":null,"uiAmountString":"DO_NOT_USE"}}]);
+            serde_json::from_value(v).unwrap()
+        };
+        let ata = Pubkey::new_unique().to_string();
+        let keys = vec![payer.to_string(), wallet.to_string(), ata.clone()];
+        let read = |keys: Vec<String>, payer: Option<&Pubkey>| {
+            parse_finalized(split(keys), &sig, &wallet, payer, 50, &expected)
+        };
+        let o = read(keys.clone(), Some(&payer)).unwrap();
+        assert_eq!(
+            (o.wallet_sol_delta_lamports, o.payer_sol_delta_lamports),
+            (500, Some(-7123))
+        );
+        assert_eq!(o.wallet_token_deltas, Some([(mint.clone(), 7)].into()));
+        assert!(o.is_complete());
+        // Without the payer the wallet is not the first key: refused, never another's SOL.
+        assert!(read(keys.clone(), None).is_err());
+        // Another payer than the first key: refused.
+        let other = Pubkey::new_unique();
+        assert!(read(keys, Some(&other)).is_err());
+        // The liquidator absent: its SOL did not move, the payer's did.
+        let absent = read(
+            vec![payer.to_string(), other.to_string(), ata],
+            Some(&payer),
+        )
+        .unwrap();
+        assert_eq!(
+            (
+                absent.wallet_sol_delta_lamports,
+                absent.payer_sol_delta_lamports
+            ),
+            (0, Some(-7123))
+        );
+        // A self-paid one names no payer delta.
+        let (v, sig, wallet, _, expected) = fixture();
+        let own = parse_finalized(
+            serde_json::from_value(v).unwrap(),
+            &sig,
+            &wallet,
+            Some(&wallet),
+            50,
+            &expected,
+        )
+        .unwrap();
+        assert_eq!(own.payer_sol_delta_lamports, None);
+    }
+
+    /// DEC-11/DEC-17b B4: a bundle's tip transaction invokes only the System program — it moves
+    /// no token, each expected mint's delta is 0 and the observation is complete, the self-paid
+    /// tip and the one another wallet pays alike. A transaction invoking any other program without
+    /// the wallet's token balances is still refused (never an invented zero).
+    #[test]
+    fn dec17b_b4_a_tip_transaction_moves_no_token_of_the_wallet() {
+        let (v, sig, wallet, mint, expected) = fixture();
+        let tip = Pubkey::new_unique().to_string();
+        let system = "11111111111111111111111111111111".to_string();
+        let tip_tx = |keys: Vec<String>, program: usize| {
+            let mut v = v.clone();
+            v["transaction"]["message"]["accountKeys"] = json!(keys);
+            v["transaction"]["message"]["instructions"] =
+                json!([{"programIdIndex": program, "accounts": [0, 1], "data": ""}]);
+            v["meta"]["preBalances"] = json!([100000, 0, 1]);
+            v["meta"]["postBalances"] = json!([84877, 10000, 1]);
+            v["meta"]["preTokenBalances"] = json!([]);
+            v["meta"]["postTokenBalances"] = json!([]);
+            serde_json::from_value(v).unwrap()
+        };
+        let read = |keys: Vec<String>, program: usize, payer: Option<&Pubkey>| {
+            parse_finalized(tip_tx(keys, program), &sig, &wallet, payer, 50, &expected).unwrap()
+        };
+        let own = read(
+            vec![wallet.to_string(), tip.clone(), system.clone()],
+            2,
+            None,
+        );
+        assert!(own.is_complete(), "{:?}", own.unknown_reasons);
+        assert_eq!(
+            (
+                own.wallet_sol_delta_lamports,
+                own.wallet_token_deltas.clone()
+            ),
+            (-15_123, Some([(mint.clone(), 0)].into()))
+        );
+        let payer = Pubkey::new_unique();
+        let paid = read(
+            vec![payer.to_string(), tip.clone(), system.clone()],
+            2,
+            Some(&payer),
+        );
+        assert!(paid.is_complete());
+        assert_eq!(
+            (
+                paid.wallet_sol_delta_lamports,
+                paid.payer_sol_delta_lamports
+            ),
+            (0, Some(-15_123))
+        );
+        // Another program invoked, no token balances: never a zero.
+        let other = read(vec![wallet.to_string(), tip, system], 1, None);
+        assert!(!other.is_complete());
+        assert_eq!(other.unknown_reasons, ["EXPECTED_ASSET_NOT_OBSERVED"]);
     }
     #[test]
     fn finalized_success_and_revert_preserve_actual_fees_and_integer_deltas() {
@@ -291,7 +508,8 @@ mod tests {
             let parsed = serde_json::from_value(v);
             assert!(
                 parsed.is_err()
-                    || parse_finalized(parsed.unwrap(), &sig, &wallet, 50, &expected).is_err(),
+                    || parse_finalized(parsed.unwrap(), &sig, &wallet, None, 50, &expected)
+                        .is_err(),
                 "case {case}"
             );
         }
@@ -506,7 +724,7 @@ mod tests {
             write!(socket,"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",body.len(),body).unwrap();
         });
         let rpc = RpcClient::new_with_timeout(url, Duration::from_secs(3));
-        let result = fetch_finalized(&rpc, &sig, &wallet, 50, &expected);
+        let result = fetch_finalized(&rpc, &sig, &wallet, None, 50, &expected);
         server.join().unwrap();
         assert_eq!(result.unwrap().fee_lamports, 7123);
     }

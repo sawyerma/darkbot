@@ -11,8 +11,9 @@ const sol = (lamports: bigint | null) => (lamports == null ? "unknown" : `${lamp
  * after its holds and the policy reserve), its holds, held attempt, Safety and journal, and the
  * candidates of this run it ran; then how many candidates no wallet could run and why the last
  * could not. Each candidate runs with the wallet with the most free SOL (the lowest key on a tie);
- * an error, UNKNOWN or HALT of a wallet blocks that wallet only. Read-only: switches are on the
- * Signers section. Nothing is shown without the owner's projection.
+ * an error, UNKNOWN or HALT of a wallet blocks that wallet only. B4: a liquidator without its own
+ * fees shows the fee payer it runs with; a fee payer the SOL held on it for the liquidators it pays.
+ * Read-only: switches are on the Signers section. Nothing is shown without the owner's projection.
  */
 export function WalletRowsSection({ wallets, topicStatus }: { wallets: WalletsView | null; topicStatus: TopicStatus }) {
   if (!wallets || wallets.rows.length === 0) return null;
@@ -22,6 +23,7 @@ export function WalletRowsSection({ wallets, topicStatus }: { wallets: WalletsVi
       value={<span data-testid={`p0-wallet-row-${r.wallet}`}>{[
         r.enabled ? "ENABLED" : "DISABLED",
         !r.runsCandidates ? "runs no candidate" : r.blockReason ? `blocked: ${r.blockReason}` : "may run candidates",
+        r.runsCandidates ? `fees paid by ${r.feePayer == null ? "no eligible fee payer" : r.feePayer === r.wallet ? "itself" : r.feePayer}` : `holds ${r.solHeldForOthers} lamports for the liquidators it pays`,
         `SOL ${sol(r.solLamports)} · free ${sol(r.freeSolLamports)}`,
         r.holds.length ? `holds ${r.holds.map((h) => `${h.asset} ${h.units}`).join(", ")}` : "no hold",
         `attempt ${r.heldAttempt}`,

@@ -300,6 +300,7 @@ fn n2_evaluate_record<R: RouteProvider, S: darkbot_solana::submit::SubmissionAda
     };
     let lamports = |l: u64| Some(l);
     let builder = P0ReceivershipBuilder {
+        fee_payer: f.liquidator,
         state: &src,
         program: f.program,
         group: f.group,
@@ -339,6 +340,7 @@ fn n2_evaluate_record<R: RouteProvider, S: darkbot_solana::submit::SubmissionAda
             .unwrap(),
     ];
     let mut p = Pipeline {
+        authority: None,
         mode: Mode::Shadow,
         clock: &clock,
         health: &health,
@@ -986,6 +988,7 @@ fn exit_candidate<'a>(
     wsol_balance: u64,
 ) -> crate::execution::one_shot::exit_admission::ExitCandidate<'a> {
     crate::execution::one_shot::exit_admission::ExitCandidate {
+        authority: None,
         route,
         payer,
         blockhash: solana_sdk::hash::Hash::new_unique(),
@@ -1081,6 +1084,99 @@ fn fe04_exit_admission_sells_the_open_position_once_through_the_real_adapters() 
     assert!(hold.unknown_outcome);
     assert_eq!(hold.holds, intent.holds());
     assert_eq!(rpc.arrivals_of("simulateTransaction").len(), 1);
+    drop(journal);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// DEC-17b B4: the exit of a position whose attempt another wallet paid is paid by that wallet —
+/// the first key of the exit, its signature beside the seller's under one permit, the exit's SOL
+/// held on it — and refused (nothing durable, no send) when another wallet would pay.
+#[test]
+fn dec17b_b4_an_exit_is_paid_by_its_attempts_fee_payer() {
+    use crate::execution::one_shot::admission::Admission;
+    use crate::orchestration::capability_control as cap;
+    use solana_sdk::signer::Signer;
+    let (payer, seller) = (
+        solana_sdk::signature::Keypair::new(),
+        solana_sdk::signature::Keypair::new(),
+    );
+    let taker = seller.pubkey();
+    let dir = std::env::temp_dir().join(format!("p0_exit_b4_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let mint_s = crate::execution::one_shot::exit::tests::settled_paid_with_position(
+        &dir,
+        &taker.to_string(),
+        &payer.pubkey().to_string(),
+        1_000,
+    );
+    let mint: Pubkey = mint_s.parse().unwrap();
+    let build = exit_build(&taker, &mint, |_| {});
+    let jupiter = Endpoint::start(move |_, _| Answer::Raw(build.clone()));
+    let rpc = Endpoint::start(|kind, _| match kind {
+        "getFeeForMessage" => fee_ok(),
+        "simulateTransaction" => simulation_ok(),
+        _ => Answer::Status(500),
+    });
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    let route = crate::execution::route::JupiterV2RouteProvider::new(taker, 50, 64, false)
+        .unwrap()
+        .with_base_url(jupiter.url.clone())
+        .unpaced()
+        .exit_to_sol(&mint, 1_000, deadline)
+        .unwrap();
+    let adapter = CountingAdapter {
+        inner: rpc_submitter(&rpc.url, n2_budget(4)),
+        submits: std::cell::Cell::new(0),
+    };
+    let mut gates = cap::OfflineGates::enabled(taker);
+    let mut fee_payer = cap::WalletSwitch::configured(payer.pubkey(), &[cap::ROLE_FEE_PAYER]);
+    fee_payer.enabled = true;
+    gates.wallets = vec![
+        {
+            let mut w = cap::WalletSwitch::configured(taker, &[cap::ROLE_LIQUIDATOR]);
+            w.enabled = true;
+            w
+        },
+        fee_payer,
+    ];
+    let jup = darkbot_project0::protocol::JUP_SWAP_PROGRAM_ID;
+    let approval =
+        crate::execution::one_shot::exit::tests::exit_approval(&taker.to_string(), &mint_s, jup);
+    let mut journal = crate::execution::one_shot::Journal::open(&dir, &taker.to_string()).unwrap();
+    // The seller paying itself, or another payer: refused before anything durable.
+    for (fee, authority) in [(&seller, None), (&solana_sdk::signature::Keypair::new(), Some(&seller))] {
+        let mut c = exit_candidate(&route, fee, &mint_s, 0);
+        c.authority = authority;
+        let refused = crate::execution::one_shot::exit_admission::admit_exit(
+            &mut journal,
+            approval.clone(),
+            c,
+            &adapter,
+            Some(&gates.gates()),
+        );
+        assert!(
+            matches!(&refused, Admission::Refused(e) if e == "EXIT_FEE_PAYER_MISMATCH"),
+            "{refused:?}"
+        );
+    }
+    assert!(journal.open_exit_id().is_none());
+    let mut c = exit_candidate(&route, &payer, &mint_s, 0);
+    c.authority = Some(&seller);
+    let admitted = crate::execution::one_shot::exit_admission::admit_exit(
+        &mut journal,
+        approval,
+        c,
+        &adapter,
+        Some(&gates.gates()),
+    );
+    assert!(matches!(admitted, Admission::Submitted(..)), "{admitted:?}");
+    assert_eq!(adapter.submits.get(), 1, "exactly one send");
+    let sent = rpc.arrivals_of("simulateTransaction");
+    assert_eq!(sent.len(), 1);
+    let hold = journal.active_hold().unwrap();
+    assert_eq!(hold.fee_payer, Some(payer.pubkey().to_string()));
+    let (intent, _) = journal.exit_job().expect("the exit is UNKNOWN");
+    assert_eq!(intent.wallet, taker.to_string(), "the seller's exit");
     drop(journal);
     let _ = std::fs::remove_dir_all(&dir);
 }

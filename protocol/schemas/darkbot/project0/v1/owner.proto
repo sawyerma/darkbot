@@ -590,7 +590,7 @@ message WalletRow {
   repeated string roles = 2;
   // Its switch WALLET:<pubkey> is ENABLED.
   bool enabled = 3;
-  // It liquidates as its own fee payer (the kind a candidate runs with).
+  // It liquidates (as its own fee payer, or paid by a fee payer: DEC-17b B4).
   bool runs_candidates = 4;
   // Why it may not run a candidate now in the effective mode; empty: it may.
   string block_reason = 5;
@@ -615,6 +615,11 @@ message WalletRow {
   optional int64 realized_net_usd_micro = 14;
   // Candidates of this run it ran.
   uint64 selected = 15;
+  // DEC-17b B4: the wallet paying its candidates now (itself, or the fee payer it runs with);
+  // unset when it runs none or no fee payer may pay now.
+  optional string fee_payer = 16;
+  // DEC-17b B4: lamports held on it for the attempts of the liquidators it pays.
+  uint64 sol_held_for_others = 17;
 }
 
 // DEC-04 (V7): the B hold mode — requested and effective (ACTIVE only with the user's N and the

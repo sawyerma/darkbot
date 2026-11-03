@@ -20,6 +20,9 @@ pub struct WalletReservations {
     attempts: BTreeMap<String, BTreeMap<String, u64>>,
     /// P8-RES-02: a target belongs to at most one attempt (contending targets).
     targets: BTreeMap<String, TargetHold>,
+    /// DEC-17b B4: the attempts whose SOL another of the owner's wallets pays (attempt → that
+    /// wallet): their SOL is held on that wallet (`held_for`), never on this one.
+    payers: BTreeMap<String, String>,
     /// The durable journals could not be read: nothing is available until they are.
     unreadable: bool,
 }
@@ -40,7 +43,7 @@ impl WalletReservations {
         let mut out: BTreeMap<String, u64> = BTreeMap::new();
         for (id, holds) in &self.attempts {
             if !own.contains(&id.as_str()) {
-                for (asset, n) in holds {
+                for (asset, n) in holds.iter().filter(|(a, _)| self.own(id, a)) {
                     let total = out.entry(asset.clone()).or_default();
                     *total = total.saturating_add(*n);
                 }
@@ -49,11 +52,27 @@ impl WalletReservations {
         out
     }
 
+    /// DEC-17b B4: whether `attempt`'s hold of `asset` is on this wallet — every asset but the
+    /// SOL another wallet pays.
+    fn own(&self, attempt: &str, asset: &str) -> bool {
+        asset != "SOL" || !self.payers.contains_key(attempt)
+    }
+
     fn held_except(&self, asset: &str, attempt: Option<&str>) -> u64 {
         self.attempts
             .iter()
-            .filter(|(id, _)| Some(id.as_str()) != attempt)
+            .filter(|(id, _)| Some(id.as_str()) != attempt && self.own(id, asset))
             .filter_map(|(_, h)| h.get(asset))
+            .fold(0u64, |s, n| s.saturating_add(*n))
+    }
+
+    /// DEC-17b B4: the SOL this book's attempts but the `except` ones hold on `payer` (another
+    /// wallet paying them).
+    pub fn held_for(&self, payer: &str, except: &[&str]) -> u64 {
+        self.payers
+            .iter()
+            .filter(|(id, p)| p.as_str() == payer && !except.contains(&id.as_str()))
+            .filter_map(|(id, _)| self.attempts.get(id).and_then(|h| h.get("SOL")))
             .fold(0u64, |s, n| s.saturating_add(*n))
     }
 
@@ -159,6 +178,10 @@ impl WalletReservations {
             return Err("RESERVATION_TARGET_CONTENDED");
         }
         self.reserve(&hold.attempt, &hold.holds, balances)?;
+        // B4 review L3: a hold another wallet pays keeps its payer here as in `restore`.
+        if let Some(payer) = &hold.fee_payer {
+            self.payers.insert(hold.attempt.clone(), payer.clone());
+        }
         self.targets
             .insert(hold.target.clone(), Self::target_hold(hold));
         Ok(())
@@ -179,6 +202,9 @@ impl WalletReservations {
         }
         self.attempts
             .insert(hold.attempt.clone(), hold.holds.clone());
+        if let Some(payer) = &hold.fee_payer {
+            self.payers.insert(hold.attempt.clone(), payer.clone());
+        }
         self.targets
             .insert(hold.target.clone(), Self::target_hold(hold));
         Ok(())
@@ -197,6 +223,7 @@ impl WalletReservations {
     /// Releases `attempt` (after its finalized reconciliation) and returns what it held.
     pub fn release(&mut self, attempt: &str) -> Result<BTreeMap<String, u64>, &'static str> {
         let held = self.attempts.remove(attempt).ok_or("RESERVATION_UNKNOWN")?;
+        self.payers.remove(attempt);
         self.targets.retain(|_, t| t.attempt != attempt);
         Ok(held)
     }

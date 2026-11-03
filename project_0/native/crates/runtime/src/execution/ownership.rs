@@ -595,6 +595,7 @@ mod tests {
         let holds: BTreeMap<String, u64> = [("SOL".to_string(), 20u64)].into();
         let balances: BTreeMap<String, u64> = [("SOL".to_string(), 100u64)].into();
         let hold = ActiveHold {
+            fee_payer: None,
             attempt: "A1".into(),
             target: target.to_string(),
             unknown_outcome: true,

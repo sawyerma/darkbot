@@ -300,9 +300,6 @@ pub fn validate(s: &Scope, c: &Ceilings) -> Result<(), String> {
             "FE06_SCOPE_FIELD_INVALID: fee_payer (a signer with the FEE_PAYER role)".into(),
         );
     }
-    if !pilot_wallet(s) {
-        return Err(PILOT_ONE_WALLET.into());
-    }
     for b in s.banks.iter() {
         pubkey("banks", b)?;
     }
@@ -437,6 +434,9 @@ pub struct Running {
     /// The configured signers as `<pubkey>:<ROLE>+<ROLE>`.
     pub signers: BTreeSet<String>,
     pub owner_epoch: u64,
+    /// DEC-17b: the first pilot's attempt is booked in the wallets' journals (unknown: not) —
+    /// until then a scope admits exactly one wallet, its own fee payer.
+    pub pilot_done: bool,
 }
 
 /// P8-CTRL.3: the route classes in their order (`planner::RouteKind`); a scope's `route` is the
@@ -770,7 +770,8 @@ fn canonical_roles(roles: &str) -> bool {
     !roles.is_empty() && roles.split('+').all(|r| order.any(|k| *k == r))
 }
 
-/// DEC-17b: why a scope admitting other wallets than the first pilot's is refused.
+/// DEC-17b: why a scope admitting other wallets than the first pilot's is refused before the
+/// first pilot's attempt is booked.
 pub const PILOT_ONE_WALLET: &str = "FE06_SCOPE_PILOT_ONE_WALLET: the first pilot admits exactly one wallet, its liquidator and its own fee payer (DEC-17b)";
 
 /// DEC-17b: the first pilot — exactly one wallet, LIQUIDATOR and its own FEE_PAYER.
@@ -783,11 +784,10 @@ fn pilot_wallet(s: &Scope) -> bool {
         ))
 }
 
-/// P8-CTRL.3: whether a scope follows the rules of its route class, signer roles and admitted
-/// wallets that hold now (one previewed under an earlier rule would be refused at its use).
+/// P8-CTRL.3: whether a scope follows the rules of its route class and signer roles that hold
+/// now (one previewed under an earlier rule would be refused at its use).
 fn current_rules(s: &Scope) -> bool {
-    pilot_wallet(s)
-        && ROUTES.contains(&s.route.as_str())
+    ROUTES.contains(&s.route.as_str())
         && s.signers.iter().all(|e| {
             e.split_once(':')
                 .is_some_and(|(_, roles)| canonical_roles(roles))
@@ -821,6 +821,11 @@ pub fn check_running(s: &Scope, r: &Running, now_unix_s: u64) -> Result<(), Stri
     // these roles (the owner may run more: a wallet the scope does not name signs nothing).
     if !s.signers.is_subset(&r.signers) {
         return differs("signers");
+    }
+    // DEC-17b: the first pilot — exactly one wallet, LIQUIDATOR and its own FEE_PAYER — until
+    // its attempt is booked; then (B4) a scope may admit more wallets and a fee payer alone.
+    if !r.pilot_done && !pilot_wallet(s) {
+        return Err(PILOT_ONE_WALLET.into());
     }
     if s.owner_epoch != r.owner_epoch {
         return Err(format!(
@@ -971,6 +976,7 @@ pub(crate) mod tests {
     /// What the default test scope of `signer` binds as the running identity.
     pub(crate) fn running(signer: &Pubkey) -> Running {
         Running {
+            pilot_done: false,
             genesis_hash: darkbot_project0::protocol::GENESIS_HASH_MAINNET.into(),
             program: darkbot_project0::protocol::PROGRAM_ID_MAINNET.into(),
             program_data_hash: darkbot_project0::protocol::PROGRAM_DATA_REFERENCE_HASH.into(),
@@ -1215,12 +1221,25 @@ pub(crate) mod tests {
 
     /// P8-CTRL.3: the scope binds what runs — each binding alone refuses it, as do another epoch
     /// and a time outside its validity.
-    /// DEC-17b: the first pilot — a scope admits exactly one wallet, its liquidator and its own
-    /// fee payer; never a second wallet, a separate fee payer or a treasury.
+    /// DEC-17b: the first pilot — until its attempt is booked a scope admits exactly one wallet,
+    /// its liquidator and its own fee payer (refused when it binds what runs, at a grant and at
+    /// every use); then (B4) a second wallet or a liquidator paid by a fee payer alone. A treasury
+    /// never signs.
     #[test]
-    fn dec17b_a_scope_admits_the_pilot_wallet_only() {
+    fn dec17b_the_first_pilot_admits_one_wallet_then_split_roles() {
         let signer = Pubkey::new_unique();
         let other = Pubkey::new_unique();
+        let running = |signers: &str, pilot_done: bool| Running {
+            pilot_done,
+            genesis_hash: darkbot_project0::protocol::GENESIS_HASH_MAINNET.into(),
+            program: darkbot_project0::protocol::PROGRAM_ID_MAINNET.into(),
+            program_data_hash: darkbot_project0::protocol::PROGRAM_DATA_REFERENCE_HASH.into(),
+            code_sha: Some("c0de".into()),
+            binary_sha256: Some("b".repeat(64)),
+            runtime_config_sha256: "c".repeat(64),
+            signers: signers.split(',').map(str::to_string).collect(),
+            owner_epoch: 3,
+        };
         for (signers, fee_payer) in [
             (
                 format!("{signer}:LIQUIDATOR+FEE_PAYER,{other}:LIQUIDATOR+FEE_PAYER"),
@@ -1231,13 +1250,27 @@ pub(crate) mod tests {
                 other.to_string(),
             ),
         ] {
-            let e = parse(
+            let s = parse(
                 text(&signer, &[("signers", &signers), ("fee_payer", &fee_payer)]).as_bytes(),
                 &ceilings(),
             )
-            .unwrap_err();
-            assert_eq!(e, PILOT_ONE_WALLET, "{signers}");
+            .unwrap();
+            assert_eq!(
+                check_running(&s, &running(&signers, false), 1000),
+                Err(PILOT_ONE_WALLET.into()),
+                "{signers}"
+            );
+            assert_eq!(
+                check_running(&s, &running(&signers, true), 1000),
+                Ok(()),
+                "{signers}"
+            );
         }
+        // The pilot's own scope binds before and after.
+        let pilot = parse(text(&signer, &[]).as_bytes(), &ceilings()).unwrap();
+        let one = format!("{signer}:LIQUIDATOR+FEE_PAYER");
+        assert_eq!(check_running(&pilot, &running(&one, false), 1000), Ok(()));
+        assert_eq!(check_running(&pilot, &running(&one, true), 1000), Ok(()));
         let e = parse(
             text(&signer, &[("signers", &format!("{signer}:TREASURY"))]).as_bytes(),
             &ceilings(),
@@ -1251,6 +1284,7 @@ pub(crate) mod tests {
         let signer = Pubkey::new_unique();
         let s = parse(text(&signer, &[]).as_bytes(), &ceilings()).unwrap();
         let running = Running {
+            pilot_done: false,
             genesis_hash: darkbot_project0::protocol::GENESIS_HASH_MAINNET.into(),
             program: darkbot_project0::protocol::PROGRAM_ID_MAINNET.into(),
             program_data_hash: darkbot_project0::protocol::PROGRAM_DATA_REFERENCE_HASH.into(),

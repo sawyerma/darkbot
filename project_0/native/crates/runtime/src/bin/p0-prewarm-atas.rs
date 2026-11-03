@@ -3,6 +3,9 @@
 //! (P8-CTRL-03d): `--send` signs and sends it under the owner's own permits — WALLET, ECON_SIGN
 //! and ECON_SEND ENABLED in the running owner's epoch, the operator's confirmation, its cost
 //! within `prewarm_max_lamports` (`tool_permit`); there is no other way to send.
+//! DEC-17b B4: `--for <liquidator>` prewarms the ATAs of a configured liquidator without its own
+//! fees, created and paid (rent and fee) by this keypair — a configured fee payer alone; the
+//! liquidator signs nothing.
 use darkbot_project0::protocol;
 use darkbot_runner::orchestration::tool_permit::{self, Tool, ToolUse};
 use darkbot_solana::tx;
@@ -27,6 +30,29 @@ fn need(name: &str) -> Result<String, Box<dyn Error>> {
                 Ok(v)
             }
         })
+}
+
+/// DEC-17b B4: `liquidator` may have its ATAs paid by `payer` — among the configured signers the
+/// liquidator is a LIQUIDATOR without its own FEE_PAYER role and the payer a FEE_PAYER alone.
+fn paid_owner(signers: &[String], payer: &Pubkey, liquidator: &Pubkey) -> Result<(), String> {
+    use darkbot_solana::runtime_config::{roles, signer_entry};
+    let roles_of = |key: &Pubkey| -> Result<Option<Vec<&'static str>>, String> {
+        for entry in signers {
+            let (k, r) = signer_entry(entry)?;
+            if k == *key {
+                return Ok(Some(r));
+            }
+        }
+        Ok(None)
+    };
+    if roles_of(liquidator)?.as_deref() != Some(&[roles::LIQUIDATOR][..])
+        || roles_of(payer)?.as_deref() != Some(&[roles::FEE_PAYER][..])
+    {
+        return Err(format!(
+            "PREWARM_FOR_NOT_PAID: {liquidator} is no configured LIQUIDATOR paid by the configured FEE_PAYER {payer} (DEC-17b B4)"
+        ));
+    }
+    Ok(())
 }
 
 fn main() {
@@ -57,9 +83,25 @@ fn run() -> Result<(), Box<dyn Error>> {
     if send {
         args.remove(0);
     }
+    // DEC-17b B4: the wallet whose ATAs are created (the payer's own, or a liquidator it pays).
+    let owner_pk = if args.first().is_some_and(|a| a == "--for") {
+        args.remove(0);
+        if args.is_empty() {
+            return Err("usage: --for <liquidator pubkey>".into());
+        }
+        let liquidator = Pubkey::from_str(&args.remove(0))?;
+        paid_owner(
+            &darkbot_solana::runtime_config::active().signers,
+            &payer_pk,
+            &liquidator,
+        )?;
+        liquidator
+    } else {
+        payer_pk
+    };
     if args.is_empty() || !args.len().is_multiple_of(2) {
         return Err(
-            "usage: p0-prewarm-atas [--send] <mint> <token_program> [<mint> <token_program> ...]"
+            "usage: p0-prewarm-atas [--send] [--for <liquidator>] <mint> <token_program> [<mint> <token_program> ...]"
                 .into(),
         );
     }
@@ -93,7 +135,7 @@ fn run() -> Result<(), Box<dyn Error>> {
             .into());
         }
 
-        let ata = get_associated_token_address_with_program_id(&payer_pk, &mint, &token_program);
+        let ata = get_associated_token_address_with_program_id(&owner_pk, &mint, &token_program);
         if !seen.insert(ata) {
             continue;
         }
@@ -127,8 +169,9 @@ fn run() -> Result<(), Box<dyn Error>> {
     }
 
     println!(
-        "PREWARM_BALANCE payer={} lamports={} missing={}",
+        "PREWARM_BALANCE payer={} owner={} lamports={} missing={}",
         payer_pk,
+        owner_pk,
         balance,
         missing.len()
     );
@@ -141,7 +184,7 @@ fn run() -> Result<(), Box<dyn Error>> {
     let instructions = missing
         .iter()
         .map(|(mint, token_program, _)| {
-            create_associated_token_account_idempotent(&payer_pk, &payer_pk, mint, token_program)
+            create_associated_token_account_idempotent(&payer_pk, &owner_pk, mint, token_program)
         })
         .collect::<Vec<_>>();
 
@@ -197,7 +240,7 @@ fn run() -> Result<(), Box<dyn Error>> {
         if account.owner != *token_program
             || account.data.len() < 64
             || account.data[..32] != mint.to_bytes()
-            || account.data[32..64] != payer_pk.to_bytes()
+            || account.data[32..64] != owner_pk.to_bytes()
         {
             return Err("prewarm simulated ATA identity mismatch".into());
         }
@@ -282,4 +325,39 @@ fn run() -> Result<(), Box<dyn Error>> {
 
     println!("PREWARM_READY created={}", missing.len());
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// DEC-17b B4: `--for` only for a configured liquidator without its own fees, paid by a
+    /// configured fee payer alone.
+    #[test]
+    fn dec17b_b4_prewarm_for_a_liquidator_its_fee_payer_pays() {
+        let (l, p, own, t) = (
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+            Pubkey::new_unique(),
+        );
+        let signers = vec![
+            format!("{l}:LIQUIDATOR"),
+            format!("{p}:FEE_PAYER"),
+            format!("{own}:LIQUIDATOR+FEE_PAYER"),
+            format!("{t}:TREASURY"),
+        ];
+        assert_eq!(paid_owner(&signers, &p, &l), Ok(()));
+        for (payer, liquidator) in [
+            (&own, &l),
+            (&p, &own),
+            (&p, &t),
+            (&l, &p),
+            (&p, &Pubkey::new_unique()),
+        ] {
+            assert!(paid_owner(&signers, payer, liquidator)
+                .unwrap_err()
+                .starts_with("PREWARM_FOR_NOT_PAID"));
+        }
+    }
 }

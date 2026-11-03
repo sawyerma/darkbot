@@ -2960,6 +2960,7 @@ fn c3_settlement_day_is_the_same_in_the_run_and_after_a_restart_across_midnight(
                     observations: vec![(
                         intent.signatures[0].clone(),
                         Ok(FinalizedObservation {
+                            payer_sol_delta_lamports: None,
                             signature: intent.signatures[0].clone(),
                             slot: 70,
                             success: true,
@@ -3180,6 +3181,7 @@ fn exit_observation(
         observations: vec![(
             sig.to_string(),
             Ok(crate::execution::one_shot::receipts::FinalizedObservation {
+                payer_sol_delta_lamports: None,
                 signature: sig.into(),
                 slot: 85,
                 success,
@@ -4235,6 +4237,7 @@ fn mt5b_projection_results_are_judged_against_ownership_and_newest_revision() {
     let identity = test_identity(&f.owner, candidate, &[]);
     // SUBMITTED by a durable attempt (the book's target hold): dropped foreign.
     f.owner.wallets[0].reservations = WalletReservations::rebuild([ActiveHold {
+        fee_payer: None,
         attempt: "A1".into(),
         target: candidate.to_string(),
         unknown_outcome: true,
@@ -4509,6 +4512,7 @@ fn b01_rebalancing_observe_plans_from_real_balances_and_quotes_without_trading()
     // What an FE-04 attempt or its open position holds of it is never collateral.
     f.owner.wallets[0].reservations = crate::execution::reservation::WalletReservations::rebuild([
         crate::execution::one_shot::ActiveHold {
+            fee_payer: None,
             attempt: "P1".into(),
             target: Pubkey::new_unique().to_string(),
             unknown_outcome: false,
@@ -7627,14 +7631,14 @@ fn dec13b_without_fe06_a_live_request_admits_and_sends_nothing() {
 fn dec13b_an_admission_needs_every_condition_and_names_the_missing_one() {
     let (mut f, target, calls) = dec13b_fixture("dec13b_refused", true);
     let reason = |f: &ShadowOwner| {
-        f.fe04_admission_facts(0, Some(&target))
+        f.fe04_admission_facts(0, None, Some(&target))
             .err()
             .map(|(r, _)| r)
     };
     assert_eq!(reason(&f.owner), None);
     let other = Pubkey::new_unique();
     assert_eq!(
-        f.owner.fe04_admission_facts(0, Some(&other)).err(),
+        f.owner.fe04_admission_facts(0, None, Some(&other)).err(),
         Some(("FE04_TARGET_NOT_APPROVED".into(), false))
     );
     f.owner.program_upgrade_latched = true;
@@ -7654,7 +7658,7 @@ fn dec13b_an_admission_needs_every_condition_and_names_the_missing_one() {
     f.owner.blockhash.set(bh);
     let journal = f.owner.fe04_journal.take();
     assert_eq!(
-        f.owner.fe04_admission_facts(0, Some(&target)).err(),
+        f.owner.fe04_admission_facts(0, None, Some(&target)).err(),
         Some(("FE04_JOURNAL_NOT_CONFIGURED".into(), true))
     );
     f.owner.fe04_journal = journal;
@@ -8227,7 +8231,10 @@ fn dec13b_a_refused_candidate_releases_at_once_and_an_unused_journal_blocks_noth
         .is_some_and(|j| j.step_state().is_none()));
     f.owner.wallets[0].fe04_held = start.held;
     set_approval(&mut f, &approval);
-    assert_eq!(f.owner.fe04_admission_facts(0, Some(&target)).err(), None);
+    assert_eq!(
+        f.owner.fe04_admission_facts(0, None, Some(&target)).err(),
+        None
+    );
     detect(&mut f, 101);
     assert_eq!(
         f.owner.wallets[0].fe04_admissions.submitted, 1,
@@ -8510,6 +8517,7 @@ fn p8ctrl04_the_status_names_the_grant_its_usage_and_this_epochs_previews() {
         (c.dir, c.config_version, c.epoch) = (Some(cap::request_dir(&f.dir)), Some(0), Some(3));
         c.fe06 = Some(cap::Fe06Authorization::offline_test_of(granted.clone()));
         c.running = Some(fe06::Running {
+            pilot_done: false,
             genesis_hash: darkbot_project0::protocol::GENESIS_HASH_MAINNET.into(),
             program: granted.programs.iter().next().unwrap().clone(),
             program_data_hash: granted.program_data_hash.clone(),
@@ -8727,6 +8735,7 @@ fn p8ctrl03_scoped(
     )
     .unwrap();
     let mut running = fe06::Running {
+        pilot_done: false,
         genesis_hash: darkbot_project0::protocol::GENESIS_HASH_MAINNET.into(),
         program: program.clone(),
         program_data_hash: deployment.clone(),
@@ -9386,7 +9395,10 @@ fn p8ctrl06_l15_a_sim_only_grant_never_hands_the_wallets_signature_to_a_sending_
                 |_| {},
             );
             // The binding facts exist; only the sending simulator rules the real signature out.
-            assert!(f.owner.sim_only_use_facts(0, &target).is_some(), "{tag}");
+            assert!(
+                f.owner.sim_only_use_facts(0, None, &target).is_some(),
+                "{tag}"
+            );
         } else {
             f.owner.sources.capabilities.fe06 = None;
         }
@@ -9447,7 +9459,7 @@ fn s4_04_core_stage_baseline() {
         let (mut f, target, calls) = dec13b_fixture(&format!("s4_04_{i}"), true);
         p8ctrl03_scoped(&mut f, &[], |_| {});
         let opened = std::time::Instant::now();
-        let facts = f.owner.fe04_admission_facts(0, Some(&target));
+        let facts = f.owner.fe04_admission_facts(0, None, Some(&target));
         let w = &mut f.owner.wallets[0];
         let admission = fe04::admission_for(
             &mut w.fe04_admission,
@@ -10360,6 +10372,7 @@ fn dec17a_a_signed_grant_is_taken_and_changed_evidence_blocks_it() {
         c.operator_key_sha256 = operator_auth::key_sha256(&key.public_key);
         c.epoch_nonce = "nonce".into();
         c.running = Some(fe06::Running {
+            pilot_done: false,
             genesis_hash: darkbot_project0::protocol::GENESIS_HASH_MAINNET.into(),
             program: scope.programs.iter().next().unwrap().clone(),
             program_data_hash: scope.program_data_hash.clone(),
@@ -10530,7 +10543,9 @@ fn dec17b_wallet(f: &mut Fixture, roles: &[&'static str], lamports: Option<u64>)
     use solana_sdk::signer::Signer;
     let kp = solana_sdk::signature::Keypair::new();
     let pk = kp.pubkey();
-    let payer = if roles == darkbot_solana::runtime_config::roles::SIGNING {
+    // A signing role holds its keypair (DEC-17b B4: a fee payer alone signs too); a treasury
+    // only its public key.
+    let payer = if roles != [darkbot_solana::runtime_config::roles::TREASURY] {
         crate::execution::payer::OwnerPayer::Signer(kp)
     } else {
         crate::execution::payer::OwnerPayer::PublicOnly(pk)
@@ -10578,13 +10593,14 @@ fn dec17b_the_wallet_choice_is_deterministic_and_a_failing_wallet_blocks_only_it
     for _ in 0..3 {
         assert_eq!(
             f.owner.choose_wallet(false),
-            (low, None),
+            choice(low),
             "a tie: the lower key"
         );
     }
     // The lower one's open position holds 1 lamport of its SOL: the other has more free.
     f.owner.wallets[low].reservations =
         WalletReservations::rebuild([crate::execution::one_shot::ActiveHold {
+            fee_payer: None,
             attempt: "P1".into(),
             target: Pubkey::new_unique().to_string(),
             unknown_outcome: false,
@@ -10593,13 +10609,13 @@ fn dec17b_the_wallet_choice_is_deterministic_and_a_failing_wallet_blocks_only_it
             last_valid_block_height: None,
         }])
         .unwrap();
-    assert_eq!(f.owner.choose_wallet(false), (high, None));
+    assert_eq!(f.owner.choose_wallet(false), choice(high));
     // A HALT blocks its wallet only.
     f.owner.wallets[high].safety.halt(HaltReason::LimitBreached);
-    assert_eq!(f.owner.choose_wallet(false), (low, None));
+    assert_eq!(f.owner.choose_wallet(false), choice(low));
     // An unreadable book blocks its wallet only: the pilot is left.
     f.owner.wallets[low].reservations = WalletReservations::unreadable();
-    assert_eq!(f.owner.choose_wallet(false), (0, None));
+    assert_eq!(f.owner.choose_wallet(false), choice(0));
     let rows = f.owner.owner_snapshot(1).wallets.rows;
     let row = |k: Pubkey| rows.iter().find(|r| r.wallet == k.to_string()).unwrap();
     assert_eq!(row(pilot).block_reason, "");
@@ -10612,18 +10628,23 @@ fn dec17b_the_wallet_choice_is_deterministic_and_a_failing_wallet_blocks_only_it
         row(f.owner.wallets[low].liquidator).block_reason,
         "RESERVATION_BOOK_UNREADABLE"
     );
-    assert_eq!(row(t).block_reason, "WALLET_NOT_ITS_OWN_FEE_PAYER");
+    assert_eq!(row(t).block_reason, "WALLET_NOT_A_LIQUIDATOR");
     assert!(!row(t).runs_candidates);
     assert_eq!(row(t).sol_lamports, Some(100_000_000_000));
     // An unknown balance blocks its wallet only.
     let u = dec17b_wallet(&mut f, &roles::SIGNING, None);
     assert_eq!(
-        f.owner.wallet_eligible(f.owner.wallets.len() - 1, false),
+        f.owner.wallet_eligible(
+            f.owner.wallets.len() - 1,
+            false,
+            &f.owner.choose_payer(false)
+        ),
         Err("WALLET_SOL_UNKNOWN".into())
     );
     // None eligible: the pilot (its own refusal is the candidate's), with every reason.
     f.owner.wallets[0].safety.halt(HaltReason::UnknownEconomics);
-    let (i, why) = f.owner.choose_wallet(false);
+    let c = f.owner.choose_wallet(false);
+    let (i, why) = (c.wallet, c.none_eligible);
     assert_eq!(i, 0);
     let why = why.unwrap();
     for part in [
@@ -10636,7 +10657,7 @@ fn dec17b_the_wallet_choice_is_deterministic_and_a_failing_wallet_blocks_only_it
             "{}=RESERVATION_BOOK_UNREADABLE",
             f.owner.wallets[low].liquidator
         ),
-        format!("{t}=WALLET_NOT_ITS_OWN_FEE_PAYER"),
+        format!("{t}=WALLET_NOT_A_LIQUIDATOR"),
         format!("{u}=WALLET_SOL_UNKNOWN"),
     ] {
         assert!(why.contains(&part), "{part} in {why}");
@@ -10660,6 +10681,15 @@ fn dec17b_the_wallet_choice_is_deterministic_and_a_failing_wallet_blocks_only_it
     cleanup(f);
 }
 
+/// DEC-17b: a choice of wallet `w` paying itself, some wallet eligible.
+fn choice(w: usize) -> super::wallets::Choice {
+    super::wallets::Choice {
+        wallet: w,
+        payer: None,
+        none_eligible: None,
+    }
+}
+
 /// DEC-17b: under LIVE a wallet runs a candidate only with its switch ENABLED, admitted by the
 /// grant's scope, no attempt of its own in flight and its own VALID FE-04 approval — through the
 /// real detect path a richer wallet without an approval is passed over and the pilot's attempt is
@@ -10672,22 +10702,24 @@ fn dec17b_live_runs_only_a_wallet_that_may_send_and_single_flight_is_per_wallet(
     let rich = dec17b_wallet(&mut f, &roles::SIGNING, Some(50_000_000_000));
     let r = f.owner.wallets.len() - 1;
     assert_eq!(
-        f.owner.wallet_eligible(r, true),
+        f.owner
+            .wallet_eligible(r, true, &f.owner.choose_payer(true)),
         Err(format!("WALLET:{rich} DISABLED"))
     );
     f.owner.sources.capabilities.wallets[1].enabled = true;
     assert_eq!(
-        f.owner.wallet_eligible(r, true),
+        f.owner
+            .wallet_eligible(r, true, &f.owner.choose_payer(true)),
         Err("FE04_APPROVAL_NONE".into())
     );
     assert_eq!(
         f.owner.choose_wallet(false),
-        (r, None),
+        choice(r),
         "Shadow: the most SOL"
     );
     assert_eq!(
         f.owner.choose_wallet(true),
-        (0, None),
+        choice(0),
         "LIVE: the wallet that may send"
     );
     f.owner
@@ -10714,17 +10746,201 @@ fn dec17b_live_runs_only_a_wallet_that_may_send_and_single_flight_is_per_wallet(
     // Single flight per wallet: the pilot's attempt holds the pilot only.
     assert!(f
         .owner
-        .wallet_eligible(0, true)
+        .wallet_eligible(0, true, &f.owner.choose_payer(true))
         .unwrap_err()
         .starts_with(fe04::ATTEMPT_HELD));
     assert_eq!(
-        f.owner.wallet_eligible(r, true),
+        f.owner
+            .wallet_eligible(r, true, &f.owner.choose_payer(true)),
         Err("FE04_APPROVAL_NONE".into())
     );
     let rows = f.owner.owner_snapshot(1).wallets.rows;
     assert_eq!(rows[0].held_attempt, "UNKNOWN", "sent, not settled yet");
     assert_eq!(rows[1].held_attempt, "NONE");
     assert_eq!(rows[1].block_reason, "FE04_APPROVAL_NONE");
+    cleanup(f);
+}
+
+/// DEC-17b B4: a liquidator without its own fees runs with a fee payer alone — through the real
+/// detect path one attempt is sent: the payer is the transaction's first key, both keys sign
+/// under one permit, the attempt's SOL (fee, rent, exit reserve) is held on the payer (never on
+/// the liquidator, whose own SOL could not pay the fee) and the journal names the payer; the
+/// Wallets rows show the pair. A halted, disabled or unknown fee payer leaves the liquidator
+/// nothing to run with (its admission refused with every reason), the self-paying pilot keeps
+/// its own choice.
+#[test]
+fn dec17b_b4_a_liquidator_paid_by_a_fee_payer_sends_one_attempt_signed_by_both() {
+    use crate::orchestration::capability_control as cap;
+    use darkbot_common::error::HaltReason;
+    use darkbot_solana::runtime_config::roles;
+    let (mut f, target, _) = dec13b_fixture("dec17b_b4_live", true);
+    // The node that records every sent transaction, opened by the same authorization.
+    let (calls, sent) = dec13b_live_node_wires(&mut f, true, 0, None);
+    let fe06 = f.owner.sources.capabilities.fe06.take().unwrap();
+    f.owner.submitter.open(&fe06);
+    f.owner.sources.capabilities.fe06 = Some(fe06);
+    let liquidator = f.owner.wallets[0].liquidator;
+    // The pilot liquidates without its own fees; its SOL could not pay a fee.
+    f.owner.wallets[0].roles = vec![roles::LIQUIDATOR];
+    f.owner.sources.capabilities.wallets[0].roles = vec![cap::ROLE_LIQUIDATOR];
+    b01_account(&mut f, liquidator, Pubkey::default(), 1_000, vec![]);
+    let payer = dec17b_wallet(&mut f, &[roles::FEE_PAYER], Some(20_000_000_000));
+    let p = f.owner.wallets.len() - 1;
+    // Its switch DISABLED: no fee payer may pay, the liquidator runs nothing.
+    let c = f.owner.choose_wallet(true);
+    assert_eq!(
+        (c.wallet, c.payer),
+        (0, Some(p)),
+        "the pilot, paid by the only fee payer"
+    );
+    let why = c.none_eligible.unwrap();
+    assert!(
+        why.contains(&format!(
+            "NO_FEE_PAYER_ELIGIBLE: {payer}=WALLET:{payer} DISABLED"
+        )),
+        "{why}"
+    );
+    f.owner.sources.capabilities.wallets[1].enabled = true;
+    let c = f.owner.choose_wallet(true);
+    assert_eq!(
+        c,
+        super::wallets::Choice {
+            wallet: 0,
+            payer: Some(p),
+            none_eligible: None
+        }
+    );
+    // A halted fee payer pays nothing (its HALT is its own).
+    f.owner.wallets[p].safety.halt(HaltReason::LimitBreached);
+    assert!(f
+        .owner
+        .choose_payer(true)
+        .unwrap_err()
+        .contains("SAFETY_HALTED:LIMIT_BREACHED"));
+    f.owner.wallets[p].safety = Safety::new(e2e_limits(), Allow::default(), false);
+    f.owner
+        .detect(Some((
+            target,
+            f.owner.clock.now_ns(),
+            100,
+            "account_update",
+        )))
+        .unwrap();
+    let sends = calls
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|m| *m == "sendTransaction")
+        .count();
+    assert_eq!(sends, 1, "one attempt");
+    let tx = sent.lock().unwrap()[0].clone();
+    let keys = tx.message.static_account_keys();
+    assert_eq!(tx.message.header().num_required_signatures, 2);
+    assert_eq!(
+        (keys[0], keys[1]),
+        (payer, liquidator),
+        "the payer pays, the liquidator signs"
+    );
+    assert!(
+        tx.verify_with_results().iter().all(|ok| *ok),
+        "both signatures real"
+    );
+    // The journal names the payer; the attempt's SOL is held on it, never on the liquidator.
+    let held = f.owner.wallets[0].fe04_held.as_ref().unwrap();
+    assert_eq!(held.fee_payer(), Some(payer.to_string().as_str()));
+    let book = &f.owner.wallets[0].reservations;
+    assert_eq!(book.held("SOL"), 0);
+    let on_payer = book.held_for(&payer.to_string(), &[]);
+    assert!(on_payer > 0);
+    assert_eq!(f.owner.sol_held(p), Some(on_payer));
+    assert_eq!(
+        f.owner.wallet_free_sol(p),
+        Some(20_000_000_000 - on_payer - f.owner.wallets[p].reservations.held("SOL")).map(|free| {
+            free.saturating_sub(
+                crate::execution::inventory::reserves(&f.owner.inventory_targets)
+                    .get("SOL")
+                    .copied()
+                    .unwrap_or(0),
+            )
+        })
+    );
+    // An unreadable book of a liquidator it pays leaves the payer's SOL unknown.
+    let saved = std::mem::replace(
+        &mut f.owner.wallets[0].reservations,
+        crate::execution::reservation::WalletReservations::unreadable(),
+    );
+    assert_eq!(f.owner.sol_held(p), None);
+    f.owner.wallets[0].reservations = saved;
+    let rows = f.owner.owner_snapshot(1).wallets.rows;
+    assert_eq!(rows[0].fee_payer, Some(payer.to_string()));
+    assert_eq!(rows[0].held_attempt, "UNKNOWN");
+    assert!(!rows[0].holds.contains_key("SOL"));
+    assert_eq!(
+        (rows[1].fee_payer.clone(), rows[1].sol_held_for_others),
+        (None, on_payer)
+    );
+    assert!(!rows[1].runs_candidates);
+    cleanup(f);
+}
+
+/// DEC-17b B4 (review M1/M2): under LIVE a wallet paying itself runs only as its grant scope's
+/// one fee payer (else the scope would refuse its signature after it was chosen); and what other
+/// books hold on it — an attempt it paid while it was a fee payer alone — is held on it in its
+/// free SOL and in the SOL its admission is checked against.
+#[test]
+fn dec17b_b4_a_self_paying_wallet_is_the_scopes_fee_payer_and_counts_holds_on_it() {
+    use crate::orchestration::capability_control::Fe06Authorization;
+    use crate::orchestration::fe06;
+    use darkbot_solana::runtime_config::roles;
+    let (mut f, target, _) = dec13b_fixture("dec17b_b4_m1", true);
+    let liquidator = f.owner.wallets[0].liquidator;
+    let p = dec17b_wallet(&mut f, &[roles::FEE_PAYER], Some(1_000_000_000));
+    let scope_of = |fee_payer: &Pubkey| {
+        fe06::parse(
+            fe06::tests::text(
+                &liquidator,
+                &[
+                    (
+                        "signers",
+                        &format!("{liquidator}:LIQUIDATOR+FEE_PAYER,{p}:FEE_PAYER"),
+                    ),
+                    ("fee_payer", &fee_payer.to_string()),
+                ],
+            )
+            .as_bytes(),
+            &fe06::tests::ceilings(),
+        )
+        .unwrap()
+    };
+    f.owner.sources.capabilities.fe06 = Some(Fe06Authorization::offline_test_of(scope_of(&p)));
+    let payer = f.owner.choose_payer(true);
+    assert_eq!(
+        f.owner.wallet_eligible(0, true, &payer),
+        Err("FE06_SCOPE_FEE_PAYER_NOT_ADMITTED".into())
+    );
+    f.owner.sources.capabilities.fe06 =
+        Some(Fe06Authorization::offline_test_of(scope_of(&liquidator)));
+    let payer = f.owner.choose_payer(true);
+    assert!(f.owner.wallet_eligible(0, true, &payer).is_ok());
+    // A liquidator alone whose book holds an attempt the pilot paid.
+    let (_, before) = f.owner.attempt_sol(0, None, Some(&target), &[]);
+    dec17b_wallet(&mut f, &[roles::LIQUIDATOR], Some(0));
+    let l = f.owner.wallets.len() - 1;
+    f.owner.wallets[l].reservations = crate::execution::reservation::WalletReservations::rebuild([
+        crate::execution::one_shot::ActiveHold {
+            attempt: "B4-M2".into(),
+            target: Pubkey::new_unique().to_string(),
+            unknown_outcome: true,
+            holds: [("SOL".to_string(), 7_000)].into(),
+            signature: None,
+            last_valid_block_height: None,
+            fee_payer: Some(liquidator.to_string()),
+        },
+    ])
+    .unwrap();
+    let (_, after) = f.owner.attempt_sol(0, None, Some(&target), &[]);
+    assert_eq!(after, before.map(|b| b + 7_000));
+    assert_eq!(f.owner.sol_held(0), after);
     cleanup(f);
 }
 

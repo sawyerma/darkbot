@@ -19,9 +19,11 @@ pub struct Fe04Admission {
     pub state_generation: u64,
     /// The currently observed deployment (ProgramData) hash.
     pub program_data_hash: String,
-    /// Reconciled wallet balances (`"SOL"` lamports, mint base units).
+    /// Reconciled wallet balances (`"SOL"` lamports, mint base units; DEC-17b B4: with
+    /// `fee_payer` its SOL is that wallet's).
     pub balances: BTreeMap<String, u64>,
-    /// What other attempts hold (`WalletReservations::held_by_others`).
+    /// What other attempts hold (`WalletReservations::held_by_others`; DEC-17b B4: with
+    /// `fee_payer` the SOL is what that wallet holds for every attempt of every wallet).
     pub reserved_elsewhere: BTreeMap<String, u64>,
     /// Never-spent policy reserve (`inventory::reserves`).
     pub policy_reserve: BTreeMap<String, u64>,
@@ -35,6 +37,9 @@ pub struct Fe04Admission {
     /// DEC-17b: the attempt records of the owner's other wallets — a grant's quotas and totals
     /// count every wallet's journal (`Err`: one was never read, the quotas are unknown).
     pub others: Result<Vec<crate::execution::accounting::AttemptRecord>, String>,
+    /// DEC-17b B4: the wallet paying the attempt's SOL when another than the journal's own
+    /// (`None`: the wallet pays itself) — the first key of every transaction of the payload.
+    pub fee_payer: Option<Pubkey>,
 }
 
 /// DEC-13b: the Safety reservation of an admitted attempt — its capital and worst-case inventory.
@@ -220,7 +225,9 @@ impl Fe04Admission {
         if c.plan.input.funding.as_str() != a.funding_class {
             return refuse("FE04_FUNDING_CLASS_MISMATCH");
         }
-        if c.payer.to_string() != a.wallet {
+        // DEC-17b B4: the payload is paid by the admission's fee payer, else by the wallet.
+        let payer_expected = self.fee_payer.map(|p| p.to_string());
+        if c.payer.to_string() != *payer_expected.as_ref().unwrap_or(&a.wallet) {
             return refuse("FE04_WALLET_MISMATCH");
         }
         let Some(fee) = c.fee_lamports else {
@@ -398,6 +405,7 @@ impl Fe04Admission {
             c.hold,
             fe06,
             exit_reserve,
+            payer_expected,
         ) {
             // A failed write may still have reached the disk: never treated as nothing.
             return if e.starts_with("JOURNAL") {

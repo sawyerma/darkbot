@@ -11,7 +11,7 @@
 //! mismatched sale, foreign wallet activity, proceeds below the floor, an incomplete observation —
 //! is refused at finalization: the exit stays UNKNOWN with every hold.
 use super::non_landing::{NonLandingRead, NonLandingRelease};
-use super::receipts::FinalizedObservation;
+use super::receipts::{observations_of, FinalizedObservation, FinalizedObservationV10};
 use super::settlement::{SettlementEvidence, SettlementSubject};
 use super::{
     cause, err, hex, key, Current, Journal, Phase, Receipt, Saved, Transition, Version,
@@ -132,7 +132,7 @@ pub(super) struct ExitAttemptV8 {
     pub(super) approval: ExitApproval,
     pub(super) intent: ExitIntent,
     pub(super) phase: ExitPhase,
-    pub(super) observations: BTreeMap<String, FinalizedObservation>,
+    pub(super) observations: BTreeMap<String, FinalizedObservationV10>,
     pub(super) finalized: Option<Vec<Receipt>>,
     pub(super) non_landing: Option<NonLandingRelease>,
 }
@@ -144,7 +144,7 @@ impl From<ExitAttempt> for ExitAttemptV8 {
             approval: v.approval,
             intent: v.intent,
             phase: v.phase,
-            observations: v.observations,
+            observations: super::receipts::observations_down(&v.observations),
             finalized: v.finalized,
             non_landing: v.non_landing,
         }
@@ -156,10 +156,52 @@ impl From<ExitAttemptV8> for ExitAttempt {
             approval: v.approval,
             intent: v.intent,
             phase: v.phase,
-            observations: v.observations,
+            observations: observations_of(v.observations),
             finalized: v.finalized,
             non_landing: v.non_landing,
             fe06: None,
+        }
+    }
+}
+
+/// Journal schema-9 and -10 layout of `ExitAttempt` (its own grant booking, before the DEC-17b
+/// B4 fee payer's delta in its observations).
+#[derive(Deserialize)]
+#[cfg_attr(test, derive(Serialize))]
+pub(super) struct ExitAttemptV10 {
+    pub(super) approval: ExitApproval,
+    pub(super) intent: ExitIntent,
+    pub(super) phase: ExitPhase,
+    pub(super) observations: BTreeMap<String, FinalizedObservationV10>,
+    pub(super) finalized: Option<Vec<Receipt>>,
+    pub(super) non_landing: Option<NonLandingRelease>,
+    pub(super) fe06: Option<super::Fe06Attempt>,
+}
+impl From<ExitAttemptV10> for ExitAttempt {
+    fn from(v: ExitAttemptV10) -> Self {
+        Self {
+            approval: v.approval,
+            intent: v.intent,
+            phase: v.phase,
+            observations: observations_of(v.observations),
+            finalized: v.finalized,
+            non_landing: v.non_landing,
+            fe06: v.fe06,
+        }
+    }
+}
+/// Tests write the earlier layout from today's exits.
+#[cfg(test)]
+impl From<ExitAttempt> for ExitAttemptV10 {
+    fn from(v: ExitAttempt) -> Self {
+        Self {
+            approval: v.approval,
+            intent: v.intent,
+            phase: v.phase,
+            observations: super::receipts::observations_down(&v.observations),
+            finalized: v.finalized,
+            non_landing: v.non_landing,
+            fe06: v.fe06,
         }
     }
 }
@@ -171,7 +213,7 @@ pub(super) struct ExitAttemptV5 {
     pub(super) approval: ExitApproval,
     pub(super) intent: ExitIntent,
     pub(super) phase: ExitPhase,
-    pub(super) observations: BTreeMap<String, FinalizedObservation>,
+    pub(super) observations: BTreeMap<String, FinalizedObservationV10>,
     pub(super) finalized: Option<Vec<Receipt>>,
 }
 impl From<ExitAttemptV5> for ExitAttempt {
@@ -180,7 +222,7 @@ impl From<ExitAttemptV5> for ExitAttempt {
             approval: v.approval,
             intent: v.intent,
             phase: v.phase,
-            observations: v.observations,
+            observations: observations_of(v.observations),
             finalized: v.finalized,
             non_landing: None,
             fe06: None,
@@ -253,6 +295,7 @@ pub(super) fn legal(p: &Saved, t: Transition, next: &Saved) -> bool {
         || p.hold != next.hold
         || p.fe06 != next.fe06
         || p.exit_reserve_lamports != next.exit_reserve_lamports
+        || p.fee_payer != next.fee_payer
     {
         return false;
     }
@@ -641,6 +684,8 @@ impl Journal {
     /// unknown reasons and consistent with the exit; anything less keeps it UNKNOWN.
     pub fn reconcile_exit_observed(&mut self) -> Result<(), String> {
         let mut s = self.saved.clone().ok_or_else(|| err("NO_ATTEMPT"))?;
+        // DEC-17b B4: an exit is paid by the attempt's fee payer.
+        let split = s.fee_payer.is_some();
         let e = s
             .exits
             .last_mut()
@@ -659,7 +704,10 @@ impl Journal {
                 .wallet_token_deltas
                 .clone()
                 .ok_or_else(|| err("EXIT_TOKEN_DELTAS_UNKNOWN_HOLD_RETAINED"))?;
-            deltas.insert("SOL".into(), o.wallet_sol_delta_lamports);
+            deltas.insert(
+                "SOL".into(),
+                super::settlement::attempt_sol_delta(o, split)?,
+            );
             receipts.push(Receipt {
                 signature: signature.clone(),
                 finalized: true,
@@ -834,6 +882,7 @@ pub(super) fn exit_hold(s: &Saved, exit_reserve: u64) -> Option<super::ActiveHol
         holds: super::held_with_exit_reserve(&holds, exit_reserve),
         signature: e.intent.signatures.first().cloned(),
         last_valid_block_height: Some(e.intent.last_valid_block_height),
+        fee_payer: s.fee_payer.clone(),
     })
 }
 
@@ -864,6 +913,7 @@ pub(super) fn position_hold(s: &Saved, exit_reserve: u64) -> Option<super::Activ
         holds: super::held_with_exit_reserve(&units, exit_reserve),
         signature: None,
         last_valid_block_height: None,
+        fee_payer: s.fee_payer.clone(),
     })
 }
 
@@ -903,6 +953,7 @@ pub(crate) mod tests {
         tokens: &[(&str, i128)],
     ) -> FinalizedObservation {
         FinalizedObservation {
+            payer_sol_delta_lamports: None,
             signature: sig.into(),
             slot: 85,
             success,
@@ -1083,6 +1134,34 @@ pub(crate) mod tests {
     ) -> String {
         let mint = solana_sdk::pubkey::Pubkey::new_unique().to_string();
         settled_in(dir, wallet, booked, &mint).2
+    }
+
+    /// DEC-17b B4 test seam: `wallet`'s journal in `dir` with a settled attempt `payer` paid
+    /// (its fee the payer's), holding an open position; returns its mint.
+    #[cfg(feature = "crate_health")]
+    pub(crate) fn settled_paid_with_position(
+        dir: &std::path::Path,
+        wallet: &str,
+        payer: &str,
+        booked: u64,
+    ) -> String {
+        let (_, mut a, mut i, c) = setup();
+        a.wallet = wallet.into();
+        i.wallet = wallet.into();
+        let mint = solana_sdk::pubkey::Pubkey::new_unique().to_string();
+        let mut j = Journal::open(dir, wallet).unwrap();
+        j.reserve_held(a, i.clone(), &c, None, None, 0, Some(payer.into()))
+            .unwrap();
+        j.handoff(&i.signed_wire_sha256, &c, || Ok(())).unwrap();
+        let mut s = j.saved.clone().unwrap();
+        let sig = &i.signatures[0];
+        let mut o = observation(sig, true, 0, &[(&mint, 1_000)]);
+        o.payer_sol_delta_lamports = Some(-5_000);
+        s.observations.insert(sig.clone(), o);
+        j.persist(s, Transition::Observe).unwrap();
+        j.reconcile_observed().unwrap();
+        j.settle(&value, booked).unwrap();
+        mint
     }
 
     /// Test seam: the same with the open position of `mint` (e.g. WSOL from a SOL bank).

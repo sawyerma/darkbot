@@ -91,14 +91,28 @@ describe("Project 0 owner wire contract (golden frames written by the Rust repor
     expect(liquidator.endResult).toBe("");
     expect(finance.snapshotId).toBe(wallets.financeSnapshotId);
     expect(wallets.policyReserves).toEqual([{ asset: "SOL", units: 50_000_000n }]);
-    // DEC-17b: every configured signer's wallet, with this run's choices.
+    // DEC-17b: every configured signer's wallet, with this run's choices; B4: a liquidator paid by
+    // a fee payer alone, and the SOL held on that payer for it.
     expect(wallets.rows).toEqual([{
       wallet: "11111111111111111111111111111112", roles: ["LIQUIDATOR", "FEE_PAYER"], enabled: true,
       runsCandidates: true, blockReason: "", solLamports: 5_000_000_000n, freeSolLamports: 4_950_000_000n,
       holds: [{ asset: "SOL", units: 0n }], heldAttempt: "NONE", haltReason: null, capitalInUseUsdMicro: 0n,
       dayAttempts: 0, journalRead: true, realizedNetUsdMicro: "0", selected: 7n,
+      feePayer: "11111111111111111111111111111112", solHeldForOthers: 0n,
+    }, {
+      wallet: "11111111111111111111111111111113", roles: ["LIQUIDATOR"], enabled: true,
+      runsCandidates: true, blockReason: "", solLamports: 0n, freeSolLamports: 9_000_000n,
+      holds: [], heldAttempt: "NONE", haltReason: null, capitalInUseUsdMicro: 0n,
+      dayAttempts: 0, journalRead: true, realizedNetUsdMicro: "0", selected: 2n,
+      feePayer: "11111111111111111111111111111114", solHeldForOthers: 0n,
+    }, {
+      wallet: "11111111111111111111111111111114", roles: ["FEE_PAYER"], enabled: true,
+      runsCandidates: false, blockReason: "", solLamports: 10_000_000n, freeSolLamports: 9_000_000n,
+      holds: [], heldAttempt: "NONE", haltReason: null, capitalInUseUsdMicro: 0n,
+      dayAttempts: 0, journalRead: true, realizedNetUsdMicro: null, selected: 0n,
+      feePayer: null, solHeldForOthers: 1_000_000n,
     }]);
-    expect([wallets.selections, wallets.selectionsNoneEligible, wallets.lastNoneEligible]).toEqual([7n, 0n, ""]);
+    expect([wallets.selections, wallets.selectionsNoneEligible, wallets.lastNoneEligible]).toEqual([9n, 0n, ""]);
   });
 
   it("DEC-03: decodes the N-2 non-landing status; none without a held attempt", () => {

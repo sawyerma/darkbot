@@ -21,6 +21,9 @@ pub struct ReceivershipParams<'a> {
     pub group: &'a Pubkey,
     pub marginfi_account: &'a Pubkey,
     pub liquidator: &'a Pubkey,
+    /// DEC-17b B4: the transaction's fee payer, who pays the liquidation record's rent and the
+    /// flat liquidation fee — the liquidator itself, or the wallet paying for it.
+    pub fee_payer: &'a Pubkey,
     /// Aus FeeState (P1A-Manifest / RAM-State), nicht hart kodiert.
     pub global_fee_wallet: &'a Pubkey,
     /// StartLiquidation: complete bank+oracle layout; active banks writable because Start locks
@@ -469,6 +472,8 @@ pub mod builders {
         }
     }
 
+    /// DEC-17b B4: `fee_payer` — another wallet paying the flat liquidation fee (the pinned
+    /// program's optional `fee_payer`, a signer); `None`: the receiver pays it.
     pub fn end_liquidation(
         program: &Pubkey,
         marginfi_account: &Pubkey,
@@ -476,6 +481,7 @@ pub mod builders {
         receiver: &Pubkey,
         global_fee_wallet: &Pubkey,
         banks_only: &[Pubkey],
+        fee_payer: Option<&Pubkey>,
     ) -> Instruction {
         let mut accounts = marginfi::accounts::EndLiquidation {
             marginfi_account: *marginfi_account,
@@ -485,7 +491,7 @@ pub mod builders {
             fee_state: protocol::fee_state_pda(program),
             global_fee_wallet: *global_fee_wallet,
             system_program: pk!(SYSTEM_PROGRAM),
-            fee_payer: None,
+            fee_payer: fee_payer.copied(),
         }
         .to_account_metas(Some(true));
         accounts.extend(banks_only.iter().map(|k| AccountMeta::new(*k, false)));
@@ -540,7 +546,7 @@ pub mod builders {
             v.push(init_liquidation_record(
                 p.program,
                 p.marginfi_account,
-                p.liquidator,
+                p.fee_payer,
             ));
         }
         v.push(start_liquidation(
@@ -560,6 +566,7 @@ pub mod builders {
             p.liquidator,
             p.global_fee_wallet,
             &p.end_banks,
+            (p.fee_payer != p.liquidator).then_some(p.fee_payer),
         ));
         v
     }
@@ -628,6 +635,7 @@ pub mod builders {
                 group: &p(),
                 marginfi_account: &account,
                 liquidator: &liquidator,
+                fee_payer: &liquidator,
                 global_fee_wallet: &p(),
                 start_observation: vec![],
                 end_banks: vec![bank],
@@ -675,6 +683,57 @@ pub mod builders {
                     Step::EndLiquidation,
                 ]
             );
+        }
+
+        /// DEC-17b B4: another wallet paying — the record's rent and the flat liquidation fee are
+        /// the fee payer's (a writable signer of Init and End), the receivership's authority and
+        /// receiver stay the liquidator.
+        #[test]
+        fn dec17b_b4_the_fee_payer_pays_the_record_the_liquidator_receives() {
+            let (program, account, liquidator, payer) = (p(), p(), p(), p());
+            let ixs = build_receivership(ReceivershipParams {
+                program: &program,
+                group: &p(),
+                marginfi_account: &account,
+                liquidator: &liquidator,
+                fee_payer: &payer,
+                global_fee_wallet: &p(),
+                start_observation: vec![],
+                end_banks: vec![],
+                init_record: true,
+                pre_refreshes: vec![],
+                withdraws: vec![],
+                swaps: vec![],
+                repays: vec![],
+            });
+            let init = &ixs[0];
+            assert_eq!(init, &init_liquidation_record(&program, &account, &payer));
+            let meta =
+                |ix: &Instruction, k: &Pubkey| ix.accounts.iter().find(|m| m.pubkey == *k).cloned();
+            assert!(meta(init, &payer).is_some_and(|m| m.is_signer && m.is_writable));
+            assert!(meta(init, &liquidator).is_none());
+            let (start, end) = (&ixs[1], &ixs[2]);
+            assert!(meta(start, &payer).is_none());
+            assert!(meta(start, &liquidator).is_some());
+            // End: the receiver, and the flat fee's payer last (the pinned optional account).
+            assert!(meta(end, &liquidator).is_some());
+            assert!(end
+                .accounts
+                .last()
+                .is_some_and(|m| m.pubkey == payer && m.is_signer && m.is_writable));
+            // Self-paid: the same account count, the optional payer absent (unchanged bytes).
+            let own = end_liquidation(&program, &account, &p(), &liquidator, &p(), &[], None);
+            let split = end_liquidation(
+                &program,
+                &account,
+                &p(),
+                &liquidator,
+                &p(),
+                &[],
+                Some(&payer),
+            );
+            assert_eq!(own.accounts.len(), split.accounts.len());
+            assert!(own.accounts.iter().all(|m| m.pubkey != payer));
         }
 
         #[test]

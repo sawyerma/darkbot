@@ -18,6 +18,7 @@ use crate::execution::one_shot::exit::ExitStep;
 use crate::execution::one_shot::non_landing::{NonLandingRead, Verdict};
 use crate::execution::one_shot::settlement::{
     conservative_value, NonLandingStatus, SettleStep, Settlement, SettlementEvidence,
+    SettlementSubject,
 };
 use crate::orchestration::remote_workers::Fe04SettlementWork;
 use darkbot_project0::safety::{LedgerViolation, SettledAttempt};
@@ -209,15 +210,17 @@ impl ShadowOwner {
             return;
         }
         let retry = Some(std::time::Instant::now() + self.fe04_settle_retry);
+        // DEC-17b B4: the attempt's and its exits' transactions are read with their fee payer.
+        let paid_by = held.fee_payer();
         let work = match (held.settlement_job(), held.exit_job()) {
             (Some((intent, observed)), _) => Some(Fe04SettlementWork {
-                subject: (&intent).into(),
+                subject: SettlementSubject::from(&intent).paid_by(paid_by),
                 observed,
                 exit: None,
                 wallet: self.wallets[i].liquidator,
             }),
             (None, Some((intent, observed))) => Some(Fe04SettlementWork {
-                subject: (&intent).into(),
+                subject: SettlementSubject::from(&intent).paid_by(paid_by),
                 observed,
                 exit: open_exit,
                 wallet: self.wallets[i].liquidator,
@@ -520,6 +523,9 @@ pub(super) struct Fe04AdmissionFacts {
     valid_until_slot: u64,
     /// DEC-17b: the other wallets' attempt records the grant quotas count too.
     others: Result<Vec<crate::execution::accounting::AttemptRecord>, String>,
+    /// DEC-17b B4: the wallet paying the attempt when another does (`balances` and
+    /// `reserved_elsewhere` carry its SOL).
+    fee_payer: Option<Pubkey>,
 }
 
 /// DEC-13b: the admission a LIVE candidate is handed to — the open one of the same approval
@@ -612,6 +618,7 @@ pub(super) fn admission_for(
                 simulation: Default::default(),
                 reserved: None,
                 others: Ok(vec![]),
+                fee_payer: None,
             }
         }
     };
@@ -622,6 +629,7 @@ pub(super) fn admission_for(
     admission.policy_reserve = f.policy_reserve;
     admission.valid_until_slot = f.valid_until_slot;
     admission.others = f.others;
+    admission.fee_payer = f.fee_payer;
     stats.block_reason.clear();
     Some(admission)
 }
@@ -649,6 +657,7 @@ impl ShadowOwner {
     pub(super) fn sim_only_use_facts(
         &self,
         i: usize,
+        payer: Option<usize>,
         target: &Pubkey,
     ) -> Option<crate::execution::one_shot::admission::UseFacts> {
         use crate::execution::one_shot::{archive, fe06_grant_totals, free_sol};
@@ -656,8 +665,11 @@ impl ShadowOwner {
         if grant.scope()?.mode != crate::orchestration::fe06::Mode::SimOnly {
             return None;
         }
-        let elsewhere: std::collections::BTreeMap<String, u64> =
-            [("SOL".to_string(), self.wallets[i].reservations.held("SOL"))].into();
+        // DEC-17b B4: the SOL is the paying wallet's (unknown holds: no free SOL).
+        let (balances, held) = self.attempt_sol(i, payer, Some(target), &[]);
+        let elsewhere: std::collections::BTreeMap<String, u64> = held
+            .map(|h| [("SOL".to_string(), h)].into())
+            .unwrap_or_default();
         let records = match &self.wallets[i].fe04_held {
             Some(journal) => journal.attempt_records().ok(),
             None => self.fe04_journal.as_ref().and_then(|dir| {
@@ -672,11 +684,13 @@ impl ShadowOwner {
                 own
             });
         Some(crate::execution::one_shot::admission::UseFacts {
-            sol_free_lamports: free_sol(
-                &self.fe04_wallet_balances(i, Some(target)),
-                &elsewhere,
-                &crate::execution::inventory::reserves(&self.inventory_targets),
-            ),
+            sol_free_lamports: held.and_then(|_| {
+                free_sol(
+                    &balances,
+                    &elsewhere,
+                    &crate::execution::inventory::reserves(&self.inventory_targets),
+                )
+            }),
             booked: records.and_then(|r| fe06_grant_totals(&r, grant.digest())),
         })
     }
@@ -690,6 +704,7 @@ impl ShadowOwner {
     pub(super) fn fe04_admission_facts(
         &self,
         i: usize,
+        payer: Option<usize>,
         target: Option<&Pubkey>,
     ) -> Result<Fe04AdmissionFacts, (String, bool)> {
         use crate::execution::one_shot::approval_file::ApprovalFile;
@@ -734,20 +749,50 @@ impl ShadowOwner {
         let Some(valid_until_slot) = self.blockhash.get().and_then(|b| b.valid_until_slot()) else {
             return Err(("FE04_BLOCKHASH_VALIDITY_UNKNOWN".into(), false));
         };
+        // DEC-17b B4: the paying wallet's SOL — its lamports, less every SOL hold on it but this
+        // approval's own (unknown: no admission).
+        let (balances, held) = self.attempt_sol(i, payer, target, &[&approval.approval_id]);
+        let mut reserved_elsewhere = self.wallets[i]
+            .reservations
+            .held_by_others(&[&approval.approval_id]);
+        let Some(held) = held else {
+            return Err(("FE04_SOL_HOLDS_UNKNOWN".into(), false));
+        };
+        reserved_elsewhere.insert("SOL".into(), held);
         Ok(Fe04AdmissionFacts {
             dir,
             wallet: self.wallets[i].liquidator.to_string(),
             state_generation: self.st.recovery_generation(),
             program_data_hash: self.program_data_baseline_hash.to_string(),
-            balances: self.fe04_wallet_balances(i, target),
-            reserved_elsewhere: self.wallets[i]
-                .reservations
-                .held_by_others(&[&approval.approval_id]),
+            balances,
+            reserved_elsewhere,
             policy_reserve: crate::execution::inventory::reserves(&self.inventory_targets),
             valid_until_slot,
             approval: approval.clone(),
             others: self.other_records(i),
+            fee_payer: payer.map(|p| self.wallets[p].liquidator),
         })
+    }
+
+    /// DEC-17b B4: the balances an attempt of wallet `i` runs with — the wallet's (`target`'s
+    /// banks), its SOL replaced by `payer`'s when another wallet pays — and the SOL held on the
+    /// paying wallet but `i`'s attempts `except` (`sol_reserved`; `None`: unknown).
+    pub(super) fn attempt_sol(
+        &self,
+        i: usize,
+        payer: Option<usize>,
+        target: Option<&Pubkey>,
+        except: &[&str],
+    ) -> (std::collections::BTreeMap<String, u64>, Option<u64>) {
+        let mut balances = self.fe04_wallet_balances(i, target);
+        let p = payer.unwrap_or(i);
+        if p != i {
+            balances.remove("SOL");
+            if let Some(r) = self.st.get(&self.wallets[p].liquidator) {
+                balances.insert("SOL".to_string(), r.lamports);
+            }
+        }
+        (balances, self.sol_reserved(p, i, except))
     }
 
     /// DEC-13b (review M4/L5): an UNKNOWN handoff is read back from the disk the way a restart
@@ -825,7 +870,12 @@ impl ShadowOwner {
             return;
         }
         let mut quiet = Fe04AdmissionStats::default();
-        let facts = self.fe04_admission_facts(i, None);
+        // DEC-17b B4: a liquidator without its own fees opens with the payer it would run with
+        // now; every candidate refreshes it.
+        let payer = (!self.wallets[i].pays_itself())
+            .then(|| self.choose_payer(true).ok().map(|(p, _)| p))
+            .flatten();
+        let facts = self.fe04_admission_facts(i, payer, None);
         let w = &mut self.wallets[i];
         w.fe04_admission =
             admission_for(&mut w.fe04_admission, &mut w.fe04_held, &mut quiet, facts);
@@ -982,9 +1032,17 @@ impl ShadowOwner {
                 return refuse(self, e);
             }
         };
+        // DEC-17b B4: the attempt's fee payer pays its exit (its exit reserve is held there).
+        let payer = match held.fee_payer() {
+            None => i,
+            Some(key) => match self.wallet_of(key) {
+                Some(p) => p,
+                None => return refuse(self, format!("EXIT_FEE_PAYER_NOT_CONFIGURED: {key}")),
+            },
+        };
         let view = StateView(&self.st);
         let mut balances = std::collections::BTreeMap::new();
-        if let Some(r) = self.st.get(&self.wallets[i].liquidator) {
+        if let Some(r) = self.st.get(&self.wallets[payer].liquidator) {
             balances.insert("SOL".to_string(), r.lamports);
         }
         for m in [mint, wsol] {
@@ -1013,7 +1071,8 @@ impl ShadowOwner {
             })
             .flatten();
         // DEC-18 §4.3: an exit is signed; a read-only measurement holds no private key.
-        if self.wallets[i].payer.signer().is_none() {
+        if self.wallets[i].payer.signer().is_none() || self.wallets[payer].payer.signer().is_none()
+        {
             return refuse(
                 self,
                 "EXIT_SIGNER_UNAVAILABLE: no private key on a read-only path".into(),
@@ -1021,21 +1080,28 @@ impl ShadowOwner {
         }
         // P8-CTRL.5: the exit realizes its attempt's open position — that hold (units and the
         // exit reserve) is its own, never another's.
-        let reserved_elsewhere = self.wallets[i]
-            .reservations
-            .held_by_others(&[&approval.approval_id, &approval.attempt_approval_id]);
+        let own: [&str; 2] = [&approval.approval_id, &approval.attempt_approval_id];
+        let mut reserved_elsewhere = self.wallets[i].reservations.held_by_others(&own);
+        let Some(held) = self.sol_reserved(payer, i, &own) else {
+            return refuse(self, "FE04_SOL_HOLDS_UNKNOWN".into());
+        };
+        reserved_elsewhere.insert("SOL".into(), held);
         let others = self.other_records(i);
-        let w = &mut self.wallets[i];
+        let (w, paying) = wallets::with_payer(&mut self.wallets, i, Some(payer));
         let Some(mut journal) = w.fe04_held.take() else {
             return;
         };
-        let Some(payer) = w.payer.signer() else {
+        let (Some(signer), Some(fee_payer)) = (
+            w.payer.signer(),
+            paying.map_or(w.payer.signer(), |p| p.payer.signer()),
+        ) else {
             w.fe04_held = Some(journal);
             return;
         };
         let candidate = ExitCandidate {
             route: &route,
-            payer,
+            payer: fee_payer,
+            authority: paying.map(|_| signer),
             blockhash: bh.hash,
             last_valid_block_height: bh.last_valid_block_height,
             resources: self.resources,

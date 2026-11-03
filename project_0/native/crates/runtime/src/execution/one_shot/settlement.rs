@@ -109,6 +109,9 @@ pub struct SettlementSubject {
     /// `None` (an intent before C12): never provably absent.
     pub last_valid_block_height: Option<u64>,
     pub state_slot: u64,
+    /// DEC-17b B4: the wallet that paid it when another of the owner's wallets did (`None`: the
+    /// wallet itself) — the first key of each of its transactions.
+    pub fee_payer: Option<String>,
 }
 impl From<&Intent> for SettlementSubject {
     fn from(i: &Intent) -> Self {
@@ -118,6 +121,7 @@ impl From<&Intent> for SettlementSubject {
             expected_wallet_assets: i.expected_wallet_assets.clone(),
             last_valid_block_height: i.last_valid_block_height,
             state_slot: i.state_slot,
+            fee_payer: None,
         }
     }
 }
@@ -136,10 +140,16 @@ impl From<&super::exit::ExitIntent> for SettlementSubject {
             .into(),
             last_valid_block_height: Some(i.last_valid_block_height),
             state_slot: i.state_slot,
+            fee_payer: None,
         }
     }
 }
 impl SettlementSubject {
+    /// DEC-17b B4: the subject as paid by `payer` (the attempt's `Journal::fee_payer`).
+    pub fn paid_by(mut self, payer: Option<&str>) -> Self {
+        self.fee_payer = payer.map(str::to_string);
+        self
+    }
     /// DEC-03: what its non-landing read proves; an unknown expiry (an intent before C12) is
     /// never provable.
     pub fn non_landing(&self) -> Result<Subject, String> {
@@ -222,6 +232,23 @@ pub(super) fn keep_strongest(
     observations.insert(signature, read);
 }
 
+/// DEC-17b B4: the SOL an observed transaction moved for the attempt — the wallet's own delta
+/// and, when another wallet paid it (`split`), that payer's (its fee, tip and rent): both or
+/// none. An observation whose payer does not match the attempt's is never booked.
+pub(super) fn attempt_sol_delta(
+    o: &super::receipts::FinalizedObservation,
+    split: bool,
+) -> Result<i128, String> {
+    match (split, o.payer_sol_delta_lamports) {
+        (false, None) => Ok(o.wallet_sol_delta_lamports),
+        (true, Some(payer)) => o
+            .wallet_sol_delta_lamports
+            .checked_add(payer)
+            .ok_or_else(|| err("SETTLEMENT_OVERFLOW")),
+        _ => Err(err("SETTLEMENT_FEE_PAYER_MISMATCH_HOLD_RETAINED")),
+    }
+}
+
 /// The settlement worker's reads for `intent` (signatures with a complete observation are not
 /// read again); the non-landing read over `sources` (unavailable: why).
 pub fn fetch_settlement_evidence(
@@ -231,21 +258,24 @@ pub fn fetch_settlement_evidence(
     observed: &Observed,
 ) -> SettlementEvidence {
     let wallet = intent.wallet.parse();
+    let payer: Result<Option<solana_sdk::pubkey::Pubkey>, _> =
+        intent.fee_payer.as_deref().map(str::parse).transpose();
     let observations: Vec<_> = intent
         .signatures
         .iter()
         .filter(|s| !observed.complete.contains(*s))
         .map(|signature| {
-            let read = match (&wallet, signature.parse()) {
-                (Ok(wallet), Ok(sig)) => super::receipts::fetch_finalized(
+            let read = match (&wallet, &payer, signature.parse()) {
+                (Ok(wallet), Ok(payer), Ok(sig)) => super::receipts::fetch_finalized(
                     rpc,
                     &sig,
                     wallet,
+                    payer.as_ref(),
                     intent.state_slot,
                     &intent.expected_wallet_assets,
                 ),
-                (Err(_), _) => Err(err("WALLET_INVALID")),
-                (_, Err(_)) => Err(err("SIGNATURE_BINDING_INVALID")),
+                (Err(_), _, _) | (_, Err(_), _) => Err(err("WALLET_INVALID")),
+                (_, _, Err(_)) => Err(err("SIGNATURE_BINDING_INVALID")),
             };
             (signature.clone(), read)
         })
@@ -366,7 +396,10 @@ impl Journal {
                 .wallet_token_deltas
                 .clone()
                 .ok_or_else(|| err("SETTLEMENT_TOKEN_DELTAS_UNKNOWN_HOLD_RETAINED"))?;
-            deltas.insert("SOL".into(), o.wallet_sol_delta_lamports);
+            deltas.insert(
+                "SOL".into(),
+                attempt_sol_delta(o, saved.fee_payer.is_some())?,
+            );
             receipts.push(Receipt {
                 signature: signature.clone(),
                 finalized: true,
@@ -541,7 +574,7 @@ impl Journal {
             Some((intent, observed)) => fetch_settlement_evidence(
                 rpc,
                 Ok(sources),
-                &SettlementSubject::from(&intent),
+                &SettlementSubject::from(&intent).paid_by(self.fee_payer()),
                 &observed,
             ),
             None => SettlementEvidence::default(),
@@ -744,6 +777,7 @@ mod tests {
         s.observations.insert(
             signature.into(),
             FinalizedObservation {
+                payer_sol_delta_lamports: None,
                 signature: signature.into(),
                 slot: 500,
                 success,
@@ -778,6 +812,7 @@ mod tests {
         let (path, mut j, i) = handed_off(1);
         let s1 = i.signatures[0].clone();
         let complete = FinalizedObservation {
+            payer_sol_delta_lamports: None,
             signature: s1.clone(),
             slot: 500,
             success: true,
@@ -816,6 +851,7 @@ mod tests {
         let (path, mut j, i) = handed_off(1);
         let s1 = i.signatures[0].clone();
         let incomplete = FinalizedObservation {
+            payer_sol_delta_lamports: None,
             signature: s1.clone(),
             slot: 500,
             success: true,
@@ -851,6 +887,7 @@ mod tests {
         let (path, mut j, i) = handed_off(2);
         let (s1, s2) = (i.signatures[0].clone(), i.signatures[1].clone());
         let obs = |sig: &str, complete: bool| FinalizedObservation {
+            payer_sol_delta_lamports: None,
             signature: sig.into(),
             slot: 500,
             success: true,
@@ -918,6 +955,62 @@ mod tests {
         assert!(
             reopened.reconcile_observed().is_err(),
             "no second finalization"
+        );
+        fs::remove_dir_all(path).unwrap();
+    }
+
+    /// DEC-17b B4: an attempt another wallet pays is reserved with that payer — never the
+    /// journal's own wallet as its payer — durable across a replay, its SOL held on the payer
+    /// (never on the wallet), and booked with both SOL deltas, the wallet's own and its payer's;
+    /// an observation without the payer's is never booked.
+    #[test]
+    fn dec17b_b4_a_paid_attempt_books_the_wallet_and_its_payer_sol() {
+        use crate::execution::reservation::WalletReservations;
+        let (path, a, i, c) = setup();
+        let payer = solana_sdk::pubkey::Pubkey::new_unique().to_string();
+        let mut j = Journal::open(&path, &a.wallet).unwrap();
+        assert_eq!(
+            j.reserve_held(
+                a.clone(),
+                i.clone(),
+                &c,
+                None,
+                None,
+                0,
+                Some(a.wallet.clone())
+            )
+            .unwrap_err(),
+            "JOURNAL_FEE_PAYER_INVALID"
+        );
+        j.reserve_held(a.clone(), i.clone(), &c, None, None, 0, Some(payer.clone()))
+            .unwrap();
+        let hold = j.active_hold().unwrap();
+        assert_eq!(hold.fee_payer.as_deref(), Some(payer.as_str()));
+        let book = WalletReservations::rebuild([hold]).unwrap();
+        assert_eq!(
+            (book.held("SOL"), book.held_for(&payer, &[])),
+            (0, i.holds["SOL"])
+        );
+        j.handoff(&i.signed_wire_sha256, &c, || Ok(())).unwrap();
+        drop(j);
+        let mut j = Journal::open(&path, &a.wallet).unwrap();
+        assert_eq!(j.fee_payer(), Some(payer.as_str()));
+        observe(&mut j, &i.signatures[0], true, 0, Some(("MINT", 1_000)));
+        assert_eq!(
+            j.reconcile_observed().unwrap_err(),
+            "SETTLEMENT_FEE_PAYER_MISMATCH_HOLD_RETAINED"
+        );
+        let mut s = j.saved.clone().unwrap();
+        s.observations
+            .get_mut(&i.signatures[0])
+            .unwrap()
+            .payer_sol_delta_lamports = Some(-5_000);
+        j.persist(s, Transition::Observe).unwrap();
+        j.reconcile_observed().unwrap();
+        let done = j.settle(&value, BOOKED).unwrap();
+        assert_eq!(
+            (done.wallet_deltas["SOL"], done.wallet_deltas["MINT"]),
+            (-5_000, 1_000)
         );
         fs::remove_dir_all(path).unwrap();
     }
@@ -1169,6 +1262,7 @@ mod tests {
         // The landing observed with incomplete deltas: UNKNOWN, the hold stays.
         let (path6, mut o, i6) = handed_off(1);
         let partial = FinalizedObservation {
+            payer_sol_delta_lamports: None,
             signature: i6.signatures[0].clone(),
             slot: 52,
             success: true,

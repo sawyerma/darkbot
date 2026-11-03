@@ -1120,6 +1120,11 @@ pub(super) fn prepare(
             )
         },
     )?;
+    // DEC-17b: the first pilot is booked once any wallet's journals hold an attempt booked
+    // against a grant (a wallet never read: not known — the first pilot's rule holds).
+    if let Some(running) = sources.capabilities.running.as_mut() {
+        running.pilot_done = pilot_booked(&wallets);
+    }
     let jit_funding_bank = crate::execution::inventory::parse_funding_bank(
         &std::env::var("P0_JIT_FUNDING_BANK").unwrap_or_default(),
     )?;
@@ -1442,6 +1447,17 @@ impl Fe04Start {
     }
 }
 
+/// DEC-17b: whether the first pilot's attempt is booked — every wallet that runs candidates was
+/// read and one of them holds an attempt booked against an FE-06 grant (unknown: not booked).
+pub(super) fn pilot_booked(wallets: &[super::wallets::OwnerWallet]) -> bool {
+    let read: Option<Vec<_>> = wallets
+        .iter()
+        .filter(|w| w.runs_candidates())
+        .map(|w| w.records.as_ref())
+        .collect();
+    read.is_some_and(|r| r.iter().flat_map(|r| r.iter()).any(|r| r.fe06.is_some()))
+}
+
 /// DEC-17b: what the owner subscribes of its wallets — every configured signer's own account (its
 /// SOL in canonical state: the admission's, the wallet choice's and the rebalancing's balance)
 /// and, of every wallet that runs candidates, its ATAs of each bank's mint.
@@ -1453,7 +1469,8 @@ pub(super) fn wallet_accounts<S: AccountSource + ?Sized>(
 ) -> Vec<Pubkey> {
     let mut keys: Vec<Pubkey> = wallets.iter().map(|(k, _)| *k).collect();
     for (wallet, roles) in wallets {
-        if roles.as_slice() == darkbot_solana::runtime_config::roles::SIGNING {
+        // DEC-17b B4: a liquidator paid by a fee payer runs candidates too.
+        if roles.contains(&darkbot_solana::runtime_config::roles::LIQUIDATOR) {
             for bank in banks {
                 keys.extend(ata_candidates_for_bank(state, program, bank, wallet));
             }
@@ -2141,6 +2158,8 @@ pub(super) fn running_identity(
             .map(crate::orchestration::capability_control::WalletSwitch::scope_entry)
             .collect(),
         owner_epoch: epoch,
+        // Set once the wallets' journals are read (`pilot_booked`).
+        pilot_done: false,
     })
 }
 

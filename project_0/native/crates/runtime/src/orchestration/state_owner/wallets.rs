@@ -4,6 +4,11 @@
 //! with: among the wallets that may run it, the most SOL available after every hold (exit
 //! reserves included) and the policy reserve, the lowest key on a tie; never round robin. An
 //! error, UNKNOWN or HALT of a wallet blocks that wallet only.
+//!
+//! DEC-17b B4: a liquidator without the FEE_PAYER role runs with a fee payer — a wallet with that
+//! role alone, chosen the same way (the most free SOL, the lowest key on a tie): its SOL pays the
+//! attempt's fee, tip, record rent and exit reserve and is held on it (`WalletReservations::
+//! held_for`), the liquidator's key signs beside it. A wallet with both roles pays only itself.
 use super::*;
 use crate::execution::reservation::WalletReservations;
 
@@ -85,15 +90,58 @@ impl OwnerWallet {
         }
     }
 
-    /// A wallet that liquidates and pays its own fees — the one kind a candidate runs with.
+    /// A wallet that liquidates — with its own fees, or (DEC-17b B4) paid by a fee payer.
     pub(super) fn runs_candidates(&self) -> bool {
+        self.roles
+            .contains(&darkbot_solana::runtime_config::roles::LIQUIDATOR)
+    }
+
+    /// DEC-17b B4: it liquidates and pays its own fees.
+    pub(super) fn pays_itself(&self) -> bool {
         self.roles == darkbot_solana::runtime_config::roles::SIGNING
+    }
+
+    /// DEC-17b B4: a fee payer alone — it pays the liquidators without their own.
+    pub(super) fn pays_others(&self) -> bool {
+        self.roles == [darkbot_solana::runtime_config::roles::FEE_PAYER]
     }
 
     /// The wallet as a grant's scope names it (`<pubkey>:<ROLE>+<ROLE>`).
     pub(super) fn scope_entry(&self) -> String {
         format!("{}:{}", self.liquidator, self.roles.join("+"))
     }
+}
+
+/// DEC-17b B4: why a candidate whose pilot has no own fees is admitted nothing.
+pub(super) const NONE_ELIGIBLE: &str = "WALLET_NONE_ELIGIBLE";
+
+/// DEC-17b B4: wallet `w` to lend to a candidate's evaluation and, when another pays it, that fee
+/// payer (read only; never `w` itself).
+pub(super) fn with_payer(
+    wallets: &mut [OwnerWallet],
+    w: usize,
+    payer: Option<usize>,
+) -> (&mut OwnerWallet, Option<&OwnerWallet>) {
+    match payer.filter(|p| *p != w) {
+        None => (&mut wallets[w], None),
+        Some(p) if p < w => {
+            let (low, high) = wallets.split_at_mut(w);
+            (&mut high[0], Some(&low[p]))
+        }
+        Some(p) => {
+            let (low, high) = wallets.split_at_mut(p);
+            (&mut low[w], Some(&high[0]))
+        }
+    }
+}
+
+/// DEC-17b: the wallet a candidate runs with, the wallet paying it (B4; `None`: itself) and,
+/// when no wallet may run it, why each may not.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct Choice {
+    pub(super) wallet: usize,
+    pub(super) payer: Option<usize>,
+    pub(super) none_eligible: Option<String>,
 }
 
 /// DEC-17b: this run's wallet choices — how many candidates ran with a wallet that may not run
@@ -124,21 +172,62 @@ impl ShadowOwner {
         &self.wallets[0]
     }
 
-    /// The wallet's SOL available to a new attempt: its reconciled lamports less every hold of
-    /// its book (open positions with their exit reserve included) and the policy reserve;
-    /// `None` when its lamports are unknown or held beyond them.
-    pub(super) fn wallet_free_sol(&self, i: usize) -> Option<u64> {
-        let w = &self.wallets[i];
+    /// The SOL held on wallet `i`: its book's own SOL holds (open positions with their exit
+    /// reserve included) and (DEC-17b B4) what the attempts of the liquidators it pays hold on
+    /// it — `None` while its book, or the book of a liquidator it may pay, is unreadable.
+    pub(super) fn sol_held(&self, i: usize) -> Option<u64> {
+        self.sol_reserved(i, i, &[])
+    }
+
+    /// The SOL held on wallet `payer` (`sol_held`) but the holds of the attempts `except` in
+    /// `lane`'s book (an admission's own approval, an exit's own attempt) — the SOL its next
+    /// attempt or exit is checked against, whichever wallet's lane that is (review M2: a wallet
+    /// paying itself counts what other books hold on it too).
+    pub(super) fn sol_reserved(&self, payer: usize, lane: usize, except: &[&str]) -> Option<u64> {
+        let w = &self.wallets[payer];
         if w.reservations.is_unreadable() {
             return None;
         }
+        let own: &[&str] = if lane == payer { except } else { &[] };
+        let mut held = w
+            .reservations
+            .held_by_others(own)
+            .get("SOL")
+            .copied()
+            .unwrap_or(0);
+        let key = w.liquidator.to_string();
+        for (j, o) in self.wallets.iter().enumerate().filter(|(j, _)| *j != payer) {
+            if o.reservations.is_unreadable() {
+                if w.pays_others() && o.runs_candidates() && !o.pays_itself() {
+                    return None;
+                }
+                continue;
+            }
+            let ids: &[&str] = if j == lane { except } else { &[] };
+            held = held.saturating_add(o.reservations.held_for(&key, ids));
+        }
+        Some(held)
+    }
+
+    /// DEC-17b B4: the wallet with key `key` (a held attempt's fee payer).
+    pub(super) fn wallet_of(&self, key: &str) -> Option<usize> {
+        self.wallets
+            .iter()
+            .position(|w| w.liquidator.to_string() == key)
+    }
+
+    /// The wallet's SOL available to a new attempt: its reconciled lamports less every SOL hold
+    /// on it (`sol_held`) and the policy reserve; `None` when its lamports or holds are unknown
+    /// or held beyond them.
+    pub(super) fn wallet_free_sol(&self, i: usize) -> Option<u64> {
+        let w = &self.wallets[i];
+        let held = self.sol_held(i)?;
         let balances: std::collections::BTreeMap<String, u64> = self
             .st
             .get(&w.liquidator)
             .map(|r| [("SOL".to_string(), r.lamports)].into())
             .unwrap_or_default();
-        let held: std::collections::BTreeMap<String, u64> =
-            [("SOL".to_string(), w.reservations.held("SOL"))].into();
+        let held: std::collections::BTreeMap<String, u64> = [("SOL".to_string(), held)].into();
         crate::execution::one_shot::free_sol(
             &balances,
             &held,
@@ -146,16 +235,12 @@ impl ShadowOwner {
         )
     }
 
-    /// Whether wallet `i` may run a candidate now, and its free SOL; else why not. A wallet
-    /// liquidates as its own fee payer, its Safety is not halted and its book readable; for LIVE
-    /// also its switch is ENABLED, the grant's scope admits it, no attempt holds it (single
-    /// flight per wallet) and its FE-04 approval (bound to one wallet) is VALID.
-    pub(super) fn wallet_eligible(&self, i: usize, live: bool) -> Result<u64, String> {
+    /// The switch, scope and halt gates every signer of a candidate passes: its Safety is not
+    /// halted and its book readable; for LIVE also its switch is ENABLED and the grant's scope
+    /// admits it.
+    fn signer_gates(&self, i: usize, live: bool) -> Result<(), String> {
         use crate::orchestration::capability_control as cap;
         let w = &self.wallets[i];
-        if !w.runs_candidates() {
-            return Err("WALLET_NOT_ITS_OWN_FEE_PAYER".into());
-        }
         if let Some(halt) = w.safety.halted() {
             return Err(format!("SAFETY_HALTED:{}", halt.as_str()));
         }
@@ -180,6 +265,92 @@ impl ShadowOwner {
             {
                 return Err("FE06_SCOPE_WALLET_NOT_ADMITTED".into());
             }
+        }
+        Ok(())
+    }
+
+    /// DEC-17b B4: for LIVE, the grant's scope names wallet `i` as its one fee payer (none: no
+    /// scope binds it).
+    fn scope_fee_payer(&self, i: usize, live: bool) -> Result<(), String> {
+        let named = |s: &crate::orchestration::fe06::Scope| {
+            s.fee_payer == self.wallets[i].liquidator.to_string()
+        };
+        if live
+            && self
+                .sources
+                .capabilities
+                .fe06
+                .as_ref()
+                .and_then(|g| g.scope())
+                .is_some_and(|s| !named(s))
+        {
+            return Err("FE06_SCOPE_FEE_PAYER_NOT_ADMITTED".into());
+        }
+        Ok(())
+    }
+
+    /// DEC-17b B4: whether wallet `p` may pay a candidate of a liquidator without its own fees
+    /// now, and its free SOL; else why not. A fee payer alone, through the signer gates; for LIVE
+    /// also the grant's scope names it as the fee payer.
+    pub(super) fn payer_eligible(&self, p: usize, live: bool) -> Result<u64, String> {
+        let w = &self.wallets[p];
+        if !w.pays_others() {
+            return Err("WALLET_NOT_A_FEE_PAYER".into());
+        }
+        self.signer_gates(p, live)?;
+        self.scope_fee_payer(p, live)?;
+        self.wallet_free_sol(p)
+            .ok_or_else(|| "WALLET_SOL_UNKNOWN".to_string())
+    }
+
+    /// DEC-17b B4: the fee payer the liquidators without their own run with now — among the
+    /// eligible ones the most free SOL, the lowest key on a tie — and its free SOL; else why none.
+    pub(super) fn choose_payer(&self, live: bool) -> Result<(usize, u64), String> {
+        let mut best: Option<(usize, u64)> = None;
+        let mut refusals = vec![];
+        for p in (0..self.wallets.len()).filter(|p| self.wallets[*p].pays_others()) {
+            match self.payer_eligible(p, live) {
+                Ok(free) => {
+                    if best.is_none_or(|(b, f)| self.better(p, free, b, f)) {
+                        best = Some((p, free));
+                    }
+                }
+                Err(e) => refusals.push(format!("{}={e}", self.wallets[p].liquidator)),
+            }
+        }
+        best.ok_or_else(|| {
+            if refusals.is_empty() {
+                "NO_FEE_PAYER_CONFIGURED".into()
+            } else {
+                format!("NO_FEE_PAYER_ELIGIBLE: {}", refusals.join(", "))
+            }
+        })
+    }
+
+    /// The deterministic order of the choice: more free SOL, then the lower key.
+    fn better(&self, i: usize, free: u64, than: usize, than_free: u64) -> bool {
+        free > than_free
+            || (free == than_free
+                && self.wallets[i].liquidator.to_bytes() < self.wallets[than].liquidator.to_bytes())
+    }
+
+    /// Whether wallet `i` may run a candidate now, the SOL free for it and the wallet paying it
+    /// (`None`: itself); else why not. A wallet liquidates — paying its own fees, or (DEC-17b
+    /// B4) paid by `payer`, the fee payer of this candidate — through the signer gates; for LIVE
+    /// also no attempt holds it (single flight per wallet) and its FE-04 approval (bound to one
+    /// wallet) is VALID.
+    pub(super) fn wallet_eligible(
+        &self,
+        i: usize,
+        live: bool,
+        payer: &Result<(usize, u64), String>,
+    ) -> Result<(u64, Option<usize>), String> {
+        let w = &self.wallets[i];
+        if !w.runs_candidates() {
+            return Err("WALLET_NOT_A_LIQUIDATOR".into());
+        }
+        self.signer_gates(i, live)?;
+        if live {
             if let Some(state) = w.fe04_held.as_ref().and_then(|j| j.step_state()) {
                 return Err(format!("{}:{}", fe04::ATTEMPT_HELD, state.name()));
             }
@@ -188,36 +359,62 @@ impl ShadowOwner {
                 return Err(format!("FE04_APPROVAL_{}", approval.state));
             }
         }
-        self.wallet_free_sol(i)
-            .ok_or_else(|| "WALLET_SOL_UNKNOWN".to_string())
+        if w.pays_itself() {
+            // B4 review M1: a wallet paying itself is the scope's one fee payer, or runs nothing.
+            self.scope_fee_payer(i, live)?;
+            return self
+                .wallet_free_sol(i)
+                .map(|free| (free, None))
+                .ok_or_else(|| "WALLET_SOL_UNKNOWN".to_string());
+        }
+        payer
+            .as_ref()
+            .map(|(p, free)| (*free, Some(*p)))
+            .map_err(Clone::clone)
     }
 
-    /// DEC-17b: the wallet a candidate runs with — among the eligible ones the most free SOL,
-    /// the lowest key on a tie (deterministic, never round robin) — and, when none is eligible,
-    /// why each is not: the pilot then, whose own refusal (its HALT, its book, its admission) is
-    /// the candidate's. Counted with `SelectionStats::note`.
-    pub(super) fn choose_wallet(&self, live: bool) -> (usize, Option<String>) {
-        let mut best: Option<(usize, u64)> = None;
+    /// DEC-17b: the wallet a candidate runs with — among the eligible ones the most free SOL
+    /// (B4: a liquidator without its own fees counts its fee payer's), the lowest key on a tie
+    /// (deterministic, never round robin) — with the wallet paying it (`None`: itself) and, when
+    /// none is eligible, why each is not: the pilot then, whose own refusal (its HALT, its book,
+    /// its admission) is the candidate's, with the payer it would run with. Counted with
+    /// `SelectionStats::note`.
+    pub(super) fn choose_wallet(&self, live: bool) -> Choice {
+        let payer = self.choose_payer(live);
+        let mut best: Option<(usize, u64, Option<usize>)> = None;
         let mut refusals = vec![];
         for i in 0..self.wallets.len() {
-            match self.wallet_eligible(i, live) {
-                Ok(free) => {
-                    let better = best.is_none_or(|(b, f)| {
-                        free > f
-                            || (free == f
-                                && self.wallets[i].liquidator.to_bytes()
-                                    < self.wallets[b].liquidator.to_bytes())
-                    });
-                    if better {
-                        best = Some((i, free));
+            if self.wallets[i].pays_others() {
+                continue;
+            }
+            match self.wallet_eligible(i, live, &payer) {
+                Ok((free, by)) => {
+                    if best.is_none_or(|(b, f, _)| self.better(i, free, b, f)) {
+                        best = Some((i, free, by));
                     }
                 }
                 Err(e) => refusals.push(format!("{}={e}", self.wallets[i].liquidator)),
             }
         }
         match best {
-            Some((i, _)) => (i, None),
-            None => (0, Some(refusals.join(", "))),
+            Some((wallet, _, payer)) => Choice {
+                wallet,
+                payer,
+                none_eligible: None,
+            },
+            None => Choice {
+                wallet: 0,
+                // The pilot without its own fees runs with the lowest-keyed fee payer (its
+                // evaluation is the candidate's; nothing of it is admitted: `none_eligible`).
+                payer: (!self.pilot().pays_itself())
+                    .then(|| {
+                        (0..self.wallets.len())
+                            .filter(|p| self.wallets[*p].pays_others())
+                            .min_by_key(|p| self.wallets[*p].liquidator.to_bytes())
+                    })
+                    .flatten(),
+                none_eligible: Some(refusals.join(", ")),
+            },
         }
     }
 

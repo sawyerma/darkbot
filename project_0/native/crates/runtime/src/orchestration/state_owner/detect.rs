@@ -385,24 +385,32 @@ impl ShadowOwner {
         // simulation's use facts (P8-CTRL.4, review N1: only where it may exist at all, a
         // simulation that can never send — review L-c: no journal read otherwise), the local fee
         // model's use (P6-MT.10) and the trigger mode.
-        let (w, none_eligible) = self.choose_wallet(live);
+        let choice = self.choose_wallet(live);
+        let (w, payer) = (choice.wallet, choice.payer);
+        // DEC-17b B4: a pilot without its own fees that no wallet could run is admitted nothing.
+        let facts = live.then(|| match &choice.none_eligible {
+            Some(why) if !self.wallets[w].pays_itself() => {
+                Err((format!("{}: {why}", wallets::NONE_ELIGIBLE), false))
+            }
+            _ => self.fe04_admission_facts(w, payer, Some(&acct)),
+        });
         self.wallet_selection
-            .note(&mut self.wallets[w], none_eligible);
-        let facts = live.then(|| self.fe04_admission_facts(w, Some(&acct)));
+            .note(&mut self.wallets[w], choice.none_eligible);
         let use_facts = {
             use darkbot_solana::submit::SubmissionAdapter;
             match mode {
                 crate::execution::pipeline::Mode::Shadow
                     if self.submitter.simulates_without_sending() =>
                 {
-                    self.sim_only_use_facts(w, &acct)
+                    self.sim_only_use_facts(w, payer, &acct)
                 }
                 _ => None,
             }
         };
         let fee_model = self.fee_model();
         let threshold_authority = self.threshold_authority();
-        let wallet = &mut self.wallets[w];
+        // DEC-17b B4: the wallet and, when another pays it, its fee payer (read only).
+        let (wallet, fee_payer) = wallets::with_payer(&mut self.wallets, w, payer);
         // DEC-17b: the wallet's own swaps (the router's one account bucket).
         let routes = self.routes.for_taker(wallet.liquidator);
         let engine = darkbot_project0::health::crate_impl::CrateHealth {
@@ -479,6 +487,7 @@ impl ShadowOwner {
             program: self.program,
             group: self.group,
             liquidator: wallet.liquidator,
+            fee_payer: fee_payer.map_or(wallet.liquidator, |p| p.liquidator),
             global_fee_wallet: sizer_for_cost.fee_snapshot().map(|f| f.global_fee_wallet),
             sizing: &sizing,
             routes: &routes,
@@ -596,7 +605,8 @@ impl ShadowOwner {
             submitter: &self.submitter,
             safety: &mut wallet.safety,
             blockhash: &self.blockhash,
-            payer: wallet.payer.as_ref(),
+            payer: fee_payer.map_or(wallet.payer.as_ref(), |p| p.payer.as_ref()),
+            authority: fee_payer.map(|_| wallet.payer.as_ref()),
             allowlist: &self.allowlist,
             failed_costs: &self.failed_costs,
             limits: TxLimits::default(),

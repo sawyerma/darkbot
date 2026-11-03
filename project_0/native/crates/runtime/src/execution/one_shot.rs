@@ -198,6 +198,8 @@ pub struct ActiveHold {
     /// SUBMITTED(signature, last_valid_block_height) of the target's ownership (P6-MT.1).
     pub signature: Option<String>,
     pub last_valid_block_height: Option<u64>,
+    /// DEC-17b B4: the wallet its SOL is held on when another than the journal's own.
+    pub fee_payer: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -244,6 +246,12 @@ struct Saved {
     /// stays open (`None`: a frame before schema 10, which reserved none).
     #[serde(default)]
     exit_reserve_lamports: Option<u64>,
+    /// DEC-17b B4 (schema 11): the wallet that pays the attempt's and its exits' SOL — fees,
+    /// tip, record rent and the exit reserve — when another of the owner's wallets pays it (the
+    /// SOL of `intent.holds` and the exit reserve are held on that wallet); `None`: the wallet
+    /// itself, and every frame before schema 11. Written by the reservation, never changed.
+    #[serde(default)]
+    fee_payer: Option<String>,
 }
 
 /// P8-CTRL.5: an attempt's booking against its FE-06 grant — the grant's digest, its campaign,
@@ -412,6 +420,57 @@ pub fn fe06_attempts_report(
     out
 }
 
+/// Schema-10 layout of `Saved` (the exit reserve, before the DEC-17b B4 fee payer).
+#[derive(Deserialize)]
+#[cfg_attr(test, derive(Serialize))]
+struct SavedV10 {
+    approval: Approval,
+    intent: Intent,
+    phase: Phase,
+    finalized: Option<Vec<Receipt>>,
+    observations: BTreeMap<String, receipts::FinalizedObservationV10>,
+    exits: Vec<exit::ExitAttemptV10>,
+    non_landing: Option<non_landing::NonLandingRelease>,
+    hold: Option<crate::execution::hold_b::HoldEvidence>,
+    fe06: Option<Fe06Attempt>,
+    exit_reserve_lamports: Option<u64>,
+}
+impl From<SavedV10> for Saved {
+    fn from(v: SavedV10) -> Self {
+        Self {
+            approval: v.approval,
+            intent: v.intent,
+            phase: v.phase,
+            finalized: v.finalized,
+            observations: receipts::observations_of(v.observations),
+            exits: v.exits.into_iter().map(Into::into).collect(),
+            non_landing: v.non_landing,
+            hold: v.hold,
+            fe06: v.fe06,
+            exit_reserve_lamports: v.exit_reserve_lamports,
+            fee_payer: None,
+        }
+    }
+}
+/// Tests write the schema-10 layout from today's state (a self-paid attempt).
+#[cfg(test)]
+impl From<&Saved> for SavedV10 {
+    fn from(s: &Saved) -> Self {
+        Self {
+            approval: s.approval.clone(),
+            intent: s.intent.clone(),
+            phase: s.phase.clone(),
+            finalized: s.finalized.clone(),
+            observations: receipts::observations_down(&s.observations),
+            exits: s.exits.iter().cloned().map(Into::into).collect(),
+            non_landing: s.non_landing.clone(),
+            hold: s.hold.clone(),
+            fe06: s.fe06.clone(),
+            exit_reserve_lamports: s.exit_reserve_lamports,
+        }
+    }
+}
+
 /// Schema-9 layout of `Saved` (the exits' own grant booking, before the exit reserve).
 #[derive(Deserialize)]
 #[cfg_attr(test, derive(Serialize))]
@@ -420,8 +479,8 @@ struct SavedV9 {
     intent: Intent,
     phase: Phase,
     finalized: Option<Vec<Receipt>>,
-    observations: BTreeMap<String, receipts::FinalizedObservation>,
-    exits: Vec<exit::ExitAttempt>,
+    observations: BTreeMap<String, receipts::FinalizedObservationV10>,
+    exits: Vec<exit::ExitAttemptV10>,
     non_landing: Option<non_landing::NonLandingRelease>,
     hold: Option<crate::execution::hold_b::HoldEvidence>,
     fe06: Option<Fe06Attempt>,
@@ -433,12 +492,13 @@ impl From<SavedV9> for Saved {
             intent: v.intent,
             phase: v.phase,
             finalized: v.finalized,
-            observations: v.observations,
-            exits: v.exits,
+            observations: receipts::observations_of(v.observations),
+            exits: v.exits.into_iter().map(Into::into).collect(),
             non_landing: v.non_landing,
             hold: v.hold,
             fe06: v.fe06,
             exit_reserve_lamports: None,
+            fee_payer: None,
         }
     }
 }
@@ -451,7 +511,7 @@ struct SavedV8 {
     intent: Intent,
     phase: Phase,
     finalized: Option<Vec<Receipt>>,
-    observations: BTreeMap<String, receipts::FinalizedObservation>,
+    observations: BTreeMap<String, receipts::FinalizedObservationV10>,
     exits: Vec<exit::ExitAttemptV8>,
     non_landing: Option<non_landing::NonLandingRelease>,
     hold: Option<crate::execution::hold_b::HoldEvidence>,
@@ -464,12 +524,13 @@ impl From<SavedV8> for Saved {
             intent: v.intent,
             phase: v.phase,
             finalized: v.finalized,
-            observations: v.observations,
+            observations: receipts::observations_of(v.observations),
             exits: v.exits.into_iter().map(Into::into).collect(),
             non_landing: v.non_landing,
             hold: v.hold,
             fe06: v.fe06,
             exit_reserve_lamports: None,
+            fee_payer: None,
         }
     }
 }
@@ -482,7 +543,7 @@ struct SavedV7 {
     intent: Intent,
     phase: Phase,
     finalized: Option<Vec<Receipt>>,
-    observations: BTreeMap<String, receipts::FinalizedObservation>,
+    observations: BTreeMap<String, receipts::FinalizedObservationV10>,
     exits: Vec<exit::ExitAttemptV8>,
     non_landing: Option<non_landing::NonLandingRelease>,
     hold: Option<crate::execution::hold_b::HoldEvidence>,
@@ -494,12 +555,13 @@ impl From<SavedV7> for Saved {
             intent: v.intent,
             phase: v.phase,
             finalized: v.finalized,
-            observations: v.observations,
+            observations: receipts::observations_of(v.observations),
             exits: v.exits.into_iter().map(Into::into).collect(),
             non_landing: v.non_landing,
             hold: v.hold,
             fe06: None,
             exit_reserve_lamports: None,
+            fee_payer: None,
         }
     }
 }
@@ -531,7 +593,7 @@ struct SavedV2 {
     intent: IntentV2,
     phase: PhaseV3,
     finalized: Option<Vec<Receipt>>,
-    observations: BTreeMap<String, receipts::FinalizedObservation>,
+    observations: BTreeMap<String, receipts::FinalizedObservationV10>,
 }
 impl TryFrom<SavedV2> for Saved {
     type Error = String;
@@ -541,12 +603,13 @@ impl TryFrom<SavedV2> for Saved {
             intent: v.intent.into(),
             phase: v.phase.try_into()?,
             finalized: v.finalized,
-            observations: v.observations,
+            observations: receipts::observations_of(v.observations),
             exits: Vec::new(),
             non_landing: None,
             hold: None,
             fe06: None,
             exit_reserve_lamports: None,
+            fee_payer: None,
         })
     }
 }
@@ -558,7 +621,7 @@ struct SavedV3 {
     intent: Intent,
     phase: PhaseV3,
     finalized: Option<Vec<Receipt>>,
-    observations: BTreeMap<String, receipts::FinalizedObservation>,
+    observations: BTreeMap<String, receipts::FinalizedObservationV10>,
 }
 impl TryFrom<SavedV3> for Saved {
     type Error = String;
@@ -568,12 +631,13 @@ impl TryFrom<SavedV3> for Saved {
             intent: v.intent,
             phase: v.phase.try_into()?,
             finalized: v.finalized,
-            observations: v.observations,
+            observations: receipts::observations_of(v.observations),
             exits: Vec::new(),
             non_landing: None,
             hold: None,
             fe06: None,
             exit_reserve_lamports: None,
+            fee_payer: None,
         })
     }
 }
@@ -585,7 +649,7 @@ struct SavedV4 {
     intent: Intent,
     phase: Phase,
     finalized: Option<Vec<Receipt>>,
-    observations: BTreeMap<String, receipts::FinalizedObservation>,
+    observations: BTreeMap<String, receipts::FinalizedObservationV10>,
 }
 impl From<SavedV4> for Saved {
     fn from(v: SavedV4) -> Self {
@@ -594,12 +658,13 @@ impl From<SavedV4> for Saved {
             intent: v.intent,
             phase: v.phase,
             finalized: v.finalized,
-            observations: v.observations,
+            observations: receipts::observations_of(v.observations),
             exits: Vec::new(),
             non_landing: None,
             hold: None,
             fe06: None,
             exit_reserve_lamports: None,
+            fee_payer: None,
         }
     }
 }
@@ -611,7 +676,7 @@ struct SavedV6 {
     intent: Intent,
     phase: Phase,
     finalized: Option<Vec<Receipt>>,
-    observations: BTreeMap<String, receipts::FinalizedObservation>,
+    observations: BTreeMap<String, receipts::FinalizedObservationV10>,
     exits: Vec<exit::ExitAttemptV8>,
     non_landing: Option<non_landing::NonLandingRelease>,
 }
@@ -622,12 +687,13 @@ impl From<SavedV6> for Saved {
             intent: v.intent,
             phase: v.phase,
             finalized: v.finalized,
-            observations: v.observations,
+            observations: receipts::observations_of(v.observations),
             exits: v.exits.into_iter().map(Into::into).collect(),
             non_landing: v.non_landing,
             hold: None,
             fe06: None,
             exit_reserve_lamports: None,
+            fee_payer: None,
         }
     }
 }
@@ -639,7 +705,7 @@ struct SavedV5 {
     intent: Intent,
     phase: Phase,
     finalized: Option<Vec<Receipt>>,
-    observations: BTreeMap<String, receipts::FinalizedObservation>,
+    observations: BTreeMap<String, receipts::FinalizedObservationV10>,
     exits: Vec<exit::ExitAttemptV5>,
 }
 impl From<SavedV5> for Saved {
@@ -649,12 +715,13 @@ impl From<SavedV5> for Saved {
             intent: v.intent,
             phase: v.phase,
             finalized: v.finalized,
-            observations: v.observations,
+            observations: receipts::observations_of(v.observations),
             exits: v.exits.into_iter().map(Into::into).collect(),
             non_landing: None,
             hold: None,
             fe06: None,
             exit_reserve_lamports: None,
+            fee_payer: None,
         }
     }
 }
@@ -740,9 +807,9 @@ struct VersionRef<'a> {
     state: &'a Saved,
 }
 /// F2: one durable transition of the wallet automaton as a typed binary frame
-/// (`FE04_TRANSITION`, schema 7 since the DEC-04 holds, 6 since the DEC-03 release class, 5 since
-/// exits, 4 since the realized/unrealized settlement, 3 since C12). Schema-6 … -2 and schema-1
-/// JSON frames of older journals stay readable.
+/// (`FE04_TRANSITION`, schema 11 since the DEC-17b B4 fee payer, 7 since the DEC-04 holds, 6
+/// since the DEC-03 release class, 5 since exits, 4 since the realized/unrealized settlement, 3
+/// since C12). Schema-10 … -2 and schema-1 JSON frames of older journals stay readable.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Version {
@@ -797,11 +864,17 @@ struct VersionV9 {
     transition: Transition,
     state: SavedV9,
 }
+#[derive(Deserialize)]
+#[cfg_attr(test, derive(Serialize))]
+struct VersionV10 {
+    transition: Transition,
+    state: SavedV10,
+}
 impl crate::analytics::payload::Payload for Version {
     const KIND: u16 = journal::kind::FE04_TRANSITION;
     /// P8-CTRL.5: 8 — the attempt's FE-06 grant booking; 9 — each exit's own; 10 — the
-    /// separate exit reserve.
-    const SCHEMA: u16 = 10;
+    /// separate exit reserve. DEC-17b B4: 11 — the fee payer of another wallet.
+    const SCHEMA: u16 = 11;
     fn decode_earlier(schema: u16, bytes: &[u8]) -> Option<std::io::Result<Self>> {
         use crate::analytics::payload::{decode_wire, TYPED};
         match schema {
@@ -838,6 +911,10 @@ impl crate::analytics::payload::Payload for Version {
                 state: v.state.into(),
             })),
             9 => Some(decode_wire::<VersionV9>(bytes).map(|v| Self {
+                transition: v.transition,
+                state: v.state.into(),
+            })),
+            10 => Some(decode_wire::<VersionV10>(bytes).map(|v| Self {
                 transition: v.transition,
                 state: v.state.into(),
             })),
@@ -895,9 +972,15 @@ struct LegacyImportV9 {
     legacy_sha256: String,
     state: SavedV9,
 }
+#[derive(Deserialize)]
+#[cfg_attr(test, derive(Serialize))]
+struct LegacyImportV10 {
+    legacy_sha256: String,
+    state: SavedV10,
+}
 impl crate::analytics::payload::Payload for LegacyImport {
     const KIND: u16 = journal::kind::FE04_LEGACY_IMPORT;
-    const SCHEMA: u16 = 10;
+    const SCHEMA: u16 = 11;
     fn decode_earlier(schema: u16, bytes: &[u8]) -> Option<std::io::Result<Self>> {
         use crate::analytics::payload::{decode_wire, TYPED};
         match schema {
@@ -934,6 +1017,10 @@ impl crate::analytics::payload::Payload for LegacyImport {
                 state: v.state.into(),
             })),
             9 => Some(decode_wire::<LegacyImportV9>(bytes).map(|v| Self {
+                legacy_sha256: v.legacy_sha256,
+                state: v.state.into(),
+            })),
+            10 => Some(decode_wire::<LegacyImportV10>(bytes).map(|v| Self {
                 legacy_sha256: v.legacy_sha256,
                 state: v.state.into(),
             })),
@@ -1070,6 +1157,7 @@ fn legal(previous: Option<&Saved>, transition: Transition, next: &Saved) -> bool
         p.hold != next.hold
             || p.fe06 != next.fe06
             || p.exit_reserve_lamports != next.exit_reserve_lamports
+            || p.fee_payer != next.fee_payer
     }) {
         return false;
     }
@@ -1089,10 +1177,12 @@ fn legal(previous: Option<&Saved>, transition: Transition, next: &Saved) -> bool
         return false;
     }
     match (previous, transition) {
+        // DEC-17b B4 (review L2): the journal's own wallet is never its attempt's other payer.
         (None, Transition::Reserve) => {
             next.phase == Phase::Reserved
                 && next.finalized.is_none()
                 && next.observations.is_empty()
+                && next.fee_payer.as_ref() != Some(&next.intent.wallet)
         }
         (Some(p), Transition::Handoff | Transition::ReopenUnknown) => {
             same(p)
@@ -1229,7 +1319,8 @@ pub(crate) fn test_unknown_attempt_held(
     a.wallet = wallet.into();
     i.wallet = wallet.into();
     let mut j = Journal::open(dir, wallet).unwrap();
-    j.reserve_held(a, i.clone(), &c, hold, None, 0).unwrap();
+    j.reserve_held(a, i.clone(), &c, hold, None, 0, None)
+        .unwrap();
     j.handoff(&i.signed_wire_sha256, &c, || Ok(())).unwrap();
     i
 }
@@ -1381,11 +1472,16 @@ impl Journal {
     }
     #[cfg(test)]
     fn reserve(&mut self, approval: Approval, intent: Intent, now: &Current) -> Result<(), String> {
-        self.reserve_held(approval, intent, now, None, None, 0)
+        self.reserve_held(approval, intent, now, None, None, 0, None)
     }
     /// P8-CTRL.5: the held attempt's FE-06 booking (`None`: none held, or booked under none).
     pub fn attempt_booking(&self) -> Option<&Fe06Attempt> {
         self.saved.as_ref().and_then(|s| s.fe06.as_ref())
+    }
+    /// DEC-17b B4: the wallet paying the held attempt and its exits when another wallet pays
+    /// (`None`: none held, or the wallet itself).
+    pub fn fee_payer(&self) -> Option<&str> {
+        self.saved.as_ref().and_then(|s| s.fee_payer.as_deref())
     }
     /// P8-CTRL.5: every own attempt of this wallet (archived and active) — what the FE-06 limits
     /// count. Review N5: the sealed archive is read once per open journal, the active attempt is
@@ -1405,7 +1501,10 @@ impl Journal {
         out.extend(self.saved.as_ref().map(|s| archive::record(s, false)));
         Ok(out)
     }
-    /// The reservation with the attempt's holds (DEC-04, `None`: OFF).
+    /// The reservation with the attempt's holds (DEC-04, `None`: OFF) and (DEC-17b B4) the
+    /// wallet paying its SOL when another one does (its SOL is checked against `now`, which the
+    /// admission composes from that wallet).
+    #[allow(clippy::too_many_arguments)]
     fn reserve_held(
         &mut self,
         approval: Approval,
@@ -1414,12 +1513,19 @@ impl Journal {
         hold: Option<crate::execution::hold_b::HoldEvidence>,
         fe06: Option<Fe06Attempt>,
         exit_reserve_lamports: u64,
+        fee_payer: Option<String>,
     ) -> Result<(), String> {
         if self.saved.is_some() {
             return Err(err("ONE_SHOT_ALREADY_CONSUMED_OR_UNKNOWN"));
         }
         if approval.wallet != self.wallet {
             return Err(err("JOURNAL_WALLET_MISMATCH"));
+        }
+        if fee_payer
+            .as_deref()
+            .is_some_and(|p| p == self.wallet || !key(p))
+        {
+            return Err(err("JOURNAL_FEE_PAYER_INVALID"));
         }
         // FE-04 archive: an approval authorizes one attempt, never a second after archiving.
         archive::single_use(&self.directory, &self.wallet, &approval.approval_id)?;
@@ -1436,6 +1542,7 @@ impl Journal {
                 hold,
                 fe06,
                 exit_reserve_lamports: Some(exit_reserve_lamports),
+                fee_payer,
             },
             Transition::Reserve,
         )
@@ -1513,6 +1620,7 @@ impl Journal {
             holds: held_with_exit_reserve(&s.intent.holds, reserve),
             signature: s.intent.signatures.first().cloned(),
             last_valid_block_height: s.intent.last_valid_block_height,
+            fee_payer: s.fee_payer.clone(),
         })
     }
     /// B3: what the safety layer replays after a restart — `None` without any attempt; with one,
@@ -1735,6 +1843,7 @@ mod tests {
             observations: [(
                 "sig-1".to_string(),
                 receipts::FinalizedObservation {
+                    payer_sol_delta_lamports: None,
                     signature: "sig-1".into(),
                     slot: 301,
                     success: true,
@@ -1751,6 +1860,7 @@ mod tests {
             hold: None,
             fe06: None,
             exit_reserve_lamports: None,
+            fee_payer: None,
         };
         // Schema 2 (before C12): the mirror reproduces the historical pinned bytes, which still
         // read — with the expiry unknown (`None`), never a zero.
@@ -1785,7 +1895,7 @@ mod tests {
                 },
                 phase: PhaseV3::HaltFinalized,
                 finalized: state.finalized.clone(),
-                observations: state.observations.clone(),
+                observations: receipts::observations_down(&state.observations),
             },
         };
         let old = crate::analytics::payload::encode_wire(&v2).unwrap();
@@ -1818,7 +1928,7 @@ mod tests {
                 intent: state.intent.clone(),
                 phase,
                 finalized: state.finalized.clone(),
-                observations: state.observations.clone(),
+                observations: receipts::observations_down(&state.observations),
             },
         };
         let bytes = crate::analytics::payload::encode_wire(&v3(
@@ -1848,7 +1958,7 @@ mod tests {
                 intent: s.intent.clone(),
                 phase: s.phase.clone(),
                 finalized: s.finalized.clone(),
-                observations: s.observations.clone(),
+                observations: receipts::observations_down(&s.observations),
             },
         };
         assert_eq!(
@@ -1977,7 +2087,7 @@ mod tests {
                 intent: exited.intent.clone(),
                 phase: exited.phase.clone(),
                 finalized: exited.finalized.clone(),
-                observations: exited.observations.clone(),
+                observations: receipts::observations_down(&exited.observations),
                 exits: exited
                     .exits
                     .iter()
@@ -1985,7 +2095,7 @@ mod tests {
                         approval: e.approval.clone(),
                         intent: e.intent.clone(),
                         phase: e.phase.clone(),
-                        observations: e.observations.clone(),
+                        observations: receipts::observations_down(&e.observations),
                         finalized: e.finalized.clone(),
                     })
                     .collect(),
@@ -2024,7 +2134,7 @@ mod tests {
                 intent: released.intent.clone(),
                 phase: released.phase.clone(),
                 finalized: released.finalized.clone(),
-                observations: released.observations.clone(),
+                observations: receipts::observations_down(&released.observations),
                 exits: released.exits.iter().cloned().map(Into::into).collect(),
                 non_landing: released.non_landing.clone(),
             },
@@ -2071,7 +2181,7 @@ mod tests {
                 intent: held.intent.clone(),
                 phase: held.phase.clone(),
                 finalized: held.finalized.clone(),
-                observations: held.observations.clone(),
+                observations: receipts::observations_down(&held.observations),
                 exits: held.exits.iter().cloned().map(Into::into).collect(),
                 non_landing: held.non_landing.clone(),
                 hold: held.hold.clone(),
@@ -2107,7 +2217,7 @@ mod tests {
                 intent: booked.intent.clone(),
                 phase: booked.phase.clone(),
                 finalized: booked.finalized.clone(),
-                observations: booked.observations.clone(),
+                observations: receipts::observations_down(&booked.observations),
                 exits: booked.exits.iter().cloned().map(Into::into).collect(),
                 non_landing: booked.non_landing.clone(),
                 hold: booked.hold.clone(),
@@ -2137,7 +2247,7 @@ mod tests {
                 intent: booked.intent.clone(),
                 phase: booked.phase.clone(),
                 finalized: booked.finalized.clone(),
-                observations: booked.observations.clone(),
+                observations: receipts::observations_down(&booked.observations),
                 exits: booked.exits.iter().cloned().map(Into::into).collect(),
                 non_landing: booked.non_landing.clone(),
                 hold: booked.hold.clone(),
@@ -2163,8 +2273,8 @@ mod tests {
             intent: s.intent.clone(),
             phase: s.phase.clone(),
             finalized: s.finalized.clone(),
-            observations: s.observations.clone(),
-            exits: s.exits.clone(),
+            observations: receipts::observations_down(&s.observations),
+            exits: s.exits.iter().cloned().map(Into::into).collect(),
             non_landing: s.non_landing.clone(),
             hold: s.hold.clone(),
             fe06: s.fe06.clone(),
@@ -2198,19 +2308,20 @@ mod tests {
             crate::analytics::payload::decode(journal::kind::FE04_LEGACY_IMPORT, 9, &bytes)
                 .unwrap();
         assert_eq!(back.state, exit_booked);
-        // Schema 10 (P8-CTRL.5/.6) is pinned with the separate exit reserve.
+        // Schema 10 (P8-CTRL.5/.6) is pinned with the separate exit reserve; its frames still
+        // read (DEC-17b B4: self-paid, no payer delta).
         let mut reserved = exit_booked;
         reserved.exit_reserve_lamports = Some(100_000);
-        let version = Version {
+        let version = VersionV10 {
             transition: Transition::ExitNotLanded,
-            state: reserved.clone(),
+            state: SavedV10::from(&reserved),
         };
-        let bytes = crate::analytics::payload::encode(&version).unwrap();
+        let bytes = crate::analytics::payload::encode_wire(&version).unwrap();
         let back: Version =
             crate::analytics::payload::decode(journal::kind::FE04_TRANSITION, 10, &bytes).unwrap();
         assert_eq!(
             (back.transition, back.state),
-            (Transition::ExitNotLanded, reserved)
+            (Transition::ExitNotLanded, reserved.clone())
         );
         assert_eq!(
             (bytes.len(), solana_sdk::hash::hash(&bytes).to_string()),
@@ -2219,6 +2330,47 @@ mod tests {
                 "3yRjJmKSNENQ2UYenEzn1341ppsW9L6eo2Qo4j2MswH5".to_string()
             ),
             "FE04_TRANSITION schema-10 layout changed"
+        );
+        // A schema-10 legacy import reads the same state.
+        let import = LegacyImportV10 {
+            legacy_sha256: "a".repeat(64),
+            state: SavedV10::from(&reserved),
+        };
+        let bytes = crate::analytics::payload::encode_wire(&import).unwrap();
+        let back: LegacyImport =
+            crate::analytics::payload::decode(journal::kind::FE04_LEGACY_IMPORT, 10, &bytes)
+                .unwrap();
+        assert_eq!(back.state, reserved);
+        // Schema 11 (DEC-17b B4) is pinned with another wallet paying: the attempt's fee payer
+        // and its SOL delta beside each observation.
+        let mut split = reserved;
+        split.fee_payer = Some(key(9));
+        for o in split.observations.values_mut() {
+            o.payer_sol_delta_lamports = Some(-5_000);
+        }
+        for e in &mut split.exits {
+            for o in e.observations.values_mut() {
+                o.payer_sol_delta_lamports = Some(-5_000);
+            }
+        }
+        let version = Version {
+            transition: Transition::ExitNotLanded,
+            state: split.clone(),
+        };
+        let bytes = crate::analytics::payload::encode(&version).unwrap();
+        let back: Version =
+            crate::analytics::payload::decode(journal::kind::FE04_TRANSITION, 11, &bytes).unwrap();
+        assert_eq!(
+            (back.transition, back.state),
+            (Transition::ExitNotLanded, split)
+        );
+        assert_eq!(
+            (bytes.len(), solana_sdk::hash::hash(&bytes).to_string()),
+            (
+                2553,
+                "Hc6PP3nrmsaMraCcv6XpfQqDAkokLscgkMZH1JytacTJ".to_string()
+            ),
+            "FE04_TRANSITION schema-11 layout changed"
         );
     }
 
@@ -2263,12 +2415,12 @@ mod tests {
         let mut j = Journal::open(&dir, &a.wallet).unwrap();
         // One lamport too much for the hold and the reserve: refused, nothing durable.
         assert_eq!(
-            j.reserve_held(a.clone(), i.clone(), &c, None, None, free - sol + 1)
+            j.reserve_held(a.clone(), i.clone(), &c, None, None, free - sol + 1, None)
                 .unwrap_err(),
             err("WALLET_UNDERFUNDED_OR_HOLD_MISSING")
         );
         assert!(j.active_hold().is_none());
-        j.reserve_held(a.clone(), i.clone(), &c, None, None, free - sol)
+        j.reserve_held(a.clone(), i.clone(), &c, None, None, free - sol, None)
             .unwrap();
         assert_eq!(j.holds()["SOL"], free);
         // A reservation that recorded no reserve: never handed off, nothing changes.
@@ -2474,6 +2626,7 @@ mod tests {
             None,
             Some(booking("g1", "k1", 10)),
             0,
+            None,
         )
         .unwrap();
         assert_eq!(
@@ -2567,10 +2720,10 @@ mod tests {
         drop(j);
         let frames = frames_of(&file);
         assert_eq!(frames.len(), 1);
-        // Schema 10 since the P8-CTRL.5 exit reserve; schemas 9 … 2 stay readable.
+        // Schema 11 since the DEC-17b B4 fee payer; schemas 10 … 2 stay readable.
         assert_eq!(
             (frames[0].kind, frames[0].schema),
-            (journal::kind::FE04_TRANSITION, 10)
+            (journal::kind::FE04_TRANSITION, 11)
         );
         assert!(frames[0].legacy_tree().is_err());
         let v: Version = frames[0].typed().unwrap();
@@ -2617,7 +2770,7 @@ mod tests {
             let frames = frames_of(&file);
             assert_eq!(
                 frames.iter().map(|f| f.schema).collect::<Vec<_>>(),
-                [1, 10],
+                [1, 11],
                 "historical frame kept, the reopen transition is typed"
             );
         }
@@ -3234,7 +3387,7 @@ mod tests {
                     .simulate(&adapter, test_deadline(), test_binding())
                     .unwrap();
                 let mut j = Journal::open(&dir, &a.wallet).unwrap();
-                j.reserve_payload(a.clone(), i.clone(), &c, &simulated, None, None, 0)
+                j.reserve_payload(a.clone(), i.clone(), &c, &simulated, None, None, 0, None)
                     .unwrap();
                 let clock = darkbot_common::timing::Clock::new();
                 let result =
@@ -3309,7 +3462,7 @@ mod tests {
             .simulate(&adapter, test_deadline(), test_binding())
             .unwrap();
         let mut j = Journal::open(&dir, &a.wallet).unwrap();
-        j.reserve_payload(a.clone(), i.clone(), &c, &simulated, None, None, 0)
+        j.reserve_payload(a.clone(), i.clone(), &c, &simulated, None, None, 0, None)
             .unwrap();
         let reserved = clock.now_ns();
         let (ack, handoff) = j
@@ -3350,7 +3503,7 @@ mod tests {
             .simulate(&adapter, test_deadline(), test_binding())
             .unwrap();
         let mut j = Journal::open(&dir, &a.wallet).unwrap();
-        j.reserve_payload(a.clone(), i.clone(), &c, &simulated, None, None, 0)
+        j.reserve_payload(a.clone(), i.clone(), &c, &simulated, None, None, 0, None)
             .unwrap();
         let clock = darkbot_common::timing::Clock::new();
         let past = std::time::Instant::now();
@@ -3618,7 +3771,7 @@ mod tests {
             .unwrap();
         let mut j = Journal::open(&dir, &a.wallet).unwrap();
         assert!(j
-            .reserve_payload(a.clone(), i.clone(), &c, &reversed, None, None, 0)
+            .reserve_payload(a.clone(), i.clone(), &c, &reversed, None, None, 0, None)
             .is_err());
         // DEC-11: a bundle token is reserved only with current bundle evidence.
         let stale = Current {
@@ -3626,13 +3779,13 @@ mod tests {
             ..c.clone()
         };
         let refused = j
-            .reserve_payload(a.clone(), i.clone(), &stale, &original, None, None, 0)
+            .reserve_payload(a.clone(), i.clone(), &stale, &original, None, None, 0, None)
             .unwrap_err();
         assert!(
             refused.contains("CURRENT_BUNDLE_EVIDENCE_UNKNOWN"),
             "{refused}"
         );
-        j.reserve_payload(a, i, &c, &original, None, None, 0)
+        j.reserve_payload(a, i, &c, &original, None, None, 0, None)
             .unwrap();
         let clock = darkbot_common::timing::Clock::new();
         assert!(j
@@ -3752,6 +3905,7 @@ mod tests {
     }
     fn reserved(a: &Approval, i: &Intent) -> Saved {
         Saved {
+            fee_payer: None,
             approval: a.clone(),
             intent: i.clone(),
             phase: Phase::Reserved,

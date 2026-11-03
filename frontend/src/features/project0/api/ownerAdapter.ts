@@ -309,6 +309,8 @@ export function toWalletsView(m: WalletsState): WalletsView {
       journalRead: r.journalRead,
       realizedNetUsdMicro: decimal(r.realizedNetUsdMicro),
       selected: r.selected,
+      feePayer: r.feePayer ?? null,
+      solHeldForOthers: r.solHeldForOthers,
     })),
     selections: m.selections,
     selectionsNoneEligible: m.selectionsNoneEligible,

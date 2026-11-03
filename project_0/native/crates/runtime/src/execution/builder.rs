@@ -994,6 +994,10 @@ pub mod p0 {
         pub program: Pubkey,
         pub group: Pubkey,
         pub liquidator: Pubkey,
+        /// DEC-17b B4: the transactions' fee payer — the liquidator itself, or the wallet paying
+        /// for it: the first key of every transaction and the payer of the liquidation record's
+        /// rent.
+        pub fee_payer: Pubkey,
         /// [P5] FeeState read result; an unreadable FeeState blocks every plan.
         pub global_fee_wallet: Result<Pubkey, String>,
         pub sizing: &'a Z,
@@ -1409,7 +1413,7 @@ pub mod p0 {
             let built = tx::build(
                 &TxPlan {
                     version: BuildVersion::V0,
-                    payer: self.liquidator,
+                    payer: self.fee_payer,
                     instructions,
                     lookup_tables: protocol_luts.clone(),
                     resources: self.resources,
@@ -1500,6 +1504,7 @@ pub mod p0 {
                 group: &self.group,
                 marginfi_account: account,
                 liquidator: &self.liquidator,
+                fee_payer: &self.fee_payer,
                 // `plans` checks the FeeState first (typed); here only its text can remain.
                 global_fee_wallet: required_fee_wallet(&self.global_fee_wallet)
                     .map_err(|e| e.text)?,
@@ -1807,7 +1812,7 @@ pub mod p0 {
                                 |buy| {
                                     tx::build(
                                         &crate::execution::pipeline::prerequisite_tx_plan(
-                                            self.liquidator,
+                                            self.fee_payer,
                                             buy.instructions.clone(),
                                             crate::execution::lookup_tables::merge(
                                                 &protocol_luts,
@@ -1986,7 +1991,7 @@ pub mod p0 {
                             tx::build(
                                 &TxPlan {
                                     version: BuildVersion::V0,
-                                    payer: self.liquidator,
+                                    payer: self.fee_payer,
                                     instructions: ixs.clone(),
                                     lookup_tables: crate::execution::lookup_tables::merge(
                                         &protocol_luts,
@@ -2703,6 +2708,7 @@ pub mod p0 {
                 };
                 let lamports = |l: u64| Some(l);
                 P0ReceivershipBuilder {
+                    fee_payer: self.liquidator,
                     state: src,
                     program: self.program,
                     group: self.group,
@@ -3266,6 +3272,7 @@ pub mod p0 {
                 };
                 let lamports = |l: u64| Some(l);
                 P0ReceivershipBuilder {
+                    fee_payer: f.liquidator,
                     state: &src,
                     program: f.program,
                     group: f.group,
@@ -3346,6 +3353,7 @@ pub mod p0 {
                 };
                 let lamports = |l: u64| Some(l);
                 P0ReceivershipBuilder {
+                    fee_payer: f.liquidator,
                     state: &src,
                     program: f.program,
                     group: f.group,

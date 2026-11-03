@@ -579,6 +579,11 @@ pub struct OwnerWalletRow {
     pub journal_read: bool,
     pub realized_net_usd_micro: Option<i128>,
     pub selected: u64,
+    /// DEC-17b B4: the wallet paying its candidates now — itself, or the fee payer it runs with
+    /// (`None`: it runs none, or no fee payer may pay now).
+    pub fee_payer: Option<String>,
+    /// DEC-17b B4: the SOL held on it for the attempts of the liquidators it pays.
+    pub sol_held_for_others: u64,
 }
 
 /// DEC-04: the B hold mode (requested, effective, why not, the user's N and the journals'

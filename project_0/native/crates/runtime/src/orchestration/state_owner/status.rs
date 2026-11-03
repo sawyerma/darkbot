@@ -385,13 +385,9 @@ impl ShadowOwner {
     }
 
     fn wallets_status(&self, i: usize) -> OwnerWallets {
-        let mut holds: std::collections::BTreeMap<String, u64> = Default::default();
-        for (_, attempt) in self.wallets[i].reservations.attempts() {
-            for (asset, units) in attempt {
-                let held = holds.entry(asset.clone()).or_default();
-                *held = held.saturating_add(*units);
-            }
-        }
+        // DEC-17b B4 (review L4): what is held on the wallet itself (another wallet's SOL is that
+        // one's), as its row shows it.
+        let holds = self.wallets[i].reservations.held_by_others(&[]);
         let (journal_read, verdict, unknown_reasons, totals) = match &self.wallets[i].ledger_view {
             Some(Ok(view)) => (
                 true,
@@ -440,15 +436,35 @@ impl ShadowOwner {
 
     /// DEC-17b: wallet `i`'s row — roles, switch, why it may not run a candidate now (in the
     /// effective mode), its SOL, holds, held attempt, Safety, journal and this run's choices.
+    /// DEC-17b B4: its holds are what is held on it (the SOL another wallet pays is that one's),
+    /// its fee payer the wallet paying its candidates now and the SOL held on it for others.
     fn wallet_row(&self, i: usize) -> crate::status_tap::OwnerWalletRow {
         let w = &self.wallets[i];
-        let mut holds: std::collections::BTreeMap<String, u64> = Default::default();
-        for (_, attempt) in w.reservations.attempts() {
-            for (asset, units) in attempt {
-                let held = holds.entry(asset.clone()).or_default();
-                *held = held.saturating_add(*units);
-            }
-        }
+        let holds = w.reservations.held_by_others(&[]);
+        let live = self.live_effective();
+        let payer = self.choose_payer(live);
+        let eligible = if w.pays_others() {
+            self.payer_eligible(i, live).map(|_| None)
+        } else {
+            self.wallet_eligible(i, live, &payer).map(|(_, p)| p)
+        };
+        let fee_payer = match (&eligible, w.runs_candidates(), w.pays_itself()) {
+            (_, true, true) => Some(w.liquidator.to_string()),
+            (Ok(Some(p)), true, false) => Some(self.wallets[*p].liquidator.to_string()),
+            (_, true, false) => payer
+                .as_ref()
+                .ok()
+                .map(|(p, _)| self.wallets[*p].liquidator.to_string()),
+            _ => None,
+        };
+        let key = w.liquidator.to_string();
+        let sol_held_for_others = self
+            .wallets
+            .iter()
+            .filter(|o| !o.reservations.is_unreadable())
+            .fold(0u64, |s, o| {
+                s.saturating_add(o.reservations.held_for(&key, &[]))
+            });
         let view = w.ledger_view.as_ref().and_then(|v| v.as_ref().ok());
         crate::status_tap::OwnerWalletRow {
             wallet: w.liquidator.to_string(),
@@ -460,10 +476,7 @@ impl ShadowOwner {
                 .iter()
                 .any(|s| s.pubkey == w.liquidator && s.enabled),
             runs_candidates: w.runs_candidates(),
-            block_reason: self
-                .wallet_eligible(i, self.live_effective())
-                .err()
-                .unwrap_or_default(),
+            block_reason: eligible.err().unwrap_or_default(),
             sol_lamports: self.st.get(&w.liquidator).map(|r| r.lamports),
             free_sol_lamports: self.wallet_free_sol(i),
             holds,
@@ -478,6 +491,8 @@ impl ShadowOwner {
             journal_read: view.is_some(),
             realized_net_usd_micro: view.and_then(|v| v.totals.realized_net_usd_micro),
             selected: w.selected,
+            fee_payer,
+            sol_held_for_others,
         }
     }
 

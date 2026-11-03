@@ -955,6 +955,7 @@ fn actual_shadow_pipeline_builds_signs_simulates_and_never_submits() {
     slots.observe(10);
     let mut network = crate::execution::pipeline::NetworkBudget::unbounded();
     let mut p = Pipeline {
+        authority: None,
         mode: Mode::Shadow,
         clock: &clock,
         health: &TestHealth,
@@ -1125,6 +1126,7 @@ fn mt2_pipeline_evaluates_on_the_carried_health_and_computes_none() {
         calls: AtomicU64::new(0),
     };
     let mut p = Pipeline {
+        authority: None,
         mode: Mode::Shadow,
         clock: &clock,
         health: &health,
@@ -1330,6 +1332,7 @@ fn p2_05_pipeline_records_the_tag_wakeup_of_a_non_actionable_plan() {
         slots.observe(10);
         let mut network = crate::execution::pipeline::NetworkBudget::unbounded();
         let mut p = Pipeline {
+            authority: None,
             mode: Mode::Shadow,
             clock: &clock,
             health: &TestHealth,
@@ -1450,6 +1453,7 @@ fn b1_live_pipeline_never_sends_and_reserves_nothing() {
         solana_sdk::signature::Signer::pubkey(&payer),
     );
     let mut p = Pipeline {
+        authority: None,
         mode: Mode::Live,
         clock: &clock,
         health: &TestHealth,
@@ -1752,6 +1756,7 @@ fn evaluate_in(
         solana_sdk::signature::Signer::pubkey(payer),
     );
     let mut p = Pipeline {
+        authority: None,
         mode,
         clock: &clock,
         health: &TestHealth,
@@ -1802,6 +1807,7 @@ fn admission(
     use solana_sdk::signer::Signer;
     let wallet = payer.pubkey().to_string();
     crate::execution::one_shot::admission::Fe04Admission {
+        fee_payer: None,
         journal: crate::execution::one_shot::Journal::open(dir, &wallet).unwrap(),
         approval: crate::execution::one_shot::Approval {
             schema: 1,
@@ -2416,6 +2422,7 @@ fn b18_single_tx_with_tip_marks_t_sign_once() {
     slots.observe(10);
     let mut network = crate::execution::pipeline::NetworkBudget::unbounded();
     let mut p = Pipeline {
+        authority: None,
         mode: Mode::Shadow,
         clock: &clock,
         health: &TestHealth,
@@ -2546,6 +2553,7 @@ fn e2_pipeline_rejects_plans_by_their_built_instructions() {
         let mut network = NetworkBudget::unbounded();
         let builder = Rewritten(rewrite);
         let mut p = Pipeline {
+            authority: None,
             mode: Mode::Shadow,
             clock: &clock,
             health: &TestHealth,
@@ -2712,6 +2720,7 @@ fn d2_identical_funding_plans_share_one_fee_quote() {
         let mut network = NetworkBudget::unbounded();
         let builder = TwoClasses(different);
         let mut p = Pipeline {
+            authority: None,
             mode: Mode::Shadow,
             clock: &clock,
             health: &TestHealth,
@@ -3521,6 +3530,7 @@ fn b6_owner_rpc_block_grows_the_ingress_queue_until_overflow() {
     slots.observe(10);
     let mut network = crate::execution::pipeline::NetworkBudget::unbounded();
     let mut p = Pipeline {
+        authority: None,
         mode: Mode::Shadow,
         clock: &clock,
         health: &TestHealth,
@@ -3820,6 +3830,7 @@ fn evaluate_parked<B: crate::execution::pipeline::ReceivershipBuilder, S: Submis
     let failed = FailedCostMatrix::default();
     let slots = darkbot_solana::ingress::SlotWatch::new();
     let mut p = Pipeline {
+        authority: None,
         mode: Mode::Shadow,
         clock,
         health: &TestHealth,
@@ -5254,6 +5265,7 @@ fn bundle_evaluate<S: SubmissionAdapter>(
         solana_sdk::signature::Signer::pubkey(payer),
     );
     let mut p = Pipeline {
+        authority: None,
         mode: Mode::Live,
         clock: &clock,
         health: &TestHealth,

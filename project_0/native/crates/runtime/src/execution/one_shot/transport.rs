@@ -11,7 +11,9 @@ use std::collections::BTreeSet;
 pub struct SignedPayload {
     txs: Vec<VersionedTransaction>,
     path: SubmissionPath,
-    wallet: String,
+    /// The fee payer: the first key of every transaction (the attempt's wallet, or the wallet
+    /// paying for it, DEC-17b B4).
+    payer: String,
     signatures: Vec<String>,
     digest: String,
     wire_len: usize,
@@ -63,7 +65,7 @@ impl SignedPayload {
         Ok(Self {
             txs,
             path,
-            wallet: wallet.to_string(),
+            payer: wallet.to_string(),
             signatures,
             digest,
             wire_len,
@@ -79,14 +81,15 @@ impl SignedPayload {
         &self.digest
     }
 
-    fn matches(&self, i: &Intent) -> bool {
-        self.wallet == i.wallet
+    /// The intent's exact payload, paid by `fee_payer` (DEC-17b B4) or else its own wallet.
+    fn matches(&self, i: &Intent, fee_payer: Option<&str>) -> bool {
+        self.payer == fee_payer.unwrap_or(&i.wallet)
             && self.signatures == i.signatures
             && self.digest == i.signed_wire_sha256
     }
 
-    fn matches_exit(&self, i: &super::exit::ExitIntent) -> bool {
-        self.wallet == i.wallet
+    fn matches_exit(&self, i: &super::exit::ExitIntent, fee_payer: Option<&str>) -> bool {
+        self.payer == fee_payer.unwrap_or(&i.wallet)
             && self.signatures == i.signatures
             && self.digest == i.signed_wire_sha256
     }
@@ -242,14 +245,23 @@ impl Journal {
         hold: Option<crate::execution::hold_b::HoldEvidence>,
         fe06: Option<super::Fe06Attempt>,
         exit_reserve_lamports: u64,
+        fee_payer: Option<String>,
     ) -> Result<(), String> {
         if simulated.payload.path == SubmissionPath::JitoBundle && !now.bundle_simulated {
             return Err(err("CURRENT_BUNDLE_EVIDENCE_UNKNOWN"));
         }
-        if !simulated.payload.matches(&intent) {
+        if !simulated.payload.matches(&intent, fee_payer.as_deref()) {
             return Err(err("SIGNED_PAYLOAD_CHANGED"));
         }
-        self.reserve_held(approval, intent, now, hold, fe06, exit_reserve_lamports)
+        self.reserve_held(
+            approval,
+            intent,
+            now,
+            hold,
+            fe06,
+            exit_reserve_lamports,
+            fee_payer,
+        )
     }
 
     /// Exactly one adapter call, only after the UNKNOWN state was fsynced, bounded by the
@@ -272,7 +284,7 @@ impl Journal {
             return Err(err("CURRENT_BUNDLE_EVIDENCE_UNKNOWN"));
         }
         let saved = self.saved.as_ref().ok_or_else(|| err("NOT_RESERVED"))?;
-        if !p.matches(&saved.intent) {
+        if !p.matches(&saved.intent, saved.fee_payer.as_deref()) {
             return Err(err("SIGNED_PAYLOAD_CHANGED"));
         }
         permit.admit(
@@ -334,7 +346,7 @@ impl Journal {
         if simulated.payload.path == SubmissionPath::JitoBundle {
             return Err(err("EXIT_BUNDLE_UNSUPPORTED"));
         }
-        if !simulated.payload.matches_exit(&intent) {
+        if !simulated.payload.matches_exit(&intent, self.fee_payer()) {
             return Err(err("SIGNED_PAYLOAD_CHANGED"));
         }
         self.reserve_exit_booked(approval, intent, now, fe06)
@@ -355,7 +367,7 @@ impl Journal {
         let (intent, _) = self
             .exit_reserved()
             .ok_or_else(|| err("EXIT_NOT_RESERVED"))?;
-        if p.path == SubmissionPath::JitoBundle || !p.matches_exit(&intent) {
+        if p.path == SubmissionPath::JitoBundle || !p.matches_exit(&intent, self.fee_payer()) {
             return Err(err("SIGNED_PAYLOAD_CHANGED"));
         }
         permit.admit(

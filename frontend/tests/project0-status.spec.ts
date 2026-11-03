@@ -156,9 +156,14 @@ test("DEC-17b: Wallets shows every signer's wallet beside the frozen panel, read
   await tab(page, "Wallets");
   const section = page.locator(".p0-section", { has: page.getByRole("heading", { name: "Wallets · per signer" }) });
   await expect(page.getByTestId("p0-wallet-row-11111111111111111111111111111112")).toHaveText(
-    "ENABLED · may run candidates · SOL 5000000000 lamports · free 4950000000 lamports · holds SOL 0 · attempt NONE · not halted · capital 0.00 USD · 0 attempts today · realized 0.00 USD · ran 7 candidates");
+    "ENABLED · may run candidates · fees paid by itself · SOL 5000000000 lamports · free 4950000000 lamports · holds SOL 0 · attempt NONE · not halted · capital 0.00 USD · 0 attempts today · realized 0.00 USD · ran 7 candidates");
+  // DEC-17b B4: a liquidator paid by a fee payer alone, and the SOL held on that payer for it.
+  await expect(page.getByTestId("p0-wallet-row-11111111111111111111111111111113")).toContainText(
+    "may run candidates · fees paid by 11111111111111111111111111111114 · SOL 0 lamports");
+  await expect(page.getByTestId("p0-wallet-row-11111111111111111111111111111114")).toContainText(
+    "runs no candidate · holds 1000000 lamports for the liquidators it pays");
   await expect(section).toContainText("LIQUIDATOR · FEE_PAYER");
-  await expect(section).toContainText("7 / 0");
+  await expect(section).toContainText("9 / 0");
   await expect(section.locator("button, input, select")).toHaveCount(0);
   await expect(page.getByText("Total capital", { exact: true })).toBeVisible();
 });

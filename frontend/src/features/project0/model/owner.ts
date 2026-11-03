@@ -280,6 +280,10 @@ export interface WalletRowView {
   journalRead: boolean;
   realizedNetUsdMicro: string | null;
   selected: bigint;
+  /** DEC-17b B4: the wallet paying its candidates now (itself, or its fee payer); null: none. */
+  feePayer: string | null;
+  /** DEC-17b B4: lamports held on it for the attempts of the liquidators it pays. */
+  solHeldForOthers: bigint;
 }
 
 /** DEC-04 (V7): the B hold mode, its evidence, Safety's reserved inventory and capital, and the

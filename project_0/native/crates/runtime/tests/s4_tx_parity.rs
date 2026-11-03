@@ -459,6 +459,7 @@ fn s4_03_the_core_rebuilds_and_compiles_every_winner() {
                 group: &group,
                 marginfi_account: &account,
                 liquidator: &receiver,
+                fee_payer: &receiver,
                 global_fee_wallet: &global_fee_wallet,
                 start_observation: start_observation.clone(),
                 end_banks: end_banks.clone(),

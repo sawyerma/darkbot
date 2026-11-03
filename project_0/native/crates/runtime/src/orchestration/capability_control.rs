@@ -817,8 +817,14 @@ fn wallets_usable(g: &LiveGates) -> Result<(), String> {
                 .is_none_or(|s| s.signers.contains(&w.scope_entry()))
     };
     let usable: Vec<&WalletSwitch> = g.wallets.iter().filter(admitted).collect();
-    let fee_payer = usable.iter().any(|w| w.has(ROLE_FEE_PAYER));
-    if usable.iter().any(|w| w.has(ROLE_LIQUIDATOR)) && fee_payer {
+    // DEC-17b B4: a liquidator that pays its own fees, or a liquidator alone paid by a fee payer
+    // alone (a wallet with both roles pays only for itself).
+    let self_paying = usable
+        .iter()
+        .any(|w| w.has(ROLE_LIQUIDATOR) && w.has(ROLE_FEE_PAYER));
+    let split = usable.iter().any(|w| w.roles == [ROLE_LIQUIDATOR])
+        && usable.iter().any(|w| w.roles == [ROLE_FEE_PAYER]);
+    if self_paying || split {
         return Ok(());
     }
     let states: Vec<String> = g
@@ -1080,12 +1086,19 @@ impl SignPermit {
             }
         }
         for s in signers {
-            if !g
+            let Some(w) = g
                 .wallets
                 .iter()
-                .any(|w| w.pubkey == *s && w.enabled && w.signs())
-            {
+                .find(|w| w.pubkey == *s && w.enabled && w.signs())
+            else {
                 return Err(format!("SIGN_NOT_PERMITTED: {WALLET_PREFIX}{s} DISABLED"));
+            };
+            // DEC-17b B4 (review L1): every signer — the fee payer and the liquidator beside it —
+            // is a wallet the grant's scope admits with exactly its roles.
+            if scope.is_some_and(|sc| !sc.signers.contains(&w.scope_entry())) {
+                return Err(format!(
+                    "SIGN_SCOPE_SIGNER: {WALLET_PREFIX}{s} is not admitted by the grant's scope"
+                ));
             }
         }
         if signers.is_empty() {
@@ -1403,6 +1416,21 @@ mod tests {
         ];
         alone.iter_mut().for_each(|w| w.enabled = true);
         assert!(decide(&econ, &alone, Some(&fe06), LIVE)
+            .1
+            .starts_with("WALLET: no enabled liquidator"));
+        // DEC-17b B4: a liquidator alone paid by a fee payer alone runs; its payer DISABLED, it
+        // does not.
+        let mut split = vec![
+            WalletSwitch::configured(pk, &[ROLE_LIQUIDATOR]),
+            WalletSwitch::configured(Pubkey::new_unique(), &[ROLE_FEE_PAYER]),
+        ];
+        split.iter_mut().for_each(|w| w.enabled = true);
+        assert_eq!(
+            decide(&econ, &split, Some(&fe06), LIVE),
+            (LIVE, String::new())
+        );
+        split[1].enabled = false;
+        assert!(decide(&econ, &split, Some(&fe06), LIVE)
             .1
             .starts_with("WALLET: no enabled liquidator"));
         assert_eq!(
@@ -2262,6 +2290,30 @@ mod tests {
             .unwrap()
             .purpose(),
             SignPurpose::Simulation
+        );
+        // DEC-17b B4 (review L1): a second signer ENABLED but not admitted by the scope signs
+        // nothing beside the payer.
+        let other = Pubkey::new_unique();
+        let mut extra = offline.wallets.clone();
+        let mut liquidator = WalletSwitch::configured(other, &[ROLE_LIQUIDATOR]);
+        liquidator.enabled = true;
+        extra.push(liquidator);
+        let both = [pk[0], other];
+        assert_eq!(
+            SignPermit::issue(
+                &LiveGates {
+                    wallets: &extra,
+                    ..with_sim
+                },
+                SignPurpose::Simulation,
+                &both,
+                &message(1),
+                Some((&sim_use, rpc))
+            )
+            .unwrap_err(),
+            format!(
+                "SIGN_SCOPE_SIGNER: {WALLET_PREFIX}{other} is not admitted by the grant's scope"
+            )
         );
         let mut sign_off = offline.econ;
         sign_off.set(ECON_SIGN, false);
