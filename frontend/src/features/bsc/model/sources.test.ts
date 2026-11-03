@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { BACKEND_UNAVAILABLE } from "./status";
-import { NOT_RECORDED, RUNTIME_SCHEMA, SOURCE_IDS, SOURCE_SCHEMA, VENUE_IDS, runtimeView, sourceControlView } from "./sources";
+import { RUNTIME_SCHEMA, SOURCE_SCHEMA, runtimeView, sourceControlView } from "./sources";
 import type { NativeRecordView } from "./types";
 
 const record = (generation: string, rows: [string, string, string, string?][]): NativeRecordView => ({
@@ -14,6 +14,8 @@ const record = (generation: string, rows: [string, string, string, string?][]): 
     ])],
 });
 
+// The owner's sources as its record names them (test data; the view takes the record's list).
+const SOURCE_IDS = ["BSC_INGRESS_GETH", "BSC_INGRESS_PUBLICNODE", "BSC_INGRESS_DRPC", "BSC_INGRESS_BLOCKREQ", "BSC_INGRESS_48CLUB"];
 const all = (over: Record<string, [string, string, string?]> = {}) =>
   SOURCE_IDS.map(id => [id, ...(over[id] ?? ["OFF", "OFF"])] as [string, string, string, string?]);
 
@@ -30,20 +32,21 @@ describe("BSC component control (C2 state)", () => {
   it("shows the owner's component modes; LIVE stays BLOCKED with its reason", () => {
     const v = sourceControlView([withComponents(record("4", all()), [["BSC_STATE_C2", "LIVE", "BLOCKED", "C2_OPERATIONAL_NOT_AUTHORIZED"]])]);
     expect(v.components[0]).toEqual({ id: "BSC_STATE_C2", requested: "LIVE", effective: "BLOCKED", blockReason: "C2_OPERATIONAL_NOT_AUTHORIZED", health: "", counters: "" });
-    // A component the record does not name is NOT_RECORDED, never assumed OFF.
-    expect(v.components[1]).toMatchObject({ id: "BSC_EXEC", requested: NOT_RECORDED, effective: NOT_RECORDED });
+    // Audit E 4.9: a component the record does not name is not listed, never assumed OFF.
+    expect(v.components.map(c => c.id)).toEqual(["BSC_STATE_C2"]);
     const exec = sourceControlView([withComponents(record("5", all()), [["BSC_STATE_C2", "SHADOW", "SHADOW"], ["BSC_EXEC", "LIVE", "BLOCKED", "ECONOMIC_LIVE_NOT_AUTHORIZED"]])]);
     expect(exec.components[1]).toMatchObject({ id: "BSC_EXEC", requested: "LIVE", effective: "BLOCKED", blockReason: "ECONOMIC_LIVE_NOT_AUTHORIZED" });
-    // A generation from before Strategy C does not name it: NOT_RECORDED.
-    expect(exec.components[2]).toMatchObject({ id: "BSC_STRATEGY_C", requested: NOT_RECORDED, effective: NOT_RECORDED });
+    // A generation from before Strategy C does not name it: not listed.
+    expect(exec.components.map(c => c.id)).toEqual(["BSC_STATE_C2", "BSC_EXEC"]);
     const strategy = sourceControlView([withComponents(record("6", all()), [["BSC_STATE_C2", "SHADOW", "SHADOW"], ["BSC_EXEC", "OFF", "OFF"], ["BSC_STRATEGY_C", "LIVE", "BLOCKED", "ECONOMIC_LIVE_NOT_AUTHORIZED"]])]);
     expect(strategy.components[2]).toMatchObject({ id: "BSC_STRATEGY_C", requested: "LIVE", effective: "BLOCKED", blockReason: "ECONOMIC_LIVE_NOT_AUTHORIZED" });
   });
-  it("a generation from before components is NOT_RECORDED, never assumed", () => {
-    expect(sourceControlView([record("1", all())]).components[0]).toMatchObject({ requested: NOT_RECORDED, effective: NOT_RECORDED });
+  it("a generation from before components names none, never assumed", () => {
+    expect(sourceControlView([record("1", all())]).components).toEqual([]);
   });
-  it("an unknown or repeated component makes the record invalid", () => {
-    expect(sourceControlView([withComponents(record("1", all()), [["BSC_STATE_X", "OFF", "OFF"]])]).reason).toBe("BACKEND_INVALID");
+  it("a repeated or unnamed component makes the record invalid; its ids are the owner's", () => {
+    expect(sourceControlView([withComponents(record("1", all()), [["BSC_STATE_X", "OFF", "OFF"]])]).components.map(c => c.id)).toEqual(["BSC_STATE_X"]);
+    expect(sourceControlView([withComponents(record("1", all()), [["", "OFF", "OFF"]])]).reason).toBe("BACKEND_INVALID");
     expect(sourceControlView([withComponents(record("1", all()), [["BSC_STATE_C2", "OFF", "OFF"], ["BSC_STATE_C2", "OFF", "OFF"]])]).reason).toBe("BACKEND_INVALID");
   });
 });
@@ -61,16 +64,16 @@ const withVenues = (base: NativeRecordView, rows: [string, string, string, strin
 describe("BSC venue control (plan v9 §2.3)", () => {
   it("shows the owner's venue modes with the request that set each", () => {
     const v = sourceControlView([withVenues(record("8", all()), [["BSC_VENUE_FLAP", "SHADOW", "SHADOW", undefined, "req-1"], ["BSC_VENUE_FOUR_CLASSIC", "SHADOW", "BLOCKED", "FOUR_EXECUTION_PATH_MISSING"], ["BSC_VENUE_OPENFOUR", "LIVE", "BLOCKED", "ECONOMIC_LIVE_DISABLED"]])]);
-    expect(v.venues.map(r => r.id)).toEqual([...VENUE_IDS]);
+    expect(v.venues.map(r => r.id)).toEqual(["BSC_VENUE_FLAP", "BSC_VENUE_FOUR_CLASSIC", "BSC_VENUE_OPENFOUR"]);
     expect(v.venues[0]).toMatchObject({ requested: "SHADOW", effective: "SHADOW", receipt: "req-1 @ generation 7" });
     expect(v.venues[1]).toMatchObject({ effective: "BLOCKED", blockReason: "FOUR_EXECUTION_PATH_MISSING", receipt: "never requested" });
     expect(v.venues[2]).toMatchObject({ requested: "LIVE", effective: "BLOCKED", blockReason: "ECONOMIC_LIVE_DISABLED" });
   });
-  it("a generation from before the venues names none: NOT_RECORDED, never assumed", () => {
-    expect(sourceControlView([record("1", all())]).venues[0]).toMatchObject({ requested: NOT_RECORDED, effective: NOT_RECORDED });
+  it("a generation from before the venues names none, never assumed", () => {
+    expect(sourceControlView([record("1", all())]).venues).toEqual([]);
   });
-  it("an unknown or repeated venue makes the record invalid", () => {
-    expect(sourceControlView([withVenues(record("1", all()), [["BSC_VENUE_X", "OFF", "OFF"]])]).reason).toBe("BACKEND_INVALID");
+  it("a repeated or unnamed venue makes the record invalid", () => {
+    expect(sourceControlView([withVenues(record("1", all()), [["", "OFF", "OFF"]])]).reason).toBe("BACKEND_INVALID");
     expect(sourceControlView([withVenues(record("1", all()), [["BSC_VENUE_FLAP", "OFF", "OFF"], ["BSC_VENUE_FLAP", "OFF", "OFF"]])]).reason).toBe("BACKEND_INVALID");
   });
 });
@@ -79,6 +82,8 @@ describe("BSC source control", () => {
   it("without the native owner's record nothing can be requested", () => {
     const v = sourceControlView([]);
     expect([v.available, v.reason]).toEqual([false, BACKEND_UNAVAILABLE]);
+    // Audit E 4.9: and nothing is listed from a frontend list.
+    expect([v.rows, v.components, v.venues]).toEqual([[], [], []]);
   });
   it("shows the owner's requested and effective modes with the generation", () => {
     const v = sourceControlView([record("3", all({ BSC_INGRESS_DRPC: ["LIVE", "BLOCKED", "ECONOMIC_LIVE_NOT_AUTHORIZED"], BSC_INGRESS_PUBLICNODE: ["SHADOW", "SHADOW"] }))]);
@@ -88,9 +93,12 @@ describe("BSC source control", () => {
     expect(v.runtime.state).toBe("NOT_RUNNING");
     expect(v.rows.map(r => r.id)).toEqual([...SOURCE_IDS]);
   });
-  it("a record without all five sources or a generation is invalid, never partial", () => {
+  it("a record without a generation, without sources or with a repeated one is invalid", () => {
     expect(sourceControlView([record("x", all())]).reason).toBe("BACKEND_INVALID");
-    expect(sourceControlView([record("1", all().slice(1))]).reason).toBe("BACKEND_INVALID");
+    expect(sourceControlView([record("1", [])]).reason).toBe("BACKEND_INVALID");
+    expect(sourceControlView([record("1", [...all(), all()[0]!])]).reason).toBe("BACKEND_INVALID");
+    // The owner's record names its sources (the native rule checks them); the view lists them.
+    expect(sourceControlView([record("1", all().slice(1))]).rows.map(r => r.id)).toEqual(SOURCE_IDS.slice(1));
   });
   it("takes health only from a fresh runtime status, a stale one is STALE, never HEALTHY", () => {
     const status = (observed: number): NativeRecordView => ({ schema: RUNTIME_SCHEMA, provenance: "NATIVE_CREATED", fields: [

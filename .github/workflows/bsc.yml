@@ -17,6 +17,8 @@ on:
       - 'frontend/package.json'
       - 'frontend/package-lock.json'
       - 'ops/bsc-control.sh'
+      # Audit E 4.9: the gateway's allowlists are pinned to the owner (sources::tests).
+      - 'gateway/src/control.rs'
       - '.github/workflows/bsc.yml'
   workflow_dispatch:
 jobs:
@@ -103,6 +105,8 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
       - run: npm run build
+      # Audit E 4.8: the BSC models' tests (live.test.ts reads the owner's grant vector).
+      - run: npx vitest run src/features/bsc src/core/realtime
       - run: npx playwright install --with-deps chromium
       - name: npm run test:bsc (a failure's error lines become an annotation; the run log is not public)
         run: |

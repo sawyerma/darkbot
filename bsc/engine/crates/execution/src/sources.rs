@@ -1037,6 +1037,10 @@ pub enum LiveStrategies {
 }
 
 impl LiveStrategies {
+    /// Every strategy choice of a grant, in the owner's order (Audit E 4.9:
+    /// the projection's list; the LIVE tab offers exactly these).
+    pub const ALL: [LiveStrategies; 3] = [Self::C3, Self::StrategyC, Self::Both];
+
     pub fn name(self) -> &'static str {
         match self {
             Self::C3 => "C3",
@@ -1046,9 +1050,7 @@ impl LiveStrategies {
     }
 
     pub fn parse(text: &str) -> Option<Self> {
-        [Self::C3, Self::StrategyC, Self::Both]
-            .into_iter()
-            .find(|s| s.name() == text)
+        Self::ALL.into_iter().find(|s| s.name() == text)
     }
 
     pub fn c3(self) -> bool {
@@ -1099,6 +1101,10 @@ impl LiveAdapter {
         Self::ALL.into_iter().find(|a| a.name() == text)
     }
 }
+
+/// The venues a LIVE grant can name: Flap alone (Four has no execution path,
+/// `FOUR_EXECUTION_PATH_MISSING`). Audit E 4.9: the projection's list.
+pub const LIVE_VENUES: [VenueId; 1] = [VenueId::Flap];
 
 /// The operator's LIVE grant (plan 28.10., `0a647175`): the one economic
 /// approval of a LIVE scope with its limits. It is approved by its scope
@@ -1365,7 +1371,7 @@ impl LiveGrant {
     /// grant on file stays readable when the maximum is lowered; the
     /// campaign's total bounds its attempts).
     pub fn validate(&self) -> Result<(), String> {
-        if self.venue != VenueId::Flap {
+        if !LIVE_VENUES.contains(&self.venue) {
             return Err(format!(
                 "{}: {FOUR_EXECUTION_PATH_MISSING}, only BSC_VENUE_FLAP can be live",
                 self.venue.name()
@@ -7308,6 +7314,153 @@ pub(crate) mod tests {
         fs::write(&path, d.encode().unwrap()).unwrap();
         assert!(s.current().unwrap_err().contains("not the owner's"));
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A grant from its canonical scope text (tests only; the owner builds a
+    /// grant from the CLI's arguments).
+    fn grant_of_text(text: &str) -> LiveGrant {
+        let mut g = grant(0);
+        let (mut risk, mut limits) = (TEST_RISK, TEST_LIMITS);
+        for line in text.lines().skip(1) {
+            let (key, v) = line.split_once('=').unwrap();
+            let list = |v: &str| {
+                v.split(',')
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_owned)
+                    .collect::<Vec<_>>()
+            };
+            match key {
+                "venue" => g.venue = VenueId::parse(v).unwrap(),
+                "strategies" => g.strategies = LiveStrategies::parse(v).unwrap(),
+                "sources" => {
+                    g.sources = list(v)
+                        .iter()
+                        .map(|s| SourceId::parse(s).unwrap())
+                        .collect()
+                }
+                "adapters" => {
+                    g.adapters = list(v)
+                        .iter()
+                        .map(|a| LiveAdapter::parse(a).unwrap())
+                        .collect()
+                }
+                "max_input_wei" => g.max_input_wei = v.parse().unwrap(),
+                "max_spend_wei" => g.max_spend_wei = v.parse().unwrap(),
+                "max_attempts" => g.max_attempts = v.parse().unwrap(),
+                "expires_unix_ms" => g.expires_unix_ms = v.parse().unwrap(),
+                "max_buy_slippage_bps" => risk.max_buy_slippage_bps = v.parse().unwrap(),
+                "max_exit_slippage_bps" => risk.max_exit_slippage_bps = v.parse().unwrap(),
+                "max_gas_price_wei" => risk.max_gas_price_wei = v.parse().unwrap(),
+                "max_buy_gas_limit" => risk.max_buy_gas_limit = v.parse().unwrap(),
+                "max_approve_gas_limit" => risk.max_approve_gas_limit = v.parse().unwrap(),
+                "max_sell_gas_limit" => risk.max_sell_gas_limit = v.parse().unwrap(),
+                "risk_outlier_ack" => risk.outlier_ack = v == "YES",
+                "max_open_positions" => limits.max_open_positions = v.parse().unwrap(),
+                "max_realized_loss_wei" => limits.max_realized_loss_wei = v.parse().unwrap(),
+                "max_daily_realized_loss_wei" => {
+                    limits.max_daily_realized_loss_wei = v.parse().unwrap()
+                }
+                "min_buy_interval_ms" => limits.min_buy_interval_ms = v.parse().unwrap(),
+                "exit_only" => g.exit_only = v == "true",
+                other => panic!("unknown scope key {other}"),
+            }
+        }
+        g.risk = Some(risk);
+        g.limits = Some(limits);
+        g
+    }
+
+    /// Audit E 4.9: the shared gateway's command allowlists (its boundary
+    /// against a browser request, which it checks before any owner call) are
+    /// exactly this owner's IDs and grant choices, in its order: they cannot
+    /// drift from the one authority. The frontend takes them from the
+    /// projection (`bsc.live.state`, the native source record).
+    #[test]
+    fn the_gateway_allowlists_are_the_owners_ids() {
+        const GATEWAY: &str = include_str!("../../../../../gateway/src/control.rs");
+        let list = |name: &str| -> Vec<String> {
+            let at = GATEWAY
+                .find(&format!("const {name}: [&str; "))
+                .unwrap_or_else(|| panic!("{name} not in gateway/src/control.rs"));
+            let body = &GATEWAY[at..];
+            let body = &body[body.find("= [").unwrap() + 3..body.find("];").unwrap()];
+            body.split(',')
+                .map(|s| s.trim().trim_matches('"').to_owned())
+                .filter(|s| !s.is_empty())
+                .collect()
+        };
+        let names = |v: Vec<&str>| v.into_iter().map(str::to_owned).collect::<Vec<_>>();
+        let sources: Vec<&str> = SourceId::ALL
+            .iter()
+            .map(|s| s.name())
+            .chain(ComponentId::ALL.iter().map(|c| c.name()))
+            .collect();
+        assert_eq!(list("BSC_SOURCE_IDS"), names(sources));
+        assert_eq!(
+            list("BSC_VENUE_IDS"),
+            names(VenueId::ALL.iter().map(|v| v.name()).collect())
+        );
+        let switches: Vec<&str> = SwitchId::ALL.iter().map(|s| s.name()).collect();
+        assert_eq!(list("BSC_WALLET_IDS"), names(switches[..2].to_vec()));
+        assert_eq!(list("BSC_ECONOMIC_IDS"), names(switches[2..].to_vec()));
+        assert_eq!(
+            list("BSC_LIVE_STRATEGIES"),
+            names(LiveStrategies::ALL.iter().map(|s| s.name()).collect())
+        );
+        assert_eq!(
+            list("BSC_LIVE_ADAPTERS"),
+            names(LiveAdapter::ALL.iter().map(|a| a.name()).collect())
+        );
+    }
+
+    /// Audit E 4.8: one grant vector for the owner and the LIVE tab
+    /// (`tests/fixtures/live_grant/`, which `live.test.ts` reads too): the
+    /// canonical scope text and its digest byte for byte, and every variant
+    /// of `refused.txt` refused by the owner (the form refuses the same).
+    #[test]
+    fn the_grant_vector_is_the_owners() {
+        const SCOPE: &str = include_str!("../tests/fixtures/live_grant/scope.txt");
+        const REFUSED: &str = include_str!("../tests/fixtures/live_grant/refused.txt");
+        let g = grant_of_text(SCOPE);
+        assert_eq!(g.scope_text(), SCOPE);
+        assert_eq!(
+            hex32(&g.scope_sha256()),
+            "567cec77f585f80ab0ab9408bcdb2ccc7db7ba2f3d70d770c379195dea6afceb"
+        );
+        g.validate_within(10).unwrap();
+        let exits = LiveGrant {
+            exit_only: true,
+            ..g.clone()
+        };
+        assert_eq!(exits.scope_text(), format!("{SCOPE}exit_only=true\n"));
+        assert_eq!(
+            hex32(&exits.scope_sha256()),
+            "e012c2fd97397c20f75972c2435989cac4ed0843260534b7d020a812f25a2162"
+        );
+        let mut acked = g.clone();
+        acked.risk.as_mut().unwrap().outlier_ack = true;
+        assert_eq!(
+            acked.scope_text(),
+            SCOPE.replace(
+                "max_sell_gas_limit=1500000\n",
+                "max_sell_gas_limit=1500000\nrisk_outlier_ack=YES\n"
+            )
+        );
+        let mut refused = 0;
+        for line in REFUSED
+            .lines()
+            .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        {
+            let key = format!("{}=", line.split_once('=').unwrap().0);
+            let text: String = SCOPE
+                .lines()
+                .map(|l| format!("{}\n", if l.starts_with(&key) { line } else { l }))
+                .collect();
+            assert!(text.contains(line), "{line}");
+            assert!(grant_of_text(&text).validate_within(10).is_err(), "{line}");
+            refused += 1;
+        }
+        assert_eq!(refused, 17);
     }
 
     /// BSC3-049: the risk scope is the grant's scope without its validity

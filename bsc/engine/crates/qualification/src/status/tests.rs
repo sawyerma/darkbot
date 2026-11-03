@@ -1768,6 +1768,17 @@ fn the_tabs_count_the_running_paths_held_attempt_as_its_own() {
     assert_eq!(counted(), (1, 1));
     status("ARMED", now);
     assert_eq!(counted().0, 0);
+    // Audit E 4.11: the runtime's LIVE path is projected once, typed in bsc.live.state; the
+    // runtime status's native leaves omit it (the other leaves stay).
+    let monitoring = projection::project(&root, &rundir).monitoring;
+    let leaves = &monitoring
+        .records
+        .iter()
+        .find(|r| r.schema == rs::SCHEMA.name)
+        .unwrap()
+        .fields;
+    assert!(leaves.iter().any(|f| f.name == "status_interval_ms"));
+    assert!(!leaves.iter().any(|f| f.name.starts_with("live[")));
     // Not armed, stale: every slot counts.
     status("PROBING", now);
     assert_eq!(counted().0, 1);
@@ -2532,6 +2543,42 @@ fn the_live_tab_projects_the_gate_grant_and_ledger() {
     );
     fs::remove_dir_all(root).unwrap();
 }
+/// Audit E 4.9: the LIVE tab's grant choices are the native owner's (its live venues, strategy
+/// paths, adapters, in its order), projected with or without its state or a configuration; the
+/// frontend has no list of its own.
+#[test]
+fn the_live_tab_offers_the_owners_grant_choices() {
+    use darkbot_bsc_execution::sources::{LIVE_VENUES, LiveAdapter, LiveStrategies};
+    let root = std::env::temp_dir().join(format!("darkbot-bsc-choices-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(root.join("run")).unwrap();
+    let s = projection::project(&root, &root.join("run"));
+    assert_eq!(s.live.grant_venues, ["BSC_VENUE_FLAP"]);
+    assert_eq!(
+        s.live.grant_venues,
+        LIVE_VENUES.iter().map(|v| v.name()).collect::<Vec<_>>()
+    );
+    assert_eq!(
+        s.live.grant_strategies,
+        ["C3", "STRATEGY_C", "C3+STRATEGY_C"]
+    );
+    assert_eq!(
+        s.live.grant_strategies,
+        LiveStrategies::ALL
+            .iter()
+            .map(|x| x.name())
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        s.live.grant_adapters,
+        LiveAdapter::ALL
+            .iter()
+            .map(|a| a.name())
+            .collect::<Vec<_>>()
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
 /// Audit E 1.3/1.6: the Wallets tab names the LIVE buyer the runtime configuration names (C2
 /// watches it, or the runtime refuses the configuration), never a hand-written status; the
 /// grant form offers only the sources the configuration gives an adapter endpoint. Without a

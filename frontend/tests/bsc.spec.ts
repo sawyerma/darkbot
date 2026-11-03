@@ -75,13 +75,24 @@ test("the six tabs fail closed without a gateway: UNKNOWN, never 0, no control a
     for (const v of await page.locator(".g-line .g-right").allTextContents()) expect(v.trim()).not.toMatch(/^0(\.0+)?( BNB| USD)?$/);
   }
   // Every tab's requests were checked: readiness, candidate, switches, modes, limits, grant, revoke.
-  expect(locked).toBeGreaterThan(20);
+  // Audit E 4.9: without the owner's projection no source, component or venue row exists to
+  // request at all (before, rows from frontend lists showed locked buttons): the 20 left are locked.
+  expect(locked).toBeGreaterThanOrEqual(20);
+  expect(await page.locator("[data-testid^=bsc-source-BSC_]").count()).toBe(0);
+  // Review M1: and the empty lists say why, never nothing.
+  await tab(page, "Monitoring").click();
+  for (const group of ["Sources", "Venues", "Components"]) await expect(line(page, group)).toContainText("BACKEND_UNAVAILABLE");
+  await tab(page, "Launch / BUY").click();
+  await expect(line(page, "Economic switches").first()).toContainText("BACKEND_UNAVAILABLE");
   await tab(page, "Overview").click();
   await expect(page.getByTestId("bsc-guard")).toHaveText("Guard · UNKNOWN");
   await expect(line(page, "LIVE")).toContainText("UNKNOWN");
   // Audit E 1.6: no grantable source without the native projection, so none is offered.
   await tab(page, "LIVE").click();
   await expect(page.locator("[data-testid^=bsc-live-grant-source-]")).toHaveCount(0);
+  // Audit E 4.9: nor a strategy or an adapter: the choices are the owner's projection alone.
+  await expect(page.getByTestId("bsc-live-grant-strategies").locator("option")).toHaveCount(0);
+  await expect(page.locator("[data-testid^=bsc-live-grant-adapter-]")).toHaveCount(0);
   // REV.1.0 R2b: no campaign verdict is no evaluation, never a value.
   await expect(page.getByTestId("bsc-live-campaign-none")).toHaveText("keine Bewertung");
   await expect(page.getByTestId("bsc-live-attempts")).toHaveCount(0);
@@ -93,6 +104,9 @@ test("LIVE comes from bsc.live.state alone and the grant offers only its grantab
   const live = toBinary(BscLiveStateSchema, create(BscLiveStateSchema, {
     gate: "CLEAR", pathState: "ARMED", generation: 5n, qualification: "VERIFIED", warnings: [],
     grantableSources: ["BSC_INGRESS_PUBLICNODE", "BSC_INGRESS_DRPC"],
+    // Audit E 4.9: the owner's grant choices (TEST_ONLY values of the projection).
+    grantVenues: ["BSC_VENUE_FLAP"], grantStrategies: ["C3", "STRATEGY_C", "C3+STRATEGY_C"],
+    grantAdapters: ["CLUB48_BUILDER_V1", "BLOCKRAZOR_BUILDER_V1"],
   }));
   await feed(page, live);
   await page.goto("/bsc");
@@ -112,6 +126,13 @@ test("LIVE comes from bsc.live.state alone and the grant offers only its grantab
     ["bsc-live-grant-source-BSC_INGRESS_PUBLICNODE", "bsc-live-grant-source-BSC_INGRESS_DRPC"]);
   await expect(page.getByTestId("bsc-live-grant-source-BSC_INGRESS_PUBLICNODE")).toBeChecked();
   await expect(page.getByTestId("bsc-live-grant-source-BSC_INGRESS_DRPC")).not.toBeChecked();
+  // Audit E 4.9: exactly the owner's projected strategies and adapters; its first ones are chosen.
+  expect(await page.getByTestId("bsc-live-grant-strategies").locator("option").evaluateAll(els => els.map(e => e.textContent)))
+    .toEqual(["C3", "STRATEGY_C", "C3+STRATEGY_C"]);
+  const adapters = page.locator("[data-testid^=bsc-live-grant-adapter-]");
+  expect(await adapters.evaluateAll(els => els.map(e => e.getAttribute("data-testid")))).toEqual(
+    ["bsc-live-grant-adapter-CLUB48_BUILDER_V1", "bsc-live-grant-adapter-BLOCKRAZOR_BUILDER_V1"]);
+  await expect(page.getByTestId("bsc-live-grant-adapter-CLUB48_BUILDER_V1")).toBeChecked();
   await page.getByTestId("bsc-live-grant-source-BSC_INGRESS_PUBLICNODE").uncheck();
   await expect(page.getByTestId("bsc-live-grant-error")).toContainText("at least one grantable source");
   await expect(page.getByTestId("bsc-live-campaign-none")).toHaveText("keine Bewertung");

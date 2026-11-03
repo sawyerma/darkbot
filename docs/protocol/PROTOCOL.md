@@ -357,6 +357,9 @@ transactions and the net result. A view of the native owner and ledger, never a 
 | qualification_observed_unix_ms | [uint64](#uint64) | optional | The qualification&#39;s age: the oldest of its record, evidence and risk decision (unix ms). |
 | qualification_max_age_ms | [uint64](#uint64) | optional | BSC_EXEC_LIVE_QUALIFICATION_MAX_AGE_MS (0: no bound): an older qualification admits no BUY. |
 | buy_attempts_total_max | [uint32](#uint32) | optional | Audit E 3.1 (BSC_BUY_ATTEMPTS_TOTAL_MAX): the most BUY attempts a UTC day or the whole campaign may take, and the most a grant may name; absent: no readable runtime configuration. |
+| grant_venues | [string](#string) | repeated | Audit E 4.9: the venues a grant can name, as the native owner takes them, in its order. The LIVE tab offers exactly these; never a frontend list. |
+| grant_strategies | [string](#string) | repeated | Audit E 4.9: the strategy paths a grant can name, as the native owner takes them. |
+| grant_adapters | [string](#string) | repeated | Audit E 4.9: the inclusion adapters a grant can name, as the native owner takes them. |
 
 
 

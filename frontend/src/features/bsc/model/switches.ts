@@ -6,8 +6,6 @@
 import type { BuyAttemptLimitView, ControlSwitchView } from "./types";
 import { BACKEND_UNAVAILABLE } from "./status";
 
-export const WALLET_SWITCHES = ["BSC_WALLET_LAUNCHER", "BSC_WALLET_BUYER"] as const;
-export const ECONOMIC_SWITCHES = ["BSC_ECON_SIGN", "BSC_ECON_ARM", "BSC_ECON_SEND", "BSC_ECON_ATTEMPT", "BSC_ECON_LIVE"] as const;
 
 /** What each switch permits; the Mainnet path still checks its own guard, V5, nonce, budget and attempt. */
 export const SWITCH_TEXT: Record<string, { label: string; hint: string }> = {
@@ -47,13 +45,15 @@ export function switchRow(id: string, s: ControlSwitchView | undefined): SwitchR
   };
 }
 
-/** The economic switches in their fixed order. */
+/** The economic switches as the projection lists them, in the owner's order (Audit E 4.9: never a
+ *  frontend list; none without the owner's state). */
 export function economicRows(controls: readonly ControlSwitchView[] | undefined): SwitchRow[] {
-  return ECONOMIC_SWITCHES.map(id => switchRow(id, controls?.find(c => c.id === id)));
+  return (controls ?? []).map(c => switchRow(c.id, c));
 }
 
 /** One line for a summary: each switch with its effective state. */
 export function summary(rows: readonly SwitchRow[]): string {
+  if (!rows.length) return BACKEND_UNAVAILABLE;
   return rows.map(r => `${r.label} ${r.effective}${r.blockReason ? ` (${r.blockReason})` : ""}`).join(" · ");
 }
 

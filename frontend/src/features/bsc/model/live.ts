@@ -5,9 +5,12 @@
 import type { LiveGrantScope } from "@/core/realtime/bscControl";
 import type { BscLiveView, ControlSwitchView, LiveAttemptView, LiveCampaignView } from "./types";
 
-export const LIVE_VENUES = ["BSC_VENUE_FLAP"] as const;
-export const LIVE_STRATEGIES = ["C3", "STRATEGY_C", "C3+STRATEGY_C"] as const;
-export const LIVE_ADAPTERS = ["CLUB48_BUILDER_V1", "BLOCKRAZOR_BUILDER_V1"] as const;
+/** Audit E 4.9: the grant's fixed choices as the native owner projects them (bsc.live.state's
+ *  grant_venues/strategies/adapters); none without the projection, never a frontend list. */
+export interface GrantChoices { venues: readonly string[]; strategies: readonly string[]; adapters: readonly string[] }
+export function grantChoices(l: BscLiveView | null): GrantChoices {
+  return { venues: l?.grantVenues ?? [], strategies: l?.grantStrategies ?? [], adapters: l?.grantAdapters ?? [] };
+}
 
 /** The one LIVE indicator (Audit E 4.10), from bsc.live.state alone: LIVE while the owner's gate
  *  is CLEAR and the runtime's LIVE path ARMED, UNKNOWN without the owner's state, else BLOCKED. */
@@ -76,9 +79,10 @@ export function weiOk(text: string): boolean {
   return /^(0|[1-9][0-9]{0,38})$/.test(text) && BigInt(text) <= U128_MAX;
 }
 
-/** The grant form as typed. `sources` null: not chosen yet, the first grantable source. */
+/** The grant form as typed. `strategies`, `sources`, `adapters` null: not chosen yet, the first
+ *  the owner offers. */
 export interface GrantForm {
-  strategies: string; sources: string[] | null; adapters: string[];
+  strategies: string | null; sources: string[] | null; adapters: string[] | null;
   maxInputWei: string; maxSpendWei: string; maxAttempts: string; hours: string;
   exitOnly: boolean;
   /** BSC3-069: the execution risk, as typed. */
@@ -107,17 +111,29 @@ const MIN_GAS_LIMIT = 21_000n;
 export function formSources(f: GrantForm, grantable: readonly string[]): string[] {
   return f.sources ?? grantable.slice(0, 1);
 }
+/** The strategy paths a form names, or before any choice the owner's first. */
+export function formStrategies(f: GrantForm, c: GrantChoices): string {
+  return f.strategies ?? c.strategies[0] ?? "";
+}
+/** The adapters a form names, or before any choice the owner's first. */
+export function formAdapters(f: GrantForm, c: GrantChoices): string[] {
+  return f.adapters ?? c.adapters.slice(0, 1);
+}
 
 /** The scope of a grant form at `nowMs`, or why it is not one (the owner checks again). Only the
  *  native projection's grantable sources can be named, at most `maxAttempts` attempts
  *  (bsc.live.state's buy_attempts_total_max, Audit E 3.1; none without it). */
-export function grantScope(f: GrantForm, nowMs: number, grantable: readonly string[], maxAttempts: number | undefined): { scope: LiveGrantScope } | { error: string } {
-  if (!(LIVE_STRATEGIES as readonly string[]).includes(f.strategies)) return { error: "strategies: C3, STRATEGY_C or C3+STRATEGY_C" };
+export function grantScope(f: GrantForm, nowMs: number, grantable: readonly string[], maxAttempts: number | undefined, choices: GrantChoices): { scope: LiveGrantScope } | { error: string } {
+  const venue = choices.venues[0];
+  if (venue === undefined) return { error: "no venue the native owner can grant (bsc.live.state)" };
+  const strategies = formStrategies(f, choices);
+  if (!choices.strategies.includes(strategies)) return { error: `strategies: ${choices.strategies.join(", ") || "none projected"}` };
   const unique = (xs: string[]) => new Set(xs).size === xs.length;
   const sources = formSources(f, grantable);
   if (!grantable.length) return { error: "no source has an adapter endpoint in the runtime configuration" };
   if (!sources.length || !unique(sources) || !sources.every(s => grantable.includes(s))) return { error: "at least one grantable source, each once" };
-  if (!f.adapters.length || !unique(f.adapters) || !f.adapters.every(a => (LIVE_ADAPTERS as readonly string[]).includes(a))) return { error: "at least one adapter, each once" };
+  const adapters = formAdapters(f, choices);
+  if (!adapters.length || !unique(adapters) || !adapters.every(a => choices.adapters.includes(a))) return { error: "at least one adapter, each once" };
   if (!weiOk(f.maxInputWei) || BigInt(f.maxInputWei) === 0n) return { error: "max input: a positive plain decimal in wei" };
   if (!weiOk(f.maxSpendWei) || BigInt(f.maxSpendWei) < BigInt(f.maxInputWei)) return { error: "max spend: a plain decimal in wei, at least the max input" };
   if (maxAttempts === undefined) return { error: "attempts: no maximum without a readable runtime configuration (BSC_BUY_ATTEMPTS_TOTAL_MAX)" };
@@ -132,7 +148,7 @@ export function grantScope(f: GrantForm, nowMs: number, grantable: readonly stri
   if (!u64Ok(f.minBuyIntervalMs, 0n)) return { error: "BUY interval: a plain decimal in milliseconds" };
   return {
     scope: {
-      venue: LIVE_VENUES[0], strategies: f.strategies, sources, adapters: f.adapters,
+      venue, strategies, sources, adapters,
       maxInputWei: f.maxInputWei, maxSpendWei: f.maxSpendWei, maxAttempts: Number(f.maxAttempts),
       expiresUnixMs: BigInt(nowMs) + BigInt(f.hours) * 3_600_000n, exitOnly: f.exitOnly,
       risk: {

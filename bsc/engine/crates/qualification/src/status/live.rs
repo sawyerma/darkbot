@@ -208,6 +208,19 @@ fn owner_tab(
 ) -> BscLiveState {
     let mut out = BscLiveState {
         gate: "UNKNOWN".into(),
+        // Audit E 4.9: the owner's own vocabulary, with or without its state.
+        grant_venues: darkbot_bsc_execution::sources::LIVE_VENUES
+            .iter()
+            .map(|v| v.name().into())
+            .collect(),
+        grant_strategies: darkbot_bsc_execution::sources::LiveStrategies::ALL
+            .iter()
+            .map(|s| s.name().into())
+            .collect(),
+        grant_adapters: darkbot_bsc_execution::sources::LiveAdapter::ALL
+            .iter()
+            .map(|a| a.name().into())
+            .collect(),
         ..Default::default()
     };
     // R3b: the buyer whose nonces may be burnt (none: no LIVE path configured).

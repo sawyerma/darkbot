@@ -487,9 +487,12 @@ fn wei_ok(s: &str) -> bool {
 
 /// Plan 28.10.: the only accepted LIVE grant: the fixed resource `BSC_LIVE_GRANT`, the scope
 /// the operator confirmed as `BscLiveGrantCommand` (every value from the fixed sets or a plain
-/// bound decimal, the scope's SHA-256 as shown) and the owner generation as CAS. The arguments
-/// of `darkbotctl bsc live grant` without the request id; the native owner recomputes the
-/// scope digest and refuses a grant whose digest differs.
+/// decimal, the scope's SHA-256 as shown) and the owner generation as CAS. The arguments of
+/// `darkbotctl bsc live grant` without the request id. Audit E 4.8: only the shape is checked
+/// here; the native owner alone decides the bounds (slippage, gas, limits, losses, attempts,
+/// validity: `LiveGrant::validate`; its refusal is the receipt's detail, as in the terminal; an
+/// empty source or adapter list already stops at `bsc-control.sh`), recomputes the scope digest
+/// and refuses a grant whose digest differs.
 fn grant_request(req: &CommandRequest) -> Option<Vec<String>> {
     use crate::proto::bsc::v1::BscLiveGrantCommand;
     if req.action != BSC_LIVE_GRANT || req.resource_id != "BSC_LIVE_GRANT" {
@@ -500,51 +503,25 @@ fn grant_request(req: &CommandRequest) -> Option<Vec<String>> {
         return None;
     };
     let c = BscLiveGrantCommand::decode(req.params.as_ref()).ok()?;
-    // BSC3-069: the execution risk, every bound one a transaction can be
-    // signed within (the native owner checks again).
+    // BSC3-069 and 31.10. order: the risk and the limits are part of every grant.
     let risk = c.risk?;
-    let risk_ok = risk.max_buy_slippage_bps < 10_000
-        && risk.max_exit_slippage_bps < 10_000
-        && risk.max_gas_price_wei > 0
-        && [
-            risk.max_buy_gas_limit,
-            risk.max_approve_gas_limit,
-            risk.max_sell_gas_limit,
-        ]
-        .iter()
-        .all(|l| *l >= 21_000);
-    // 31.10. order: the positions and losses, every bound one a BUY can come
-    // under (the native owner checks again).
     let limits = c.limits?;
-    let wei = |s: &str| s.parse::<u128>().ok().filter(|_| wei_ok(s));
-    let limits_ok = limits.max_open_positions > 0
-        && match (
-            wei(&limits.max_realized_loss_wei),
-            wei(&limits.max_daily_realized_loss_wei),
-        ) {
-            (Some(grant), Some(daily)) => grant > 0 && daily > 0 && daily <= grant,
-            _ => false,
-        };
     let ingress =
         |s: &String| s.starts_with("BSC_INGRESS_") && BSC_SOURCE_IDS.contains(&s.as_str());
     let ok = BSC_VENUE_IDS.contains(&c.venue.as_str())
         && BSC_LIVE_STRATEGIES.contains(&c.strategies.as_str())
-        && (1..=5).contains(&c.sources.len())
         && c.sources.iter().all(ingress)
-        && (1..=2).contains(&c.adapters.len())
         && c.adapters
             .iter()
             .all(|a| BSC_LIVE_ADAPTERS.contains(&a.as_str()))
         && wei_ok(&c.max_input_wei)
         && wei_ok(&c.max_spend_wei)
-        && c.max_attempts >= 1
-        && c.expires_unix_ms > 0
+        && wei_ok(&limits.max_realized_loss_wei)
+        && wei_ok(&limits.max_daily_realized_loss_wei)
         && c.scope_sha256.len() == 64
         && c.scope_sha256
             .bytes()
-            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-        && risk_ok
-        && limits_ok;
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
     ok.then(|| {
         vec![
             "bsc".into(),
@@ -1687,7 +1664,7 @@ impl Control {
                         id,
                         CommandStatus::Rejected,
                         CommandRejectReason::InvalidParams,
-                        "LIVE grant takes exactly the resource BSC_LIVE_GRANT, a BscLiveGrantCommand (venue, strategies, ingress sources, builder adapters, plain wei limits, at least one attempt, expiry, the execution risk, the confirmed scope SHA-256) and the config_version generation",
+                        "LIVE grant takes exactly the resource BSC_LIVE_GRANT, a BscLiveGrantCommand (venue, strategies, ingress sources and builder adapters from the fixed sets, plain decimal wei amounts, the execution risk and the limits, the confirmed scope SHA-256; every bound is the native owner's to decide) and the config_version generation",
                     );
                 }
             }
@@ -3577,16 +3554,37 @@ mod tests {
                 ..scope.clone()
             },
             BscLiveGrantCommand {
-                max_attempts: 0,
-                ..scope.clone()
-            },
-            BscLiveGrantCommand {
                 scope_sha256: "AB".repeat(32),
                 ..scope.clone()
             },
-            // BSC3-069: no risk, or a bound no transaction is signed within.
+            // BSC3-069: no risk.
             BscLiveGrantCommand {
                 risk: None,
+                ..scope.clone()
+            },
+            // 31.10. order: no limits, a non-decimal loss.
+            BscLiveGrantCommand {
+                limits: None,
+                ..scope.clone()
+            },
+            BscLiveGrantCommand {
+                limits: Some(LiveGrantLimits {
+                    max_daily_realized_loss_wei: "1e15".into(),
+                    ..scope.limits.clone().unwrap()
+                }),
+                ..scope.clone()
+            },
+        ] {
+            assert_eq!(
+                grant_request(&grant(&bad, "BSC_LIVE_GRANT", ConfigVersion(9))),
+                None
+            );
+        }
+        // Audit E 4.8: a bound is the native owner's alone; such a grant reaches it (it refuses
+        // these: the shared grant vector, sources::tests::the_grant_vector_is_the_owners).
+        for bounded in [
+            BscLiveGrantCommand {
+                max_attempts: 0,
                 ..scope.clone()
             },
             BscLiveGrantCommand {
@@ -3631,11 +3629,6 @@ mod tests {
                 }),
                 ..scope.clone()
             },
-            // 31.10. order: no limits, no position, no loss bound, a non-decimal loss.
-            BscLiveGrantCommand {
-                limits: None,
-                ..scope.clone()
-            },
             BscLiveGrantCommand {
                 limits: Some(LiveGrantLimits {
                     max_open_positions: 0,
@@ -3650,13 +3643,6 @@ mod tests {
                 }),
                 ..scope.clone()
             },
-            BscLiveGrantCommand {
-                limits: Some(LiveGrantLimits {
-                    max_daily_realized_loss_wei: "1e15".into(),
-                    ..scope.limits.clone().unwrap()
-                }),
-                ..scope.clone()
-            },
             // The day's bound above the grant's.
             BscLiveGrantCommand {
                 limits: Some(LiveGrantLimits {
@@ -3666,10 +3652,7 @@ mod tests {
                 ..scope.clone()
             },
         ] {
-            assert_eq!(
-                grant_request(&grant(&bad, "BSC_LIVE_GRANT", ConfigVersion(9))),
-                None
-            );
+            assert!(grant_request(&grant(&bounded, "BSC_LIVE_GRANT", ConfigVersion(9))).is_some());
         }
         assert_eq!(
             grant_request(&grant(&scope, "BSC_LIVE_GRANT", WalletPolicyVersion(9))),
@@ -3765,11 +3748,51 @@ mod tests {
             argv.ends_with("9\n62345678-1234-1234-1234-123456789abc\n"),
             "{argv}"
         );
-        // A malformed grant never reaches the owner.
+        // Review L3 (Audit E 4.8): a bound reaches the owner, and its refusal is the receipt's
+        // detail, as in the terminal.
+        let refusing_ctl = dir.join("darkbotctl-refusing");
+        executable(
+            &refusing_ctl,
+            "#!/bin/sh\necho 'STOP: max_attempts must be at least 1' >&2\nexit 2\n",
+        );
+        let refusing = Control::new(
+            Some(Paths {
+                ctl: refusing_ctl,
+                rundir: dir.join("run"),
+                logdir: dir.clone(),
+                label: "test.capture".into(),
+                launchctl: absent_launchctl(&dir),
+            }),
+            &Limits::default(),
+        );
+        let mut bounded = grant(
+            &BscLiveGrantCommand {
+                max_attempts: 0,
+                ..scope.clone()
+            },
+            "BSC_LIVE_GRANT",
+            ConfigVersion(9),
+        );
+        bounded.request_id = "82345678-1234-1234-1234-123456789abc".into();
+        let refused = refusing.execute(&bounded).await;
+        assert_eq!(
+            refused.phase,
+            CommandPhase::Failed as i32,
+            "{}",
+            refused.detail
+        );
+        assert!(
+            refused
+                .detail
+                .contains("Native controller refused: STOP: max_attempts must be at least 1"),
+            "{}",
+            refused.detail
+        );
+        // A malformed grant never reaches the owner (a bound is the owner's: Audit E 4.8).
         fs::remove_file(&log).unwrap();
         let mut bad = grant(
             &BscLiveGrantCommand {
-                max_attempts: 0,
+                max_input_wei: "01".into(),
                 ..scope.clone()
             },
             "BSC_LIVE_GRANT",

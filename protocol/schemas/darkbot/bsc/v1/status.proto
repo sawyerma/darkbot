@@ -658,6 +658,13 @@ message BscLiveState {
   // Audit E 3.1 (BSC_BUY_ATTEMPTS_TOTAL_MAX): the most BUY attempts a UTC day or the whole campaign
   // may take, and the most a grant may name; absent: no readable runtime configuration.
   optional uint32 buy_attempts_total_max = 79;
+  // Audit E 4.9: the venues a grant can name, as the native owner takes them, in its order. The
+  // LIVE tab offers exactly these; never a frontend list.
+  repeated string grant_venues = 80;
+  // Audit E 4.9: the strategy paths a grant can name, as the native owner takes them.
+  repeated string grant_strategies = 81;
+  // Audit E 4.9: the inclusion adapters a grant can name, as the native owner takes them.
+  repeated string grant_adapters = 82;
 }
 // One cell of the LIVE campaign (REV.1.0 R2), as the verdict record holds it.
 message LiveCampaignCell {

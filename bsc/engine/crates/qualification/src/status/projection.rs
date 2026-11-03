@@ -175,6 +175,13 @@ fn native_leaves(
         {
             continue;
         }
+        // Audit E 4.11: the running runtime's LIVE path travels typed (bsc.live.state,
+        // `live::path`); its leaves are not projected a second time.
+        if top.name == schema::bsc_runtime::runtime_status::SCHEMA.name
+            && name.starts_with("live[]")
+        {
+            continue;
+        }
         match (v, f.nested) {
             (Value::Nested(inner), Some(nested)) => native_leaves(
                 top,

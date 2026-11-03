@@ -1,3 +1,4 @@
+import { BACKEND_UNAVAILABLE } from "../model/status";
 import { TopicId } from "@/core/realtime";
 import { useTopic } from "@/core/realtime/hooks";
 import { Line } from "@/shared/ui/graphite/Rows";
@@ -39,11 +40,13 @@ export function MonitoringPanel() {
       <Line label="Source modes generation" value={sources.available ? sources.generation.toString() : sources.reason} hint="Native bsc_runtime source owner; requested vs. effective, LIVE only under the owner's LIVE gate (LIVE tab)" />
       <Line label="BSC runtime" value={<ValueState state={sources.runtime.state} />} hint={`${sources.runtime.mode} · launches ${sources.runtime.launches} · journal ${sources.runtime.journal}`} />
       {sources.runtime.capture && <Line label="BSC capture" value={<ValueState state={sources.runtime.capture.state} />} hint={sources.runtime.capture.detail} />}
+      {!sources.rows.length && <Line label="Sources" value={<ValueState state={sources.reason || BACKEND_UNAVAILABLE} />} hint="No readable owner state: nothing to request" />}
       {sources.rows.map(row => <Line key={row.id} label={row.id} value={<><ValueState state={row.effective} /> <ValueState state={row.health} /></>}
         hint={`requested ${row.requested}${row.blockReason ? ` · ${row.blockReason}` : ""}${row.counters ? ` · ${row.counters}` : ""}`} />)}
       <SourceActions view={sources} />
     </PlacedSection>
     <PlacedSection panel="monitoring" section={2} records={records}>
+      {!sources.venues.length && <Line label="Venues" value={<ValueState state={sources.reason || BACKEND_UNAVAILABLE} />} hint="No venue in the owner's record" />}
       {sources.venues.map(row => <Line key={row.id} label={row.id} value={<ValueState state={row.effective} />}
         hint={`requested ${row.requested}${row.blockReason ? ` · ${row.blockReason}` : ""} · ${VENUE_HINTS[row.id] ?? ""}${row.receipt ? ` · last set by ${row.receipt}` : ""}`} />)}
       <SourceActions view={sources} rows={sources.venues} testId="bsc-venue" action="bsc.venue.mode.set" />
@@ -64,6 +67,7 @@ export function MonitoringPanel() {
       <EvidenceRows evidence={m?.evidence} />
     </PlacedSection>
     <PlacedSection panel="monitoring" section={6} records={records}>
+      {!sources.components.length && <Line label="Components" value={<ValueState state={sources.reason || BACKEND_UNAVAILABLE} />} hint="No component in the owner's record" />}
       {sources.components.map(row => <Line key={row.id} label={row.id} value={<ValueState state={row.effective} />}
         hint={`requested ${row.requested}${row.blockReason ? ` · ${row.blockReason}` : ""} · ${COMPONENT_HINTS[row.id] ?? ""}`} />)}
       <SourceActions view={sources} rows={sources.components} testId="bsc-component" />

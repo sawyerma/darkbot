@@ -2,7 +2,7 @@ import "@/shared/ui/graphite/control-dialog.css";
 import { useState } from "react";
 import * as AlertDialog from "@radix-ui/react-alert-dialog";
 import { liveDecisionCommand, liveGrantCommand, ownerCommand, useSourceControl, type LiveGrantScope, type LotDecision } from "@/core/realtime/bscControl";
-import { LIVE_ADAPTERS, LIVE_STRATEGIES, formSources, grantScope, liveRequestOf, scopeSha256, scopeText, totalInputOk, type DecisionLock, type GrantForm } from "./model/live";
+import { formAdapters, formSources, formStrategies, grantScope, liveRequestOf, scopeSha256, scopeText, totalInputOk, type DecisionLock, type GrantChoices, type GrantForm } from "./model/live";
 import type { ControlSwitchView } from "./model/types";
 // The LIVE tab's requests (plan 28.10.), each the same request a terminal sends with `darkbotctl bsc
 // live grant|revoke` or `darkbotctl bsc source request`, applied or refused by the one native
@@ -26,7 +26,7 @@ function Confirm({ open, title, children, onConfirm, onClose, testId }: { open: 
 }
 
 const GRANT = "bsc-live-grant";
-const EMPTY: GrantForm = { strategies: "C3", sources: null, adapters: ["CLUB48_BUILDER_V1"], maxInputWei: "", maxSpendWei: "", maxAttempts: "1", hours: "1", exitOnly: false,
+const EMPTY: GrantForm = { strategies: null, sources: null, adapters: null, maxInputWei: "", maxSpendWei: "", maxAttempts: "1", hours: "1", exitOnly: false,
   buySlippageBps: "", exitSlippageBps: "", gasPriceWei: "", buyGasLimit: "", approveGasLimit: "", sellGasLimit: "", outlierAck: false,
   maxOpenPositions: "", maxRealizedLossWei: "", maxDailyRealizedLossWei: "", minBuyIntervalMs: "" };
 /** BSC3-069: the execution risk's inputs, each a bound the executor must stay within. */
@@ -47,27 +47,29 @@ const LIMIT_INPUTS: { key: "maxOpenPositions" | "maxRealizedLossWei" | "maxDaily
 ];
 
 /** The grant of one scope: the form, then the exact canonical scope and its SHA-256 to confirm.
- *  Only the sources the native projection names grantable (an adapter endpoint) are offered. */
-export function LiveGrantActions({ generation, available, grantable, maxAttempts }: { generation: bigint; available: boolean; grantable: readonly string[]; maxAttempts: number | undefined }) {
+ *  Only the sources the native projection names grantable (an adapter endpoint) and the owner's
+ *  own grant choices (Audit E 4.9) are offered. */
+export function LiveGrantActions({ generation, available, grantable, maxAttempts, choices }: { generation: bigint; available: boolean; grantable: readonly string[]; maxAttempts: number | undefined; choices: GrantChoices }) {
   const { busy } = useSourceControl();
   const [form, setForm] = useState<GrantForm>(EMPTY);
   const [shown, setShown] = useState<{ scope: LiveGrantScope; text: string; sha: string } | null>(null);
-  const checked = grantScope(form, Date.now(), grantable, maxAttempts);
+  const checked = grantScope(form, Date.now(), grantable, maxAttempts, choices);
   const sources = formSources(form, grantable);
+  const adapters = formAdapters(form, choices);
   const toggle = (list: string[], v: string) => list.includes(v) ? list.filter(x => x !== v) : [...list, v];
   const review = async () => {
-    const now = grantScope(form, Date.now(), grantable, maxAttempts);
+    const now = grantScope(form, Date.now(), grantable, maxAttempts, choices);
     if (!("scope" in now)) return;
     const text = scopeText(now.scope);
     setShown({ scope: now.scope, text, sha: await scopeSha256(text) });
   };
   return <>
     <div className="bsc-filter" data-testid={`${GRANT}-form`}>
-      <select aria-label="Strategies" value={form.strategies} onChange={e => setForm({ ...form, strategies: e.target.value })} data-testid={`${GRANT}-strategies`}>
-        {LIVE_STRATEGIES.map(s => <option key={s} value={s}>{s}</option>)}
+      <select aria-label="Strategies" value={formStrategies(form, choices)} onChange={e => setForm({ ...form, strategies: e.target.value })} data-testid={`${GRANT}-strategies`}>
+        {choices.strategies.map(s => <option key={s} value={s}>{s}</option>)}
       </select>
       {grantable.map(s => <label key={s}><input type="checkbox" checked={sources.includes(s)} onChange={() => setForm({ ...form, sources: toggle(sources, s) })} data-testid={`${GRANT}-source-${s}`} />{s.replace("BSC_INGRESS_", "")}</label>)}
-      {LIVE_ADAPTERS.map(a => <label key={a}><input type="checkbox" checked={form.adapters.includes(a)} onChange={() => setForm({ ...form, adapters: toggle(form.adapters, a) })} data-testid={`${GRANT}-adapter-${a}`} />{a}</label>)}
+      {choices.adapters.map(a => <label key={a}><input type="checkbox" checked={adapters.includes(a)} onChange={() => setForm({ ...form, adapters: toggle(adapters, a) })} data-testid={`${GRANT}-adapter-${a}`} />{a}</label>)}
       <input inputMode="numeric" aria-label="Max BUY input (wei)" placeholder="max input wei" value={form.maxInputWei} onChange={e => setForm({ ...form, maxInputWei: e.target.value.trim() })} data-testid={`${GRANT}-max-input`} />
       <input inputMode="numeric" aria-label="Max spend (wei)" placeholder="max spend wei" value={form.maxSpendWei} onChange={e => setForm({ ...form, maxSpendWei: e.target.value.trim() })} data-testid={`${GRANT}-max-spend`} />
       <input inputMode="numeric" aria-label="BUY attempts" placeholder={`attempts 1..${maxAttempts ?? "?"}`} value={form.maxAttempts} onChange={e => setForm({ ...form, maxAttempts: e.target.value.trim() })} data-testid={`${GRANT}-attempts`} />

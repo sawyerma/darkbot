@@ -1,0 +1,19 @@
+# Audit E 4.8: variants of scope.txt the native owner refuses (LiveGrant::validate) and the LIVE
+# tab's form refuses before (grantScope), one `key=value` override per line; `#` lines are notes.
+sources=
+sources=BSC_INGRESS_PUBLICNODE,BSC_INGRESS_PUBLICNODE
+adapters=
+adapters=CLUB48_BUILDER_V1,CLUB48_BUILDER_V1
+max_input_wei=0
+max_spend_wei=999999999999999
+max_attempts=0
+max_buy_slippage_bps=10000
+max_exit_slippage_bps=10000
+max_gas_price_wei=0
+max_buy_gas_limit=20999
+max_approve_gas_limit=20999
+max_sell_gas_limit=20999
+max_open_positions=0
+max_realized_loss_wei=0
+max_daily_realized_loss_wei=0
+max_daily_realized_loss_wei=5000000000000001

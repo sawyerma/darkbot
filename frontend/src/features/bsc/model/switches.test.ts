@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ECONOMIC_SWITCHES, buyLimitRow, economicRows, limitInputOk, modeHeld, summary, switchRow } from "./switches";
+import { buyLimitRow, economicRows, limitInputOk, modeHeld, summary, switchRow } from "./switches";
 import { BACKEND_UNAVAILABLE } from "./status";
 import { readdirSync, readFileSync } from "node:fs";
 import type { ControlSwitchView } from "./types";
@@ -26,10 +26,13 @@ describe("BSC wallet and economic switches (plan 27.10.)", () => {
     const row = switchRow("BSC_ECON_SIGN", sw("BSC_ECON_SIGN", { requested: "UNKNOWN", effective: "BLOCKED", blockReason: "CONTROL_STATE_INVALID", generation: 0n }));
     expect([row.available, row.reason]).toEqual([false, "CONTROL_STATE_INVALID"]);
   });
-  it("lists the five economic switches in their fixed order, missing ones unavailable", () => {
+  it("lists the economic switches as the projection does, in its order (Audit E 4.9)", () => {
     const rows = economicRows([sw("BSC_ECON_LIVE"), sw("BSC_ECON_SIGN")]);
-    expect(rows.map(r => r.id)).toEqual([...ECONOMIC_SWITCHES]);
-    expect(rows.map(r => r.available)).toEqual([true, false, false, false, true]);
+    expect(rows.map(r => r.id)).toEqual(["BSC_ECON_LIVE", "BSC_ECON_SIGN"]);
+    expect(rows.map(r => r.available)).toEqual([true, true]);
+    expect(economicRows(undefined)).toEqual([]);
+    // Review M1: an empty list reads unavailable, never an empty summary.
+    expect(summary([])).toBe("BACKEND_UNAVAILABLE");
   });
   it("the runtime mode takes its four modes; anything else is not requestable", () => {
     const row = switchRow("BSC_RUNTIME_MODE", sw("BSC_RUNTIME_MODE", { requested: "PAPER", effective: "PAPER" }));

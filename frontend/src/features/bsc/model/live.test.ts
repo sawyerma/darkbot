@@ -1,17 +1,16 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { ATTEMPT_COLUMNS, COUNTERS_MEANING, NO_EVALUATION, builderPolicyText, divergenceText, evaluationOf, attemptCells, campaignBeyondState, campaignRows, exitDeciderRows, heldPositions, operatorDecisions, outcomeRows, pathRows, presenceText, qualificationAgeText, recoveryRows, conditionRows, grantScope, liveIndicator, liveRequestOf, scopeSha256, scopeText, signedBnb, totalInputOk, weiOk } from "./live";
+import { ATTEMPT_COLUMNS, COUNTERS_MEANING, NO_EVALUATION, builderPolicyText, divergenceText, evaluationOf, attemptCells, campaignBeyondState, campaignRows, exitDeciderRows, heldPositions, operatorDecisions, outcomeRows, pathRows, presenceText, qualificationAgeText, recoveryRows, conditionRows, grantChoices, grantScope, liveIndicator, liveRequestOf, scopeSha256, scopeText, signedBnb, totalInputOk, weiOk } from "./live";
 import type { BscLiveView, LiveAttemptView, LiveCampaignView } from "./types";
 
-// The native owner's own output (`bsc_runtime live scope` with these flags): text and digest.
-const OWNER_TEXT = "darkbot.bsc.live-grant.v1\nvenue=BSC_VENUE_FLAP\nstrategies=C3+STRATEGY_C\n"
-  + "sources=BSC_INGRESS_PUBLICNODE,BSC_INGRESS_DRPC\nadapters=CLUB48_BUILDER_V1\n"
-  + "max_input_wei=1000000000000000\nmax_spend_wei=20000000000000000\nmax_attempts=2\nexpires_unix_ms=1793000000000\n"
-  // BSC3-069: the execution risk (`--max-buy-slippage-bps 300 ... --max-sell-gas-limit 1500000`).
-  + "max_buy_slippage_bps=300\nmax_exit_slippage_bps=500\nmax_gas_price_wei=1000000000\n"
-  + "max_buy_gas_limit=3000000\nmax_approve_gas_limit=100000\nmax_sell_gas_limit=1500000\n"
-  // 31.10. order: the limits (`--max-open-positions 3 ... --min-buy-interval-ms 60000`).
-  + "max_open_positions=3\nmax_realized_loss_wei=5000000000000000\n"
-  + "max_daily_realized_loss_wei=2000000000000000\nmin_buy_interval_ms=60000\n";
+// Audit E 4.8: the owner's grant vector (bsc/engine/crates/execution/tests/fixtures/live_grant/), which
+// the native owner's test `the_grant_vector_is_the_owners` reads too: its canonical scope text and the
+// variants it refuses.
+const VECTOR = new URL("../../../../../bsc/engine/crates/execution/tests/fixtures/live_grant/", import.meta.url);
+const OWNER_TEXT = readFileSync(new URL("scope.txt", VECTOR), "utf8");
+const REFUSED = readFileSync(new URL("refused.txt", VECTOR), "utf8").split("\n").filter(l => l && !l.startsWith("#"));
+// The owner's grant choices as bsc.live.state projects them (status::tests checks the projection).
+const CHOICES = { venues: ["BSC_VENUE_FLAP"], strategies: ["C3", "STRATEGY_C", "C3+STRATEGY_C"], adapters: ["CLUB48_BUILDER_V1", "BLOCKRAZOR_BUILDER_V1"] };
 const OWNER_SHA = "567cec77f585f80ab0ab9408bcdb2ccc7db7ba2f3d70d770c379195dea6afceb";
 // The same scope as an EXIT-ONLY grant (`... --exit-only`, BSC3-058).
 const OWNER_EXIT_SHA = "e012c2fd97397c20f75972c2435989cac4ed0843260534b7d020a812f25a2162";
@@ -41,12 +40,39 @@ describe("BSC LIVE tab (plan 28.10.)", () => {
     expect(scopeText(acked)).toBe(OWNER_TEXT.replace("max_sell_gas_limit=1500000\n", "max_sell_gas_limit=1500000\nrisk_outlier_ack=YES\n"));
   });
 
+  it("refuses every variant the owner refuses (the shared grant vector)", () => {
+    // The form of OWNER_TEXT's scope; each refused key maps to its form field.
+    const form = { strategies: "C3+STRATEGY_C", sources: ["BSC_INGRESS_PUBLICNODE", "BSC_INGRESS_DRPC"], adapters: ["CLUB48_BUILDER_V1"],
+      maxInputWei: "1000000000000000", maxSpendWei: "20000000000000000", maxAttempts: "2", hours: "1", exitOnly: false,
+      buySlippageBps: "300", exitSlippageBps: "500", gasPriceWei: "1000000000", buyGasLimit: "3000000", approveGasLimit: "100000", sellGasLimit: "1500000", outlierAck: false,
+      maxOpenPositions: "3", maxRealizedLossWei: "5000000000000000", maxDailyRealizedLossWei: "2000000000000000", minBuyIntervalMs: "60000" };
+    const grantable = ["BSC_INGRESS_PUBLICNODE", "BSC_INGRESS_DRPC"];
+    const ok = grantScope(form, 1_000, grantable, 10, CHOICES);
+    expect("scope" in ok && scopeText({ ...ok.scope, expiresUnixMs: 1793000000000n })).toBe(OWNER_TEXT);
+    const field: Record<string, string> = {
+      max_input_wei: "maxInputWei", max_spend_wei: "maxSpendWei", max_attempts: "maxAttempts",
+      max_buy_slippage_bps: "buySlippageBps", max_exit_slippage_bps: "exitSlippageBps", max_gas_price_wei: "gasPriceWei",
+      max_buy_gas_limit: "buyGasLimit", max_approve_gas_limit: "approveGasLimit", max_sell_gas_limit: "sellGasLimit",
+      max_open_positions: "maxOpenPositions", max_realized_loss_wei: "maxRealizedLossWei", max_daily_realized_loss_wei: "maxDailyRealizedLossWei",
+    };
+    expect(REFUSED.length).toBe(17);
+    for (const line of REFUSED) {
+      const [key, value] = [line.slice(0, line.indexOf("=")), line.slice(line.indexOf("=") + 1)];
+      const list = value ? value.split(",") : [];
+      const into = field[key];
+      const list_key = key === "sources" || key === "adapters";
+      expect(list_key || into !== undefined, line).toBe(true);
+      const bad = list_key ? { ...form, [key]: list } : { ...form, [into ?? key]: value };
+      expect("error" in grantScope(bad, 1_000, grantable, 10, CHOICES), line).toBe(true);
+    }
+  });
+
   it("checks a grant form as the owner does and dates its expiry", () => {
     const form = { strategies: "C3", sources: ["BSC_INGRESS_PUBLICNODE"], adapters: ["CLUB48_BUILDER_V1"], maxInputWei: "1000", maxSpendWei: "5000", maxAttempts: "2", hours: "4", exitOnly: false,
       buySlippageBps: "300", exitSlippageBps: "500", gasPriceWei: "1000000000", buyGasLimit: "3000000", approveGasLimit: "100000", sellGasLimit: "1500000", outlierAck: true,
       maxOpenPositions: "3", maxRealizedLossWei: "5000", maxDailyRealizedLossWei: "2000", minBuyIntervalMs: "0" };
     const grantable = ["BSC_INGRESS_PUBLICNODE", "BSC_INGRESS_DRPC"];
-    const ok = grantScope(form, 1_000, grantable, 10);
+    const ok = grantScope(form, 1_000, grantable, 10, CHOICES);
     expect("scope" in ok && ok.scope.expiresUnixMs).toBe(1_000n + 4n * 3_600_000n);
     expect("scope" in ok && ok.scope.venue).toBe("BSC_VENUE_FLAP");
     expect("scope" in ok && ok.scope.risk.outlierAck).toBe(true);
@@ -80,16 +106,18 @@ describe("BSC LIVE tab (plan 28.10.)", () => {
       // Audit E 1.6: a source the projection does not name grantable (no adapter endpoint).
       { ...form, sources: ["BSC_INGRESS_GETH"] },
       { ...form, sources: ["BSC_INGRESS_PUBLICNODE", "BSC_INGRESS_48CLUB"] },
-    ]) expect("error" in grantScope(bad, 1_000, grantable, 10)).toBe(true);
+    ]) expect("error" in grantScope(bad, 1_000, grantable, 10, CHOICES)).toBe(true);
     // Before a choice the form names the first grantable source; without any it offers none.
-    const unchosen = grantScope({ ...form, sources: null }, 1_000, grantable, 10);
+    const unchosen = grantScope({ ...form, sources: null }, 1_000, grantable, 10, CHOICES);
     expect("scope" in unchosen && unchosen.scope.sources).toEqual(["BSC_INGRESS_PUBLICNODE"]);
-    expect("error" in grantScope(form, 1_000, [], 10)).toBe(true);
-    expect("error" in grantScope({ ...form, sources: null }, 1_000, [], 10)).toBe(true);
+    expect("error" in grantScope(form, 1_000, [], 10, CHOICES)).toBe(true);
+    expect("error" in grantScope({ ...form, sources: null }, 1_000, [], 10, CHOICES)).toBe(true);
     // Audit E 3.1: a lowered maximum bounds the attempts; without one no grant is formed.
-    expect("scope" in grantScope(form, 1_000, grantable, 2)).toBe(true);
-    expect("error" in grantScope({ ...form, maxAttempts: "3" }, 1_000, grantable, 2)).toBe(true);
-    expect("error" in grantScope(form, 1_000, grantable, undefined)).toBe(true);
+    expect("scope" in grantScope(form, 1_000, grantable, 2, CHOICES)).toBe(true);
+    expect("error" in grantScope({ ...form, maxAttempts: "3" }, 1_000, grantable, 2, CHOICES)).toBe(true);
+    expect("error" in grantScope(form, 1_000, grantable, undefined, CHOICES)).toBe(true);
+    // Audit E 4.9: without the owner's projected choices nothing is grantable.
+    expect(grantScope(form, 1_000, grantable, 10, grantChoices(null))).toEqual({ error: "no venue the native owner can grant (bsc.live.state)" });
     expect(weiOk("340282366920938463463374607431768211455")).toBe(true);
     expect(weiOk("340282366920938463463374607431768211456")).toBe(false);
     expect([totalInputOk("10", 10), totalInputOk("0", 10), totalInputOk("11", 10), totalInputOk("01", 10)]).toEqual([true, true, false, false]);

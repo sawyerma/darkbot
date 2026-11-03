@@ -1,3 +1,4 @@
+import { BACKEND_UNAVAILABLE } from "../model/status";
 import { TopicId } from "@/core/realtime";
 import { useTopic } from "@/core/realtime/hooks";
 import { Line } from "@/shared/ui/graphite/Rows";
@@ -18,6 +19,8 @@ import { BuyLimitActions } from "../BuyLimitActions";
 
 /** The economic switches of one section, with what each permits and the request that set it. */
 function EconomicSwitches({ rows, testId }: { rows: SwitchRow[]; testId: string }) {
+  // Review M1 (Audit E 4.9): the switches are the projection's; without it one line says so.
+  if (!rows.length) return <Line label="Economic switches" value={<ValueState state={BACKEND_UNAVAILABLE} />} hint="No readable owner state: nothing to request" />;
   return <>
     {rows.map(row => <Line key={row.id} label={`${row.label} switch`} value={<ValueState state={row.effective} />}
       hint={`requested ${row.requested}${row.blockReason ? ` · ${row.blockReason}` : ""} · ${row.hint} · generation ${row.available ? row.generation.toString() : row.reason} · last set by ${row.receipt}`} />)}

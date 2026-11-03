@@ -9,13 +9,8 @@ import { BACKEND_UNAVAILABLE } from "./status";
 
 export const SOURCE_SCHEMA = "darkbot.bsc.source-modes.v1";
 export const RUNTIME_SCHEMA = "darkbot.bsc.runtime-status.v1";
-export const SOURCE_IDS = ["BSC_INGRESS_GETH", "BSC_INGRESS_PUBLICNODE", "BSC_INGRESS_DRPC", "BSC_INGRESS_BLOCKREQ", "BSC_INGRESS_48CLUB"] as const;
-/** Switchable runtime components of the same native owner (C2 state, ...). */
-export const COMPONENT_IDS = ["BSC_STATE_C2", "BSC_EXEC", "BSC_STRATEGY_C"] as const;
-/** The venues of the same owner (plan v9 §2.3): Flap admits to the C3 PAPER path and Strategy C. */
-export const VENUE_IDS = ["BSC_VENUE_FLAP", "BSC_VENUE_FOUR_CLASSIC", "BSC_VENUE_OPENFOUR"] as const;
-/** A component the owner's record does not name yet (a generation from before it existed). */
-export const NOT_RECORDED = "NOT_RECORDED";
+// Audit E 4.9: the sources, components and venues are the ones the native record names, in its
+// order; never a frontend list. Without the record nothing is listed and nothing requestable.
 
 export interface SourceRow { id: string; requested: string; effective: string; blockReason: string; health: string; counters: string; receipt?: string }
 /** The canonical chain follower (G0.4 denominator); absent when not configured. */
@@ -103,10 +98,7 @@ export function sourceControlView(records: readonly NativeRecordView[], nowMs = 
   const { view: runtime, health } = runtimeView(records, nowMs);
   const healthOf = (id: string) => health.get(id) ?? { health: runtime.state === "NOT_RUNNING" ? "NOT_RUNNING" : "UNKNOWN", counters: "" };
   const unavailable = (reason: string): SourceControlView => ({
-    available: false, reason, generation: 0n, runtime,
-    rows: SOURCE_IDS.map(id => ({ id, requested: reason, effective: reason, blockReason: "", ...healthOf(id) })),
-    components: COMPONENT_IDS.map(id => ({ id, requested: reason, effective: reason, blockReason: "", health: "", counters: "" })),
-    venues: VENUE_IDS.map(id => ({ id, requested: reason, effective: reason, blockReason: "", health: "", counters: "" })),
+    available: false, reason, generation: 0n, runtime, rows: [], components: [], venues: [],
   });
   const record = records.find(r => r.schema === SOURCE_SCHEMA);
   if (!record) return unavailable(BACKEND_UNAVAILABLE);
@@ -123,26 +115,26 @@ export function sourceControlView(records: readonly NativeRecordView[], nowMs = 
       ...healthOf(f.get(`sources[${i}].source_id`) ?? ""),
     });
   }
-  const ids = rows.map(r => r.id).sort();
-  if (ids.join() !== [...SOURCE_IDS].sort().join()) return unavailable("BACKEND_INVALID");
+  // Each entity once, with an id: a record naming one twice or none is not the owner's.
+  const valid = (ids: string[]) => ids.every(id => id) && new Set(ids).size === ids.length;
+  if (!rows.length || !valid(rows.map(r => r.id))) return unavailable("BACKEND_INVALID");
   const found = new Map<string, SourceRow>();
   for (let i = 0; f.has(`components[${i}].component_id`); i++) {
     const id = f.get(`components[${i}].component_id`) ?? "";
-    if (!(COMPONENT_IDS as readonly string[]).includes(id) || found.has(id)) return unavailable("BACKEND_INVALID");
+    if (!id || found.has(id)) return unavailable("BACKEND_INVALID");
     found.set(id, { id, requested: f.get(`components[${i}].requested`) ?? "UNKNOWN", effective: f.get(`components[${i}].effective`) ?? "UNKNOWN",
       blockReason: f.get(`components[${i}].block_reason`) ?? "", health: "", counters: "" });
   }
-  const components = COMPONENT_IDS.map(id => found.get(id) ?? { id, requested: NOT_RECORDED, effective: NOT_RECORDED, blockReason: "", health: "", counters: "" });
+  const components = [...found.values()];
   // The venues with the request that last set each (its receipt); a generation from before them names none.
   const venues = new Map<string, SourceRow>();
   for (let i = 0; f.has(`venues[${i}].venue_id`); i++) {
     const id = f.get(`venues[${i}].venue_id`) ?? "";
-    if (!(VENUE_IDS as readonly string[]).includes(id) || venues.has(id)) return unavailable("BACKEND_INVALID");
+    if (!id || venues.has(id)) return unavailable("BACKEND_INVALID");
     const by = f.get(`venues[${i}].request_id`);
     venues.set(id, { id, requested: f.get(`venues[${i}].requested`) ?? "UNKNOWN", effective: f.get(`venues[${i}].effective`) ?? "UNKNOWN",
       blockReason: f.get(`venues[${i}].block_reason`) ?? "", health: "", counters: "",
       receipt: by ? `${by} @ generation ${f.get(`venues[${i}].set_generation`) ?? "?"}` : "never requested" });
   }
-  return { available: true, reason: "", generation, runtime, rows: SOURCE_IDS.map(id => rows.find(r => r.id === id)!), components,
-    venues: VENUE_IDS.map(id => venues.get(id) ?? { id, requested: NOT_RECORDED, effective: NOT_RECORDED, blockReason: "", health: "", counters: "" }) };
+  return { available: true, reason: "", generation, runtime, rows, components, venues: [...venues.values()] };
 }

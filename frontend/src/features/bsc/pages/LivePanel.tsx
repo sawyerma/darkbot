@@ -6,7 +6,7 @@ import { selectLive, useBscStore } from "../store/bscStore";
 import { ValueState } from "./EvidenceRows";
 import { PlacedSection } from "./PlacedSection";
 import { useNativeRecords } from "./useNativeRecords";
-import { builderPolicyText, conditionRows, divergenceText, exitDeciderRows, heldPositions, operatorDecisions, outcomeRows, pathRows, presenceText, qualificationAgeText, recoveryRows, signedBnb } from "../model/live";
+import { builderPolicyText, conditionRows, divergenceText, exitDeciderRows, heldPositions, operatorDecisions, outcomeRows, pathRows, presenceText, qualificationAgeText, recoveryRows, signedBnb, grantChoices } from "../model/live";
 import { buyLimitRow, switchRow } from "../model/switches";
 import { formatNative } from "../model/format";
 import { BuyLimitActions } from "../BuyLimitActions";
@@ -67,7 +67,7 @@ export function LivePanel() {
         <Line label="Grant risk scope SHA-256" value={l.grant.riskScopeSha256 || "—"} hint="BSC3-049: the scope a qualification's risk decision names" />
         <pre data-testid="bsc-live-grant-scope">{l.grant.scopeText}</pre>
       </> : null}
-      <LiveGrantActions generation={generation} available={owner} grantable={l?.grantableSources ?? []} maxAttempts={l?.buyAttemptsTotalMax} />
+      <LiveGrantActions generation={generation} available={owner} grantable={l?.grantableSources ?? []} maxAttempts={l?.buyAttemptsTotalMax} choices={grantChoices(l)} />
     </PlacedSection>
     <PlacedSection panel="live" section={3} records={records}>
       <Line label="Runtime mode" value={<ValueState state={l?.runtimeMode?.effective} />} hint={`requested ${l?.runtimeMode?.requested ?? "—"}${l?.runtimeMode?.blockReason ? ` · ${l.runtimeMode.blockReason}` : ""}`} />
