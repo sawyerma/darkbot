@@ -65,7 +65,6 @@ use darkbot_bsc_trading::economics::flap::native_curve20::{
 };
 use darkbot_bsc_trading::intent::IntentState;
 use darkbot_bsc_trading::venues::flap::deployment::{ValidatedDeployment, bsc_mainnet_v5_27_2};
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, TryRecvError, channel};
 use std::thread;
@@ -273,13 +272,11 @@ fn components(strategies: LiveStrategies) -> Vec<ComponentId> {
     strategies.components()
 }
 
-/// The BlockRazor authorization from an owner-only file.
-fn token_from(path: &Path) -> Result<AuthorizationToken, String> {
-    let meta = std::fs::symlink_metadata(path).map_err(|e| format!("{}: {e}", path.display()))?;
-    if !meta.is_file() || meta.permissions().mode() & 0o077 != 0 {
-        return Err(format!("{} is not a private regular file", path.display()));
-    }
-    let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+/// The BlockRazor authorization from a private file outside `repo_root`,
+/// held as the LIVE key is (R10: [`crate::paper::read_private_text`]).
+fn token_from(path: &Path, repo_root: &Path) -> Result<AuthorizationToken, String> {
+    let text = crate::paper::read_private_text(path, repo_root)
+        .map_err(|e| crate::live_key::refused_as("BSC_LIVE_BLOCKRAZOR_TOKEN_FILE", e))?;
     AuthorizationToken::new(text.trim().to_string()).map_err(|e| format!("{e:?}"))
 }
 
@@ -2327,11 +2324,14 @@ impl LiveRuntime {
                                 return self.stop(Phase::ArmFailed(format!("TLS setup: {e:?}")));
                             }
                         };
-                        let blockrazor =
-                            match blockrazor_token.as_deref().map(token_from).transpose() {
-                                Ok(t) => t,
-                                Err(e) => return self.stop(Phase::ArmFailed(e)),
-                            };
+                        let blockrazor = match blockrazor_token
+                            .as_deref()
+                            .map(|t| token_from(t, &self.repo_root))
+                            .transpose()
+                        {
+                            Ok(t) => t,
+                            Err(e) => return self.stop(Phase::ArmFailed(e)),
+                        };
                         LiveRoute::Builders { setup, blockrazor }
                     }
                 };
@@ -3634,6 +3634,7 @@ impl LiveRuntime {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::os::unix::fs::PermissionsExt;
 
     /// BSC3-026: the stand-in route runs only on a state that is not the
     /// account's owner state (also through another spelling of its path),
@@ -3660,6 +3661,39 @@ mod tests {
     }
     use crate::chain_follower::{CanonicalEvent, CanonicalTx};
     use crate::live_end::tests::{club48_findings, key_file, stand_in};
+
+    /// R10: the BlockRazor authorization is read under the key's rules (a
+    /// private file outside the repository, through its own name only).
+    #[test]
+    fn the_blockrazor_authorization_is_read_as_a_private_file() {
+        use std::io::Write;
+        use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+        let dir = std::env::temp_dir().join(format!("bsc-live-token-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::DirBuilder::new().mode(0o700).create(&dir).unwrap();
+        let token = dir.join("token");
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&token)
+            .and_then(|mut f| f.write_all(b"secret-token\n"))
+            .unwrap();
+        let repo = Path::new("/nonexistent-repo");
+        assert_eq!(token_from(&token, repo).unwrap().expose(), "secret-token");
+        let e = token_from(&token, &dir).unwrap_err();
+        assert!(
+            e.contains("BSC_LIVE_BLOCKRAZOR_TOKEN_FILE location refused"),
+            "{e}"
+        );
+        std::fs::hard_link(&token, dir.join("second")).unwrap();
+        let e = token_from(&token, repo).unwrap_err();
+        assert!(
+            e.contains("BSC_LIVE_BLOCKRAZOR_TOKEN_FILE permissions refused"),
+            "{e}"
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     /// BSC3-026: the stand-in's test identity in the test's owner state
     /// `state` (the synthetic buyer's key), and its address.

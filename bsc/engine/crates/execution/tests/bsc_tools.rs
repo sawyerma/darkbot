@@ -1,6 +1,6 @@
 //! The `bsc/tools` tests in the cargo regression (BSC-002 follow-up 28.10.:
 //! `test_g06a_state_pin.cjs` was red from `86de25c9` because no gate ran
-//! them). The five that need no status reporter, each with its fixed test
+//! them). The six that need no status reporter, each with its fixed test
 //! count; the two others run in qualification's `bsc_tools`. The tools call
 //! the owner binaries by their fixed debug path: those must be this build's.
 
@@ -44,6 +44,13 @@ fn test_g06a_private_mode_cjs() {
 fn test_g06a_state_pin_cjs() {
     owner_binaries();
     run("test_g06a_state_pin.cjs", 9, &[]);
+}
+
+/// REV.1.0 R10: the controller's terminal wrappers against a stand-in runtime
+/// and launchctl (no job started, no host reached).
+#[test]
+fn test_bsc_control_py() {
+    run("test_bsc_control.py", 6, &[]);
 }
 
 /// The runner counts every outcome: a failure, an error (Node: cancelled),

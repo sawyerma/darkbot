@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ATTEMPT_COLUMNS, COUNTERS_MEANING, NO_EVALUATION, builderPolicyText, evaluationOf, attemptCells, campaignBeyondState, campaignRows, exitDeciderRows, operatorDecisions, recoveryRows, conditionRows, grantScope, liveIndicator, liveRequestOf, scopeSha256, scopeText, signedBnb, totalInputOk, weiOk } from "./live";
+import { ATTEMPT_COLUMNS, COUNTERS_MEANING, NO_EVALUATION, builderPolicyText, divergenceText, evaluationOf, attemptCells, campaignBeyondState, campaignRows, exitDeciderRows, heldPositions, operatorDecisions, outcomeRows, pathRows, presenceText, qualificationAgeText, recoveryRows, conditionRows, grantScope, liveIndicator, liveRequestOf, scopeSha256, scopeText, signedBnb, totalInputOk, weiOk } from "./live";
 import type { BscLiveView, LiveAttemptView, LiveCampaignView } from "./types";
 
 // The native owner's own output (`bsc_runtime live scope` with these flags): text and digest.
@@ -119,6 +119,36 @@ describe("BSC LIVE tab (plan 28.10.)", () => {
     const none = recoveryRows(undefined);
     expect([none.row.value, none.pending]).toEqual(["0 resolved · 0 pending · 0 failed reads", []]);
     expect(exitDeciderRows(undefined).map(x => x.value)).toEqual(["—", "—", "0"]);
+  });
+
+  it("shows the LIVE path's counters, the second source, the presence and the qualification's age as projected (REV.1.0 R10)", () => {
+    const l = {
+      nextNonce: 41n, armedGeneration: 6n, refusals: ["OWNER=2", "PLAN=1"], responses: ["ACCEPTED=3"], probes: 16n,
+      included: 11n, reverted: 12n, replaced: 13n, finalized: 14n, orphaned: 15n,
+      latencySamples: 9n, latencyP50Ns: 100n, latencyP99Ns: 200n, latencyMaxNs: 300n,
+      divergenceQuarantine: true, confirmState: "DISAGREES", presenceAnchor: "0xAB", presenceSigner: "0xab",
+      grant: { riskScopeSha256: "r1" }, qualification: "VERIFIED", qualificationRiskScopeSha256: "r1",
+      qualificationObservedUnixMs: 0n, qualificationMaxAgeMs: 86400000n,
+      positions: [{ state: "OPEN" }, { state: "EXITING" }, { state: "PENDING" }, { state: "CLOSED" }, { state: "FAILED" }, { state: "WRITTEN_OFF" }],
+    } as unknown as BscLiveView;
+    expect(pathRows(l).map(r => r.value)).toEqual(["41", "grant generation 6", "OWNER=2 · PLAN=1", "16", "p50 100 ns · p99 200 ns · max 300 ns (9 samples)"]);
+    expect(outcomeRows(l).map(r => r.value)).toEqual(["ACCEPTED=3", "11 included · 12 reverted · 13 replaced · 14 final · 15 orphaned"]);
+    expect(divergenceText(l)).toBe("second source DISAGREES · quarantine ON · every send refused, exits too, while it DISAGREES");
+    expect(presenceText(l)).toBe("anchor 0xAB · the grant is signed by it");
+    expect(qualificationAgeText(l)).toBe("oldest evidence 1970-01-01T00:00:00.000Z · max age 86400000 ms · risk decision for this grant's risk scope");
+    // A revoke ends the exits of the held positions (pending, open, exiting).
+    expect(heldPositions(l)).toBe(3);
+    // Another signer, an unsigned grant, OFF; another risk scope, no age bound.
+    const other = { ...l, presenceSigner: "0xcd", qualificationRiskScopeSha256: "r2", qualificationMaxAgeMs: 0n } as BscLiveView;
+    expect(presenceText(other)).toBe("anchor 0xAB · the grant is signed by 0xcd, not the anchor: BUYs refused");
+    expect(qualificationAgeText(other)).toContain("no max age · risk decision for another grant risk scope");
+    expect(presenceText({ ...l, presenceSigner: "" } as BscLiveView)).toContain("unsigned: BUYs refused (LIVE_PRESENCE_UNSIGNED)");
+    expect(presenceText({ ...l, presenceAnchor: "" } as BscLiveView)).toBe("OFF · BUYs need no presence signature");
+    // Nothing projected: nothing made up.
+    expect([divergenceText(undefined), presenceText(undefined), qualificationAgeText(undefined), heldPositions(undefined)]).toEqual([undefined, undefined, undefined, 0]);
+    expect(pathRows(undefined).map(r => r.value)).toEqual(["—", "—", "—", "—", "no sample"]);
+    expect(outcomeRows(undefined)[1]?.value).toBe("0 included · 0 reverted · 0 replaced · 0 final · 0 orphaned");
+    expect(qualificationAgeText({ ...l, qualification: "NONE" } as BscLiveView)).toBeUndefined();
   });
 
   it("offers the operator's decisions at the ledger's version, exit-now and the burn locked unless their switch is ON (REV.1.0 R3b)", () => {

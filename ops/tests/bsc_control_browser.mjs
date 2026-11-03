@@ -270,7 +270,7 @@ await until(async()=> /HEALTHY[\s\S]*sealed segments \d+ · durable to sequence/
  await setLimit(0);
  // Plan 28.10.: the LIVE tab. Activation through the GUI up to an effective LIVE (the synthetic, verified
  // qualification of this isolated snapshot), the grant of a confirmed scope whose SHA-256 is the native
- // owner's, then deactivation and stop. This runtime has no LIVE path (no BSC_LIVE_* keys, no key):
+ // owner's, then deactivation and stop. This runtime has no LIVE path (its BSC_LIVE_* keys empty, no key):
  // nothing can be signed or sent.
  process.stderr.write(`[${elapsed()}] LIVE tab\n`);
  const liveLine=label=>p.locator('.g-line').filter({has:p.locator('span:first-child',{hasText:new RegExp('^'+label+'$')})}).first();

@@ -116,15 +116,39 @@ fn check_location(path: &Path, repo_root: &Path) -> Result<(), IdentityError> {
             path.display()
         )));
     }
-    let root = fs::canonicalize(repo_root).unwrap_or_else(|_| repo_root.to_path_buf());
-    if resolved(path).starts_with(&root) || path.starts_with(repo_root) {
+    let inside = |repo: &Path| {
+        let root = fs::canonicalize(repo).unwrap_or_else(|_| repo.to_path_buf());
+        resolved(path).starts_with(&root) || path.starts_with(repo)
+    };
+    if inside(repo_root) {
         return Err(IdentityError::Location(format!(
             "{} is inside the repository",
             path.display()
         )));
     }
-    Ok(())
+    // R10 review L3: a runtime snapshot (`status_sync.py`) names the checkout
+    // it was taken from (CHECKOUT); a key there is inside the repository too.
+    match fs::read_to_string(repo_root.join(SNAPSHOT_CHECKOUT)) {
+        Ok(text) if Path::new(text.trim()).is_absolute() && inside(Path::new(text.trim())) => {
+            Err(IdentityError::Location(format!(
+                "{} is inside the checkout {}",
+                path.display(),
+                text.trim()
+            )))
+        }
+        Ok(text) if !Path::new(text.trim()).is_absolute() => Err(IdentityError::Location(format!(
+            "the snapshot's {SNAPSHOT_CHECKOUT} is no absolute path"
+        ))),
+        Ok(_) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(IdentityError::Location(format!(
+            "the snapshot's {SNAPSHOT_CHECKOUT}: {e}"
+        ))),
+    }
 }
+
+/// The file in which a runtime snapshot names its checkout.
+pub const SNAPSHOT_CHECKOUT: &str = "CHECKOUT";
 
 fn private(meta: &fs::Metadata) -> bool {
     meta.permissions().mode() & 0o077 == 0
@@ -139,14 +163,13 @@ fn key_directory(dir: &Path) -> Result<u32, IdentityError> {
     })
 }
 
-/// The signer of the key file at `path`: absolute and outside `repo_root`,
-/// in an owner-only directory no other user can change (BSC3-067), an
-/// owner-only regular file of that owner with no other name, exactly 32
-/// bytes of a valid secp256k1 key. The name is checked, then the file opened
-/// once and checked on its descriptor: the same inode as the name, so a link
-/// swapped in between is never read. The bytes read are zeroized at once;
-/// the signer's key is zeroized when it is dropped. The file is only read.
-pub(crate) fn load_private_key(path: &Path, repo_root: &Path) -> Result<Signer, IdentityError> {
+/// The private file at `path`, opened once: absolute and outside
+/// `repo_root`, in an owner-only directory no other user can change
+/// (BSC3-067), an owner-only regular file of that owner with no other name.
+/// The name is checked, then the file opened and checked on its descriptor:
+/// the same inode as the name, so a link swapped in between is never read.
+/// Returns the file and its length; nothing of it is read here.
+fn open_private(path: &Path, repo_root: &Path) -> Result<(fs::File, u64), IdentityError> {
     check_location(path, repo_root)?;
     let io = |e: std::io::Error| IdentityError::Io(format!("{}: {e}", path.display()));
     let refused = || {
@@ -160,7 +183,7 @@ pub(crate) fn load_private_key(path: &Path, repo_root: &Path) -> Result<Signer, 
     if !named.is_file() {
         return Err(refused());
     }
-    let mut file = fs::File::open(path).map_err(io)?;
+    let file = fs::File::open(path).map_err(io)?;
     let opened = file.metadata().map_err(io)?;
     if (opened.dev(), opened.ino()) != (named.dev(), named.ino())
         || !opened.is_file()
@@ -170,12 +193,44 @@ pub(crate) fn load_private_key(path: &Path, repo_root: &Path) -> Result<Signer, 
     {
         return Err(refused());
     }
-    if opened.len() != 32 {
-        return Err(IdentityError::Malformed(format!(
-            "{} bytes, not 32",
-            opened.len()
-        )));
+    Ok((file, opened.len()))
+}
+
+/// REV.1.0 R10 (provisioning): whether `path` is a key file
+/// [`load_private_key`] would take, by its place, owner, mode, links and
+/// length alone: nothing of it is read (the LIVE key is read only under an
+/// effective LIVE).
+pub fn check_key_file(path: &Path, repo_root: &Path) -> Result<(), IdentityError> {
+    match open_private(path, repo_root)?.1 {
+        32 => Ok(()),
+        len => Err(IdentityError::Malformed(format!("{len} bytes, not 32"))),
     }
+}
+
+/// R10: whether `path` is a private file as the LIVE path's credential read
+/// requires it ([`open_private`]); nothing of it is read.
+pub fn check_private_file(path: &Path, repo_root: &Path) -> Result<(), IdentityError> {
+    open_private(path, repo_root).map(|_| ())
+}
+
+/// R10: the text of the private file at `path` ([`open_private`]).
+pub(crate) fn read_private_text(path: &Path, repo_root: &Path) -> Result<String, IdentityError> {
+    let (mut file, _) = open_private(path, repo_root)?;
+    let mut text = String::new();
+    file.read_to_string(&mut text)
+        .map_err(|e| IdentityError::Io(format!("{}: {e}", path.display())))?;
+    Ok(text)
+}
+
+/// The signer of the key file at `path` ([`open_private`]): exactly 32 bytes
+/// of a valid secp256k1 key. The bytes read are zeroized at once; the
+/// signer's key is zeroized when it is dropped. The file is only read.
+pub(crate) fn load_private_key(path: &Path, repo_root: &Path) -> Result<Signer, IdentityError> {
+    let (mut file, len) = open_private(path, repo_root)?;
+    if len != 32 {
+        return Err(IdentityError::Malformed(format!("{len} bytes, not 32")));
+    }
+    let io = |e: std::io::Error| IdentityError::Io(format!("{}: {e}", path.display()));
     let mut secret = [0u8; 32];
     let mut more = [0u8; 1];
     let read = file
@@ -194,53 +249,57 @@ pub(crate) fn load_private_key(path: &Path, repo_root: &Path) -> Result<Signer, 
     signer.map_err(|_| IdentityError::Malformed("not a secp256k1 key".into()))
 }
 
-impl PaperIdentity {
-    /// Creates a new identity at `path` from the operating system's
-    /// randomness and returns its address. Refuses an existing file; the
-    /// directory is created owner-only.
-    pub fn create(path: &Path, repo_root: &Path) -> Result<[u8; 20], IdentityError> {
+/// A new private key at `path` from the operating system's randomness;
+/// returns its address. Refuses an existing file; the directory is created
+/// owner-only. The PAPER identity and (R10) the LIVE buyer key are drawn so.
+pub fn create_private_key(path: &Path, repo_root: &Path) -> Result<[u8; 20], IdentityError> {
+    check_location(path, repo_root)?;
+    let io = |e: std::io::Error| IdentityError::Io(format!("{}: {e}", path.display()));
+    if let Some(dir) = path.parent() {
+        fs::DirBuilder::new()
+            .mode(0o700)
+            .recursive(true)
+            .create(dir)
+            .map_err(io)?;
+        // Once the directory exists, its real location is checked again;
+        // R10 review L5: the directory as a load takes it (owner-only, no
+        // directory on its way changeable by another user), before a key is
+        // drawn whose address an operator would fund.
         check_location(path, repo_root)?;
-        let io = |e: std::io::Error| IdentityError::Io(format!("{}: {e}", path.display()));
-        if let Some(dir) = path.parent() {
-            fs::DirBuilder::new()
-                .mode(0o700)
-                .recursive(true)
-                .create(dir)
-                .map_err(io)?;
-            // Once the directory exists, its real location is checked again.
-            check_location(path, repo_root)?;
-            if !private(&fs::metadata(dir).map_err(io)?) {
-                return Err(IdentityError::Permissions(format!(
-                    "{} is accessible to others",
-                    dir.display()
-                )));
-            }
+        key_directory(dir)?;
+    }
+    if path.exists() {
+        return Err(IdentityError::Exists(path.display().to_string()));
+    }
+    let mut secret = [0u8; 32];
+    let signer = loop {
+        fs::File::open("/dev/urandom")
+            .and_then(|mut f| f.read_exact(&mut secret))
+            .map_err(io)?;
+        // Zero or above the curve order is not a key: draw again.
+        if let Ok(signer) = Signer::from_secret_bytes(&secret) {
+            break signer;
         }
-        if path.exists() {
-            return Err(IdentityError::Exists(path.display().to_string()));
-        }
-        let mut secret = [0u8; 32];
-        let signer = loop {
-            fs::File::open("/dev/urandom")
-                .and_then(|mut f| f.read_exact(&mut secret))
-                .map_err(io)?;
-            // Zero or above the curve order is not a key: draw again.
-            if let Ok(signer) = Signer::from_secret_bytes(&secret) {
-                break signer;
-            }
-        };
-        let written = fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .open(path)
-            .and_then(|mut f| f.write_all(&secret).and_then(|()| f.sync_all()));
-        secret.zeroize();
-        written.map_err(|e| match e.kind() {
-            std::io::ErrorKind::AlreadyExists => IdentityError::Exists(path.display().to_string()),
-            _ => io(e),
-        })?;
-        Ok(signer.address().into_array())
+    };
+    let written = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(path)
+        .and_then(|mut f| f.write_all(&secret).and_then(|()| f.sync_all()));
+    secret.zeroize();
+    written.map_err(|e| match e.kind() {
+        std::io::ErrorKind::AlreadyExists => IdentityError::Exists(path.display().to_string()),
+        _ => io(e),
+    })?;
+    Ok(signer.address().into_array())
+}
+
+impl PaperIdentity {
+    /// Creates a new identity at `path` ([`create_private_key`]) and returns
+    /// its address.
+    pub fn create(path: &Path, repo_root: &Path) -> Result<[u8; 20], IdentityError> {
+        create_private_key(path, repo_root)
     }
 
     /// Loads the identity at `path`: owner-only file and directory, exactly
@@ -423,6 +482,105 @@ mod tests {
             Err(IdentityError::Location(_))
         ));
         fs::remove_dir_all(path.parent().unwrap().parent().unwrap()).unwrap();
+    }
+
+    /// REV.1.0 R10: a credential file is read (and checked unread) under
+    /// the key's rules: through its own name only, owner-only, outside the
+    /// repository; a key file's check also takes its length.
+    #[test]
+    fn a_private_file_is_read_and_checked_under_the_keys_rules() {
+        let path = temp("text");
+        let dir = path.parent().unwrap().to_path_buf();
+        fs::DirBuilder::new()
+            .mode(0o700)
+            .recursive(true)
+            .create(&dir)
+            .unwrap();
+        let token = dir.join("token");
+        fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&token)
+            .and_then(|mut f| f.write_all(b"abc\n"))
+            .unwrap();
+        assert_eq!(read_private_text(&token, &repo()).unwrap(), "abc\n");
+        assert_eq!(check_private_file(&token, &repo()), Ok(()));
+        assert!(matches!(
+            check_key_file(&token, &repo()),
+            Err(IdentityError::Malformed(_))
+        ));
+        PaperIdentity::create(&path, &repo()).unwrap();
+        assert_eq!(check_key_file(&path, &repo()), Ok(()));
+        let linked = dir.join("linked");
+        std::os::unix::fs::symlink(&token, &linked).unwrap();
+        let second = dir.join("second");
+        fs::hard_link(&path, &second).unwrap();
+        for refused in [
+            read_private_text(&linked, &repo()).map(|_| ()),
+            check_private_file(&linked, &repo()),
+            check_key_file(&path, &repo()),
+        ] {
+            assert!(
+                matches!(refused, Err(IdentityError::Permissions(_))),
+                "{refused:?}"
+            );
+        }
+        fs::remove_file(&second).unwrap();
+        fs::set_permissions(&token, fs::Permissions::from_mode(0o640)).unwrap();
+        assert!(matches!(
+            read_private_text(&token, &repo()),
+            Err(IdentityError::Permissions(_))
+        ));
+        assert!(matches!(
+            check_private_file(&repo().join("bsc/config/ingress.public.env"), &repo()),
+            Err(IdentityError::Location(_))
+        ));
+        fs::remove_dir_all(dir.parent().unwrap()).unwrap();
+    }
+
+    /// R10 review L3/L5: a key in the checkout a snapshot names (CHECKOUT)
+    /// is refused like one in the repository, also unread; no key is drawn
+    /// under a directory another user could change.
+    #[test]
+    fn a_key_in_the_snapshots_checkout_or_an_exposed_directory_is_refused() {
+        let base = temp("checkout")
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .to_path_buf();
+        let (snapshot, checkout) = (base.join("snapshot"), base.join("checkout"));
+        fs::create_dir_all(&snapshot).unwrap();
+        fs::create_dir_all(&checkout).unwrap();
+        fs::write(
+            snapshot.join(SNAPSHOT_CHECKOUT),
+            format!("{}\n", checkout.display()),
+        )
+        .unwrap();
+        let inside = checkout.join("bsc/.local/live.key");
+        assert!(
+            matches!(create_private_key(&inside, &snapshot), Err(IdentityError::Location(m)) if m.contains("inside the checkout"))
+        );
+        assert!(!inside.exists());
+        let outside = base.join("keys/live.key");
+        create_private_key(&outside, &snapshot).unwrap();
+        assert_eq!(check_key_file(&outside, &snapshot), Ok(()));
+        fs::write(snapshot.join(SNAPSHOT_CHECKOUT), "relative/checkout\n").unwrap();
+        assert!(matches!(
+            check_key_file(&outside, &snapshot),
+            Err(IdentityError::Location(_))
+        ));
+        let exposed = base.join("exposed");
+        fs::create_dir_all(&exposed).unwrap();
+        fs::set_permissions(&exposed, fs::Permissions::from_mode(0o777)).unwrap();
+        let drawn = exposed.join("keys/live.key");
+        assert!(matches!(
+            create_private_key(&drawn, &repo()),
+            Err(IdentityError::Permissions(_))
+        ));
+        assert!(!drawn.exists());
+        fs::remove_dir_all(base).unwrap();
     }
 
     /// BSC3-067: the key is read only through its own name: never through a

@@ -23,6 +23,10 @@ fn hex0x(bytes: &[u8]) -> String {
     format!("0x{}", hex(bytes))
 }
 
+/// R10 review L4: the runtime status is older than the owner's freshness
+/// rule (or the clock is unreadable): its probe values are not shown.
+pub const RUNTIME_STATUS_STALE: &str = "RUNTIME_STATUS_STALE";
+
 /// Where a snapshot keeps the configuration its runtime runs with (`bsc_runtime run --config`).
 pub const RUNTIME_CONFIG_PATH: &str = "bsc/config/ingress.public.env";
 
@@ -59,8 +63,17 @@ fn scope_row(g: &Generation, e: Entity, ctx: &LiveContext<'_>) -> ControlSwitch 
     }
 }
 
-/// The runtime's LIVE path from its status record (absent: not running).
-fn path(rundir: &Path, out: &mut BscLiveState) {
+/// R10 (Audit D): the runtime's LIVE path alone ([`path`]) at `now_ms`, for
+/// the Wallets tab's LIVE buyer probe.
+pub fn path_only(rundir: &Path, now_ms: Option<u64>) -> BscLiveState {
+    let mut out = BscLiveState::default();
+    path(rundir, &mut out, now_ms);
+    out
+}
+
+/// The runtime's LIVE path from its status record (absent: not running) at
+/// `now_ms` (none: the clock is unreadable).
+fn path(rundir: &Path, out: &mut BscLiveState, now_ms: Option<u64>) {
     use rs::live as l;
     out.path_state = "NOT_RUNNING".into();
     let Ok(bytes) = std::fs::read(rundir.join("bsc-runtime/status.dbrec")) else {
@@ -70,6 +83,18 @@ fn path(rundir: &Path, out: &mut BscLiveState) {
         out.warnings.push("RUNTIME_STATUS_INVALID".into());
         return;
     };
+    // R10 (R7 display): the second source's verdict, LIVE path or not.
+    out.confirm_state = r
+        .opt_nested(rs::CANONICAL)
+        .ok()
+        .flatten()
+        .and_then(|c| {
+            c.opt_text(rs::canonical::CONFIRM_STATE)
+                .ok()
+                .flatten()
+                .map(safe_text)
+        })
+        .unwrap_or_default();
     let Ok(Some(p)) = r.opt_nested(rs::LIVE) else {
         out.path_state = "NOT_CONFIGURED".into();
         return;
@@ -88,10 +113,30 @@ fn path(rundir: &Path, out: &mut BscLiveState) {
         .flatten()
         .unwrap_or_default()
         .into();
+    // R10 review L4: the probe's values (balance, nonce, the arm and the
+    // next C3 attempt) only from a status the owner's own rule still takes
+    // as current (written within STATUS_STALE_AFTER_INTERVALS of its
+    // rewrites); the arm and the attempt only while ARMED.
+    let fresh = match (
+        now_ms,
+        r.u64(rs::PROVENANCE_OBSERVED_UNIX_MS),
+        r.u64(rs::STATUS_INTERVAL_MS),
+    ) {
+        (Some(now), Ok(written), Ok(interval)) => {
+            now.saturating_sub(written)
+                <= sources::STATUS_STALE_AFTER_INTERVALS.saturating_mul(interval)
+        }
+        _ => false,
+    };
+    if !fresh {
+        out.warnings.push(RUNTIME_STATUS_STALE.into());
+    }
+    let armed = fresh && out.path_state == "ARMED";
     out.buyer_balance_wei = p
         .opt_u256(l::BALANCE_WEI)
         .ok()
         .flatten()
+        .filter(|_| fresh)
         .map(|w| record::u256_to_decimal(&w));
     out.released = p.u64(l::RELEASED).unwrap_or_default();
     out.unknown = p.u64(l::UNKNOWN).unwrap_or_default();
@@ -122,6 +167,32 @@ fn path(rundir: &Path, out: &mut BscLiveState) {
     out.recovered = p.u64(l::RECOVERED).unwrap_or_default();
     out.recovery_faults = p.u64(l::RECOVERY_FAULTS).unwrap_or_default();
     out.recovery_fault = text(l::RECOVERY_FAULT);
+    // R10 (Audit D): the path's nonce, arm, refusals, answers, C2 evidence,
+    // probes, ledger read, latency and next C3 attempt, as the status names them.
+    let count = |tag| p.u64(tag).unwrap_or_default();
+    let opt = |tag| p.opt_u64(tag).ok().flatten();
+    out.next_nonce = opt(l::NEXT_NONCE).filter(|_| fresh);
+    out.armed_generation = opt(l::GRANT_GENERATION).filter(|_| armed);
+    out.refusals = texts(l::REFUSALS);
+    out.responses = texts(l::RESPONSES);
+    out.included = count(l::INCLUDED);
+    out.reverted = count(l::REVERTED);
+    out.replaced = count(l::REPLACED);
+    out.finalized = count(l::FINAL);
+    out.orphaned = count(l::ORPHANED);
+    out.probes = count(l::PROBES);
+    out.ledger_error = text(l::LEDGER_ERROR);
+    out.latency_samples = count(l::LATENCY_SAMPLES);
+    out.latency_p50_ns = opt(l::LATENCY_P50_NS);
+    out.latency_p99_ns = opt(l::LATENCY_P99_NS);
+    out.latency_max_ns = opt(l::LATENCY_MAX_NS);
+    out.lease_attempt = p
+        .opt_b256(l::LEASE_ATTEMPT)
+        .ok()
+        .flatten()
+        .filter(|_| armed)
+        .map(|a| hex0x(&a))
+        .unwrap_or_default();
 }
 
 /// The LIVE tab at `now_ms` (none: the clock is unreadable, the gate is
@@ -171,6 +242,15 @@ fn owner_tab(
                 out.exit_reprice_bps = Some(u32::from(x.live_exit_reprice_bps));
                 out.public_exit = Some(x.live_public_exit);
                 out.dex_exit = Some(x.live_dex_exit);
+                // R10: the divergence quarantine (R7), the presence anchor
+                // (R9, empty: OFF), the qualification's age bound (R8).
+                out.divergence_quarantine = Some(x.live_divergence_quarantine);
+                out.presence_anchor = Some(
+                    x.live_presence_anchor
+                        .map(|a| hex0x(&a))
+                        .unwrap_or_default(),
+                );
+                out.qualification_max_age_ms = Some(x.live_qualification_max_age_ms);
                 use darkbot_bsc_execution::builder_policy as bp;
                 out.builder_policy_fresh_until_unix_ms = bp::read(root, &x.live_builder_policy)
                     .ok()
@@ -188,13 +268,22 @@ fn owner_tab(
         }
         Err(why) => out.warnings.push(why.into()),
     }
-    path(rundir, &mut out);
+    path(rundir, &mut out, now_ms);
     let (verified, invalid) = live_qualification::view(root);
     (out.qualification, out.qualification_detail) = match invalid {
         Some(why) => ("INVALID".into(), why),
         None if verified.sha256 == [0; 32] => ("NONE".into(), String::new()),
         None => ("VERIFIED".into(), hex(&verified.sha256)),
     };
+    // R10 (R8 display): the risk scope its decision names and its age.
+    if out.qualification == "VERIFIED" {
+        out.qualification_risk_scope_sha256 = verified
+            .view
+            .risk_scope_sha256
+            .map(|h| hex(&h))
+            .unwrap_or_default();
+        out.qualification_observed_unix_ms = Some(verified.observed_unix_ms);
+    }
     // The ledger is the owner state's, whatever the gate.
     let dir = rundir.join("bsc-sources");
     match sources::spent_total(&dir) {
@@ -392,6 +481,7 @@ fn owner_tab(
             expires_unix_ms: grant.expires_unix_ms,
             scope_sha256: hex(&grant.scope_sha256()),
             scope_text: grant.scope_text(),
+            risk_scope_sha256: hex(&grant.risk_scope_sha256()),
             request_id: by.request_id.clone(),
             set_generation: by.generation,
             exit_only: grant.exit_only,
@@ -411,6 +501,13 @@ fn owner_tab(
                 min_buy_interval_ms: l.min_buy_interval_ms,
             }),
         });
+        // R10 (R9 display): who signed the grant's presence for its generation.
+        out.presence_signer = g
+            .live_presence
+            .as_ref()
+            .and_then(|sig| sources::presence_signer(grant, by.generation, sig))
+            .map(|a| hex0x(&a))
+            .unwrap_or_default();
         let mut scope = vec![Entity::Runtime, ComponentId::StateC2.into()];
         // 01.11. (R1): Strategy C with every grant (it decides the exits).
         scope.extend(grant.strategies.components().into_iter().map(Entity::from));

@@ -345,6 +345,11 @@ cmd_deploy() {
   [ -x "$ROOT/bsc/engine/target/release/g07_pre_live_readiness" ] || die "BSC Readiness nicht gebaut"
   [ -x "$ROOT/bsc/engine/target/release/g07_candidate" ] || die "BSC Kandidatenverwaltung nicht gebaut"
   [ -x "$ROOT/bsc/engine/target/release/bsc_runtime" ] || die "BSC Runtime nicht gebaut"
+  # REV.1.0 R10: a running runtime is restarted below; never into a configuration it refuses (checked
+  # in this checkout before the snapshot moves: a refused deploy changes nothing the runtime reads).
+  if launchctl list "$BSC_RUNTIME_LABEL" >/dev/null 2>&1; then
+    bsc_config_check "$ROOT/bsc/engine/target/release/bsc_runtime" "$ROOT/bsc/config/ingress.public.env" >/dev/null || die "BSC Runtime-Konfiguration verweigert: Deploy abgebrochen, die laufende Runtime bleibt"
+  fi
   bsc_sync
   local rel; rel="$APP_HOME/releases/$(date +%Y%m%dT%H%M%S)"
   mkdir -p "$rel"
@@ -666,6 +671,7 @@ cmd_status() {
   if [ -S "$SOCK" ]; then say "reporter-socket: vorhanden"; else say "reporter-socket: fehlt"; fi
   cmd_capture_status
   if [ -e "$APP_HOME/current/COMMIT" ]; then say "deployed commit: $(cat "$APP_HOME/current/COMMIT")"; fi
+  bsc_status
 }
 
 cmd_logs() {

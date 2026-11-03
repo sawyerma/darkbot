@@ -93,14 +93,17 @@ export function LiveGrantActions({ generation, available, grantable }: { generat
 
 const REVOKE = "bsc-live-revoke";
 /** Deactivate: the grant is revoked; the LIVE path ends at its next pass and drops its key. */
-export function LiveRevokeActions({ generation, granted }: { generation: bigint; granted: boolean }) {
+export function LiveRevokeActions({ generation, granted, held }: { generation: bigint; granted: boolean; held: number }) {
   const { busy } = useSourceControl();
   const [open, setOpen] = useState(false);
   return <>
     <button className="g-secondary" disabled={!granted || busy} data-testid={`${REVOKE}-request`} onClick={() => setOpen(true)}>Deactivate (revoke grant)</button>
     <Confirm open={open} testId={REVOKE} title="LIVE-Freigabe widerrufen?" onClose={() => setOpen(false)}
       onConfirm={() => void ownerCommand(REVOKE, "bsc.live.revoke", "BSC_LIVE_GRANT", "DISABLED", generation)}>
-      <p>Der Widerruf beendet den LIVE-Pfad bei seinem nächsten Durchlauf; sein Schlüssel wird verworfen. Bereits gesendete Transaktionen und offene Positionen bleiben, wie die Kette sie entscheidet (Ledger). Generation {generation.toString()}.</p>
+      <p>Der Widerruf beendet den LIVE-Pfad bei seinem nächsten Durchlauf; sein Schlüssel wird verworfen. Bereits gesendete Transaktionen bleiben, wie die Kette sie entscheidet (Ledger). Generation {generation.toString()}.</p>
+      <p data-testid={`${REVOKE}-exits`}>{held > 0
+        ? `Ohne Grant laufen keine Exits: ${held} gehaltene Position(en) bleiben offen, bis ein neuer Grant (auch EXIT-ONLY) sie abwickelt.`
+        : "Keine gehaltene Position: kein Exit endet mit dem Widerruf."}</p>
     </Confirm>
     <Receipt testId={REVOKE} />
   </>;

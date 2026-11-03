@@ -382,7 +382,18 @@ fn qualified_build() -> String {
     })
 }
 
-fn qualify_in(root: &Path, ev: &str, (strategies, attempts): (&str, &str)) {
+fn qualify_in(root: &Path, ev: &str, scope: (&str, &str)) {
+    let (code, out) = qualify_cli(root, ev, scope, &[]);
+    assert_eq!(code, 0, "{out}");
+}
+
+/// `live qualify` of the synthetic evidence `ev` in `root`, with `extra`.
+fn qualify_cli(
+    root: &Path,
+    ev: &str,
+    (strategies, attempts): (&str, &str),
+    extra: &[&str],
+) -> (i32, String) {
     let adapter = format!("CLUB48_BUILDER_V1@{FINDINGS}@{ev}/g07.dbrec");
     let venue = format!("BSC_VENUE_FLAP@{ev}/freeze.dbrec,{ev}/parity.dbrec");
     let source = format!("BSC_INGRESS_PUBLICNODE@{ev}/g04.dbrec");
@@ -402,7 +413,7 @@ fn qualify_in(root: &Path, ev: &str, (strategies, attempts): (&str, &str)) {
         .unwrap()
         .to_string();
     let root_s = root.to_str().unwrap();
-    let (code, out) = cli(&[
+    let args = [
         "live",
         "qualify",
         "--root",
@@ -425,8 +436,126 @@ fn qualify_in(root: &Path, ev: &str, (strategies, attempts): (&str, &str)) {
         &risk_scope,
         "--risk-evidence",
         &risk,
-    ]);
+    ];
+    cli(&[&args[..], extra].concat())
+}
+
+/// REV.1.0 R10: the terminal's provisioning. `live key init` draws the
+/// buyer key once, a private file outside the repository; `config-check`
+/// checks the LIVE path's files without reading them (neither the key nor
+/// the BlockRazor authorization); `live qualify` writes create-new and
+/// `--replace` replaces the qualification of an earlier build.
+#[test]
+fn the_terminal_provisions_the_live_path_and_requalifies() {
+    use std::os::unix::fs::PermissionsExt;
+    let home = scratch("r10-provision");
+    let repo = home.join("repo");
+    fs::create_dir_all(repo.join("bsc/config")).unwrap();
+    let (repo_s, key) = (repo.to_str().unwrap(), home.join("keys/live.key"));
+    let init = |key: &Path| {
+        cli(&[
+            "live",
+            "key",
+            "init",
+            "--key",
+            key.to_str().unwrap(),
+            "--root",
+            repo_s,
+        ])
+    };
+    let (code, out) = init(&key);
     assert_eq!(code, 0, "{out}");
+    let buyer = out
+        .lines()
+        .find_map(|l| l.strip_prefix("live_buyer="))
+        .unwrap()
+        .to_string();
+    let meta = fs::metadata(&key).unwrap();
+    assert_eq!((meta.len(), meta.permissions().mode() & 0o777), (32, 0o600));
+    let (code, out) = init(&key);
+    assert!(code != 0 && out.contains("exists"), "{out}");
+    let (code, out) = init(&repo.join("bsc/.local/live.key"));
+    assert!(
+        code != 0 && out.contains("LIVE key location refused"),
+        "{out}"
+    );
+    // The shipped config: no LIVE path.
+    let shipped = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../config/ingress.public.env"
+    );
+    let (code, out) = cli(&["config-check", "--config", shipped]);
+    assert!(
+        code == 0 && out.contains("config=OK") && out.ends_with("live=OFF\n"),
+        "{out}"
+    );
+    // The operator's LIVE keys: checked, nothing of the files read out.
+    let token = home.join("keys/blockrazor.token");
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&token)
+        .and_then(|mut f| f.write_all(b"token-value\n"))
+        .unwrap();
+    let config = repo.join("bsc/config/ingress.public.env");
+    let text = fs::read_to_string(shipped)
+        .unwrap()
+        .replace(
+            "BSC_STATE_WATCHED=\n",
+            &format!("BSC_STATE_WATCHED={buyer}\n"),
+        )
+        .replace(
+            "BSC_LIVE_KEY=\nBSC_LIVE_BUYER=\nBSC_LIVE_ROUTE=\nBSC_LIVE_BLOCKRAZOR_TOKEN_FILE=\n",
+            &format!(
+                "BSC_LIVE_KEY={}\nBSC_LIVE_BUYER={buyer}\nBSC_LIVE_ROUTE=BUILDERS\n\
+                 BSC_LIVE_BLOCKRAZOR_TOKEN_FILE={}\n",
+                key.display(),
+                token.display()
+            ),
+        );
+    fs::write(&config, text).unwrap();
+    let check = || cli(&["config-check", "--config", config.to_str().unwrap()]);
+    let (code, out) = check();
+    assert!(
+        code == 0
+            && out.contains(&format!(
+                "live=BUILDERS blockrazor_token=OK buyer={buyer} key_file=OK"
+            ))
+            && !out.contains("token-value"),
+        "{out}"
+    );
+    // A second name of the authorization, an exposed key: refused.
+    let second = home.join("keys/second");
+    fs::hard_link(&token, &second).unwrap();
+    let (code, out) = check();
+    assert!(
+        code != 0 && out.contains("BSC_LIVE_BLOCKRAZOR_TOKEN_FILE permissions refused"),
+        "{out}"
+    );
+    fs::remove_file(&second).unwrap();
+    fs::set_permissions(&key, fs::Permissions::from_mode(0o644)).unwrap();
+    let (code, out) = check();
+    assert!(
+        code != 0 && out.contains("LIVE key permissions refused"),
+        "{out}"
+    );
+    // Requalified per build: create-new, or replaced as a whole.
+    let root = evidence_root("r10-requalify", "PASS");
+    qualify(&root);
+    let written = root.join("bsc/config/live_qualification.dbrec");
+    let first = hex::encode(darkbot_bsc_record::sha256(&fs::read(&written).unwrap()));
+    let (code, out) = qualify_cli(&root, "ev", E2E_SCOPE, &[]);
+    assert!(code != 0 && out.contains("exists"), "{out}");
+    let (code, out) = qualify_cli(&root, "ev", E2E_SCOPE, &["--replace"]);
+    assert!(
+        code == 0 && out.contains(&format!("replaced_sha256={first}")),
+        "{out}"
+    );
+    let now = hex::encode(darkbot_bsc_record::sha256(&fs::read(&written).unwrap()));
+    assert!(out.contains(&format!("sha256={now}")), "{out}");
+    fs::remove_dir_all(home).unwrap();
+    fs::remove_dir_all(root).unwrap();
 }
 
 /// The browser E2E's harness (`ops/tests/bsc_control_test.py`): a verified
@@ -1805,9 +1934,12 @@ fn the_operators_lot_and_ledger_commands_write_their_facts_once() {
     let on_path = state.with_file_name(format!("burn-on-{}.env", std::process::id()));
     fs::write(
         &on_path,
-        format!(
-            "{on}BSC_LIVE_KEY=~/.darkbot/bsc/live/buyer.key\nBSC_LIVE_BUYER={buyer}\n\
-             BSC_LIVE_ROUTE=LOOPBACK:18545\nBSC_LIVE_CONNECT_TIMEOUT_MS=5000\n"
+        on.replace(
+            "BSC_LIVE_KEY=\nBSC_LIVE_BUYER=\nBSC_LIVE_ROUTE=\n",
+            &format!(
+                "BSC_LIVE_KEY=~/.darkbot/bsc/live/buyer.key\nBSC_LIVE_BUYER={buyer}\n\
+                 BSC_LIVE_ROUTE=LOOPBACK:18545\n"
+            ),
         ),
     )
     .unwrap();

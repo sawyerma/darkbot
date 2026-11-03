@@ -12,9 +12,11 @@ class SyncTests(unittest.TestCase):
    base=pathlib.Path(folder);root=base/'repo';root.mkdir();app=base/'app';run=base/'run'
    subprocess.run(['git','init','-q',str(root)],check=True)
    (root/'bsc/config').mkdir(parents=True);(root/'bsc/tools').mkdir()
-   (root/'bsc/config/wallet.public.env').write_text('BSC_WALLET_STATUS=UNPROVISIONED\n')
+   (root/'bsc/config/readiness.public.env').write_text('BSC_READINESS_STATE=ORIGINAL\n')
    (root/'bsc/tools/readiness_job.py').write_text('# fixture\n')
    (root/'bsc/.env').write_text('PRIVATE_KEY=NEVER_COPY_THIS\n')
+   # R10: an unread wallet file and the superseded v4 contract are never copied (no -dirty for them).
+   (root/'bsc/config/wallet.public.env').write_text('BSC_WALLET_STATUS=UNPROVISIONED\n')
    subprocess.run(['git','-C',str(root),'add','bsc/config','bsc/tools'],check=True)
    subprocess.run(['git','-C',str(root),'-c','user.name=Fixture','-c','user.email=fixture@example.invalid','commit','-qm','fixture'],check=True)
    launch='12345678-1234-1234-1234-123456789abc'
@@ -26,8 +28,10 @@ class SyncTests(unittest.TestCase):
    sealed=subprocess.run([str(REPORTER),'--seal-readiness-provenance',str(output),launch,str(relative)],env={'PATH':'/usr/bin:/bin','DARKBOT_BSC_ROOT':str(snap),'DARKBOT_RUNDIR':str(run)},capture_output=True,text=True)
    self.assertEqual(sealed.returncode,0,sealed.stderr)
    release=root/'bsc/engine/target/release';release.mkdir(parents=True);shutil.copy2(REPORTER,release/'bsc-status-reporter')
+   (root/'bsc/config/g07_attempt1_acceptance_v4.dbrec').write_bytes(b'superseded')
    mod.sync(root,app,run)
    snapshot=(app/'bsc-source').resolve();self.assertFalse((snapshot/'bsc/.env').exists())
+   self.assertFalse((snapshot/'bsc/config/wallet.public.env').exists());self.assertFalse((snapshot/'bsc/config/g07_attempt1_acceptance_v4.dbrec').exists())
    self.assertEqual((root/relative/'readiness.dbrec').read_bytes(),raw)
    self.assertEqual((snapshot/relative/'readiness.dbrec').read_bytes(),raw)
    self.assertTrue((snapshot/'SNAPSHOT_SHA256').is_file())
@@ -36,9 +40,10 @@ class SyncTests(unittest.TestCase):
    manifest=(snapshot/'SOURCES.SHA256SUMS').read_bytes()
    self.assertEqual((snapshot/'SNAPSHOT_SHA256').read_text(),hashlib.sha256(manifest).hexdigest())
    self.assertIn(hashlib.sha256(raw).hexdigest()+'  ./'+str(relative/'readiness.dbrec'),manifest.decode())
-   (root/'bsc/config/wallet.public.env').write_text('BSC_WALLET_STATUS=CHANGED\n')
+   (root/'bsc/config/readiness.public.env').write_text('BSC_READINESS_STATE=CHANGED\n')
    mod.sync(root,app,run);self.assertNotEqual(snapshot,(app/'bsc-source').resolve())
-   self.assertIn('UNPROVISIONED',(snapshot/'bsc/config/wallet.public.env').read_text())
+   self.assertIn('ORIGINAL',(snapshot/'bsc/config/readiness.public.env').read_text())
+   self.assertTrue(((app/'bsc-source').resolve()/'COMMIT').read_text().strip().endswith('-dirty'))
    (root/relative/'readiness.dbrec').write_bytes(b'conflict')
    with self.assertRaises(ValueError):mod.sync(root,app,run)
    # A result whose provenance is not its own is never imported.
@@ -74,6 +79,7 @@ class SyncTests(unittest.TestCase):
    (root/'bsc/tools/readiness_job.py').write_text('# fixture\n')
    (root/'bsc/config/readiness.public.env').write_text('BSC_READINESS_RPC_HTTPS=https://rpc.example.invalid/\n')
    (root/'bsc/config/g04_criteria.env').write_text('BSC_G04_CRITERIA_STATE=PROPOSED\n')
+   (root/'bsc/config/live_campaign.env').write_text('BSC_CAMPAIGN_STATE=PROPOSED\n')
    subprocess.run(['git','-C',str(root),'add','bsc/tools'],check=True)
    subprocess.run(['git','-C',str(root),'-c','user.name=Fixture','-c','user.email=fixture@example.invalid','commit','-qm','fixture'],check=True)
    (root/'bsc/config/g07_attempt1_acceptance_v5.dbrec').write_bytes(b'v5 fixture')
@@ -91,6 +97,8 @@ class SyncTests(unittest.TestCase):
    self.assertTrue((snapshot/'bsc/config/readiness.public.env').is_file())
    # G0.4: the criteria file the reporter shows (CRITERIA_UNCONFIRMED until confirmed).
    self.assertEqual((snapshot/'bsc/config/g04_criteria.env').read_text(),'BSC_G04_CRITERIA_STATE=PROPOSED\n')
+   # R10 review M1: the LIVE campaign manifest the terminal's attempts and precommit read.
+   self.assertEqual((snapshot/'bsc/config/live_campaign.env').read_text(),'BSC_CAMPAIGN_STATE=PROPOSED\n')
    self.assertEqual((snapshot/'bsc/.local/g06a_sign/g06a_sign_20261025T000000Z/dry_result.dbrec').read_bytes(),b'bound dry')
    manifest=(snapshot/'SOURCES.SHA256SUMS').read_text()
    self.assertIn('./bsc/config/g07_producer_witness_source_attempt1.json',manifest)

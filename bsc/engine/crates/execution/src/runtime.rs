@@ -1,8 +1,10 @@
-//! The read-only BSC runtime process (C1, order V2 §5/§7.3): it observes the
-//! signal sources the native source owner made effective `SHADOW`, verifies
-//! and classifies what they deliver in one [`IngressCore`], journals launch
-//! sightings and source transitions, and rewrites its status record. No
-//! transaction is built, signed or sent anywhere in this program.
+//! The BSC runtime process (C1, order V2 §5/§7.3): it observes the signal
+//! sources the native source owner made effective, verifies and classifies
+//! what they deliver in one [`IngressCore`], journals launch sightings and
+//! source transitions, and rewrites its status record. Its PAPER paths sign
+//! into the local PAPER sink and never send; its LIVE path (`live`) signs
+//! and sends only while the owner's LIVE gate holds under the operator's
+//! grant.
 //!
 //! With a canonical endpoint it also follows the canonical chain
 //! (`chain_follower`) and joins every canonical launch with the sightings
@@ -398,11 +400,15 @@ impl RuntimeConfig {
         let dex_exit = values.remove("BSC_EXEC_LIVE_DEX_EXIT");
         let divergence = values.remove("BSC_EXEC_LIVE_DIVERGENCE_QUARANTINE");
         let presence = values.remove("BSC_EXEC_LIVE_PRESENCE_ANCHOR");
-        let live_key = values.remove("BSC_LIVE_KEY");
-        let live_buyer = values.remove("BSC_LIVE_BUYER");
-        let live_route = values.remove("BSC_LIVE_ROUTE");
+        // REV.1.0 R10: the public config names every LIVE key, empty (no LIVE
+        // path) until the operator sets them on the host.
+        let mut live_value = |name: &str| values.remove(name).filter(|v| !v.is_empty());
+        let live_key = live_value("BSC_LIVE_KEY");
+        let live_buyer = live_value("BSC_LIVE_BUYER");
+        let live_route = live_value("BSC_LIVE_ROUTE");
+        let live_token = live_value("BSC_LIVE_BLOCKRAZOR_TOKEN_FILE");
+        let live_connect = values.remove("BSC_LIVE_CONNECT_TIMEOUT_MS");
         let geth_arena = values.remove("BSC_INGRESS_GETH_ARENA");
-        let live_token = values.remove("BSC_LIVE_BLOCKRAZOR_TOKEN_FILE");
         let capture_pending = CaptureScope::parse(
             values
                 .remove("BSC_RUNTIME_CAPTURE_PENDING")
@@ -887,11 +893,13 @@ impl RuntimeConfig {
                 ));
             }
         }
+        let live_connect_ms = |v: &str| bounded("BSC_LIVE_CONNECT_TIMEOUT_MS", v, 100, 60_000);
         let live = match (live_key, live_buyer, live_route) {
             (None, None, None) => {
                 if live_token.is_some() {
                     return Err("BSC_LIVE_BLOCKRAZOR_TOKEN_FILE needs BSC_LIVE_ROUTE".into());
                 }
+                live_connect.map(live_connect_ms).transpose()?;
                 None
             }
             (Some(key), Some(buyer), Some(route)) => {
@@ -927,7 +935,9 @@ impl RuntimeConfig {
                     key_path: ExecSetup::expand_home(key)?,
                     buyer,
                     route: live::LiveRouteConfig::parse(route, token)?,
-                    connect_timeout: ms(take("BSC_LIVE_CONNECT_TIMEOUT_MS", 100, 60_000)?),
+                    connect_timeout: ms(live_connect_ms(
+                        live_connect.ok_or("BSC_LIVE_CONNECT_TIMEOUT_MS is required")?,
+                    )?),
                 })
             }
             _ => return Err("BSC_LIVE_KEY, BSC_LIVE_BUYER and BSC_LIVE_ROUTE go together".into()),
@@ -3210,8 +3220,9 @@ fn checkpoint_pass(
     }
 }
 
-/// Writes `bytes` to `path` atomically (temp file in the same directory).
-fn replace(path: &Path, bytes: &[u8]) -> Result<(), String> {
+/// Writes `bytes` to `path` atomically (temp file in the same directory),
+/// durable with its rename.
+pub fn replace(path: &Path, bytes: &[u8]) -> Result<(), String> {
     replace_with(path, bytes, true)
 }
 
@@ -4552,28 +4563,36 @@ mod tests {
 
     /// Plan 28.10.: the LIVE keys go together, need the executor's keys
     /// and a buyer C2 watches; the route is the builders or a loopback port.
+    /// R10: the shipped config names every key, empty (no LIVE path).
     #[test]
     fn the_live_keys_go_together_and_need_a_watched_buyer() {
         assert_eq!(RuntimeConfig::parse(CONFIG).unwrap().live, None);
+        assert!(CONFIG.contains(
+            "\nBSC_LIVE_KEY=\nBSC_LIVE_BUYER=\nBSC_LIVE_ROUTE=\nBSC_LIVE_BLOCKRAZOR_TOKEN_FILE=\n"
+        ));
         let buyer = "0x00000000000000000000000000000000000000aB";
         let watched = CONFIG.replace(
             "BSC_STATE_WATCHED=\n",
             &format!("BSC_STATE_WATCHED={buyer}\n"),
         );
-        let keys = |route: &str| {
-            format!(
-                "BSC_LIVE_KEY=~/.darkbot/bsc/live/buyer.key\nBSC_LIVE_BUYER={buyer}\n\
-                 BSC_LIVE_ROUTE={route}\nBSC_LIVE_CONNECT_TIMEOUT_MS=5000\n"
+        let keys = |base: &str, route: &str| {
+            base.replace(
+                "BSC_LIVE_KEY=\nBSC_LIVE_BUYER=\nBSC_LIVE_ROUTE=\n",
+                &format!(
+                    "BSC_LIVE_KEY=~/.darkbot/bsc/live/buyer.key\nBSC_LIVE_BUYER={buyer}\n\
+                     BSC_LIVE_ROUTE={route}\n"
+                ),
             )
         };
-        let live = RuntimeConfig::parse(&format!("{watched}{}", keys("LOOPBACK:18545")))
+        let live = RuntimeConfig::parse(&keys(&watched, "LOOPBACK:18545"))
             .unwrap()
             .live
             .unwrap();
         assert_eq!(live.route, live::LiveRouteConfig::Loopback { port: 18545 });
         assert_eq!(live.buyer[19], 0xab);
         assert!(live.key_path.is_absolute() && live.key_path.ends_with("live/buyer.key"));
-        let builders = RuntimeConfig::parse(&format!("{watched}{}", keys("BUILDERS")))
+        assert_eq!(live.connect_timeout, Duration::from_millis(5000));
+        let builders = RuntimeConfig::parse(&keys(&watched, "BUILDERS"))
             .unwrap()
             .live
             .unwrap();
@@ -4583,23 +4602,30 @@ mod tests {
                 blockrazor_token: None
             }
         );
+        let token = "BSC_LIVE_BLOCKRAZOR_TOKEN_FILE=/tmp/t\n";
+        let slow = |c: String| {
+            c.replace(
+                "BSC_LIVE_CONNECT_TIMEOUT_MS=5000\n",
+                "BSC_LIVE_CONNECT_TIMEOUT_MS=50\n",
+            )
+        };
         for bad in [
             // Not watched by C2.
-            format!("{CONFIG}{}", keys("BUILDERS")),
+            keys(CONFIG, "BUILDERS"),
             // Not all three.
-            format!("{watched}BSC_LIVE_BUYER={buyer}\n"),
-            format!("{watched}{}", keys("LOOPBACK:0")),
-            format!("{watched}{}", keys("TLS")),
-            format!(
-                "{watched}{}BSC_LIVE_BLOCKRAZOR_TOKEN_FILE=/tmp/t\n",
-                keys("LOOPBACK:1")
-            ),
-            format!("{watched}{}", keys("BUILDERS").replace("5000", "50")),
+            watched.replace("BSC_LIVE_BUYER=\n", &format!("BSC_LIVE_BUYER={buyer}\n")),
+            keys(&watched, "LOOPBACK:0"),
+            keys(&watched, "TLS"),
+            keys(&watched, "LOOPBACK:1").replace("BSC_LIVE_BLOCKRAZOR_TOKEN_FILE=\n", token),
+            // A token without a route; the timeout out of bounds, LIVE or not.
+            watched.replace("BSC_LIVE_BLOCKRAZOR_TOKEN_FILE=\n", token),
+            slow(keys(&watched, "BUILDERS")),
+            slow(watched.clone()),
         ] {
             assert!(RuntimeConfig::parse(&bad).is_err(), "{bad}");
         }
         // BSC3-056: a LIVE path without an independent second source.
-        let no_confirm = format!("{watched}{}", keys("BUILDERS")).replace(
+        let no_confirm = keys(&watched, "BUILDERS").replace(
             "BSC_CANONICAL_CONFIRM_RPC=https://bsc-rpc.publicnode.com\n",
             "BSC_CANONICAL_CONFIRM_RPC=\n",
         );
@@ -4607,7 +4633,7 @@ mod tests {
         assert!(e.contains("BSC_CANONICAL_CONFIRM_RPC"), "{e}");
         // R1 review: a sender whose paths leave out Strategy C's could buy
         // and never sell.
-        let no_exits = format!("{watched}{}", keys("BUILDERS")).replace(
+        let no_exits = keys(&watched, "BUILDERS").replace(
             "BSC_EXEC_SENDER_PATHS=C3+STRATEGY_C\n",
             "BSC_EXEC_SENDER_PATHS=C3\n",
         );

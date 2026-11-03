@@ -2,10 +2,12 @@
 //!
 //! The runner owns what touches the outside world: transports, provider
 //! framing, the clock reads and the placement of the last deadline check,
-//! response parsing and transport measurements. It decides nothing about
-//! the trade. Economic intent, nonce, signed bytes, plan, budget, envelope
-//! options, validity bounds, capability records and release profiles are
-//! `darkbot-bsc-trading`'s and are consumed here as they are.
+//! response parsing and transport measurements; and the runtime process
+//! that drives the PAPER and LIVE paths over them (sources, owner,
+//! executor, Strategy C's runtime). Economic intent, nonce, signed bytes,
+//! plan, budget, envelope options, validity bounds, capability records and
+//! release profiles are `darkbot-bsc-trading`'s and are consumed here as
+//! they are.
 //!
 //! The dependency points one way: this crate depends on the core, never
 //! the reverse.
@@ -108,7 +110,8 @@ pub mod capture_preflight;
 /// The Phase F quality verdict of a finished run.
 #[cfg(feature = "runtime")]
 pub mod capture_quality;
-/// The read-only runtime process: sources, ingress, journal, status.
+/// The runtime process: sources, ingress, journal, status, the PAPER paths
+/// and (under the operator's grant) the LIVE path.
 #[cfg(feature = "runtime")]
 pub mod runtime;
 /// Phase H: Strategy C on the journaled canonical records (PAPER).

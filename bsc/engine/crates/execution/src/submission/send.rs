@@ -9,10 +9,10 @@
 //! - [`dispatch_release`] takes a `QualifiedReleasePlan`, adapters over
 //!   [`QualifiedTransport`]s and the runner's current
 //!   [`TransportQualifications`], and nothing else. No flag or option lets
-//!   a plain plan or an unqualified transport through. Today neither a
-//!   qualified plan (no frozen record is release-eligible) nor a qualified
-//!   transport or qualification (no production constructor) can exist
-//!   outside tests.
+//!   a plain plan or an unqualified transport through. Outside tests only
+//!   the LIVE end (`live_end`) builds them, under an owner's
+//!   effective LIVE: its transports qualified against the capability
+//!   table.
 //!
 //! # Order of one dispatch
 //!

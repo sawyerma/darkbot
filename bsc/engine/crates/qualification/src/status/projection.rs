@@ -948,6 +948,10 @@ pub fn project(root: &Path, rundir: &Path) -> Snapshot {
             readiness.portal_version_bound = field(r, "portal_version").unwrap_or_default();
         }
     }
+    // R10 (Audit D): the LIVE buyer as the LIVE path's last probe read it.
+    let probe = super::live::path_only(rundir, clock_s().map(|s| s * 1_000));
+    wallets.live_balance_wei = probe.buyer_balance_wei;
+    wallets.live_next_nonce = probe.next_nonce;
     let mut witness = WitnessStatus {
         t0_to_buy_state: "UNKNOWN".into(),
         ..Default::default()

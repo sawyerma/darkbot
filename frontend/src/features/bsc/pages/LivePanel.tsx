@@ -6,7 +6,7 @@ import { selectLive, useBscStore } from "../store/bscStore";
 import { ValueState } from "./EvidenceRows";
 import { PlacedSection } from "./PlacedSection";
 import { useNativeRecords } from "./useNativeRecords";
-import { builderPolicyText, conditionRows, exitDeciderRows, operatorDecisions, recoveryRows, signedBnb } from "../model/live";
+import { builderPolicyText, conditionRows, divergenceText, exitDeciderRows, heldPositions, operatorDecisions, outcomeRows, pathRows, presenceText, qualificationAgeText, recoveryRows, signedBnb } from "../model/live";
 import { buyLimitRow, switchRow } from "../model/switches";
 import { formatNative } from "../model/format";
 import { BuyLimitActions } from "../BuyLimitActions";
@@ -29,6 +29,9 @@ export function LivePanel() {
   const recovery = recoveryRows(l);
   const decisions = operatorDecisions(l);
   const builder = builderPolicyText(l);
+  const age = qualificationAgeText(l);
+  const divergence = divergenceText(l);
+  const presence = presenceText(l);
   return <>
     <Line label="LIVE source quality" value={<ValueState state={quality} />} hint="bsc.live.state transport" />
     <PlacedSection panel="live" section={1} records={records}>
@@ -37,6 +40,8 @@ export function LivePanel() {
         {conditions.map(c => <tr key={c.id} data-met={c.met}><td>{c.met ? "✓" : "✗"}</td><td>{c.label}</td><td>{c.reason}</td><td className="g-muted">{c.met ? "" : c.where}</td></tr>)}
       </tbody></table>
       <Line label="LIVE qualification" value={<ValueState state={l?.qualification} />} hint={l?.qualificationDetail || "bsc/config/live_qualification.dbrec, verified against its evidence"} />
+      {age !== undefined ? <Line label="Qualification age" value={age} hint="BSC3-049: older than the max age (BSC_EXEC_LIVE_QUALIFICATION_MAX_AGE_MS), or for another risk scope, it admits no BUY (exits go on)" /> : null}
+      {divergence !== undefined ? <Line label="Second source" value={divergence} hint="BSC3-056: BSC_EXEC_LIVE_DIVERGENCE_QUARANTINE" /> : null}
       {l?.warnings.length ? <Line label="Warnings" value={l.warnings.join(", ")} /> : null}
       <LiveQuarantineAction seq={l?.firstUnreadable} generation={generation} available={owner} />
       <Receipt testId={LIVE_QUARANTINE} />
@@ -56,8 +61,10 @@ export function LivePanel() {
       {l?.dexExit !== undefined ? <Line label="DEX exit" value={l.dexExit ? "ON · a migrated lot exits at the Portal's quote" : "OFF · a migrated lot stays stranded for the operator"} hint="BSC3-030: BSC_EXEC_LIVE_DEX_EXIT" /> : null}
       {l?.publicExit !== undefined ? <Line label="Public exit route" value={l.publicExit ? "ON · exit steps also to the public mempool (never a BUY)" : "OFF · exit steps to the builders only"} hint="BSC3-030: BSC_EXEC_LIVE_PUBLIC_EXIT" /> : null}
       {builder !== undefined ? <Line label="Builder policy" value={builder} hint="R4: BSC_EXEC_LIVE_BUILDER_POLICY, checked every pass; while it does not hold, BUYs close and exits go on" /> : null}
+      {presence !== undefined ? <Line label="Presence anchor" value={presence} hint="BSC3-001: BSC_EXEC_LIVE_PRESENCE_ANCHOR; the grant's presence digest (bsc_runtime live scope --expect-generation N) signed by its key (live grant --presence-signature); the GUI grants unsigned" /> : null}
       {l?.grant ? <>
         <Line label="Grant scope SHA-256" value={l.grant.scopeSha256} />
+        <Line label="Grant risk scope SHA-256" value={l.grant.riskScopeSha256 || "—"} hint="BSC3-049: the scope a qualification's risk decision names" />
         <pre data-testid="bsc-live-grant-scope">{l.grant.scopeText}</pre>
       </> : null}
       <LiveGrantActions generation={generation} available={owner} grantable={l?.grantableSources ?? []} />
@@ -70,13 +77,14 @@ export function LivePanel() {
       <ScopeLiveActions rows={l?.scope ?? []} />
       <Line label="Economic LIVE (start / stop)" value={<ValueState state={econLive.effective} />} hint="DISABLE stops every LIVE intent at its next admission" />
       <SwitchActions rows={[econLive]} testId="bsc-live-econ" action="bsc.economic.set" />
-      <LiveRevokeActions generation={generation} granted={!!l?.grant} />
+      <LiveRevokeActions generation={generation} granted={!!l?.grant} held={heldPositions(l)} />
     </PlacedSection>
     <PlacedSection panel="live" section={4} records={records}>
       <Line label="Daily BUY attempts" value={buyLimitRow(l?.daily).summary} />
       <BuyLimitActions row={buyLimitRow(l?.daily)} />
       <Line label="Campaign BUY attempts" value={`${(l?.totalUsed ?? 0n).toString()} of ${(l?.totalLimit ?? 0n).toString()} (at most 10)`} />
       <Line label="This grant's attempts" value={`${(l?.grantAttemptsUsed ?? 0n).toString()} of ${l?.grant?.maxAttempts ?? 0}`} />
+      <Line label="Next C3 attempt" value={l?.leaseAttempt || "—"} hint="BSC3-078: the attempt the next C3 BUY takes (its lease holds it, or it was kept from a returned one)" />
       <TotalLimitActions generation={generation} available={owner} limit={l?.totalLimit ?? 0n} />
       <LiveCampaign campaign={l?.campaign} attempts={l?.attempts ?? []} warnings={l?.warnings ?? []} />
     </PlacedSection>
@@ -92,6 +100,7 @@ export function LivePanel() {
       <Line label="Buyer" value={l?.buyer || "—"} />
       <Line label="Buyer balance" value={wei(l?.buyerBalanceWei)} hint="At the last read-only probe" />
       <Line label="Last refusal" value={l?.lastRefusal || "—"} />
+      <div data-testid="bsc-live-path-counters">{pathRows(l).map(r => <Line key={r.label} label={r.label} value={r.value} hint={r.hint} />)}</div>
     </PlacedSection>
     <PlacedSection panel="live" section={7} records={records}>
       <table className="bsc-table" data-testid="bsc-live-positions"><tbody>
@@ -109,6 +118,7 @@ export function LivePanel() {
           <td>{t.burnable || t.burnRequested ? <LiveBurnAction tx={t.txHash} nonce={t.nonce} version={decisions.version} burn={decisions.burn} requested={t.burnRequested} /> : null}</td></tr>)}
       </tbody></table>
       <Receipt testId={LIVE_BURN} />
+      <div data-testid="bsc-live-outcomes">{outcomeRows(l).map(r => <Line key={r.label} label={r.label} value={r.value} hint={r.hint} />)}</div>
       <Line label={recovery.row.label} value={recovery.row.value} hint={recovery.row.hint} />
       {recovery.pending.length ? <table className="bsc-table" data-testid="bsc-live-recovery-pending"><tbody>
         {recovery.pending.map(([tx, why]) => <tr key={tx}><td>{tx}</td><td>{why}</td></tr>)}
@@ -117,6 +127,7 @@ export function LivePanel() {
     <PlacedSection panel="live" section={9} records={records}>
       <Line label="Realized PnL" value={l ? signedBnb(l.realizedPnlWei) : "—"} hint="Proceeds − input − all gas of closed positions; failed BUYs' gas" />
       <Line label="Gas paid" value={wei(l?.gasWei)} />
+      {l?.ledgerError ? <Line label="Runtime ledger read" value={l.ledgerError} hint="The runtime could not read the LIVE ledger: its counters above do not count" /> : null}
     </PlacedSection>
     <Notice>LIVE is the native owner's decision: effective only while every condition above holds, for the confirmed scope until its expiry, in this boot session. Every LIVE intent is admitted again at its dispatch (switches, daily and campaign limits, the grant's budget, the verified qualification); nothing is retried, and an intent whose handoff did not complete stays UNKNOWN until the chain decides.</Notice>
   </>;

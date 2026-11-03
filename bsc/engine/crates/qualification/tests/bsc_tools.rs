@@ -1,5 +1,5 @@
 //! The two `bsc/tools` tests that need the status reporter, in the cargo
-//! regression with their fixed test counts (the other five run in
+//! regression with their fixed test counts (the other six run in
 //! execution's `bsc_tools`). Both get exactly this build's reporter; the
 //! readiness binary is execution's: its `bsc_tools` checks in the same
 //! workspace run that this path is that build's `CARGO_BIN_EXE_*` (cargo

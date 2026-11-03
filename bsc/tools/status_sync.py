@@ -64,7 +64,10 @@ def sync(root, app, run):
         for path in sorted((root/parent).rglob('*.dbrec')):
             if any(p.is_symlink() for p in path.parents if p!=root): raise ValueError('symlink source')
             files.append(path)
-    for name in ['bsc/config/g07_attempt1_acceptance_v4.dbrec','bsc/config/g07_attempt1_acceptance_v5.dbrec','bsc/config/wallet.public.env','bsc/config/readiness.public.env','bsc/config/ingress.public.env','bsc/config/g04_criteria.env','bsc/tools/readiness_job.py']:
+    # REV.1.0 R10: never the superseded v4 contract (the guard refuses it) nor wallet.public.env (no reader since Audit E 1.3):
+    # a local copy of either made the snapshot -dirty for nothing.
+    # R10 review M1: the LIVE campaign manifest `bsc live attempts` and `campaign-precommit` read from the snapshot.
+    for name in ['bsc/config/g07_attempt1_acceptance_v5.dbrec','bsc/config/readiness.public.env','bsc/config/ingress.public.env','bsc/config/g04_criteria.env','bsc/config/live_campaign.env','bsc/tools/readiness_job.py']:
         path=root/name
         if path.exists(): files.append(path)
     # Phase H: the frozen gas evidence Strategy C reads from the snapshot (BSC_STRATEGY_C_GAS_EVIDENCE).

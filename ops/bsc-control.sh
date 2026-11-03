@@ -68,9 +68,16 @@ bsc_reporter_up() {
 # Restarted by launchd only after a crash; a stop is a stop file it answers by
 # committing its journal.
 bsc_runtime_pid() { launchctl list "$BSC_RUNTIME_LABEL" 2>/dev/null | sed -n 's/.*"PID" = \([0-9][0-9]*\);/\1/p' || true; }
+# REV.1.0 R10: the configuration as the runtime `$1` takes it (and the LIVE path's files, unread):
+# a refused start is never handed to launchd, which would restart it every BSC_LAUNCHD_THROTTLE_S.
+bsc_config_check() {
+  /usr/bin/env -i PATH=/usr/bin:/bin "$1" config-check --config "${2:-$BSC_ROOT/bsc/config/ingress.public.env}"
+}
 bsc_runtime_up() {
   [ -x "$APP_HOME/current/bsc_runtime" ] || return 0
   if launchctl list "$BSC_RUNTIME_LABEL" >/dev/null 2>&1; then return 0; fi
+  bsc_config_check "$APP_HOME/current/bsc_runtime" >/dev/null || {
+    say "BSC Runtime nicht gestartet: Konfiguration verweigert (darkbotctl bsc config-check)"; return 0; }
   rm -f "$RUNDIR/bsc.runtime.stop"
   local args
   args="$(for a in run --sources "$RUNDIR/bsc-sources" --rundir "$RUNDIR" --config "$BSC_ROOT/bsc/config/ingress.public.env"; do printf '<string>%s</string>' "$(printf '%s' "$a" | xml_escape)"; done)"
@@ -170,7 +177,7 @@ BSC_REQUEST_USAGE="bsc source request <ID> OFF|SHADOW|PAPER|LIVE|DISABLED|ENABLE
 # LIVE scope. `scope` prints the canonical scope text and its SHA-256, the
 # value `grant` must confirm; `revoke` withdraws it; `status` names every
 # condition LIVE still misses. A grant is a permission, never an order.
-BSC_LIVE_USAGE="bsc live scope <venue> <strategies> <sources,...> <adapters,...> <max_input_wei> <max_spend_wei> <max_attempts> <expires_unix_ms> <ALL|EXIT_ONLY> <max_buy_slippage_bps> <max_exit_slippage_bps> <max_gas_price_wei> <max_buy_gas_limit> <max_approve_gas_limit> <max_sell_gas_limit> <max_open_positions> <max_realized_loss_wei> <max_daily_realized_loss_wei> <min_buy_interval_ms> <OUTLIER_ACK|NO_OUTLIER_ACK>; bsc live grant <the same twenty> <scope_sha256> <generation> <request_id>; bsc live revoke <generation> <request_id>; bsc live status; bsc live lot <0x lot> RESUME|WRITE_OFF|EXIT_NOW <ledger_version> <request_id>; bsc live nonce-burn <0x tx> <ledger_version> <request_id>; bsc live ledger-quarantine <seq> <generation> <request_id>"
+BSC_LIVE_USAGE="bsc live status | positions | idle | ledger-check | attempts | campaign-precommit | qualify <--venue|--source|--adapter|--acquisition|--risk-by|--risk-statement|--risk-scope-sha256|--risk-evidence value>... | key-init <absolute key file> | loopback-identity init|show <test owner state> | adopt-g07 <g08 result> <capture> <request_id>; bsc live scope <venue> <strategies> <sources,...> <adapters,...> <max_input_wei> <max_spend_wei> <max_attempts> <expires_unix_ms> <ALL|EXIT_ONLY> <max_buy_slippage_bps> <max_exit_slippage_bps> <max_gas_price_wei> <max_buy_gas_limit> <max_approve_gas_limit> <max_sell_gas_limit> <max_open_positions> <max_realized_loss_wei> <max_daily_realized_loss_wei> <min_buy_interval_ms> <OUTLIER_ACK|NO_OUTLIER_ACK>; bsc live grant <the same twenty> <scope_sha256> <generation> <request_id>; bsc live revoke <generation> <request_id>; bsc live status; bsc live lot <0x lot> RESUME|WRITE_OFF|EXIT_NOW <ledger_version> <request_id>; bsc live nonce-burn <0x tx> <ledger_version> <request_id>; bsc live ledger-quarantine <seq> <generation> <request_id>"
 bsc_live_flags() {
   for v in "$1" "$2" "$3" "$4"; do case "$v" in ''|*[!A-Z0-9_+,]*) die "unknown LIVE scope value" ;; esac; done
   for v in "$5" "$6" "$7" "$8"; do case "$v" in ''|*[!0-9]*) die "LIVE limits are unsigned integers" ;; esac; done
@@ -193,6 +200,25 @@ bsc_live_flags() {
   # R4 (BSC3-069): the operator confirms a risk above the runtime's soft bounds as an outlier.
   case "${20}" in OUTLIER_ACK) LIVE_FLAGS+=(--risk-outlier-ack) ;; NO_OUTLIER_ACK) ;;
     *) die "the grant's risk is OUTLIER_ACK or NO_OUTLIER_ACK" ;; esac
+}
+# REV.1.0 R10 (Audit D, terminal parity): `live qualify` writes the qualification of the deployed
+# runtime into this checkout, replacing the one of an earlier build (`bsc sync` carries it into the
+# snapshot); its evidence flags pass as the runtime takes them, nothing else. `key-init` draws the
+# LIVE buyer's key once into a new private file outside the checkout and prints its address
+# (BSC_LIVE_KEY and BSC_LIVE_BUYER in ingress.public.env are the operator's).
+BSC_QUALIFY_FLAGS=' --venue --source --adapter --acquisition --risk-by --risk-statement --risk-scope-sha256 --risk-evidence '
+bsc_live_qualify() {
+  [ "${DARKBOT_STAGED:-}" != 1 ] || die "bsc live qualify im Terminal aus dem Original-Repository ausführen"
+  local rt="$1" args=(); shift
+  [ "$#" -gt 0 ] || die "$BSC_LIVE_USAGE"
+  while [ "$#" -gt 0 ]; do
+    case "$BSC_QUALIFY_FLAGS" in *" $1 "*) ;; *) die "bsc live qualify: unknown flag $1" ;; esac
+    [ "$#" -ge 2 ] || die "bsc live qualify: $1 needs a value"
+    case "$2" in ''|-*) die "bsc live qualify: $1 needs a value" ;; esac
+    args+=("$1" "$2"); shift 2
+  done
+  /usr/bin/env -i PATH=/usr/bin:/bin "$rt" live qualify --root "$ROOT" --runtime-binary "$rt" "${args[@]}" --replace
+  say "weiter: darkbotctl bsc sync"
 }
 # REV.1.0 R3b (Audit A): the operator's decisions of the LIVE ledger, once per request, each with
 # the state it was decided on as the CAS: a lot's RESUME, WRITE_OFF or EXIT_NOW and an unresolved
@@ -240,6 +266,26 @@ bsc_live() {
     status) [ "$#" -eq 0 ] || die "$BSC_LIVE_USAGE"
       /usr/bin/env -i PATH=/usr/bin:/bin "$rt" live status --state "$RUNDIR/bsc-sources" --root "$BSC_ROOT" \
         --rundir "$RUNDIR" ;;
+    positions|idle) [ "$#" -eq 0 ] || die "$BSC_LIVE_USAGE"
+      /usr/bin/env -i PATH=/usr/bin:/bin "$rt" live "$cmd" --state "$RUNDIR/bsc-sources" ;;
+    ledger-check) [ "$#" -eq 0 ] || die "$BSC_LIVE_USAGE"
+      /usr/bin/env -i PATH=/usr/bin:/bin "$rt" live ledger check --state "$RUNDIR/bsc-sources" ;;
+    attempts) [ "$#" -eq 0 ] || die "$BSC_LIVE_USAGE"
+      /usr/bin/env -i PATH=/usr/bin:/bin "$rt" live attempts --rundir "$RUNDIR" --state "$RUNDIR/bsc-sources" \
+        --config "$BSC_ROOT/bsc/config/ingress.public.env" --manifest "$BSC_ROOT/bsc/config/live_campaign.env" ;;
+    campaign-precommit) [ "$#" -eq 0 ] || die "$BSC_LIVE_USAGE"
+      /usr/bin/env -i PATH=/usr/bin:/bin "$rt" live campaign-precommit --rundir "$RUNDIR" \
+        --manifest "$BSC_ROOT/bsc/config/live_campaign.env" --decided-by "$(/usr/bin/id -un)" ;;
+    qualify) bsc_live_qualify "$rt" "$@" ;;
+    key-init) [ "$#" -eq 1 ] || die "$BSC_LIVE_USAGE"
+      case "$1" in /*) ;; *) die "the key file is an absolute path" ;; esac
+      /usr/bin/env -i PATH=/usr/bin:/bin "$rt" live key init --key "$1" --root "$ROOT" ;;
+    loopback-identity) [ "$#" -eq 2 ] || die "$BSC_LIVE_USAGE"
+      case "$1" in init|show) ;; *) die "$BSC_LIVE_USAGE" ;; esac
+      /usr/bin/env -i PATH=/usr/bin:/bin "$rt" live loopback-identity "$1" --state "$2" --root "$ROOT" ;;
+    adopt-g07) [ "$#" -eq 3 ] || die "$BSC_LIVE_USAGE"
+      bsc_live_ledger "$rt" "$3" adopt-g07 --g08 "$1" --capture "$2" \
+        --config "$BSC_ROOT/bsc/config/ingress.public.env" ;;
     lot) [ "$#" -eq 4 ] || die "$BSC_LIVE_USAGE"; bsc_live_hash "$1"
       local what
       case "$2" in RESUME) what=resume ;; WRITE_OFF) what=write-off ;; EXIT_NOW) what=exit-now ;;
@@ -276,7 +322,7 @@ cmd_bsc() {
       *) die "$BSC_REQUEST_USAGE" ;;
     esac ;;
     live) case "${2:-}" in
-      grant|revoke|lot|nonce-burn|ledger-quarantine) locked bsc_live "${@:2}" ;;
+      grant|revoke|lot|nonce-burn|ledger-quarantine|qualify|key-init|loopback-identity|adopt-g07|attempts|campaign-precommit) locked bsc_live "${@:2}" ;;
       *) bsc_live "${@:2}" ;;
     esac ;;
     candidate) case "${2:-}" in
@@ -292,8 +338,28 @@ cmd_bsc() {
     sync) [ "${DARKBOT_STAGED:-}" != 1 ] || die "bsc sync im Terminal aus dem Original-Repository ausführen"
       locked bsc_sync ;;
     reporter) locked bsc_reporter_up ;;
-    *) die "bsc readiness start | stop | status; bsc reporter; bsc candidate request; bsc source request | show; bsc live scope | grant | revoke | status | lot | nonce-burn | ledger-quarantine" ;;
+    config-check) [ -x "$APP_HOME/current/bsc_runtime" ] || die "BSC runtime nicht deployed"
+      bsc_config_check "$APP_HOME/current/bsc_runtime" ;;
+    status) bsc_status ;;
+    *) die "bsc readiness start | stop | status; bsc reporter; bsc status; bsc config-check; bsc candidate request; bsc source request | show; $BSC_LIVE_USAGE" ;;
   esac
+}
+
+# REV.1.0 R10 (Audit D): the BSC part of `darkbotctl status`: the runtime and reporter jobs, the
+# readiness job, the snapshot's source, whether anything LIVE holds and the configuration check.
+bsc_status() {
+  local rt="$APP_HOME/current/bsc_runtime" pid
+  pid="$(bsc_runtime_pid)"
+  if [ -n "$pid" ]; then say "bsc runtime: läuft pid $pid"
+  elif launchctl list "$BSC_RUNTIME_LABEL" >/dev/null 2>&1; then say "bsc runtime: geladen, kein Prozess"
+  else say "bsc runtime: gestoppt"; fi
+  if [ -S "$BSC_SOCKET" ]; then say "bsc reporter-socket: vorhanden"; else say "bsc reporter-socket: fehlt"; fi
+  say "bsc readiness: pid=$(bsc_pid) result=$(bsc_result_field result_code)"
+  if [ -f "$BSC_ROOT/COMMIT" ]; then say "bsc snapshot: $(cat "$BSC_ROOT/COMMIT")"; else say "bsc snapshot: fehlt"; fi
+  [ -x "$rt" ] || { say "bsc runtime: nicht deployed"; return 0; }
+  local held
+  if held="$(bsc_live_idle "$rt" 2>&1)"; then say "bsc live: nichts offen"; else say "bsc live: ${held##*$'\n'}"; fi
+  say "bsc config: $(bsc_config_check "$rt" 2>&1 | tail -n 1 || true)"
 }
 
 bsc_sync() {

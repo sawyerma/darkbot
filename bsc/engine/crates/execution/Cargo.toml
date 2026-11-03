@@ -1,6 +1,6 @@
 [package]
 name = "darkbot-bsc-execution"
-description = "DarkBot BSC execution: transport, provider framing and execution of submissions. Decides no quote, nonce or strategy; those are darkbot-bsc-trading."
+description = "DarkBot BSC execution: transports, provider framing, submission and the runtime process (sources, owner, PAPER and LIVE paths). Transaction construction and signing are darkbot-bsc-trading's."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -136,7 +136,7 @@ required-features = ["g07-mainnet"]
 name = "g07_candidate"
 required-features = ["g07-mainnet"]
 
-# The BSC runtime (C0/C1): source modes now; ingress, journal and status follow.
+# The BSC runtime: sources, ingress, journal, status, the owner and the PAPER and LIVE paths.
 [[bin]]
 name = "bsc_runtime"
 required-features = ["runtime"]

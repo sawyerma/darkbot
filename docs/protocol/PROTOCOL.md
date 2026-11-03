@@ -331,6 +331,29 @@ transactions and the net result. A view of the native owner and ledger, never a 
 | exit_reprice_bps | [uint32](#uint32) | optional | REV.1.0 R5 (BSC3-030, BSC_EXEC_LIVE_EXIT_REPRICE_BPS): a lost exit step goes again at its nonce at its price raised by these bps, at most the grant&#39;s max gas price; 0: never re-priced. |
 | public_exit | [bool](#bool) | optional | REV.1.0 R5 (BSC3-030, BSC_EXEC_LIVE_PUBLIC_EXIT): true sends every exit step, once handed to the builders, also to the configured public JSON-RPC endpoint (the public mempool); never a BUY. |
 | dex_exit | [bool](#bool) | optional | REV.1.0 R5 (BSC3-030, BSC_EXEC_LIVE_DEX_EXIT): true exits a lot whose token migrated to its DEX at the Portal&#39;s quote (routed through its DEX router); false: it stays stranded for the operator. |
+| next_nonce | [uint64](#uint64) | optional | REV.1.0 R10 (Audit D): the LIVE buyer&#39;s next nonce at the LIVE path&#39;s last probe; absent unless a current runtime status (the owner&#39;s freshness rule) reports it. |
+| armed_generation | [uint64](#uint64) | optional | The owner grant generation the LIVE path is armed under; absent unless a current status reports it ARMED. |
+| refusals | [string](#string) | repeated | The LIVE path&#39;s refusals by stage, `NAME=n`. |
+| responses | [string](#string) | repeated | The providers&#39; answers to the LIVE releases, `OUTCOME=n` (BSC3-051). |
+| included | [uint64](#uint64) |  | C2&#39;s evidence on the LIVE path&#39;s intents: included. |
+| reverted | [uint64](#uint64) |  | C2&#39;s evidence on the LIVE path&#39;s intents: reverted. |
+| replaced | [uint64](#uint64) |  | C2&#39;s evidence on the LIVE path&#39;s intents: replaced (another transaction took the nonce). |
+| finalized | [uint64](#uint64) |  | C2&#39;s evidence on the LIVE path&#39;s intents: final. |
+| orphaned | [uint64](#uint64) |  | C2&#39;s evidence on the LIVE path&#39;s intents: orphaned (the block left the canonical chain). |
+| probes | [uint64](#uint64) |  | The LIVE path&#39;s read-only probes. |
+| ledger_error | [string](#string) |  | Why the runtime could not read the LIVE ledger (then its counters do not count); empty: read. |
+| latency_samples | [uint64](#uint64) |  | T_ingress→T_handoff of the LIVE releases (BSC3-043): the kept samples. |
+| latency_p50_ns | [uint64](#uint64) | optional | T_ingress→T_handoff p50 (ns); absent without a sample. |
+| latency_p99_ns | [uint64](#uint64) | optional | T_ingress→T_handoff p99 (ns); absent without a sample. |
+| latency_max_ns | [uint64](#uint64) | optional | T_ingress→T_handoff maximum (ns); absent without a sample. |
+| lease_attempt | [string](#string) |  | The attempt the next C3 BUY takes (BSC3-078), `0x` hex; empty: none, or no current status reports the path ARMED. |
+| divergence_quarantine | [bool](#bool) | optional | REV.1.0 R7 (BSC3-056, BSC_EXEC_LIVE_DIVERGENCE_QUARANTINE): true refuses every send, exits too, while the second source DISAGREES. |
+| confirm_state | [string](#string) |  | The second source&#39;s verdict now (AGREED, STALE, BEHIND, DISAGREES, NO_COMMON_HEIGHT); empty: none configured or no runtime status. |
+| presence_anchor | [string](#string) | optional | REV.1.0 R9 (BSC3-001, BSC_EXEC_LIVE_PRESENCE_ANCHOR): the anchor address; empty: OFF. |
+| presence_signer | [string](#string) |  | The key that signed the grant&#39;s presence digest for its generation; empty: unsigned. |
+| qualification_risk_scope_sha256 | [string](#string) |  | REV.1.0 R8 (BSC3-049): the grant risk scope the qualification&#39;s risk decision is made for. |
+| qualification_observed_unix_ms | [uint64](#uint64) | optional | The qualification&#39;s age: the oldest of its record, evidence and risk decision (unix ms). |
+| qualification_max_age_ms | [uint64](#uint64) | optional | BSC_EXEC_LIVE_QUALIFICATION_MAX_AGE_MS (0: no bound): an older qualification admits no BUY. |
 
 
 
@@ -404,6 +427,8 @@ Public wallet identity and timestamped evidence balances, never keys.
 | evidence | [Evidence](#darkbot-bsc-v1-Evidence) |  | Evidence identity makes snapshot age and provenance reviewable. |
 | launcher_control | [ControlSwitch](#darkbot-bsc-v1-ControlSwitch) |  | The launcher wallet&#39;s native ENABLE/DISABLE switch; absent before the owner state exists. |
 | buyer_control | [ControlSwitch](#darkbot-bsc-v1-ControlSwitch) |  | The buyer wallet&#39;s native ENABLE/DISABLE switch; absent before the owner state exists. |
+| live_balance_wei | [string](#string) | optional | REV.1.0 R10 (Audit D): the LIVE buyer&#39;s balance (decimal wei) at the LIVE path&#39;s last probe; absent unless a current runtime status (the owner&#39;s freshness rule) reports it. |
+| live_next_nonce | [uint64](#uint64) | optional | The LIVE buyer&#39;s next nonce at the LIVE path&#39;s last probe; absent unless a current runtime status reports it. |
 
 
 
@@ -770,6 +795,7 @@ The operator&#39;s LIVE grant of one scope as the native owner holds it.
 | exit_only | [bool](#bool) |  | The grant admits the exits of open positions only, no BUY (BSC3-058). |
 | risk | [LiveGrantRisk](#darkbot-bsc-v1-LiveGrantRisk) |  | The execution risk the operator granted (BSC3-069); absent in a grant written before it, which admits nothing. |
 | limits | [LiveGrantLimits](#darkbot-bsc-v1-LiveGrantLimits) |  | The positions and losses the operator granted (31.10. order); absent in a grant written before them, which arms nothing. |
+| risk_scope_sha256 | [string](#string) |  | REV.1.0 R10 (BSC3-049): SHA-256 of the grant&#39;s risk scope text, the scope a qualification&#39;s risk decision must name. |
 
 
 

@@ -11,7 +11,10 @@
 //! never a wallet's key: the route refuses any other key file before it is
 //! read, and any of the refused production accounts.
 
-use crate::paper::{IdentityError, PaperIdentity, load_private_key};
+use crate::paper::{
+    IdentityError, PaperIdentity, check_key_file, check_private_file, load_private_key,
+};
+use crate::runtime::live::{LiveRouteConfig, LiveSetup};
 use crate::sources::LiveNow;
 use darkbot_bsc_trading::signer::Signer;
 use std::path::{Path, PathBuf};
@@ -75,14 +78,34 @@ impl core::fmt::Debug for LiveKey {
 }
 
 fn refused(e: IdentityError) -> String {
+    refused_as("LIVE key", e)
+}
+
+/// Why the file of `what` was refused (never "paper identity").
+pub fn refused_as(what: &str, e: IdentityError) -> String {
     match e {
-        IdentityError::Location(m) => format!("LIVE key location refused: {m}"),
-        IdentityError::Permissions(m) => format!("LIVE key permissions refused: {m}"),
-        IdentityError::Malformed(m) => format!("LIVE key malformed: {m}"),
-        IdentityError::Exists(m) | IdentityError::ProductionAccount(m) | IdentityError::Io(m) => {
-            format!("LIVE key: {m}")
-        }
+        IdentityError::Location(m) => format!("{what} location refused: {m}"),
+        IdentityError::Permissions(m) => format!("{what} permissions refused: {m}"),
+        IdentityError::Malformed(m) => format!("{what} malformed: {m}"),
+        IdentityError::Exists(m) => format!("{what} exists: {m}"),
+        IdentityError::ProductionAccount(m) | IdentityError::Io(m) => format!("{what}: {m}"),
     }
+}
+
+/// REV.1.0 R10 (provisioning): the LIVE path's files as its arm takes them
+/// (the key, and the BlockRazor authorization if configured), by place,
+/// owner, mode, links and length alone: neither is read (the key only under
+/// an effective LIVE).
+pub fn check_files(setup: &LiveSetup, repo_root: &Path) -> Result<(), String> {
+    check_key_file(&setup.key_path, repo_root).map_err(refused)?;
+    if let LiveRouteConfig::Builders {
+        blockrazor_token: Some(token),
+    } = &setup.route
+    {
+        check_private_file(token, repo_root)
+            .map_err(|e| refused_as("BSC_LIVE_BLOCKRAZOR_TOKEN_FILE", e))?;
+    }
+    Ok(())
 }
 
 impl LiveKey {

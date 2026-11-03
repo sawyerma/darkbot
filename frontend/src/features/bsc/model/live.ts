@@ -248,6 +248,62 @@ export function recoveryRows(l: BscLiveView | null | undefined): { row: LiveRow;
   };
 }
 
+/** R10 (Audit D): the positions a revoke leaves without an exit (pending, open or exiting). */
+export function heldPositions(l: BscLiveView | null | undefined): number {
+  return (l?.positions ?? []).filter(p => p.state === "PENDING" || p.state === "OPEN" || p.state === "EXITING").length;
+}
+
+/** REV.1.0 R10 (Audit D): the LIVE path as the runtime's status names it: the buyer's next nonce,
+ *  the grant it is armed under, refusals by stage, probes and the release latency. */
+export function pathRows(l: BscLiveView | null | undefined): LiveRow[] {
+  const n = (v: bigint | undefined) => v === undefined ? "—" : v.toString();
+  const ns = (v: bigint | undefined) => v === undefined ? "—" : `${v.toString()} ns`;
+  return [
+    { label: "Next nonce", value: n(l?.nextNonce), hint: "The buyer's next nonce at the LIVE path's last probe" },
+    { label: "Armed under", value: l?.armedGeneration === undefined ? "—" : `grant generation ${l.armedGeneration.toString()}`, hint: "The owner generation of the grant the LIVE path is armed under" },
+    { label: "Refusals by stage", value: l?.refusals.length ? l.refusals.join(" · ") : "—", hint: "Every refused intent, counted by the stage that refused it" },
+    { label: "Probes", value: n(l?.probes), hint: "The LIVE path's read-only probes" },
+    { label: "Release latency", value: l?.latencySamples ? `p50 ${ns(l.latencyP50Ns)} · p99 ${ns(l.latencyP99Ns)} · max ${ns(l.latencyMaxNs)} (${l.latencySamples.toString()} samples)` : "no sample",
+      hint: "T_ingress → T_handoff of the LIVE releases: owner admitted, request written; no builder answer, no inclusion (BSC3-043)" },
+  ];
+}
+
+/** R10: what the providers answered the LIVE releases and what C2's evidence did to its intents. */
+export function outcomeRows(l: BscLiveView | null | undefined): LiveRow[] {
+  const c = (v: bigint | undefined) => (v ?? 0n).toString();
+  return [
+    { label: "Provider answers", value: l?.responses.length ? l.responses.join(" · ") : "—", hint: "OUTCOME=n per release answer (BSC3-051)" },
+    { label: "Chain evidence", value: `${c(l?.included)} included · ${c(l?.reverted)} reverted · ${c(l?.replaced)} replaced · ${c(l?.finalized)} final · ${c(l?.orphaned)} orphaned`, hint: "C2's evidence on the LIVE path's intents" },
+  ];
+}
+
+/** R10 (R7, BSC3-056): the second source's verdict and the divergence quarantine (none: unknown). */
+export function divergenceText(l: BscLiveView | null | undefined): string | undefined {
+  if (!l || (l.divergenceQuarantine === undefined && !l.confirmState)) return undefined;
+  const q = l.divergenceQuarantine === undefined ? "unknown" : l.divergenceQuarantine ? "ON · every send refused, exits too, while it DISAGREES" : "OFF · exits go on while it DISAGREES";
+  return `second source ${l.confirmState || "—"} · quarantine ${q}`;
+}
+
+/** R10 (R9, BSC3-001): the presence anchor and who signed the grant's presence (none: unknown). */
+export function presenceText(l: BscLiveView | null | undefined): string | undefined {
+  if (!l || l.presenceAnchor === undefined) return undefined;
+  if (l.presenceAnchor === "") return "OFF · BUYs need no presence signature";
+  const signer = l.presenceSigner.toLowerCase();
+  const signed = !l.grant ? "no grant" : signer === "" ? "the grant is unsigned: BUYs refused (LIVE_PRESENCE_UNSIGNED), exits go on"
+    : signer === l.presenceAnchor.toLowerCase() ? "the grant is signed by it" : `the grant is signed by ${l.presenceSigner}, not the anchor: BUYs refused`;
+  return `anchor ${l.presenceAnchor} · ${signed}`;
+}
+
+/** R10 (R8, BSC3-049): the qualification's age and the grant risk scope its risk decision names. */
+export function qualificationAgeText(l: BscLiveView | null | undefined): string | undefined {
+  if (!l || l.qualification !== "VERIFIED") return undefined;
+  const bound = l.qualificationMaxAgeMs === undefined ? "max age unknown" : l.qualificationMaxAgeMs === 0n ? "no max age" : `max age ${l.qualificationMaxAgeMs.toString()} ms`;
+  const scope = !l.qualificationRiskScopeSha256 ? "risk decision names no grant risk scope"
+    : !l.grant ? `risk decision for ${l.qualificationRiskScopeSha256}`
+      : l.qualificationRiskScopeSha256 === l.grant.riskScopeSha256 ? "risk decision for this grant's risk scope" : "risk decision for another grant risk scope";
+  return `oldest evidence ${unixMs(l.qualificationObservedUnixMs)} · ${bound} · ${scope}`;
+}
+
 /** REV.1.0 R3b (Audit A): whether a switch locks a decision, and why (unknown locks as OFF does).
  *  Which lots and transactions take a decision is the ledger's own rule (`decisions`, `burnable`). */
 export interface DecisionLock { locked: boolean; why: string }

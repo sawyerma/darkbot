@@ -246,6 +246,55 @@ const txRow = (txHash: string, nonce: bigint, state: string, burnable: boolean, 
 type LiveInit = MessageInitShape<typeof BscLiveStateSchema>;
 const liveOf = (init: LiveInit) => toBinary(BscLiveStateSchema, create(BscLiveStateSchema, { gate: "BLOCKED", pathState: "ARMED", generation: 5n, qualification: "NONE", ...init }));
 
+test("the LIVE tab shows the path's counters, the second source and the presence; a revoke names the exits it ends (REV.1.0 R10)", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  const live = liveOf({
+    nextNonce: 41n, armedGeneration: 6n, refusals: ["OWNER=2"], responses: ["ACCEPTED=3"], probes: 16n, included: 11n, finalized: 14n,
+    latencySamples: 9n, latencyP50Ns: 100n, latencyP99Ns: 200n, latencyMaxNs: 300n, leaseAttempt: hash(0xab),
+    divergenceQuarantine: true, confirmState: "DISAGREES", presenceAnchor: "0x" + "ab".repeat(20), presenceSigner: "",
+    grant: { venue: "BSC_VENUE_FLAP", strategies: "C3+STRATEGY_C", requestId: "g1", setGeneration: 5n, expiresUnixMs: 1793000000000n, scopeSha256: "s", riskScopeSha256: "r1" },
+    positions: [lotRow(hash(1), "OPEN", []), lotRow(hash(2), "CLOSED", [])],
+  });
+  await feed(page, live);
+  await page.goto("/bsc");
+  await tab(page, "LIVE").click();
+  await expect(line(page, "Next nonce")).toContainText("41");
+  await expect(line(page, "Refusals by stage")).toContainText("OWNER=2");
+  await expect(line(page, "Release latency")).toContainText("p50 100 ns · p99 200 ns · max 300 ns (9 samples)");
+  await expect(line(page, "Provider answers")).toContainText("ACCEPTED=3");
+  await expect(line(page, "Chain evidence")).toContainText("11 included · 0 reverted · 0 replaced · 14 final · 0 orphaned");
+  await expect(line(page, "Second source")).toContainText("second source DISAGREES · quarantine ON");
+  await expect(line(page, "Presence anchor")).toContainText("unsigned: BUYs refused (LIVE_PRESENCE_UNSIGNED)");
+  await expect(line(page, "Grant risk scope SHA-256")).toContainText("r1");
+  await expect(line(page, "Next C3 attempt")).toContainText(hash(0xab));
+  // A revoke ends the held position's exits; its dialog says so. Accessible: named, focus inside, cancelled by its button.
+  await page.getByTestId("bsc-live-revoke-request").click();
+  const dialog = page.getByRole("alertdialog");
+  await expect(dialog).toHaveAccessibleName("LIVE-Freigabe widerrufen?");
+  await expect(page.getByTestId("bsc-live-revoke-exits")).toHaveText("Ohne Grant laufen keine Exits: 1 gehaltene Position(en) bleiben offen, bis ein neuer Grant (auch EXIT-ONLY) sie abwickelt.");
+  await expect(dialog.locator(":focus")).toHaveCount(1);
+  await dialog.getByRole("button", { name: "Abbrechen", exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
+
+test("every BSC control has an accessible name and the tabs follow the keyboard (REV.1.0 R10 a11y)", async ({ page }) => {
+  await feed(page);
+  await page.goto("/bsc");
+  for (const name of TABS) {
+    await tab(page, name).click();
+    await expect(tab(page, name)).toHaveAttribute("aria-selected", "true");
+    const controls = page.locator(".bsc-page").locator("button:visible, input:visible, select:visible, textarea:visible");
+    for (let i = 0; i < await controls.count(); i++) await expect(controls.nth(i)).toHaveAccessibleName(/\S/);
+  }
+  // Roving focus: the arrow keys move from the selected tab and select the next.
+  await tab(page, TABS[0]!).click();
+  await page.keyboard.press("ArrowRight");
+  await expect(tab(page, TABS[1]!)).toBeFocused();
+  await expect(tab(page, TABS[1]!)).toHaveAttribute("aria-selected", "true");
+});
+
 test("the LIVE tab's operator decisions go at the state their dialog opened on (REV.1.0 R3b, Audit A)", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));

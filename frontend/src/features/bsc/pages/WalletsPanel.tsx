@@ -47,6 +47,7 @@ export function WalletsPanel() {
     <PlacedSection panel="wallets" section={3} records={records}>
       <Line label="Launcher balance" value={wei(w?.launcherBalanceWei)} hint="Historical snapshot, not a live balance" />
       <Line label="Buyer balance" value={wei(w?.buyerBalanceWei)} hint="Historical snapshot, not a live balance" />
+      <Line label="LIVE buyer balance" value={w?.liveBalanceWei === undefined ? "— (not reported)" : wei(w.liveBalanceWei)} hint="At the LIVE path's last read-only probe; only from a current runtime status" />
     </PlacedSection>
     <PlacedSection panel="wallets" section={4} records={records}>
       <Line label="Launcher required" value={wei(w?.requiredLauncherWei)} />
@@ -54,7 +55,9 @@ export function WalletsPanel() {
       <Line label="Funding verdict" value={<ValueState state={s?.readiness?.fundingVerdict} />} hint="From the native readiness check" />
     </PlacedSection>
     <PlacedSection panel="wallets" section={5} records={records} />
-    <PlacedSection panel="wallets" section={6} records={records} />
+    <PlacedSection panel="wallets" section={6} records={records}>
+      <Line label="LIVE buyer next nonce" value={w?.liveNextNonce?.toString() ?? "— (not reported)"} hint="At the LIVE path's last read-only probe (runtime status)" />
+    </PlacedSection>
     <PlacedSection panel="wallets" section={7} records={records}>
       <Line label="Wallet snapshots" value={<ValueState state={w?.source || undefined} />} hint="HISTORICAL_PREFLIGHT is an old observation" />
       <Line label="Wallet state" value={w?.walletStatus || "UNKNOWN"} />
@@ -63,6 +66,6 @@ export function WalletsPanel() {
       <Line label="Balance observed" value={timestamp(w?.observedUnixS)} />
       <EvidenceRows evidence={w?.evidence} />
     </PlacedSection>
-    <Notice>Balances are historical snapshots, not a live balance reader. No transfers or wallet mutations are available. The two wallet switches are native permissions of the bsc_runtime owner (the same as darkbotctl bsc source request): every Mainnet signing or sending path checks them, also when started in a terminal; ENABLED alone signs and sends nothing.</Notice>
+    <Notice>Balances are historical snapshots, not a live balance reader, except the LIVE buyer's at the LIVE path's last probe. No transfers or wallet mutations are available. The two wallet switches are native permissions of the bsc_runtime owner (the same as darkbotctl bsc source request): every Mainnet signing or sending path checks them, also when started in a terminal; ENABLED alone signs and sends nothing.</Notice>
   </>;
 }

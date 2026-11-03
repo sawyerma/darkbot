@@ -1824,6 +1824,7 @@ fn a_dex_routed_sells_proceeds_show_as_unknown() {
 fn the_live_tab_shows_the_exit_deciders_the_recovery_and_the_quarantine() {
     use darkbot_bsc_execution::live_ledger::{Fact, FactKind, FactSource, Ledger};
     use darkbot_bsc_execution::sources::{ComponentId, LiveIntentKind};
+    use darkbot_bsc_record::Value;
     use darkbot_bsc_record::schema::bsc_runtime::runtime_status as rs;
     let root = std::env::temp_dir().join(format!("darkbot-bsc-live-r3b-{}", std::process::id()));
     let _ = fs::remove_dir_all(&root);
@@ -1843,10 +1844,44 @@ fn the_live_tab_shows_the_exit_deciders_the_recovery_and_the_quarantine() {
         .set(rs::live::RECOVERED, 5u64)
         .set(rs::live::RECOVERY_FAULTS, 7u64)
         .set(rs::live::RECOVERY_FAULT, "recovery fault");
-    let mut d = filled(&rs::SCHEMA);
-    d.set(rs::PROVENANCE_OBSERVED_UNIX_MS, now)
-        .set(rs::LIVE, live.into_nested());
-    fs::write(rundir.join("bsc-runtime/status.dbrec"), d.encode().unwrap()).unwrap();
+    // R10: the path's nonce, arm, refusals, answers, C2 evidence, probes,
+    // ledger read, latency, next C3 attempt; the second source's verdict.
+    let mut balance = [0u8; 32];
+    balance[31] = 42;
+    live.set(rs::live::STATE, "ARMED")
+        .set(rs::live::BALANCE_WEI, Value::U256(balance))
+        .set(rs::live::NEXT_NONCE, 41u64)
+        .set(rs::live::GRANT_GENERATION, 6u64)
+        .push(rs::live::REFUSALS, "OWNER=2")
+        .push(rs::live::REFUSALS, "PLAN=1")
+        .push(rs::live::RESPONSES, "ACCEPTED=3")
+        .set(rs::live::INCLUDED, 11u64)
+        .set(rs::live::REVERTED, 12u64)
+        .set(rs::live::REPLACED, 13u64)
+        .set(rs::live::FINAL, 14u64)
+        .set(rs::live::ORPHANED, 15u64)
+        .set(rs::live::PROBES, 16u64)
+        .set(rs::live::LEDGER_ERROR, "ledger fault")
+        .set(rs::live::LATENCY_SAMPLES, 9u64)
+        .set(rs::live::LATENCY_P50_NS, 100u64)
+        .set(rs::live::LATENCY_P99_NS, 200u64)
+        .set(rs::live::LATENCY_MAX_NS, 300u64)
+        .set(rs::live::LEASE_ATTEMPT, Value::B256([0xab; 32]));
+    let mut canonical = filled(&rs::canonical::SCHEMA);
+    canonical.set(rs::canonical::CONFIRM_STATE, "DISAGREES");
+    // Rewritten every minute: current within three intervals (the owner's rule).
+    let status_in = |written: u64, state: &str| {
+        let mut path = live.clone();
+        path.set(rs::live::STATE, state);
+        let mut d = filled(&rs::SCHEMA);
+        d.set(rs::PROVENANCE_OBSERVED_UNIX_MS, written)
+            .set(rs::STATUS_INTERVAL_MS, 60_000u64)
+            .set(rs::CANONICAL, canonical.clone().into_nested())
+            .set(rs::LIVE, path.into_nested());
+        fs::write(rundir.join("bsc-runtime/status.dbrec"), d.encode().unwrap()).unwrap();
+    };
+    let status = |written: u64| status_in(written, "ARMED");
+    status(now);
     let released = |n: u8| Fact {
         kind: FactKind::Released,
         tx_hash: [n; 32],
@@ -1903,6 +1938,65 @@ fn the_live_tab_shows_the_exit_deciders_the_recovery_and_the_quarantine() {
         super::live::live_state(&root, &rundir, config.as_ref().map_err(|w| *w), Some(now))
     };
     let l = tab();
+    assert_eq!((l.next_nonce, l.armed_generation), (Some(41), Some(6)));
+    assert_eq!(
+        (l.refusals.join(","), l.responses.join(",")),
+        ("OWNER=2,PLAN=1".to_string(), "ACCEPTED=3".to_string())
+    );
+    assert_eq!(
+        (
+            l.included,
+            l.reverted,
+            l.replaced,
+            l.finalized,
+            l.orphaned,
+            l.probes
+        ),
+        (11, 12, 13, 14, 15, 16)
+    );
+    assert_eq!(l.ledger_error, "ledger fault");
+    assert_eq!(
+        (
+            l.latency_samples,
+            l.latency_p50_ns,
+            l.latency_p99_ns,
+            l.latency_max_ns
+        ),
+        (9, Some(100), Some(200), Some(300))
+    );
+    assert_eq!(l.lease_attempt, format!("0x{}", "ab".repeat(32)));
+    assert_eq!(l.confirm_state, "DISAGREES");
+    // R10: the Wallets tab's LIVE buyer, as the LIVE path's last probe read it.
+    let w = projection::project(&root, &rundir).wallets;
+    assert_eq!(
+        (w.live_balance_wei.as_deref(), w.live_next_nonce),
+        (Some("42"), Some(41))
+    );
+    // R10 review L4: a status older than three intervals shows no probe value
+    // (nonce, arm, next attempt, balance), with its warning; the counters stay.
+    status(now - 180_001);
+    let stale = tab();
+    assert_eq!(
+        (
+            stale.next_nonce,
+            stale.armed_generation,
+            stale.lease_attempt.as_str(),
+            stale.buyer_balance_wei.as_deref()
+        ),
+        (None, None, "", None)
+    );
+    assert!(stale.warnings.contains(&"RUNTIME_STATUS_STALE".to_string()));
+    assert_eq!(stale.included, 11);
+    let w = projection::project(&root, &rundir).wallets;
+    assert_eq!((w.live_balance_wei, w.live_next_nonce), (None, None));
+    // Current but not ARMED: the probe's nonce, no arm and no next attempt.
+    status_in(now, "DISARMED");
+    let idle = tab();
+    assert_eq!(
+        (idle.next_nonce, idle.armed_generation, idle.lease_attempt.as_str()),
+        (Some(41), None, "")
+    );
+    status(now);
     assert_eq!(l.exit_undecided, ["0xundecided"]);
     assert_eq!(l.stranded, ["0xstranded LIVE_POSITION_OFF_CURVE"]);
     assert_eq!(
@@ -1993,6 +2087,14 @@ fn the_live_tab_shows_the_exit_deciders_the_recovery_and_the_quarantine() {
         ]
     );
     assert_eq!((l.operator_exit, l.nonce_burn), (None, None));
+    assert_eq!(
+        (
+            l.divergence_quarantine,
+            l.presence_anchor.as_deref(),
+            l.qualification_max_age_ms
+        ),
+        (None, None, None)
+    );
     // R4: the campaign's spend (no admission yet), its budget only with a
     // configuration.
     assert_eq!(
@@ -2040,16 +2142,37 @@ fn the_live_tab_shows_the_exit_deciders_the_recovery_and_the_quarantine() {
             )
             .replace("BSC_EXEC_LIVE_DEX_EXIT=OFF\n", "BSC_EXEC_LIVE_DEX_EXIT=ON\n")
             .replace(
+                "BSC_EXEC_LIVE_DIVERGENCE_QUARANTINE=OFF\n",
+                "BSC_EXEC_LIVE_DIVERGENCE_QUARANTINE=ON\n",
+            )
+            .replace(
+                "BSC_EXEC_LIVE_QUALIFICATION_MAX_AGE_MS=0\n",
+                "BSC_EXEC_LIVE_QUALIFICATION_MAX_AGE_MS=86400000\n",
+            )
+            .replace(
                 "BSC_STATE_WATCHED=\n",
                 &format!("BSC_STATE_WATCHED={buyer}\n"),
             )
-            + &format!(
-                "BSC_LIVE_KEY=~/.darkbot/bsc/live/buyer.key\nBSC_LIVE_BUYER={buyer}\nBSC_LIVE_ROUTE=LOOPBACK:18545\nBSC_LIVE_CONNECT_TIMEOUT_MS=5000\n"
+            .replace(
+                "BSC_LIVE_KEY=\nBSC_LIVE_BUYER=\nBSC_LIVE_ROUTE=\n",
+                &format!(
+                    "BSC_LIVE_KEY=~/.darkbot/bsc/live/buyer.key\nBSC_LIVE_BUYER={buyer}\nBSC_LIVE_ROUTE=LOOPBACK:18545\n"
+                ),
             ),
     )
     .unwrap();
     let l = tab();
     assert_eq!((l.operator_exit, l.nonce_burn), (Some(false), Some(true)));
+    // R10: the divergence quarantine (R7), the presence anchor (R9: OFF, empty),
+    // the qualification's age bound (R8), as configured.
+    assert_eq!(
+        (
+            l.divergence_quarantine,
+            l.presence_anchor.as_deref(),
+            l.qualification_max_age_ms
+        ),
+        (Some(true), Some(""), Some(86_400_000))
+    );
     assert_eq!(l.campaign_spend_max_wei.as_deref(), Some("0"));
     // R4 (BSC3-069): the repository's soft bounds and switch.
     assert_eq!(
@@ -2185,8 +2308,29 @@ fn the_live_tab_projects_the_gate_grant_and_ledger() {
             min_buy_interval_ms: 0,
         }),
     };
+    // R10 (R9 display): the grant's presence, signed for the generation it
+    // is written as.
+    let key = k256::ecdsa::SigningKey::from_slice(&[0x31; 32]).unwrap();
+    let mut message = b"\x19Ethereum Signed Message:\n32".to_vec();
+    message.extend_from_slice(&darkbot_bsc_execution::sources::presence_digest(
+        &grant,
+        g + 1,
+    ));
+    let (sig, id) = key
+        .sign_prehash_recoverable(alloy_primitives::keccak256(&message).as_slice())
+        .unwrap();
+    let mut presence = [0u8; 65];
+    presence[..64].copy_from_slice(&sig.to_bytes());
+    presence[64] = 27 + u8::from(id.is_y_odd());
     let r = store
-        .grant_live("grant", grant.clone(), grant.scope_sha256(), g, now)
+        .grant_live_present(
+            "grant",
+            grant.clone(),
+            grant.scope_sha256(),
+            Some(presence),
+            g,
+            now,
+        )
         .unwrap();
     assert!(r.applied(), "{}", r.line());
     let buy = Fact {
@@ -2253,6 +2397,20 @@ fn the_live_tab_projects_the_gate_grant_and_ledger() {
     assert_eq!(
         shown.scope_sha256,
         darkbot_bsc_record::hex(&grant.scope_sha256())
+    );
+    // R10: the grant's risk scope (what a risk decision names) and who
+    // signed its presence.
+    assert_eq!(
+        shown.risk_scope_sha256,
+        darkbot_bsc_record::hex(&grant.risk_scope_sha256())
+    );
+    let operator = darkbot_bsc_trading::signer::Signer::from_secret_bytes(&[0x31; 32])
+        .unwrap()
+        .address()
+        .into_array();
+    assert_eq!(
+        live.presence_signer,
+        format!("0x{}", darkbot_bsc_record::hex(&operator))
     );
     assert_eq!((shown.max_attempts, shown.set_generation), (2, g + 1));
     assert_eq!(live.generation, g + 1);
@@ -2380,12 +2538,17 @@ fn the_wallets_and_the_grant_follow_the_runtime_configuration() {
     );
     // A LIVE path: its buyer, watched by C2.
     let buyer = "0x00000000000000000000000000000000000000aB";
-    let live = CONFIG.replace(
-        "BSC_STATE_WATCHED=\n",
-        &format!("BSC_STATE_WATCHED={buyer}\n"),
-    ) + &format!(
-        "BSC_LIVE_KEY=~/.darkbot/bsc/live/buyer.key\nBSC_LIVE_BUYER={buyer}\nBSC_LIVE_ROUTE=LOOPBACK:18545\nBSC_LIVE_CONNECT_TIMEOUT_MS=5000\n"
-    );
+    let live = CONFIG
+        .replace(
+            "BSC_STATE_WATCHED=\n",
+            &format!("BSC_STATE_WATCHED={buyer}\n"),
+        )
+        .replace(
+            "BSC_LIVE_KEY=\nBSC_LIVE_BUYER=\nBSC_LIVE_ROUTE=\n",
+            &format!(
+                "BSC_LIVE_KEY=~/.darkbot/bsc/live/buyer.key\nBSC_LIVE_BUYER={buyer}\nBSC_LIVE_ROUTE=LOOPBACK:18545\n"
+            ),
+        );
     fs::write(&config, &live).unwrap();
     let s = project();
     assert_eq!(

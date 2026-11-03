@@ -9,6 +9,8 @@
 //! bsc_runtime source request <WALLET_OR_ECONOMIC_SWITCH_ID> <DISABLED|ENABLED> --expect-generation <n> --request-id <id> --state <dir>
 //! bsc_runtime control require [--state <dir>] <SWITCH_ID>...
 //! bsc_runtime live scope|grant|revoke|qualify|status|positions|idle|bound-inputs|loopback-identity ...
+//! bsc_runtime live key init --key <file> --root <repo>
+//! bsc_runtime config-check --config <ingress.public.env>
 //! bsc_runtime live attempts --rundir <dir> --state <dir> --config <ingress.public.env> [--manifest <live_campaign.env>] [--witness-dir <dir>]
 //! bsc_runtime live campaign-precommit --rundir <dir> --manifest <live_campaign.env> --decided-by <who>
 //! bsc_runtime live lot resume|write-off|exit-now --lot <0x hash> --expect-version <n> --state <dir> --config <ingress.public.env> --request-id <id> --decided-by <who>
@@ -397,6 +399,19 @@ fn print_qualification(rest: &[String]) -> darkbot_bsc_execution::sources::LiveQ
     v.view
 }
 
+/// The repository whose bsc/config/ holds the configuration at
+/// `config_path`: its keys (the PAPER identity, the LIVE key) live outside
+/// it.
+fn repo_root_of(config_path: &str) -> Result<std::path::PathBuf, String> {
+    Ok(std::path::Path::new(config_path)
+        .canonicalize()
+        .map_err(|e| format!("{config_path}: {e}"))?
+        .ancestors()
+        .nth(3)
+        .ok_or("--config is not under <repo>/bsc/config/")?
+        .to_path_buf())
+}
+
 fn run(args: &[String]) -> Result<bool, String> {
     match args {
         // Plan 28.10.: the canonical scope text of a LIVE grant and its
@@ -478,7 +493,9 @@ fn run(args: &[String]) -> Result<bool, String> {
         }
         // Plan 28.10.: the LIVE qualification record of a scope, each
         // evidence file bound by path and SHA-256; written create-new to
-        // `--root`/bsc/config/live_qualification.dbrec (or `--out`).
+        // `--root`/bsc/config/live_qualification.dbrec (or `--out`). R10:
+        // `--replace` replaces an existing one atomically (a requalification
+        // per build) and names the record it replaced.
         [area, cmd, rest @ ..] if area == "live" && cmd == "qualify" => {
             use darkbot_bsc_execution::live_qualification::{LIVE_QUALIFICATION_PATH, build};
             use std::io::Write;
@@ -489,13 +506,38 @@ fn run(args: &[String]) -> Result<bool, String> {
                 Some(out) => std::path::PathBuf::from(out),
                 None => root.join(LIVE_QUALIFICATION_PATH),
             };
-            std::fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&out)
-                .and_then(|mut f| f.write_all(&bytes).and_then(|()| f.sync_all()))
-                .map_err(|e| format!("{}: {e}", out.display()))?;
+            if rest.iter().any(|a| a == "--replace") {
+                let before = match std::fs::read(&out) {
+                    Ok(old) => hex(&darkbot_bsc_record::sha256(&old)),
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => "NONE".into(),
+                    Err(e) => return Err(format!("{}: {e}", out.display())),
+                };
+                darkbot_bsc_execution::runtime::replace(&out, &bytes)?;
+                println!("replaced_sha256={before}");
+            } else {
+                std::fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(&out)
+                    .and_then(|mut f| f.write_all(&bytes).and_then(|()| f.sync_all()))
+                    .map_err(|e| format!("{}: {e}", out.display()))?;
+            }
             println!("written={} sha256={}", out.display(), hex(&darkbot_bsc_record::sha256(&bytes)));
+            Ok(true)
+        }
+        // REV.1.0 R10 (provisioning): the LIVE buyer's key, drawn from the
+        // operating system's randomness into a new private file outside
+        // `--root` (never over an existing one). Prints its address only:
+        // BSC_LIVE_KEY is the path, BSC_LIVE_BUYER (and one of
+        // BSC_STATE_WATCHED) the address. The wallet is funded by the
+        // operator; nothing here signs or sends.
+        [area, cmd, sub, rest @ ..] if area == "live" && cmd == "key" && sub == "init" => {
+            let address = darkbot_bsc_execution::paper::create_private_key(
+                std::path::Path::new(flag(rest, "--key")?),
+                std::path::Path::new(flag(rest, "--root")?),
+            )
+            .map_err(|e| darkbot_bsc_execution::live_key::refused_as("LIVE key", e))?;
+            println!("live_buyer=0x{}", hex(&address));
             Ok(true)
         }
         // 01.11. (R1): the files the LIVE qualification in `--root` binds
@@ -857,21 +899,44 @@ fn run(args: &[String]) -> Result<bool, String> {
             let config = RuntimeConfig::parse(&text)?;
             let rundir = std::path::Path::new(flag(rest, "--rundir")?);
             stop_on_signals(stop_file(rundir))?;
-            // The repository holds the configuration at bsc/config/; the
-            // PAPER identity must live outside it.
-            let repo_root = std::path::Path::new(config_path)
-                .canonicalize()
-                .map_err(|e| format!("{config_path}: {e}"))?
-                .ancestors()
-                .nth(3)
-                .ok_or("--config is not under <repo>/bsc/config/")?
-                .to_path_buf();
+            let repo_root = repo_root_of(config_path)?;
             run_runtime(
                 &config,
                 std::path::Path::new(flag(rest, "--sources")?),
                 rundir,
                 &repo_root,
             )?;
+            Ok(true)
+        }
+        // REV.1.0 R10: the configuration as `run` takes it, and the LIVE
+        // path's files as its arm takes them, by place, owner, mode, links
+        // and length (neither the key nor the authorization is read).
+        // darkbotctl runs it before it starts or restarts the runtime: a
+        // refused start would be restarted by launchd again and again.
+        [cmd, rest @ ..] if cmd == "config-check" => {
+            let config_path = flag(rest, "--config")?;
+            let text = std::fs::read_to_string(config_path).map_err(|e| format!("{config_path}: {e}"))?;
+            let config = RuntimeConfig::parse(&text)?;
+            let repo_root = repo_root_of(config_path)?;
+            let sha256 = hex(&darkbot_bsc_record::sha256(text.as_bytes()));
+            match &config.live {
+                None => println!("config=OK sha256={sha256} live=OFF"),
+                Some(live) => {
+                    use darkbot_bsc_execution::runtime::live::LiveRouteConfig;
+                    darkbot_bsc_execution::live_key::check_files(live, &repo_root)?;
+                    let route = match &live.route {
+                        LiveRouteConfig::Builders { blockrazor_token: None } => "BUILDERS".into(),
+                        LiveRouteConfig::Builders { blockrazor_token: Some(_) } => {
+                            "BUILDERS blockrazor_token=OK".into()
+                        }
+                        LiveRouteConfig::Loopback { port } => format!("LOOPBACK:{port}"),
+                    };
+                    println!(
+                        "config=OK sha256={sha256} live={route} buyer=0x{} key_file=OK",
+                        hex(&live.buyer)
+                    );
+                }
+            }
             Ok(true)
         }
         [cmd, rest @ ..] if cmd == "census" => {
@@ -1033,13 +1098,7 @@ fn run(args: &[String]) -> Result<bool, String> {
             let text = std::fs::read_to_string(config_path).map_err(|e| format!("{config_path}: {e}"))?;
             let config = RuntimeConfig::parse(&text)?;
             let setup = config.exec.ok_or("BSC_EXEC_PAPER_IDENTITY is not configured")?;
-            let repo_root = std::path::Path::new(config_path)
-                .canonicalize()
-                .map_err(|e| format!("{config_path}: {e}"))?
-                .ancestors()
-                .nth(3)
-                .ok_or("--config is not under <repo>/bsc/config/")?
-                .to_path_buf();
+            let repo_root = repo_root_of(config_path)?;
             let address = if cmd == "init" {
                 darkbot_bsc_execution::paper::PaperIdentity::create(&setup.identity_path, &repo_root)
                     .map_err(|e| e.to_string())?
@@ -1232,7 +1291,7 @@ fn run(args: &[String]) -> Result<bool, String> {
             println!("{}", receipt.line());
             Ok(receipt.applied())
         }
-        _ => Err("usage: bsc_runtime run --sources DIR --rundir DIR --config FILE | source init|reset|show --state DIR | source request ID MODE --expect-generation N --request-id ID --state DIR [--root DIR] [--rundir DIR] | live scope|grant --venue V --strategies S --sources A,B --adapters X --max-input-wei N --max-spend-wei N --max-attempts N --expires-unix-ms N --max-buy-slippage-bps N --max-exit-slippage-bps N --max-gas-price-wei N --max-buy-gas-limit N --max-approve-gas-limit N --max-sell-gas-limit N --max-open-positions N --max-realized-loss-wei N --max-daily-realized-loss-wei N --min-buy-interval-ms N [--exit-only] [--risk-outlier-ack] [--scope-sha256 H --expect-generation N --request-id ID --state DIR [--presence-signature S]] | live revoke --expect-generation N --request-id ID --state DIR | live qualify --root DIR --runtime-binary FILE [--venue V@EV,..] [--source S@EV,..] [--adapter A@FINDING,..@EV,..] [--acquisition G08@G07] [--risk-by WHO --risk-statement TEXT --risk-scope-sha256 H --risk-evidence EV,..] [--out FILE] | live bound-inputs --root DIR | live idle --state DIR | live status --state DIR [--root DIR] [--rundir DIR] | live loopback-identity init|show --state DIR --root DIR | live positions --state DIR | live lot resume|write-off|exit-now --lot H --expect-version N --state DIR --config FILE --request-id ID --decided-by WHO | live nonce-burn --tx H --expect-version N --state DIR --config FILE --request-id ID --decided-by WHO | live adopt-g07 --g08 FILE --capture FILE --state DIR --config FILE --request-id ID --decided-by WHO | live ledger check --state DIR | live ledger quarantine --seq N --expect-generation N --state DIR --request-id ID --decided-by WHO | control require [--state DIR] SWITCH_ID... | census --rundir DIR --config FILE | g04-precommit --rundir DIR --criteria FILE --decided-by WHO | g04-verdict --rundir DIR --config FILE --criteria FILE | replay-proof|capture-quality|strategy-replay --rundir DIR --config FILE [--run ID] | capture-preflight --rundir DIR --config FILE | paper-identity init|show --config FILE".into()),
+        _ => Err("usage: bsc_runtime run --sources DIR --rundir DIR --config FILE | source init|reset|show --state DIR | source request ID MODE --expect-generation N --request-id ID --state DIR [--root DIR] [--rundir DIR] | live scope|grant --venue V --strategies S --sources A,B --adapters X --max-input-wei N --max-spend-wei N --max-attempts N --expires-unix-ms N --max-buy-slippage-bps N --max-exit-slippage-bps N --max-gas-price-wei N --max-buy-gas-limit N --max-approve-gas-limit N --max-sell-gas-limit N --max-open-positions N --max-realized-loss-wei N --max-daily-realized-loss-wei N --min-buy-interval-ms N [--exit-only] [--risk-outlier-ack] [--scope-sha256 H --expect-generation N --request-id ID --state DIR [--presence-signature S]] | live revoke --expect-generation N --request-id ID --state DIR | live qualify --root DIR --runtime-binary FILE [--venue V@EV,..] [--source S@EV,..] [--adapter A@FINDING,..@EV,..] [--acquisition G08@G07] [--risk-by WHO --risk-statement TEXT --risk-scope-sha256 H --risk-evidence EV,..] [--out FILE] [--replace] | live key init --key FILE --root DIR | config-check --config FILE | live bound-inputs --root DIR | live idle --state DIR | live status --state DIR [--root DIR] [--rundir DIR] | live loopback-identity init|show --state DIR --root DIR | live positions --state DIR | live lot resume|write-off|exit-now --lot H --expect-version N --state DIR --config FILE --request-id ID --decided-by WHO | live nonce-burn --tx H --expect-version N --state DIR --config FILE --request-id ID --decided-by WHO | live adopt-g07 --g08 FILE --capture FILE --state DIR --config FILE --request-id ID --decided-by WHO | live ledger check --state DIR | live ledger quarantine --seq N --expect-generation N --state DIR --request-id ID --decided-by WHO | control require [--state DIR] SWITCH_ID... | census --rundir DIR --config FILE | g04-precommit --rundir DIR --criteria FILE --decided-by WHO | g04-verdict --rundir DIR --config FILE --criteria FILE | replay-proof|capture-quality|strategy-replay --rundir DIR --config FILE [--run ID] | capture-preflight --rundir DIR --config FILE | paper-identity init|show --config FILE".into()),
     }
 }
 
