@@ -77,7 +77,7 @@ fn configured_sources(
             let capabilities = crate::orchestration::capability_control::request_dir(project);
             let capability_baseline =
                 crate::orchestration::capability_control::head(&capabilities)?;
-            let epoch = crate::orchestration::capability_control::open_epoch(
+            let epoch = crate::orchestration::capability_control::open_epoch_with_nonce(
                 &capabilities,
                 std::process::id(),
                 super::accounts::wall_unix_s().ok(),

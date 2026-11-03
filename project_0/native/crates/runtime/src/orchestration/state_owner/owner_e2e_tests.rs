@@ -5385,6 +5385,7 @@ fn p8ctrl01_the_owner_decides_switches_per_epoch_and_live_needs_every_gate() {
         let c = &mut f.owner.sources.capabilities;
         (c.dir, c.config_version, c.epoch) = (Some(dir.clone()), Some(0), Some(3));
         c.operator_key_sha256 = operator_auth::key_sha256(&key.public_key);
+        c.epoch_nonce = "nonce-3".into();
         c.wallets = vec![cap::WalletSwitch::configured(
             signer,
             &[cap::ROLE_LIQUIDATOR, cap::ROLE_FEE_PAYER],
@@ -5402,7 +5403,7 @@ fn p8ctrl01_the_owner_decides_switches_per_epoch_and_live_needs_every_gate() {
         };
         if operator_auth::required(capability, requested) {
             r.operator_signature =
-                operator_auth::sign(&project, &operator_auth::statement(&r)).unwrap();
+                operator_auth::sign(&project, &operator_auth::statement(&r, "nonce-3")).unwrap();
         }
         Ok(r)
     };
@@ -8332,6 +8333,16 @@ fn p8ctrl04_the_status_names_the_grant_its_usage_and_this_epochs_previews() {
         let c = &mut f.owner.sources.capabilities;
         (c.dir, c.config_version, c.epoch) = (Some(cap::request_dir(&f.dir)), Some(0), Some(3));
         c.fe06 = Some(cap::Fe06Authorization::offline_test_of(granted.clone()));
+        c.running = Some(fe06::Running {
+            genesis_hash: darkbot_project0::protocol::GENESIS_HASH_MAINNET.into(),
+            program: granted.programs.iter().next().unwrap().clone(),
+            program_data_hash: granted.program_data_hash.clone(),
+            code_sha: Some(granted.code_sha.clone()),
+            binary_sha256: Some(granted.binary_sha256.clone()),
+            runtime_config_sha256: granted.runtime_config_sha256.clone(),
+            signers: granted.signers.clone(),
+            owner_epoch: 3,
+        });
     }
     let today = now / 86_400;
     let booking = |grant: &str, campaign: &str, utc_day| Fe06Attempt {
@@ -8459,6 +8470,27 @@ fn p8ctrl04_the_status_names_the_grant_its_usage_and_this_epochs_previews() {
         ),
         (None, None, None, None)
     );
+    // DEC-17a (review L3): within its validity, a grant that no longer binds what runs, or
+    // whose evidence changed (as last checked), is not in force — with LIVE's reason.
+    let c = &mut f.owner.sources.capabilities;
+    c.running.as_mut().unwrap().binary_sha256 = Some("another binary".into());
+    let s = f.owner.owner_snapshot(4).fe06;
+    assert!(!s.in_force);
+    assert!(
+        s.block_reason
+            .starts_with("FE06_SCOPE_BINDING: binary_sha256"),
+        "{}",
+        s.block_reason
+    );
+    let c = &mut f.owner.sources.capabilities;
+    c.running.as_mut().unwrap().binary_sha256 = Some(granted.binary_sha256.clone());
+    c.fe06_evidence = Some("EVIDENCE_CHANGED: provider".into());
+    let s = f.owner.owner_snapshot(4).fe06;
+    assert_eq!(
+        (s.in_force, s.block_reason.as_str()),
+        (false, "EVIDENCE_CHANGED: provider")
+    );
+    f.owner.sources.capabilities.fe06_evidence = None;
     // A grant outside its validity is not in force, with LIVE's reason.
     let expired = scope(3, "first-profit", now - 3_000, now - 60);
     let expired_digest = fe06::digest(&expired).unwrap();
@@ -10120,6 +10152,7 @@ fn dec17a_a_signed_grant_is_taken_and_changed_evidence_blocks_it() {
         let c = &mut f.owner.sources.capabilities;
         (c.dir, c.config_version, c.epoch) = (Some(dir.clone()), Some(0), Some(scope.owner_epoch));
         c.operator_key_sha256 = operator_auth::key_sha256(&key.public_key);
+        c.epoch_nonce = "nonce".into();
         c.running = Some(fe06::Running {
             genesis_hash: darkbot_project0::protocol::GENESIS_HASH_MAINNET.into(),
             program: scope.programs.iter().next().unwrap().clone(),
@@ -10144,7 +10177,7 @@ fn dec17a_a_signed_grant_is_taken_and_changed_evidence_blocks_it() {
     let signed = |r: CapabilityControlRequest| {
         let mut r = r;
         r.operator_signature =
-            operator_auth::sign(&project, &operator_auth::statement(&r)).unwrap();
+            operator_auth::sign(&project, &operator_auth::statement(&r, "nonce")).unwrap();
         r
     };
     let outcome = |seq| cap::outcome_at(&dir, seq).unwrap().unwrap();
@@ -10184,6 +10217,15 @@ fn dec17a_a_signed_grant_is_taken_and_changed_evidence_blocks_it() {
     );
     let reason = |f: &Fixture| cap::live_decision(&f.owner.sources.capabilities.live_gates()).1;
     assert!(!reason(&f).contains("EVIDENCE_CHANGED"), "{}", reason(&f));
+    let status = |f: &mut Fixture| {
+        f.owner
+            .sources
+            .capabilities
+            .refresh_previews(Duration::ZERO);
+        let s = f.owner.owner_snapshot(1).fe06;
+        (s.in_force, s.block_reason)
+    };
+    assert_eq!(status(&mut f), (true, String::new()));
     // An enabling switch only signed; a disabling one never needs it.
     f.owner
         .apply_capability_control(7, Ok(request(7, cap::ECON_ARM, cap::ENABLED)));
@@ -10198,12 +10240,30 @@ fn dec17a_a_signed_grant_is_taken_and_changed_evidence_blocks_it() {
     let provider = project.join("data/provider_evidence/e.p0j");
     let mut bytes = std::fs::read(&provider).unwrap();
     *bytes.last_mut().unwrap() ^= 1;
-    std::fs::write(&provider, bytes).unwrap();
+    std::fs::write(&provider, &bytes).unwrap();
     assert!(reason(&f).contains("EVIDENCE_CHANGED"), "{}", reason(&f));
+    // The status says so at the next refresh (review L3).
+    let (in_force, why) = status(&mut f);
+    assert!(!in_force && why.contains("EVIDENCE_CHANGED"), "{why}");
     // A revocation needs no signature.
     f.owner
         .apply_capability_control(10, Ok(request(10, cap::FE06_REVOKE, &digest)));
     assert!(outcome(10).applied, "{}", outcome(10).detail);
+    assert!(f.owner.sources.capabilities.fe06.is_none());
+    // Review M2: a signed grant whose receipt is not written does not stand.
+    *bytes.last_mut().unwrap() ^= 1;
+    std::fs::write(&provider, &bytes).unwrap();
+    let blocked = project.join("data/capability-blocked");
+    std::fs::write(&blocked, b"not a directory").unwrap();
+    f.owner.sources.capabilities.dir = Some(blocked);
+    f.owner
+        .apply_capability_control(11, Ok(signed(request(11, cap::FE06_GRANT, &digest))));
+    let last = f.owner.sources.capabilities.last_decision.clone().unwrap();
+    assert!(
+        last.detail.contains("RECEIPT_NOT_RECORDED"),
+        "{}",
+        last.detail
+    );
     assert!(f.owner.sources.capabilities.fe06.is_none());
     cleanup(f);
 }

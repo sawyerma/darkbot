@@ -111,6 +111,13 @@ pub(super) struct OwnerCapabilities {
     /// DEC-17a: the configured operator key's SHA-256, fixed at the start (empty: none — every
     /// request that needs the operator is refused).
     pub(super) operator_key_sha256: String,
+    /// DEC-17a (review H1): this epoch's nonce, kept from its opening (never read back) — every
+    /// operator signature binds it (empty: no epoch, every request needing the operator refused).
+    pub(super) epoch_nonce: String,
+    /// DEC-17a (review L3): why the grant's evidence no longer holds, as checked at the preview
+    /// refresh cadence for the status (`None`: it holds, or no grant) — the LIVE decision checks
+    /// it again at every use.
+    pub(super) fe06_evidence: Option<String>,
     /// P8-CTRL.7 (review M5): the stops the control thread handed over, shared with it.
     pub(super) stop: std::sync::Arc<crate::orchestration::capability_control::StopSignal>,
 }
@@ -171,10 +178,15 @@ impl OwnerCapabilities {
     /// P8-CTRL.3: refreshes the preview cache at most once per `every` (no capability control:
     /// nothing to read).
     pub(super) fn refresh_previews(&mut self, every: std::time::Duration) {
+        let due = self.previews.refreshed.is_none_or(|t| t.elapsed() >= every);
         if let (Some(dir), Some(epoch)) = (&self.dir, self.epoch) {
             if let Some(project) = dir.parent().and_then(std::path::Path::parent) {
                 self.previews.refresh(project, epoch, every);
             }
+        }
+        // DEC-17a (review L3): the grant's evidence, at the same cadence.
+        if due {
+            self.fe06_evidence = self.fe06.as_ref().and_then(|g| g.evidence_holds().err());
         }
     }
 
@@ -230,7 +242,13 @@ impl OwnerCapabilities {
                 operator_auth::OPERATOR_AUTH_REQUIRED
             )
         })?;
-        operator_auth::verify(project, &self.operator_key_sha256, r, &r.operator_signature)
+        operator_auth::verify(
+            project,
+            &self.operator_key_sha256,
+            &self.epoch_nonce,
+            r,
+            &r.operator_signature,
+        )
     }
 
     /// P8-CTRL.2: what LIVE's effective value rests on now.
@@ -298,6 +316,8 @@ impl Default for OwnerCapabilities {
             jito_block: "",
             fe06: None,
             operator_key_sha256: String::new(),
+            epoch_nonce: String::new(),
+            fe06_evidence: None,
             last_decision: None,
             applied: 0,
             refused: 0,
@@ -358,12 +378,13 @@ impl OwnerSources {
         mut self,
         dir: std::path::PathBuf,
         baseline: u64,
-        epoch: u64,
+        (epoch, epoch_nonce): (u64, String),
         stop: std::sync::Arc<crate::orchestration::capability_control::StopSignal>,
     ) -> Self {
         self.capabilities.dir = Some(dir);
         self.capabilities.config_version = Some(baseline);
         self.capabilities.epoch = Some(epoch);
+        self.capabilities.epoch_nonce = epoch_nonce;
         self.capabilities.stop = stop;
         self
     }
@@ -747,6 +768,8 @@ impl ShadowOwner {
                 c.fe06 = None;
             } else if fe06_grant {
                 c.fe06 = granted.take();
+                // Its evidence was checked just now (accept_grant).
+                c.fe06_evidence = None;
             } else if econ {
                 c.econ.set(request_capability.as_deref().unwrap_or(""), on);
             } else if let Some(pk) = wallet {
@@ -891,6 +914,10 @@ impl ShadowOwner {
                         .for_each(|w| w.enabled = false);
                 } else if request_capability.as_deref() == Some(cap::LIVE) {
                     c.live_requested = cap::LIVE_OFF;
+                } else if fe06_grant {
+                    // DEC-17a (review M2): an unrecorded grant does not stand.
+                    c.fe06 = None;
+                    self.submitter.close();
                 }
             }
             // DEC-06: a threshold ACTIVE request stands only recorded (durable receipts).

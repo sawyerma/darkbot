@@ -63,13 +63,15 @@ pub fn required(capability: &str, requested: &str) -> bool {
 }
 
 /// The statement a request's signature binds: its sequence (the CAS generation), one-time
-/// request id, owner epoch, capability with its value (an FE-06 grant's value is its scope
-/// digest) and request time — exactly, under the operator domain.
-pub fn statement(r: &CapabilityControlRequest) -> Vec<u8> {
+/// request id, owner epoch with the epoch's random nonce (an epoch number reached again is
+/// another epoch), capability with its value (an FE-06 grant's value is its scope digest) and
+/// request time — exactly, under the operator domain.
+pub fn statement(r: &CapabilityControlRequest, epoch_nonce: &str) -> Vec<u8> {
     let fields = (
         r.seq,
         r.request_id.as_str(),
         r.owner_epoch,
+        epoch_nonce,
         r.capability.as_str(),
         r.requested.as_str(),
         r.requested_unix_s,
@@ -143,18 +145,26 @@ pub fn sign(project: &Path, message: &[u8]) -> Result<Vec<u8>, String> {
 pub fn verify(
     project: &Path,
     configured_sha256: &str,
+    epoch_nonce: &str,
     r: &CapabilityControlRequest,
     signature: &[u8],
 ) -> Result<(), String> {
+    if epoch_nonce.is_empty() {
+        return Err(format!(
+            "{OPERATOR_AUTH_REQUIRED}: the owner epoch has no nonce"
+        ));
+    }
     if configured_sha256.is_empty() {
         return Err(format!(
             "{OPERATOR_AUTH_REQUIRED}: no operator key configured (operator_key_sha256)"
         ));
     }
     let key = load(project)?;
-    if key.signer == TEST_SIGNER && !cfg!(feature = "operator-test-signer") {
+    // A production build accepts the Secure Enclave's keys only (a record's label is no proof:
+    // any other signer is refused, not only one labelled a test key).
+    if key.signer != SECURE_ENCLAVE && !cfg!(feature = "operator-test-signer") {
         return Err(
-            "OPERATOR_TEST_SIGNER_NOT_BUILT: a test key authenticates no operator of this build"
+            "OPERATOR_TEST_SIGNER_NOT_BUILT: only a Secure Enclave key authenticates the operator of this build"
                 .into(),
         );
     }
@@ -172,7 +182,7 @@ pub fn verify(
         &ring::signature::ECDSA_P256_SHA256_ASN1,
         &key.public_key,
     )
-    .verify(&statement(r), signature)
+    .verify(&statement(r, epoch_nonce), signature)
     .map_err(|_| {
         format!("{OPERATOR_AUTH_REQUIRED}: the signature is not the operator's over this request")
     })
@@ -332,10 +342,11 @@ mod tests {
         assert!(!required(cap::ECON_ATTEMPT, cap::ENABLED));
     }
 
-    /// The statement binds every field of the request.
+    /// The statement binds every field of the request and the epoch's nonce.
     #[test]
     fn the_statement_binds_every_request_field() {
-        let base = statement(&request(cap::FE06_GRANT, "digest"));
+        let base = statement(&request(cap::FE06_GRANT, "digest"), "n");
+        assert_ne!(statement(&request(cap::FE06_GRANT, "digest"), "m"), base);
         let changed: [fn(&mut CapabilityControlRequest); 6] = [
             |r| r.seq += 1,
             |r| r.request_id.push('x'),
@@ -347,7 +358,7 @@ mod tests {
         for change in changed {
             let mut r = request(cap::FE06_GRANT, "digest");
             change(&mut r);
-            assert_ne!(statement(&r), base);
+            assert_ne!(statement(&r, "n"), base);
         }
     }
 
@@ -369,10 +380,16 @@ mod tests {
             .starts_with("OPERATOR_KEY_REGISTERED"));
         let sha = key_sha256(&key.public_key);
         let r = request(cap::FE06_GRANT, "digest");
-        let signature = sign(&project, &statement(&r)).unwrap();
-        verify(&project, &sha, &r, &signature).unwrap();
+        let signature = sign(&project, &statement(&r, "nonce")).unwrap();
+        verify(&project, &sha, "nonce", &r, &signature).unwrap();
+        // The same epoch number reached again (its files removed) is another epoch's nonce.
+        for nonce in ["another nonce", ""] {
+            assert!(verify(&project, &sha, nonce, &r, &signature)
+                .unwrap_err()
+                .starts_with(OPERATOR_AUTH_REQUIRED));
+        }
         let refused = |configured: &str, r: &CapabilityControlRequest, sig: &[u8]| {
-            verify(&project, configured, r, sig).unwrap_err()
+            verify(&project, configured, "nonce", r, sig).unwrap_err()
         };
         assert!(refused("", &r, &signature).starts_with(OPERATOR_AUTH_REQUIRED));
         assert!(refused(&"0".repeat(64), &r, &signature).starts_with(OPERATOR_AUTH_REQUIRED));
@@ -400,17 +417,23 @@ mod tests {
             register(&project, true).unwrap_err(),
             "OPERATOR_TEST_SIGNER_NOT_BUILT"
         );
-        let key = OperatorKey {
-            signer: TEST_SIGNER.into(),
-            public_key: vec![4; 65],
-            wrapped: vec![],
-            created_unix_s: 0,
-        };
-        journal::create_typed_value(&key_path(&project), 0, &key).unwrap();
-        let r = request(cap::FE06_GRANT, "digest");
-        assert!(verify(&project, &key_sha256(&key.public_key), &r, &[1])
-            .unwrap_err()
-            .starts_with("OPERATOR_TEST_SIGNER_NOT_BUILT"));
+        // Any signer but the Secure Enclave is refused, whatever its label.
+        for signer in [TEST_SIGNER, "OTHER"] {
+            let key = OperatorKey {
+                signer: signer.into(),
+                public_key: vec![4; 65],
+                wrapped: vec![],
+                created_unix_s: 0,
+            };
+            let _ = std::fs::remove_file(key_path(&project));
+            journal::create_typed_value(&key_path(&project), 0, &key).unwrap();
+            let r = request(cap::FE06_GRANT, "digest");
+            assert!(
+                verify(&project, &key_sha256(&key.public_key), "n", &r, &[1])
+                    .unwrap_err()
+                    .starts_with("OPERATOR_TEST_SIGNER_NOT_BUILT")
+            );
+        }
         let _ = std::fs::remove_dir_all(&project);
     }
 }

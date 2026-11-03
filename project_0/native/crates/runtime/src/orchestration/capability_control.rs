@@ -230,23 +230,49 @@ pub fn current_epoch(dir: &Path) -> Result<u64, String> {
 /// overwriting (of two owners racing for one number exactly one wins, the other takes the next).
 /// Requests of every earlier epoch are refused from now on.
 pub fn open_epoch(dir: &Path, owner_pid: u32, now_unix_s: Option<u64>) -> Result<u64, String> {
+    open_epoch_with_nonce(dir, owner_pid, now_unix_s).map(|(epoch, _)| epoch)
+}
+
+/// DEC-17a: [`open_epoch`] with the epoch's fresh random nonce — the owner keeps it from here on
+/// (never read back), so a record written over later cannot change what its signatures bind.
+pub fn open_epoch_with_nonce(
+    dir: &Path,
+    owner_pid: u32,
+    now_unix_s: Option<u64>,
+) -> Result<(u64, String), String> {
     std::fs::create_dir_all(dir).map_err(|e| format!("CAPABILITY_CONTROL_IO: {e}"))?;
+    let nonce = new_request_id()?;
     loop {
         let epoch = current_epoch(dir)? + 1;
         let value = CapabilityOwnerEpoch {
             epoch,
             owner_pid,
             opened_unix_s: now_unix_s,
+            nonce: nonce.clone(),
         };
         match journal::create_typed_value(
             &epoch_path(dir, epoch),
             journal::source::CAPABILITY_CONTROL,
             &value,
         ) {
-            Ok(()) => return Ok(epoch),
+            Ok(()) => return Ok((epoch, nonce)),
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
             Err(e) => return Err(format!("CAPABILITY_CONTROL_IO: {e}")),
         }
+    }
+}
+
+/// DEC-17a: the nonce of `epoch` (its sealed record) — what an operator signature of a request of
+/// that epoch binds; an epoch without one takes no signature.
+pub fn epoch_nonce(dir: &Path, epoch: u64) -> Result<String, String> {
+    let path = epoch_path(dir, epoch);
+    regular(&path)?;
+    match journal::read_typed_value::<CapabilityOwnerEpoch>(&path) {
+        Ok(e) if e.epoch == epoch && !e.nonce.is_empty() => Ok(e.nonce),
+        Ok(_) => Err(format!(
+            "CAPABILITY_EPOCH_INVALID: epoch_{epoch:08}.p0j names another epoch or no nonce"
+        )),
+        Err(e) => Err(format!("CAPABILITY_EPOCH_INVALID: {e}")),
     }
 }
 
@@ -360,6 +386,16 @@ pub fn write_signed_request(
 /// number), the same action of an earlier epoch (stale: a new action needs a new id), or other
 /// content under the id (a conflict).
 fn same_request(prior: &CapabilityControlRequest, r: &NewRequest) -> Result<Written, String> {
+    // DEC-17a: a request that needed the operator's signature and was written without one stays
+    // refused — a retry of its id signs nothing; a new action needs a new id.
+    if super::operator_auth::required(&prior.capability, &prior.requested)
+        && prior.operator_signature.is_empty()
+    {
+        return Err(format!(
+            "CAPABILITY_REQUEST_UNSIGNED: request id {} is seq {} written unsigned; a confirmation needs a new request id",
+            r.request_id, prior.seq
+        ));
+    }
     if (prior.capability.as_str(), prior.requested.as_str()) != (r.capability, r.requested) {
         return Err(format!(
             "CAPABILITY_REQUEST_ID_CONFLICT: request id {} is seq {} with other content",
@@ -1614,6 +1650,7 @@ mod tests {
             epoch: 3,
             owner_pid: 5,
             opened_unix_s: None,
+            nonce: "n".into(),
         };
         let bytes = payload::encode(&e).unwrap();
         assert_eq!(
@@ -1627,8 +1664,57 @@ mod tests {
         );
         assert_eq!(
             payload::registered_schema(journal::kind::CAPABILITY_OWNER_EPOCH),
-            Some(2)
+            Some(3)
         );
+        // A schema-2 epoch (P8-CTRL.6) reads without a nonce — no signature binds it.
+        let old = payload::decode::<CapabilityOwnerEpoch>(
+            journal::kind::CAPABILITY_OWNER_EPOCH,
+            payload::TYPED,
+            &payload::encode_wire(&(3u64, 5u32, Some(9u64))).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            (old.epoch, old.opened_unix_s, old.nonce.as_str()),
+            (3, Some(9), "")
+        );
+    }
+
+    /// DEC-17a (review L6): a request needing the operator, written unsigned, stays refused — a
+    /// signed retry of its id is no confirmation of it; a retry signed from the start replays.
+    #[test]
+    fn dec17a_an_unsigned_request_is_never_confirmed_by_a_retry() {
+        let dir = temp("unsigned");
+        write_request(&dir, &new(ECON_ARM, ENABLED, "id-1")).unwrap();
+        let signed = |_: &CapabilityControlRequest| Ok(vec![1]);
+        let e = write_signed_request(&dir, &new(ECON_ARM, ENABLED, "id-1"), &signed).unwrap_err();
+        assert!(e.starts_with("CAPABILITY_REQUEST_UNSIGNED"), "{e}");
+        let first = write_signed_request(&dir, &new(ECON_ARM, ENABLED, "id-2"), &signed).unwrap();
+        let again = write_signed_request(&dir, &new(ECON_ARM, ENABLED, "id-2"), &signed).unwrap();
+        assert_eq!((again.seq, again.replayed), (first.seq, true));
+        // A disable needs no signature: its unsigned retry replays.
+        write_request(&dir, &new(ECON_ARM, DISABLED, "id-3")).unwrap();
+        assert!(
+            write_request(&dir, &new(ECON_ARM, DISABLED, "id-3"))
+                .unwrap()
+                .replayed
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// DEC-17a (review H1): an epoch number reached again — its record removed — is another
+    /// epoch: a new nonce, so no signature of the earlier one holds; an epoch without a nonce
+    /// takes none.
+    #[test]
+    fn dec17a_an_epoch_reached_again_has_another_nonce() {
+        let dir = temp("nonce");
+        let (first, nonce) = open_epoch_with_nonce(&dir, 7, None).unwrap();
+        assert_eq!((first, epoch_nonce(&dir, 1).unwrap()), (1, nonce.clone()));
+        std::fs::remove_file(epoch_path(&dir, 1)).unwrap();
+        let (again, other) = open_epoch_with_nonce(&dir, 8, None).unwrap();
+        assert_eq!(again, 1);
+        assert_ne!(other, nonce);
+        assert!(epoch_nonce(&dir, 2).is_err());
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     /// Review L4/L7: an epoch names the process that opened it; a same-id action of an earlier

@@ -458,9 +458,33 @@ pub struct CapabilityOwnerEpoch {
     pub owner_pid: u32,
     /// `None`: the wall clock was not readable.
     pub opened_unix_s: Option<u64>,
+    /// DEC-17a: this epoch's random nonce — every operator signature of the epoch binds it, so an
+    /// epoch number reached again (its files removed) never takes an earlier signature.
+    pub nonce: String,
 }
 impl Payload for CapabilityOwnerEpoch {
     const KIND: u16 = journal::kind::CAPABILITY_OWNER_EPOCH;
+    /// DEC-17a: 3 — the epoch nonce.
+    const SCHEMA: u16 = 3;
+    /// Schema 2 (P8-CTRL.6) had no nonce: readable without one — no signature binds it.
+    fn decode_earlier(schema: u16, bytes: &[u8]) -> Option<io::Result<Self>> {
+        (schema == TYPED).then(|| {
+            decode_wire::<CapabilityOwnerEpochV2>(bytes).map(|v| Self {
+                epoch: v.epoch,
+                owner_pid: v.owner_pid,
+                opened_unix_s: v.opened_unix_s,
+                nonce: String::new(),
+            })
+        })
+    }
+}
+
+/// The schema-2 layout of [`CapabilityOwnerEpoch`] (P8-CTRL.6, before DEC-17a).
+#[derive(serde::Deserialize)]
+struct CapabilityOwnerEpochV2 {
+    epoch: u64,
+    owner_pid: u32,
+    opened_unix_s: Option<u64>,
 }
 
 /// C0 census row: one debtor (or undecodable member) of the configured group, evaluated against

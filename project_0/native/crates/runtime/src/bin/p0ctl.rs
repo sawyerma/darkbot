@@ -2660,9 +2660,13 @@ fn capability_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
             if needs_operator && confirm == 0 {
                 return Err(format!("{}: {capability} {requested} is the operator's — confirm it locally with --confirm (Touch ID); {CAPABILITY_USAGE}", operator_auth::OPERATOR_AUTH_REQUIRED));
             }
-            if confirm == 1 && !needs_operator {
-                return Err(format!("CAPABILITY_CONFIRM_UNNEEDED: {capability} {requested} needs no operator signature (a DISABLE, REVOKE or STOP never does)"));
-            }
+            // A stop is never held up: an unneeded confirmation is ignored with a warning.
+            let confirm = if confirm == 1 && !needs_operator {
+                eprintln!("[p0ctl] warning CAPABILITY_CONFIRM_UNNEEDED: {capability} {requested} needs no operator signature (a DISABLE, REVOKE or STOP never does); sent unsigned");
+                0
+            } else {
+                confirm
+            };
             // The Secure Enclave key is confirmed in a terminal only (no GUI, no pipe); a test key
             // (only where the test signer is built) needs no presence.
             if confirm == 1
@@ -2671,13 +2675,19 @@ fn capability_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
             {
                 return Err("OPERATOR_CONFIRM_NEEDS_TERMINAL: the operator confirms in a terminal (no GUI, no pipe)".into());
             }
+            // The running epoch's nonce, which the signature binds (review H1).
+            let nonce = if confirm == 1 {
+                capability_control::epoch_nonce(&dir, epoch)?
+            } else {
+                String::new()
+            };
             let sign = |r: &darkbot_runner::analytics::payload::CapabilityControlRequest| {
                 if confirm == 1 {
                     println!(
                         "[p0ctl] confirm {} as the operator (Touch ID or the login password)…",
                         capability_control::shown(&r.capability, &r.requested)
                     );
-                    operator_auth::sign(project, &operator_auth::statement(r))
+                    operator_auth::sign(project, &operator_auth::statement(r, &nonce))
                 } else {
                     Ok(vec![])
                 }
@@ -2947,7 +2957,11 @@ fn live_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
                         (Ok(s), Some(now))
                             if (s.not_before_unix_s..s.expires_unix_s).contains(&now) =>
                         {
-                            format!("yes ({})", d.requested)
+                            // DEC-17a (review L3): a changed evidence record blocks it.
+                            match fe06::evidence_holds(project, &s) {
+                                Ok(()) => format!("yes ({})", d.requested),
+                                Err(e) => format!("no ({}): {e}", d.requested),
+                            }
                         }
                         _ => capability_control::grant_not_in_force(&d.requested),
                     }

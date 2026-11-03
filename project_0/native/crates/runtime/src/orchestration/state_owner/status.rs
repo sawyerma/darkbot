@@ -322,7 +322,8 @@ impl ShadowOwner {
         match &c.fe06 {
             Some(grant) => {
                 s.grant_digest = Some(grant.digest().to_string());
-                s.in_force = super::accounts::wall_unix_s().is_ok_and(|now| grant.in_force(now));
+                let now = super::accounts::wall_unix_s().ok();
+                s.in_force = now.is_some_and(|now| grant.in_force(now));
                 if let Some(scope) = grant.scope() {
                     s.scope_mode = scope.mode.code();
                     s.valid_from_unix_s = Some(scope.not_before_unix_s);
@@ -346,6 +347,11 @@ impl ShadowOwner {
                 }
                 if !s.in_force {
                     s.block_reason = cap::grant_not_in_force(grant.digest());
+                } else if let Some(e) = self.fe06_unbound(grant, now) {
+                    // DEC-17a (review L3): a grant that no longer binds what runs, or whose
+                    // evidence changed, is not in force — as the LIVE decision sees it.
+                    s.in_force = false;
+                    s.block_reason = e;
                 }
             }
             None => s.block_reason = cap::FE06_NO_GRANT.into(),
@@ -353,6 +359,26 @@ impl ShadowOwner {
         // The scopes previewed for this epoch, as the lifecycle's refresh cached them.
         s.previews = c.previews.current();
         s
+    }
+
+    /// DEC-17a (review L3): why `grant` opens nothing now although within its validity — its
+    /// scope does not bind what runs, or its evidence (as last checked) changed.
+    fn fe06_unbound(
+        &self,
+        grant: &crate::orchestration::capability_control::Fe06Authorization,
+        now: Option<u64>,
+    ) -> Option<String> {
+        let c = &self.sources.capabilities;
+        if let (Some(scope), Some(now)) = (grant.scope(), now) {
+            let binds = match &c.running {
+                Some(running) => crate::orchestration::fe06::check_running(scope, running, now),
+                None => Err("FE06_SCOPE_BINDING: what the owner runs is unknown".into()),
+            };
+            if let Err(e) = binds {
+                return Some(e);
+            }
+        }
+        c.fe06_evidence.clone()
     }
 
     fn wallets_status(&self) -> OwnerWallets {
