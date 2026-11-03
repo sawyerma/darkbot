@@ -338,15 +338,21 @@ pub const SOURCE_BUILD_ENV: [(&str, &str); 5] = [
     ("CARGO_PROFILE_RELEASE_OPT_LEVEL", "3"),
     ("CARGO_PROFILE_RELEASE_INCREMENTAL", "false"),
 ];
-/// SHA-256 (base58) of the complete Mainnet ProgramData account recorded by the qualified 0.1.11
-/// Shadow upgrade watch (c0e1_4h_20261008T222326Z). Continuity evidence for its source
-/// (`PROGRAM_DATA_REFERENCE_SOURCE_TAG`), not a reproducible-build proof; historical captures of
-/// that deployment are still verified against it.
-pub const PROGRAM_DATA_REFERENCE_HASH: &str = "H57mqzeof3mnCmVTPJzmzeTfs7G6zbpaApQP4yNycr3f";
-/// The source the reference deployment was qualified for. It is not the current source pin, so
-/// no deployment is qualified for the pinned source until P1A passes: the observed upgraded
-/// ProgramData (FE-01 smoke 2026-10-24, SHA-256 `3e3626a9…`) is evidence only, never a pin.
-pub const PROGRAM_DATA_REFERENCE_SOURCE_TAG: &str = "mrgn-0.1.11-rc1";
+/// SHA-256 (base58) of the complete Mainnet ProgramData account qualified for the pinned source
+/// (C-01 step 7, P1B → P1A, 03.11.2026): deployment slot 456 093 551, upgrade authority
+/// `J3oBkTkDXU3TcAggJEa3YeBZE5om5yNAdTtLVNXFD47`; its ELF (`eb761836…cdab`) is byte-identical to the
+/// reproducible build of `SOURCE_TAG` (C-01 plan `edf159af0e91fb03`, BUILD and FE01 PASS,
+/// `P1A_PARITY PASS`).
+pub const PROGRAM_DATA_REFERENCE_HASH: &str = "5BrAnWXJFY2Z5sM6PRXWZBYL9ewVEhKKpFjPC8jpXEkm";
+/// The source the reference deployment was qualified for.
+pub const PROGRAM_DATA_REFERENCE_SOURCE_TAG: &str = "mrgn-0.1.12-rc2";
+/// Former qualified deployments (hash, source): the 0.1.11 ProgramData recorded by the qualified
+/// Shadow upgrade watch (c0e1_4h_20261008T222326Z). They qualify no start; historical captures
+/// of their deployment are still verified against them (deployment continuity).
+pub const PROGRAM_DATA_HISTORICAL_REFERENCES: [(&str, &str); 1] = [(
+    "H57mqzeof3mnCmVTPJzmzeTfs7G6zbpaApQP4yNycr3f",
+    "mrgn-0.1.11-rc1",
+)];
 /// `UpgradeableLoaderState::ProgramData` metadata: tag u32, slot u64, Option<Pubkey> (always 33 bytes).
 pub const PROGRAM_DATA_METADATA_LEN: usize = 45;
 /// DEC-18 §2 (C-01): the release IDL (`marginfi.json`) of [`SOURCE_TAG`] — the SHA-256 of its
@@ -588,12 +594,25 @@ mod tests {
             hash: Hash::from_str(PROGRAM_DATA_REFERENCE_HASH).unwrap(),
             ..d
         };
-        // P1B promotion: the 0.1.11 reference qualifies nothing for the 0.1.12 source pin — the
-        // runtime stays halted on it as on any other deployment until P1A passes.
+        // C-01 step 7 (03.11.2026): the promoted reference is qualified for the pinned source;
+        // a former reference qualifies no start any more (the runtime halts on it as on any
+        // other deployment).
+        assert_eq!(PROGRAM_DATA_REFERENCE_SOURCE_TAG, SOURCE_TAG);
         assert_eq!(
             deployment_pin(&program, &reference),
-            DeploymentPin::NotReference
+            DeploymentPin::Reference
         );
+        for (hash, source) in PROGRAM_DATA_HISTORICAL_REFERENCES {
+            assert_ne!(source, SOURCE_TAG);
+            let former = ProgramDeployment {
+                hash: Hash::from_str(hash).unwrap(),
+                ..d
+            };
+            assert_eq!(
+                deployment_pin(&program, &former),
+                DeploymentPin::NotReference
+            );
+        }
         // A deployment qualified for the pinned source is the reference; of another source, not.
         let qualified = (PROGRAM_DATA_REFERENCE_HASH, SOURCE_TAG);
         assert_eq!(
@@ -610,7 +629,7 @@ mod tests {
                 &reference,
                 (
                     PROGRAM_DATA_REFERENCE_HASH,
-                    PROGRAM_DATA_REFERENCE_SOURCE_TAG
+                    PROGRAM_DATA_HISTORICAL_REFERENCES[0].1
                 )
             ),
             DeploymentPin::NotReference

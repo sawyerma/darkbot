@@ -1,10 +1,16 @@
-//! Pinned-source instruction inventory and deployment continuity qualification.
-//! The reference hash is the ProgramData baseline recorded by the qualified 0.1.11
-//! Shadow upgrade watch (c0e1_4h_20261008T222326Z/runtime.log). This is continuity
-//! evidence, NOT a reproducible-build bytecode/source-equivalence attestation.
+//! Pinned-source instruction inventory and deployment continuity qualification: a capture is
+//! continuous when one qualified deployment — the reference (`protocol::PROGRAM_DATA_REFERENCE_HASH`,
+//! C-01 step 7) or a former one its historical captures were made under
+//! (`PROGRAM_DATA_HISTORICAL_REFERENCES`) — holds before and after it.
 use super::*;
 use darkbot_project0::protocol;
-const REFERENCE_HASH: &str = protocol::PROGRAM_DATA_REFERENCE_HASH;
+/// Whether `hash` is a qualified deployment, the current reference or a former one.
+fn qualified(hash: &str) -> bool {
+    hash == protocol::PROGRAM_DATA_REFERENCE_HASH
+        || protocol::PROGRAM_DATA_HISTORICAL_REFERENCES
+            .iter()
+            .any(|(h, _)| *h == hash)
+}
 const PROGRAM: &str = protocol::PROGRAM_ID_MAINNET;
 const LOADER: &str = protocol::BPF_LOADER_UPGRADEABLE_ID;
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -19,8 +25,8 @@ pub(super) fn verified(
     end: Option<u64>,
 ) -> bool {
     before.zip(after).zip(end).is_some_and(|((a, b), end)| {
-        a.hash == REFERENCE_HASH
-            && b.hash == REFERENCE_HASH
+        qualified(&a.hash)
+            && a.hash == b.hash
             && a.program_data == b.program_data
             && b.context_slot >= end
             && b.context_slot >= a.context_slot
@@ -257,7 +263,7 @@ mod tests {
     fn upgrade_or_missing_proof_never_qualifies() {
         let a = Deployment {
             context_slot: 1,
-            hash: REFERENCE_HASH.into(),
+            hash: protocol::PROGRAM_DATA_REFERENCE_HASH.into(),
             program_data: "p".into(),
         };
         let mut b = a.clone();
@@ -265,8 +271,17 @@ mod tests {
         assert!(verified(Some(&a), Some(&b), Some(10)));
         assert!(!verified(None, Some(&b), Some(10)));
         assert!(!verified(Some(&a), Some(&b), Some(11)));
+        // A historical capture under a former qualified deployment stays continuous; an upgrade
+        // between the two observations (former → current) or an unqualified hash never is.
+        let former = protocol::PROGRAM_DATA_HISTORICAL_REFERENCES[0].0;
+        let (mut c, mut d) = (a.clone(), b.clone());
+        (c.hash, d.hash) = (former.into(), former.into());
+        assert!(verified(Some(&c), Some(&d), Some(10)));
+        assert!(!verified(Some(&c), Some(&b), Some(10)));
         b.hash = "changed".into();
         assert!(!verified(Some(&a), Some(&b), Some(10)));
+        (c.hash, d.hash) = ("changed".into(), "changed".into());
+        assert!(!verified(Some(&c), Some(&d), Some(10)));
     }
     /// DEC-18 §2 (P0-025): the namespace is exactly the pinned program's — every `pub fn` of the
     /// `#[program]` module of the pinned source checkout (`SOURCE_COMMIT`; none overrides its

@@ -25,6 +25,8 @@ source checkout `0dotxyz/marginfi-v2` master `7d48d8a` (2026-10-02, program crat
 
 ## P1B-03 — Promotion procedure (after the actual Mainnet deployment)
 
+**Done 2026-11-03 (C-01 step 7):** steps 1–7 for `mrgn-0.1.12-rc2`; the deployment is the reference (`CURRENT_MAINNET.md`, Gate P1A PASS).
+
 1. **HALT** — automatic: the ProgramData change latches `PROGRAM_UPGRADE` at runtime; a restart on the new deployment stays
    halted because `deployment_pin` ≠ `Reference`. The HALT log names the new deployment (slot, authority, hash).
 2. **ProgramData / program hash** — authorized finalized read of program + ProgramData; record slot, upgrade authority, hash.

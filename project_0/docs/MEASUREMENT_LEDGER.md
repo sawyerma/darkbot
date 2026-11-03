@@ -6031,3 +6031,9 @@ Commits `26f6194b` (JIT), `98254f75` (source control, Geyser, lead, p0ctl/UntilS
 - Einheit 4 B03/U-9 (`e8748c3a`…`79d0d039`): Journal-Kinds 356 `ANALYTICS_JOB_REQUEST`/357 `ANALYTICS_JOB_OUTCOME` (Schema 2, Layout-Pins), Limits-Revision 9 (`analytics_status_ms`, `analytics_runs_listed`, `analytics_jobs_listed`; Revisionen 4–8 lesbar), Topic 15 `AnalyticsJobs` mit eigenem Publisher `p0-analytics-reporter`; Lauf mit echten Daten NOT_RUN.
 - Einheit 4 B01/S1-02 (`67815a7e`, `72b74fc1`, `43c8c86f`): Limits-Revision 10 (`rebalance_observe_ms`; Revisionen 4–9 lesbar), `LiquidatorState.rebalance/sources/last_source_decision/source_stats` (owner.proto 7–10); Offline-Gate `37e68357` + Runner-Clippy `fbe84af3` PASS; Rebalancing-Quotes/Provider-Lauf NOT_RUN.
 - Einheit 4 Abschluss (`c45dc1d9`…`865867af`): owner.proto `OwnerEngine.program_pin` (10, ProgramPin) und `LiquidatorState.source_config_version` (11), Limits-Revision unverändert 10; Gate `865867af` PASS (972/970/453/453, Release, Python 116); Playwright project0 8/8; Provider-/Mainnet-Läufe NOT_RUN.
+
+## 2026-11-02/03 — C-11, C-01, FE-01 (Mainnet, Nutzertoken, 1 RPS, FREE helius)
+
+- C-11 `e45bf716ce1b64f5` → Evidence `850ddad0e93e3de9`: econ4h NOT_PROVEN (ein Programmfilter); `0e909773088733b1` → `f9da768249108a52`: 12 RPC + 6 WSS SUPPORTED, 12 Calls, kein 429.
+- C-01 `edf159af0e91fb03`: 7 Reads, 17,5 MB; ProgramData `4Q8u…`, Slot 456093551, ELF `eb761836…` = reproduzierbarer Build `mrgn-0.1.12-rc2`; 165/165 Banken, 163 Oracles; IDL veraltet (informativ).
+- FE-01: zwei Abbrüche durch P0-031 (2 bzw. 5 Reads, keine Evidence), dann Plan `1accaed7f43fb811`: 6 Reads, 1 871 755 B, Scope in Runde 3 geschlossen, Freeze FROZEN; `P1A_PARITY PASS`.
