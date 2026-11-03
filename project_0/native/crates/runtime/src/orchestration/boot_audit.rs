@@ -210,17 +210,108 @@ pub fn identity(project: &Path, flags: SafetyFlags) -> Result<AuditedIdentity, S
     identity_with(project, flags, darkbot_solana::runtime_config::active())
 }
 
+/// P0-027: the source identity of a deployed release, whose data home is no checkout — written
+/// by `p0ctl release identity` from the checkout `darkbotctl build` builds from and shipped beside
+/// its executables ([`RELEASE_IDENTITY`]): the commit, the `status --porcelain -- .` digest of
+/// `project_0` and the SHA-256 of each executable ([`RELEASE_BINARIES`]).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReleaseSource {
+    pub source_head: String,
+    pub source_dirty_sha256: String,
+    pub binaries: Vec<(String, String)>,
+}
+impl payload::Payload for ReleaseSource {
+    const KIND: u16 = journal::kind::RELEASE_SOURCE;
+}
+/// The release identity record beside the executables of a release.
+pub const RELEASE_IDENTITY: &str = "p0-release.p0j";
+/// The executables a release ships for its boot flows: control, runtime, raw capture.
+pub const RELEASE_BINARIES: [&str; 3] = ["p0ctl", "p0-longtail", "p0-market-capture-reported"];
+
+/// `p0ctl release identity --output FILE`: the release identity of `project`'s checkout and the
+/// executables beside `exe`, written once to `output`.
+pub fn release_identity(
+    project: &Path,
+    exe: &Path,
+    output: &Path,
+) -> Result<ReleaseSource, String> {
+    let head = git(project, &["rev-parse", "HEAD"])
+        .map(|b| String::from_utf8_lossy(&b).trim().to_string())
+        .ok_or(
+            "RELEASE_SOURCE_NOT_A_CHECKOUT: the release identity is taken from a git checkout",
+        )?;
+    let dirty = git(project, &["status", "--porcelain", "--", "."])
+        .map(|b| sha(&b))
+        .ok_or("RELEASE_SOURCE_NOT_A_CHECKOUT")?;
+    let dir = exe.parent().ok_or("RELEASE_BINARY_DIR")?;
+    let binaries = RELEASE_BINARIES
+        .iter()
+        .map(|name| {
+            std::fs::read(dir.join(name))
+                .map(|b| (name.to_string(), sha(&b)))
+                .map_err(|_| format!("RELEASE_BINARY_MISSING: {name}"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let record = ReleaseSource {
+        source_head: head,
+        source_dirty_sha256: dirty,
+        binaries,
+    };
+    journal::create_typed_value(output, journal::source::BOOT_CONTROL, &record)
+        .map_err(|e| format!("RELEASE_IDENTITY_STORE: {e}"))?;
+    Ok(record)
+}
+
+/// The source of the release `exe` belongs to: its identity record beside it, naming exactly
+/// this executable's bytes; `None` without one or for other bytes.
+fn release_source(exe: &Path) -> Option<(String, String)> {
+    let record: ReleaseSource =
+        journal::read_typed_value(&exe.parent()?.join(RELEASE_IDENTITY)).ok()?;
+    let name = exe.file_name()?.to_str()?;
+    let own = sha(&std::fs::read(exe).ok()?);
+    record
+        .binaries
+        .iter()
+        .any(|(n, s)| n == name && *s == own)
+        .then_some((record.source_head, record.source_dirty_sha256))
+}
+
 /// Identities of this project with an explicit operational config.
 pub fn identity_with(
     project: &Path,
     flags: SafetyFlags,
     config: &darkbot_solana::runtime_config::RuntimeConfig,
 ) -> Result<AuditedIdentity, String> {
+    identity_of(
+        project,
+        flags,
+        config,
+        std::env::current_exe().ok().as_deref(),
+    )
+}
+
+/// [`identity_with`] for the executable `exe`: a checkout's source by git; a release's (the
+/// project no checkout) by the identity record beside `exe`.
+pub fn identity_of(
+    project: &Path,
+    flags: SafetyFlags,
+    config: &darkbot_solana::runtime_config::RuntimeConfig,
+    exe: Option<&Path>,
+) -> Result<AuditedIdentity, String> {
     let runtime_config_sha256 = runtime_config_sha256(config)?;
+    let (source_head, source_dirty_sha256) = match git(project, &["rev-parse", "HEAD"]) {
+        Some(head) => (
+            Some(String::from_utf8_lossy(&head).trim().to_string()),
+            git(project, &["status", "--porcelain", "--", "."]).map(|b| sha(&b)),
+        ),
+        None => match exe.and_then(release_source) {
+            Some((head, dirty)) => (Some(head), Some(dirty)),
+            None => (None, None),
+        },
+    };
     Ok(AuditedIdentity {
-        source_head: git(project, &["rev-parse", "HEAD"])
-            .map(|b| String::from_utf8_lossy(&b).trim().to_string()),
-        source_dirty_sha256: git(project, &["status", "--porcelain", "--", "."]).map(|b| sha(&b)),
+        source_head,
+        source_dirty_sha256,
         runtime_config_sha256,
         journal_version: journal::VERSION,
         discriminator_table_sha256: sha(&discriminator_table()),
@@ -299,7 +390,9 @@ pub struct OfflineInputs {
 }
 
 impl OfflineInputs {
-    pub fn for_project(project: &Path) -> Self {
+    /// The offline inputs of a boot flow of operating mode `mode`: its runtime executable
+    /// (`binary_identity_for`) is the one bound.
+    pub fn for_mode(project: &Path, mode: &str) -> Self {
         let w = crate::storage::writer::WriterConfig::from_active();
         Self {
             project: project.into(),
@@ -311,7 +404,7 @@ impl OfflineInputs {
                 .map(|r| project.join(r))
                 .collect(),
             run_output_root: econ_run_root(project, &|k| std::env::var(k).ok()),
-            binary: binary_identity(),
+            binary: binary_identity_for(mode),
             wallet_public_env: project.join("config/wallet.public.env"),
             max_capture_bytes: w.max_bytes,
             system_reserve_bytes: w.system_reserve_bytes,
@@ -493,7 +586,7 @@ pub fn offline(inputs: &OfflineInputs) -> Result<BootAudit, String> {
             "source_identity",
             true,
             Pass,
-            "git",
+            "git or release identity",
             format!("HEAD {}", &h[..h.len().min(12)]),
         ),
         _ => add(
@@ -501,8 +594,8 @@ pub fn offline(inputs: &OfflineInputs) -> Result<BootAudit, String> {
             "source_identity",
             true,
             Unknown,
-            "git",
-            "source identity not readable".into(),
+            "git or release identity",
+            format!("source identity not readable (no checkout, no {RELEASE_IDENTITY} of this executable)"),
         ),
     }
     let registry_ok = journal::kind::ALL
@@ -530,7 +623,10 @@ pub fn offline(inputs: &OfflineInputs) -> Result<BootAudit, String> {
         "discriminators",
         true,
         if pinned { Pass } else { Blocked },
-        "pinned source 33c67987",
+        &format!(
+            "pinned source {}",
+            &darkbot_project0::protocol::SOURCE_COMMIT[..8]
+        ),
         "six markers and four related instructions match the pinned Anchor rule".into(),
     );
     // X3: the executables a start would admit (control + runtime), present and hashed.

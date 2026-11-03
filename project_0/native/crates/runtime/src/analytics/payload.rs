@@ -962,6 +962,9 @@ macro_rules! typed_kinds {
             k::C01_FE01_PLAN => {
                 $f::<crate::orchestration::c01_records::Fe01Plan>($kind, $schema, $bytes)
             }
+            k::RELEASE_SOURCE => {
+                $f::<crate::orchestration::boot_audit::ReleaseSource>($kind, $schema, $bytes)
+            }
             k::BOOT_NETWORK => {
                 $f::<crate::orchestration::boot_audit::NetworkAudit>($kind, $schema, $bytes)
             }

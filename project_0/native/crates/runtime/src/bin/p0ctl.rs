@@ -151,7 +151,7 @@ fn doctor(project: &Path, args: &[String]) -> Result<bool, String> {
         &|k| std::env::var(k).ok(),
     )?
     .activate()?;
-    let audit = boot_audit::offline(&OfflineInputs::for_project(project))?;
+    let audit = boot_audit::offline(&OfflineInputs::for_mode(project, mode.name()))?;
     print!("{}", audit.terminal());
     Ok(audit.verdict != AuditVerdict::Blocked)
 }
@@ -192,7 +192,8 @@ fn preflight_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
     let _ = std::fs::remove_dir_all(&out);
     let report = result?;
     print!("{}", report.terminal());
-    let audit = boot_audit::offline(&OfflineInputs::for_project(project))?;
+    let mode = RunMode::of(args.split(|a| a == "--").next().unwrap_or(&[]))?;
+    let audit = boot_audit::offline(&OfflineInputs::for_mode(project, mode.name()))?;
     println!(
         "boot audit: {} (details: p0ctl doctor)",
         audit.verdict.as_str()
@@ -449,7 +450,7 @@ fn run_start(project: &Path, args: &[String]) -> Result<bool, String> {
     )?
     .activate()?;
     let flags = SafetyFlags::from_env();
-    let audit = boot_audit::offline(&OfflineInputs::for_project(project))?;
+    let audit = boot_audit::offline(&OfflineInputs::for_mode(project, mode.name()))?;
     print!("{}", audit.terminal());
     if audit.verdict == AuditVerdict::Blocked {
         return Err("BOOT_AUDIT_BLOCKED".into());
@@ -1674,7 +1675,7 @@ fn boot_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
             let ttl_seconds = darkbot_solana::runtime_config::active()
                 .limits
                 .boot_token_ttl_seconds;
-            let audit = boot_audit::offline(&OfflineInputs::for_project(project))?;
+            let audit = boot_audit::offline(&OfflineInputs::for_mode(project, mode))?;
             print!("{}", audit.terminal());
             let blocked = audit.verdict == AuditVerdict::Blocked;
             let token = audit.readiness_token[..16].to_string();
@@ -2175,6 +2176,26 @@ const C01_USAGE: &str = "usage: p0ctl c01 plan   (C-01 steps 5–6, offline: the
   | p0ctl c01 run --plan PLAN_ID --approve TOKEN   (reads Mainnet once; writes the reads, the token programs' bytecode and the parity verdict)
   | p0ctl c01 build --plan PLAN_ID --source CLEAN_CLONE --verifier SOLANA_VERIFY --image NAME@sha256:DIGEST   (offline, once per plan: runs the pinned source's Mainnet build recipe and compares its ELF with the deployed one; the parity derived again)
   | p0ctl c01 fe01 --plan PLAN_ID --observation FE01_OUTPUT_DIR   (offline, once per plan: the FE-01 full observation against the read deployment; the parity derived again)";
+
+/// P0-027: `release identity --output FILE` — the source identity of the release `darkbotctl
+/// build` builds from this checkout, beside its executables (`boot_audit::RELEASE_IDENTITY`).
+fn release_identity_cmd(project: &Path, args: &[String]) -> Result<bool, String> {
+    let output = value(args, "--output")
+        .ok_or("usage: p0ctl release identity --output FILE   (the release's source identity, beside its executables)")?;
+    let exe = std::env::current_exe().map_err(|_| "RELEASE_BINARY_DIR")?;
+    let r = boot_audit::release_identity(project, &exe, Path::new(&output))?;
+    println!(
+        "RELEASE_IDENTITY head={} dirty_sha256={} {}",
+        r.source_head,
+        r.source_dirty_sha256,
+        r.binaries
+            .iter()
+            .map(|(n, s)| format!("{n}={}", &s[..16]))
+            .collect::<Vec<_>>()
+            .join(" ")
+    );
+    Ok(true)
+}
 
 /// DEC-18 §2 (P0-025, C-01 steps 5–6): `c01 plan|run`.
 #[cfg(feature = "crate_health")]
@@ -3337,6 +3358,7 @@ fn main() -> ExitCode {
             (Some("capability"), _) => capability_cmd(&project, &rest),
             (Some("provider"), _) => provider_cmd(&project, &rest),
             (Some("c01"), _) => c01_cmd(&project, &rest),
+            (Some("release"), Some("identity")) => release_identity_cmd(&project, &rest[1..]),
             (Some("live"), _) => live_cmd(&project, &rest),
             (Some("boot"), _) => boot_cmd(&project, &rest),
             (Some("horizon"), _) => horizon_cmd(&project, &rest),

@@ -670,7 +670,7 @@ pub fn execute(project: &Path, mode: &str, args: &[String]) -> Result<bool, Stri
     let ttl_source = ttl_source(&resolved.sources);
     resolved.activate()?;
     let c = darkbot_solana::runtime_config::active();
-    let offline = boot_audit::offline(&boot_audit::OfflineInputs::for_project(project))?;
+    let offline = boot_audit::offline(&boot_audit::OfflineInputs::for_mode(project, mode))?;
     if val("--network-approved").as_deref() != Some(&offline.readiness_token[..16]) {
         print!("{}", offline.terminal());
         return Err("BOOT_NETWORK_APPROVAL_REQUIRED: explicit approval of the printed offline token required; no network request made".into());

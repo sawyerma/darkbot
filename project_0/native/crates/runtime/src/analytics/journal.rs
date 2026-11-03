@@ -251,6 +251,9 @@ pub mod kind {
     /// DEC-18 §6 (C-01 step 6): the FE-01 full observation's read plan
     /// (`c01_records::Fe01Plan`), `<output>/fe01_plan.p0j`.
     pub const C01_FE01_PLAN: u16 = 1115;
+    /// P0-027: a deployed release's source identity (`boot_audit::ReleaseSource`),
+    /// `<release>/p0-release.p0j`.
+    pub const RELEASE_SOURCE: u16 = 1116;
     pub const ALL: &[u16] = &[
         OWNER_RECORD,
         OWNER_OPPORTUNITY,
@@ -350,6 +353,7 @@ pub mod kind {
         C01_BUILD,
         C01_FE01,
         C01_FE01_PLAN,
+        RELEASE_SOURCE,
         super::MANIFEST,
     ];
 }
