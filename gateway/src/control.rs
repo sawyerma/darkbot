@@ -88,8 +88,9 @@ const BSC_RUNTIME_MODES: [&str; 4] = ["OFF", "SHADOW", "PAPER", "LIVE"];
 const BSC_ATTEMPT_LIMIT: &str = "bsc.attempt.limit.set";
 const BSC_ATTEMPT_LIMIT_IDS: [&str; 1] = ["BSC_BUY_ATTEMPTS_PER_DAY"];
 /// Every request the native mode/switch owner (`bsc_runtime source request`) takes.
-/// Plan 28.10.: the campaign's total BUY attempt limit (at most ten), the
-/// operator's LIVE grant of one confirmed scope and its revocation.
+/// Plan 28.10.: the campaign's total BUY attempt limit (at most the runtime configuration's
+/// BSC_BUY_ATTEMPTS_TOTAL_MAX, which the owner checks: Audit E 3.1), the operator's LIVE grant of
+/// one confirmed scope and its revocation.
 const BSC_ATTEMPT_TOTAL: &str = "bsc.attempt.total.set";
 const BSC_ATTEMPT_TOTAL_IDS: [&str; 1] = ["BSC_BUY_ATTEMPTS_TOTAL"];
 const BSC_LIVE_GRANT: &str = "bsc.live.grant";
@@ -98,8 +99,6 @@ const BSC_LIVE_REVOKE_IDS: [&str; 1] = ["BSC_LIVE_GRANT"];
 const BSC_LIVE_REVOKE_MODES: [&str; 1] = ["DISABLED"];
 const BSC_LIVE_STRATEGIES: [&str; 3] = ["C3", "STRATEGY_C", "C3+STRATEGY_C"];
 const BSC_LIVE_ADAPTERS: [&str; 2] = ["CLUB48_BUILDER_V1", "BLOCKRAZOR_BUILDER_V1"];
-/// The campaign's limit is at most ten real BUY attempts (PHASENPLAN 28.10.).
-const BSC_MAX_ATTEMPTS_TOTAL: u32 = 10;
 
 /// REV.1.0 R3b (Audit A): the operator's decisions of the LIVE ledger (`bsc_runtime live lot`,
 /// `nonce-burn`, `ledger quarantine`), once per request, each with the state it was decided on as
@@ -457,14 +456,8 @@ fn source_request(req: &CommandRequest) -> Option<(&'static str, String, u64)> {
     };
     let (id, mode) = req.resource_id.split_once(':')?;
     let id = ids.iter().copied().find(|s| *s == id)?;
-    let mode = if req.action == BSC_ATTEMPT_LIMIT {
+    let mode = if req.action == BSC_ATTEMPT_LIMIT || req.action == BSC_ATTEMPT_TOTAL {
         per_day_ok(mode).then(|| mode.to_string())?
-    } else if req.action == BSC_ATTEMPT_TOTAL {
-        (per_day_ok(mode)
-            && mode
-                .parse::<u32>()
-                .is_ok_and(|n| n <= BSC_MAX_ATTEMPTS_TOTAL))
-        .then(|| mode.to_string())?
     } else {
         modes.iter().copied().find(|m| *m == mode)?.to_string()
     };
@@ -544,7 +537,7 @@ fn grant_request(req: &CommandRequest) -> Option<Vec<String>> {
             .all(|a| BSC_LIVE_ADAPTERS.contains(&a.as_str()))
         && wei_ok(&c.max_input_wei)
         && wei_ok(&c.max_spend_wei)
-        && (1..=BSC_MAX_ATTEMPTS_TOTAL).contains(&c.max_attempts)
+        && c.max_attempts >= 1
         && c.expires_unix_ms > 0
         && c.scope_sha256.len() == 64
         && c.scope_sha256
@@ -1694,7 +1687,7 @@ impl Control {
                         id,
                         CommandStatus::Rejected,
                         CommandRejectReason::InvalidParams,
-                        "LIVE grant takes exactly the resource BSC_LIVE_GRANT, a BscLiveGrantCommand (venue, strategies, ingress sources, builder adapters, plain wei limits, 1..=10 attempts, expiry, the execution risk, the confirmed scope SHA-256) and the config_version generation",
+                        "LIVE grant takes exactly the resource BSC_LIVE_GRANT, a BscLiveGrantCommand (venue, strategies, ingress sources, builder adapters, plain wei limits, at least one attempt, expiry, the execution risk, the confirmed scope SHA-256) and the config_version generation",
                     );
                 }
             }
@@ -1734,7 +1727,7 @@ impl Control {
                             BSC_VENUE => "Venue request takes exactly <BSC_VENUE_FLAP|FOUR_CLASSIC|OPENFOUR>:<OFF|SHADOW|LIVE> and the config_version generation",
                             BSC_RUNTIME => "Runtime request takes exactly BSC_RUNTIME_MODE:<OFF|SHADOW|PAPER|LIVE> and the config_version generation",
                             BSC_ATTEMPT_LIMIT => "Limit request takes exactly BSC_BUY_ATTEMPTS_PER_DAY:<decimal count per UTC day> and the config_version generation",
-                            BSC_ATTEMPT_TOTAL => "Total limit request takes exactly BSC_BUY_ATTEMPTS_TOTAL:<0..=10> and the config_version generation",
+                            BSC_ATTEMPT_TOTAL => "Total limit request takes exactly BSC_BUY_ATTEMPTS_TOTAL:<decimal count for the campaign> and the config_version generation",
                             BSC_LIVE_REVOKE => "LIVE revoke takes exactly BSC_LIVE_GRANT:DISABLED and the config_version generation",
                             _ => "Source request takes exactly <SOURCE_ID>:<OFF|SHADOW|LIVE> and the config_version generation",
                         },
@@ -3584,7 +3577,7 @@ mod tests {
                 ..scope.clone()
             },
             BscLiveGrantCommand {
-                max_attempts: 11,
+                max_attempts: 0,
                 ..scope.clone()
             },
             BscLiveGrantCommand {
@@ -3707,10 +3700,19 @@ mod tests {
             )),
             Some(("BSC_BUY_ATTEMPTS_TOTAL", "10", 4))
         );
+        // Audit E 3.1: above the configured maximum only the owner refuses it.
         assert_eq!(
             sr(&request(
                 BSC_ATTEMPT_TOTAL,
                 "BSC_BUY_ATTEMPTS_TOTAL:11",
+                Some(ConfigVersion(4))
+            )),
+            Some(("BSC_BUY_ATTEMPTS_TOTAL", "11", 4))
+        );
+        assert_eq!(
+            sr(&request(
+                BSC_ATTEMPT_TOTAL,
+                "BSC_BUY_ATTEMPTS_TOTAL:010",
                 Some(ConfigVersion(4))
             )),
             None

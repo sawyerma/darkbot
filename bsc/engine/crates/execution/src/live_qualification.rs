@@ -173,10 +173,43 @@ fn freeze_binds(f: &Record, pin: &FlapDeployment) -> Result<(), String> {
     Ok(())
 }
 
-/// BSC3-065: the executed cases a behaviour parity needs per traded path
-/// (launch, BUY, SELL, launch then C3 BUY) at the least: the parity tool
-/// may ask more of itself, a parity with fewer qualifies nothing.
-pub const PARITY_MIN_EXECUTED_PER_PATH: u64 = 30;
+/// BSC3-065, Audit E 3.2: the configuration key of the executed cases a
+/// behaviour parity needs per traded path (launch, BUY, SELL, launch then
+/// C3 BUY) at the least: the parity tool may ask more of itself, a parity
+/// with fewer qualifies nothing.
+pub const PARITY_MIN_KEY: &str = "BSC_EXEC_LIVE_PARITY_MIN_EXECUTED_PER_PATH";
+
+/// The range of [`PARITY_MIN_KEY`]: from the floor BSC3-065 set to the most
+/// the parity tool runs per path.
+pub const PARITY_MIN_RANGE: std::ops::RangeInclusive<u64> = 30..=1_000;
+
+/// The value of [`PARITY_MIN_KEY`] as written: required, in its range.
+pub fn parity_min(value: Option<&str>) -> Result<u64, String> {
+    let v: u64 = value
+        .ok_or(format!("{PARITY_MIN_KEY} is required"))?
+        .parse()
+        .map_err(|_| format!("{PARITY_MIN_KEY} is not an unsigned integer"))?;
+    if !PARITY_MIN_RANGE.contains(&v) {
+        return Err(format!(
+            "{PARITY_MIN_KEY}={v} is outside {}..={}",
+            PARITY_MIN_RANGE.start(),
+            PARITY_MIN_RANGE.end()
+        ));
+    }
+    Ok(v)
+}
+
+/// [`parity_min`] of a configuration file's text.
+pub fn parity_min_of(text: &str) -> Result<u64, String> {
+    parity_min(crate::sources::config_value(text, PARITY_MIN_KEY)?)
+}
+
+/// [`parity_min`] of the runtime configuration under `root`.
+fn parity_min_at(root: &Path) -> Result<u64, String> {
+    let path = root.join(crate::sources::RUNTIME_CONFIG_PATH);
+    let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    parity_min_of(&text)
+}
 
 /// The traded paths of a parity and the tags of their minimums.
 const PARITY_PATHS: [(&str, u16); 4] = [
@@ -197,6 +230,7 @@ fn parity_binds(
     p: &Record,
     pin: &FlapDeployment,
     reference: &FlapDeployment,
+    floor: u64,
 ) -> Result<(), String> {
     use fp::case as c;
     use std::collections::BTreeMap;
@@ -229,7 +263,7 @@ fn parity_binds(
     let mut paths = true;
     for (path, min) in PARITY_PATHS {
         let min = p.u64(min).map_err(re)?;
-        paths &= min >= PARITY_MIN_EXECUTED_PER_PATH && n(&executed, path) >= min;
+        paths &= min >= floor && n(&executed, path) >= min;
     }
     let bound = paths
         && identical + created == cases.len() as u64
@@ -422,12 +456,13 @@ pub fn verify(root: &Path, bytes: &[u8]) -> Result<Verified, String> {
                 }
                 let (mut freezes, mut parities) = (0, 0);
                 let reference = behaviour_reference(&pin);
+                let floor = parity_min_at(root)?;
                 for f in verified_all(root, &row, k::EVIDENCE, Some(VENUE_EVIDENCE))? {
                     seen(&f);
                     let bound = if f.schema().name == fp::SCHEMA.name {
                         parities += 1;
                         match &reference {
-                            Some(r) => parity_binds(&f, &pin, r),
+                            Some(r) => parity_binds(&f, &pin, r, floor),
                             None => Err("a parity record for a source-verified pin".into()),
                         }
                     } else {
@@ -850,11 +885,19 @@ pub(crate) mod tests {
     /// source-verified reference: per traded path the floor of cases, each
     /// as `case(path, i)` says (both executions' status, the preceding
     /// launch's status of a C3 sequence, the outcome).
+    /// The shipped configuration's parity floor (Audit E 3.2).
+    pub(crate) fn floor() -> u64 {
+        parity_min_of(SHIPPED).unwrap()
+    }
+
+    /// The shipped runtime configuration (every fixture root holds it).
+    const SHIPPED: &str = include_str!("../../../../config/ingress.public.env");
+
     pub(crate) fn parity_of(case: impl Fn(&str, u64) -> (u64, u64, &'static str)) -> Draft {
         let mut p = parity_head();
         let (mut identical, mut created) = (0u64, 0u64);
         for (path, min) in PARITY_PATHS {
-            for i in 0..PARITY_MIN_EXECUTED_PER_PATH {
+            for i in 0..floor() {
                 let (status, preceding, outcome) = case(path, i);
                 match outcome {
                     "IDENTICAL" => identical += 1,
@@ -872,7 +915,7 @@ pub(crate) mod tests {
                 }
                 p.push(fp::CASES, c.into_nested());
             }
-            p.set(min, PARITY_MIN_EXECUTED_PER_PATH);
+            p.set(min, floor());
         }
         p.set(fp::IDENTICAL, identical)
             .set(fp::IDENTICAL_BUT_CREATED, created);
@@ -1025,6 +1068,8 @@ pub(crate) mod tests {
         let root = std::env::temp_dir().join(format!("bsc-live-q-{tag}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(root.join("ev")).unwrap();
+        fs::create_dir_all(root.join("bsc/config")).unwrap();
+        fs::write(root.join(crate::sources::RUNTIME_CONFIG_PATH), SHIPPED).unwrap();
         fs::write(root.join("ev/freeze.dbrec"), freeze().encode().unwrap()).unwrap();
         fs::write(root.join("ev/parity.dbrec"), parity().encode().unwrap()).unwrap();
         fs::write(root.join("ev/g04.dbrec"), g04(1).encode().unwrap()).unwrap();
@@ -1624,7 +1669,7 @@ pub(crate) mod tests {
         let bytes = std::fs::read(newest.join("flap_impl_parity.dbrec")).unwrap();
         let record = darkbot_bsc_record::decode(&fp::SCHEMA, &bytes).unwrap();
         let pin = bsc_mainnet_v5_27_2();
-        parity_binds(&record, &pin, &behaviour_reference(&pin).unwrap()).unwrap();
+        parity_binds(&record, &pin, &behaviour_reference(&pin).unwrap(), floor()).unwrap();
     }
 
     /// BSC3-049: each role takes only its own records, bound to what it
@@ -1714,7 +1759,7 @@ pub(crate) mod tests {
             // name; counts that are not the cases'.
             {
                 let mut p = parity();
-                p.set(fp::MIN_SELLS, PARITY_MIN_EXECUTED_PER_PATH - 1);
+                p.set(fp::MIN_SELLS, floor() - 1);
                 p
             },
             parity_of(|path, i| {
@@ -1739,6 +1784,22 @@ pub(crate) mod tests {
             assert!(e.contains("no behaviour parity"), "{e}");
         }
         fs::write(root.join("ev/parity.dbrec"), parity().encode().unwrap()).unwrap();
+        // Audit E 3.2: the floor is the configuration's: raised above the
+        // parity's cases it qualifies nothing; without a configuration none.
+        let config = root.join(crate::sources::RUNTIME_CONFIG_PATH);
+        let raised = SHIPPED.replace(
+            &format!("{PARITY_MIN_KEY}={}", floor()),
+            &format!("{PARITY_MIN_KEY}={}", floor() + 1),
+        );
+        assert_ne!(raised, SHIPPED);
+        fs::write(&config, raised).unwrap();
+        let e = build(&root, &spec(), 1).unwrap_err();
+        assert!(e.contains("no behaviour parity"), "{e}");
+        fs::remove_file(&config).unwrap();
+        let e = build(&root, &spec(), 1).unwrap_err();
+        assert!(e.contains(crate::sources::RUNTIME_CONFIG_PATH), "{e}");
+        fs::write(&config, SHIPPED).unwrap();
+        assert!(build(&root, &spec(), 1).is_ok());
         // A freeze of another version, a Portal that was upgraded, a pin
         // not read again.
         let freeze = || freeze();

@@ -559,9 +559,77 @@ const EXIT_EXEMPT: [&str; 12] = [
 /// real economic BUY attempt counts, G0.7 included, UNKNOWN ones too, over
 /// every day and restart. 0 initially.
 pub const BUY_ATTEMPTS_TOTAL: &str = "BSC_BUY_ATTEMPTS_TOTAL";
-/// The user's decision bounds the total limit: at most ten real BUY
-/// attempts in all (PHASENPLAN 27.10./28.10.).
-pub const MAX_BUY_ATTEMPTS_TOTAL: u32 = 10;
+/// Where a checkout or snapshot keeps the configuration its runtime runs
+/// with (`bsc_runtime run --config`).
+pub const RUNTIME_CONFIG_PATH: &str = "bsc/config/ingress.public.env";
+
+/// The value of `key` in a configuration file's text (`KEY=value` lines,
+/// comments aside); a key set twice is refused, as the runtime refuses it.
+pub fn config_value<'a>(text: &'a str, key: &str) -> Result<Option<&'a str>, String> {
+    let mut values = text
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.starts_with('#'))
+        .filter_map(|l| l.split_once('='))
+        .filter(|(k, _)| k.trim() == key)
+        .map(|(_, v)| v.trim());
+    let value = values.next();
+    match values.next() {
+        Some(_) => Err(format!("{key} is set twice")),
+        None => Ok(value),
+    }
+}
+
+/// Audit E 3.1/3.4: the owner's bounds, one value each in the runtime
+/// configuration (`bsc/config/ingress.public.env`) that the runtime, every
+/// owner command (`--config`), the reporter and the G0.7 runner read.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct OwnerLimits {
+    /// `BSC_BUY_ATTEMPTS_TOTAL_MAX`: the most BUY attempts a day or the
+    /// whole campaign may take (the user's decision 27.10./28.10.: at most
+    /// ten real BUY attempts in all; the key's range).
+    pub buy_attempts_total_max: u32,
+    /// `BSC_OWNER_KEEP_GENERATIONS`: the generations a store keeps besides
+    /// the current one (older ones and their receipts are pruned).
+    pub keep_generations: u64,
+}
+
+impl OwnerLimits {
+    pub const BUY_ATTEMPTS_TOTAL_MAX: &str = "BSC_BUY_ATTEMPTS_TOTAL_MAX";
+    pub const KEEP_GENERATIONS: &str = "BSC_OWNER_KEEP_GENERATIONS";
+
+    /// The two keys' values as written (each required, a decimal in its
+    /// range).
+    pub fn new(max: Option<&str>, keep: Option<&str>) -> Result<Self, String> {
+        let take = |key: &str, v: Option<&str>, lo: u64, hi: u64| -> Result<u64, String> {
+            let v: u64 = v
+                .ok_or(format!("{key} is required"))?
+                .parse()
+                .map_err(|_| format!("{key} is not an unsigned integer"))?;
+            if !(lo..=hi).contains(&v) {
+                return Err(format!("{key}={v} is outside {lo}..={hi}"));
+            }
+            Ok(v)
+        };
+        Ok(OwnerLimits {
+            buy_attempts_total_max: take(Self::BUY_ATTEMPTS_TOTAL_MAX, max, 1, 10)? as u32,
+            keep_generations: take(Self::KEEP_GENERATIONS, keep, 1, 100_000)?,
+        })
+    }
+
+    /// The bounds of a configuration file's text (`KEY=value` lines).
+    pub fn of_config(text: &str) -> Result<Self, String> {
+        Self::new(
+            config_value(text, Self::BUY_ATTEMPTS_TOTAL_MAX)?,
+            config_value(text, Self::KEEP_GENERATIONS)?,
+        )
+    }
+
+    /// [`Self::of_config`] of the file at `path`.
+    pub fn at(path: &Path) -> Result<Self, String> {
+        Self::of_config(&fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?)
+    }
+}
 /// The operator's LIVE grant of one scope (`GRANTED:<scope SHA-256>`) or
 /// its revocation (`DISABLED`).
 pub const LIVE_GRANT: &str = "BSC_LIVE_GRANT";
@@ -891,10 +959,9 @@ impl Entity {
             Entity::Switch(_) => matches!(mode, Mode::Disabled | Mode::Enabled),
             Entity::Runtime => matches!(mode, Mode::Off | Mode::Shadow | Mode::Paper | Mode::Live),
             // A stored limit of any size still decodes (BSC3-004 review M1);
-            // a request above the campaign's is refused in `apply`, the
-            // limit in force is capped.
-            Entity::BuyLimit => matches!(mode, Mode::PerDay(_)),
-            Entity::BuyTotal => matches!(mode, Mode::PerDay(n) if n <= MAX_BUY_ATTEMPTS_TOTAL),
+            // a request above the configured maximum is refused in `apply`,
+            // the limit in force is capped by it.
+            Entity::BuyLimit | Entity::BuyTotal => matches!(mode, Mode::PerDay(_)),
             Entity::LiveGrant => matches!(mode, Mode::Granted(_) | Mode::Disabled),
             _ => matches!(mode, Mode::Off | Mode::Shadow | Mode::Live),
         }
@@ -905,9 +972,11 @@ impl Entity {
         match self {
             Entity::Switch(_) => "DISABLED or ENABLED",
             Entity::Runtime => "OFF, SHADOW, PAPER or LIVE",
-            Entity::BuyLimit => "a whole number of BUY attempts per UTC day, at most 10 (0 = none)",
+            Entity::BuyLimit => {
+                "a whole number of BUY attempts per UTC day, at most BSC_BUY_ATTEMPTS_TOTAL_MAX (0 = none)"
+            }
             Entity::BuyTotal => {
-                "a whole number of BUY attempts for the whole campaign, at most 10 (0 = none)"
+                "a whole number of BUY attempts for the whole campaign, at most BSC_BUY_ATTEMPTS_TOTAL_MAX (0 = none)"
             }
             Entity::LiveGrant => "a scope through `live grant`, or DISABLED to revoke it",
             _ => "OFF, SHADOW or LIVE",
@@ -1277,10 +1346,24 @@ impl GrantRisk {
 }
 
 impl LiveGrant {
+    /// [`Self::validate`] and at most `max` attempts (the configured
+    /// `BSC_BUY_ATTEMPTS_TOTAL_MAX`): what a new grant or scope takes.
+    pub fn validate_within(&self, max: u32) -> Result<(), String> {
+        self.validate()?;
+        if self.max_attempts > max {
+            return Err(format!(
+                "max_attempts {} above BSC_BUY_ATTEMPTS_TOTAL_MAX {max}",
+                self.max_attempts
+            ));
+        }
+        Ok(())
+    }
+
     /// Refused unless the scope can be live at all: Flap (Four has no
     /// execution path), at least one source and adapter, each named once,
-    /// positive limits, an input within the spend, attempts within the
-    /// campaign's ceiling.
+    /// positive limits, an input within the spend, at least one attempt (a
+    /// grant on file stays readable when the maximum is lowered; the
+    /// campaign's total bounds its attempts).
     pub fn validate(&self) -> Result<(), String> {
         if self.venue != VenueId::Flap {
             return Err(format!(
@@ -1304,11 +1387,8 @@ impl LiveGrant {
         if self.max_input_wei == 0 || self.max_spend_wei < self.max_input_wei {
             return Err("max_input_wei must be positive and within max_spend_wei".into());
         }
-        if !(1..=MAX_BUY_ATTEMPTS_TOTAL).contains(&self.max_attempts) {
-            return Err(format!(
-                "max_attempts {} outside 1..={MAX_BUY_ATTEMPTS_TOTAL}",
-                self.max_attempts
-            ));
+        if self.max_attempts == 0 {
+            return Err("max_attempts must be at least 1".into());
         }
         if self.expires_unix_ms == 0 {
             return Err("expires_unix_ms must be set".into());
@@ -1666,19 +1746,19 @@ impl Generation {
         }
     }
 
-    /// The daily BUY attempt limit in force.
-    pub fn buy_attempts_per_day(&self) -> u32 {
+    /// The daily BUY attempt limit in force under the maximum `max`
+    /// (BSC3-004: never more a day than the whole campaign may take).
+    pub fn buy_attempts_per_day(&self, max: u32) -> u32 {
         match self.buy_limit.effective {
-            // BSC3-004: never more a day than the whole campaign may take.
-            Effective::PerDay(n) => n.min(MAX_BUY_ATTEMPTS_TOTAL),
+            Effective::PerDay(n) => n.min(max),
             _ => 0,
         }
     }
 
-    /// The campaign's total BUY attempt limit in force.
-    pub fn buy_attempts_total(&self) -> u32 {
+    /// The campaign's total BUY attempt limit in force under `max`.
+    pub fn buy_attempts_total(&self, max: u32) -> u32 {
         match self.buy_total.effective {
-            Effective::PerDay(n) => n.min(MAX_BUY_ATTEMPTS_TOTAL),
+            Effective::PerDay(n) => n.min(max),
             _ => 0,
         }
     }
@@ -2556,8 +2636,9 @@ pub struct Store {
     dir: PathBuf,
     /// The owner of its directories (BSC3-003): every file read is theirs.
     owner: u32,
-    /// Generations kept besides the current one (older ones are pruned).
-    keep: u64,
+    /// Its bounds (generations kept, the attempts' maximum); none for the
+    /// requests that only reduce authority ([`Store::open_reducing`]).
+    limits: Option<OwnerLimits>,
     /// The host boot session every write is stamped with.
     boot: Result<String, String>,
     /// R4: the campaign's cumulative budget its BUYs are admitted within
@@ -2914,6 +2995,16 @@ pub fn canonical_state_dir() -> Result<PathBuf, String> {
     }
 }
 
+/// The deployed runtime's configuration (`darkbotctl`'s
+/// `$APP_HOME/bsc-source`), under the account-home rule of
+/// [`canonical_state_dir`]: the bounds of the owner state there.
+pub fn canonical_config_path() -> Result<PathBuf, String> {
+    canonical_state_dir()?;
+    Ok(account_home()?
+        .join("Library/Application Support/DarkBot/bsc-source")
+        .join(RUNTIME_CONFIG_PATH))
+}
+
 /// The generation on file in `dir` without creating anything: the initial
 /// one (everything DISABLED) when there is none.
 /// The owner of `dir`'s `generations`: a real, owner-only directory
@@ -3097,16 +3188,16 @@ fn buy_slots(day_dir: &Path) -> Result<Vec<(u64, Option<String>)>, String> {
     Ok(out)
 }
 
-/// The BUY attempts of the UTC day of `now_ms` against the limit in force,
-/// read-only (for the status projection).
-pub fn buy_usage(dir: &Path, now_ms: u64) -> Result<BuyUsage, String> {
+/// The BUY attempts of the UTC day of `now_ms` against the limit in force
+/// under the maximum `max`, read-only (for the status projection).
+pub fn buy_usage(dir: &Path, now_ms: u64, max: u32) -> Result<BuyUsage, String> {
     let g = current_generation(dir)?;
     let day = BuyDay::at(now_ms);
     let used = buy_slots(&buy_day_dir(dir, &day))?.len() as u64;
     Ok(BuyUsage {
         day,
         used,
-        limit: g.buy_attempts_per_day(),
+        limit: g.buy_attempts_per_day(max),
         generation: g.generation,
     })
 }
@@ -3284,13 +3375,14 @@ fn latest_slot_ms(dir: &Path) -> Result<Option<u64>, String> {
     Ok(latest)
 }
 
-/// The campaign's BUY attempts against the total limit in force, read-only.
-pub fn total_usage(dir: &Path) -> Result<TotalUsage, String> {
+/// The campaign's BUY attempts against the total limit in force under the
+/// maximum `max`, read-only.
+pub fn total_usage(dir: &Path, max: u32) -> Result<TotalUsage, String> {
     let g = current_generation(dir)?;
     let slots = total_slots(dir)?;
     Ok(TotalUsage {
         used: slots.len() as u64,
-        limit: g.buy_attempts_total(),
+        limit: g.buy_attempts_total(max),
         generation: g.generation,
         grants: slots.into_iter().map(|(_, _, grant)| grant).collect(),
     })
@@ -3298,11 +3390,15 @@ pub fn total_usage(dir: &Path) -> Result<TotalUsage, String> {
 
 /// The owner state the LIVE gate reads at `now_ms`: the generation, today's
 /// and the campaign's BUY attempts.
-pub fn live_inputs(dir: &Path, now_ms: u64) -> Result<(Generation, BuyUsage, TotalUsage), String> {
+pub fn live_inputs(
+    dir: &Path,
+    now_ms: u64,
+    max: u32,
+) -> Result<(Generation, BuyUsage, TotalUsage), String> {
     Ok((
         current_generation(dir)?,
-        buy_usage(dir, now_ms)?,
-        total_usage(dir)?,
+        buy_usage(dir, now_ms, max)?,
+        total_usage(dir, max)?,
     ))
 }
 
@@ -3319,15 +3415,22 @@ pub struct GateReads {
 }
 
 impl GateReads {
-    pub fn read(dir: &Path, g: &Generation, now_ms: u64) -> GateReads {
-        Self::read_holding(dir, g, now_ms, None)
+    /// The reads under the maximum `max` (`BSC_BUY_ATTEMPTS_TOTAL_MAX`).
+    pub fn read(dir: &Path, g: &Generation, now_ms: u64, max: u32) -> GateReads {
+        Self::read_holding(dir, g, now_ms, None, max)
     }
 
     /// [`Self::read`] besides the slots of the attempt `held` (BSC3-078:
     /// the running LIVE path's, [`reported_held_attempt`]), as the LIVE
     /// path's gate and the runtime's reconcile read them.
-    pub fn read_holding(dir: &Path, g: &Generation, now_ms: u64, held: Option<&str>) -> GateReads {
-        let (daily, total) = usage_besides(dir, now_ms, held);
+    pub fn read_holding(
+        dir: &Path,
+        g: &Generation,
+        now_ms: u64,
+        held: Option<&str>,
+        max: u32,
+    ) -> GateReads {
+        let (daily, total) = usage_besides(dir, now_ms, held, max);
         GateReads {
             boot: boot_session().ok(),
             now_unix_ms: now_ms,
@@ -3372,22 +3475,33 @@ pub fn lease_daily_id(attempt: &str, now_ms: u64) -> String {
     format!("{attempt}-{}", BuyDay::at(now_ms).utc)
 }
 
-/// A runtime status written longer ago than this many of its own rewrite
-/// intervals is stale (the tabs' `STALE_AFTER_INTERVALS`).
-pub const STATUS_STALE_AFTER_INTERVALS: u64 = 3;
+/// Audit E 3.3: whether a runtime status record is current at `now_ms`:
+/// written within the number of its own rewrite intervals it names
+/// (`status_stale_intervals`, the runtime's `BSC_RUNTIME_STATUS_STALE_INTERVALS`);
+/// a record without either is never current.
+pub fn status_is_current(r: &darkbot_bsc_record::Record, now_ms: u64) -> bool {
+    use darkbot_bsc_record::schema::bsc_runtime::runtime_status as rs;
+    match (
+        r.u64(rs::PROVENANCE_OBSERVED_UNIX_MS),
+        r.u64(rs::STATUS_INTERVAL_MS),
+        r.opt_u64(rs::STATUS_STALE_INTERVALS),
+    ) {
+        (Ok(written), Ok(interval), Ok(Some(intervals))) => {
+            now_ms.saturating_sub(written) <= intervals.saturating_mul(interval)
+        }
+        _ => false,
+    }
+}
 
 /// BSC3-078: the attempt the running LIVE path's next C3 BUY takes, as its
 /// status record `status` (`<rundir>/bsc-runtime/status.dbrec`) reports it
 /// for the grant of `g`: the path armed under that grant, the record
-/// written within [`STATUS_STALE_AFTER_INTERVALS`] of its rewrites. Else
-/// none: every slot counts.
+/// current ([`status_is_current`]). Else none: every slot counts.
 pub fn reported_held_attempt(status: &Path, g: &Generation, now_ms: u64) -> Option<String> {
     use darkbot_bsc_record::schema::bsc_runtime::runtime_status as rs;
     let grant = g.live_set_by.as_ref()?.generation;
     let r = darkbot_bsc_record::decode(&rs::SCHEMA, &fs::read(status).ok()?).ok()?;
-    let written = r.u64(rs::PROVENANCE_OBSERVED_UNIX_MS).ok()?;
-    let interval = r.u64(rs::STATUS_INTERVAL_MS).ok()?;
-    if now_ms.saturating_sub(written) > STATUS_STALE_AFTER_INTERVALS.saturating_mul(interval) {
+    if !status_is_current(&r, now_ms) {
         return None;
     }
     let live = r.nested_all(rs::LIVE).ok()?.into_iter().next()?;
@@ -3408,9 +3522,10 @@ pub fn usage_besides(
     dir: &Path,
     now_ms: u64,
     held: Option<&str>,
+    max: u32,
 ) -> (Option<BuyUsage>, Option<TotalUsage>) {
-    let mut daily = buy_usage(dir, now_ms).ok();
-    let mut total = total_usage(dir).ok();
+    let mut daily = buy_usage(dir, now_ms, max).ok();
+    let mut total = total_usage(dir, max).ok();
     let Some(attempt) = held else {
         return (daily, total);
     };
@@ -3788,27 +3903,50 @@ pub struct LiveAdmission {
 }
 
 /// [`Store::consume_buy_attempt`] on the canonical owner state.
+/// Its bounds are those of the deployed runtime's configuration
+/// ([`canonical_config_path`]), the one that runs on this owner state.
 pub fn consume_buy_attempt_here(attempt_id: &str, now_ms: u64) -> Result<BuySlot, String> {
-    let dir = canonical_state_dir().map_err(|e| format!("BUY_ATTEMPT_LIMIT_UNREADABLE: {e}"))?;
-    Store::open(dir, KEEP_GENERATIONS)?.consume_buy_attempt(attempt_id, now_ms)
+    let unreadable = |e: String| format!("BUY_ATTEMPT_LIMIT_UNREADABLE: {e}");
+    let dir = canonical_state_dir().map_err(unreadable)?;
+    let limits =
+        OwnerLimits::at(&canonical_config_path().map_err(unreadable)?).map_err(unreadable)?;
+    Store::open(dir, limits)?.consume_buy_attempt(attempt_id, now_ms)
 }
 
-/// Source-mode generations the store keeps besides the current one (one
-/// value for every caller; Paket 8 review L5).
-pub const KEEP_GENERATIONS: u64 = 64;
 impl Store {
-    pub fn open(dir: impl Into<PathBuf>, keep: u64) -> Result<Self, String> {
-        Self::open_in_session(dir, keep, boot_session())
+    pub fn open(dir: impl Into<PathBuf>, limits: OwnerLimits) -> Result<Self, String> {
+        Self::open_in_session(dir, limits, boot_session())
+    }
+
+    /// A store for the requests that only reduce authority or put the
+    /// state on file (init, the restart reset, a revocation; review E3 M1:
+    /// a stop never depends on a readable configuration): it prunes
+    /// nothing, and everything that needs the bounds is refused.
+    pub fn open_reducing(dir: impl Into<PathBuf>) -> Result<Self, String> {
+        Self::open_with(dir.into(), None, boot_session())
     }
 
     /// A store whose writes are stamped with the boot session `boot`
     /// (tests simulate a restart with another session).
     pub fn open_in_session(
         dir: impl Into<PathBuf>,
-        keep: u64,
+        limits: OwnerLimits,
         boot: Result<String, String>,
     ) -> Result<Self, String> {
-        let dir = dir.into();
+        Self::open_with(dir.into(), Some(limits), boot)
+    }
+
+    /// The bounds, or why there are none.
+    fn bounds(&self) -> Result<OwnerLimits, String> {
+        self.limits
+            .ok_or_else(|| "the owner's bounds are not configured (--config)".into())
+    }
+
+    fn open_with(
+        dir: PathBuf,
+        limits: Option<OwnerLimits>,
+        boot: Result<String, String>,
+    ) -> Result<Self, String> {
         let mut owner = None;
         for d in [dir.clone(), dir.join("generations"), dir.join("receipts")] {
             create_durable_dir(&d)?;
@@ -3827,7 +3965,7 @@ impl Store {
         Ok(Store {
             dir,
             owner,
-            keep,
+            limits,
             boot,
             campaign_spend_max: None,
         })
@@ -4183,7 +4321,12 @@ impl Store {
         after_spend_read();
         // BSC3-076 review H1: a lease's own attempt (renewed, moved to
         // another nonce) refuses nothing with the slots it already holds.
-        let (daily, total) = usage_besides(&self.dir, now_ms, lease.then_some(attempt));
+        let (daily, total) = usage_besides(
+            &self.dir,
+            now_ms,
+            lease.then_some(attempt),
+            self.bounds()?.buy_attempts_total_max,
+        );
         let ctx = LiveContext {
             boot: self.boot().ok(),
             now_unix_ms: now_ms,
@@ -4388,7 +4531,12 @@ impl Store {
             (Some(grant), Some(by)) => (grant, by),
             _ => return Err(LIVE_GRANT_MISSING.into()),
         };
-        let (daily, total) = usage_besides(&self.dir, now_ms, held);
+        let (daily, total) = usage_besides(
+            &self.dir,
+            now_ms,
+            held,
+            self.bounds()?.buy_attempts_total_max,
+        );
         let ctx = LiveContext {
             boot: self.boot().ok(),
             now_unix_ms: now_ms,
@@ -4426,7 +4574,8 @@ impl Store {
     ) -> Result<TotalSlot, String> {
         use darkbot_bsc_record::schema::bsc_runtime::buy_attempt_total_slot as ts;
         let g = self.current()?;
-        let limit = g.buy_attempts_total();
+        let max = self.bounds()?.buy_attempts_total_max;
+        let limit = g.buy_attempts_total(max);
         create_durable_dir(&total_dir(&self.dir))?;
         let taken = total_slots(&self.dir)?;
         if let Some((slot, _, _)) = taken
@@ -4463,7 +4612,7 @@ impl Store {
                 durability,
             ) {
                 Ok(()) => {
-                    let now = self.current()?.buy_attempts_total();
+                    let now = self.current()?.buy_attempts_total(max);
                     if slot >= u64::from(now) {
                         return Err(format!(
                             "BUY_ATTEMPT_TOTAL_REACHED: slot {slot} taken while the limit fell to {now}"
@@ -4500,7 +4649,8 @@ impl Store {
             return Err("the attempt ID is not a valid attempt identifier".into());
         }
         let g = self.current()?;
-        let limit = g.buy_attempts_per_day();
+        let max = self.bounds()?.buy_attempts_total_max;
+        let limit = g.buy_attempts_per_day(max);
         let day = BuyDay::at(now_ms);
         let day_dir = buy_day_dir(&self.dir, &day);
         for d in [self.dir.join("buy-attempts"), day_dir.clone()] {
@@ -4544,7 +4694,7 @@ impl Store {
                 Ok(()) => {
                     // BSC3-004: a limit lowered meanwhile holds; the slot
                     // stays taken (counted, never given back).
-                    let now = self.current()?.buy_attempts_per_day();
+                    let now = self.current()?.buy_attempts_per_day(max);
                     if slot >= u64::from(now) {
                         return Err(format!(
                             "BUY_ATTEMPT_LIMIT_REACHED: slot {slot} taken while the limit fell to {now}"
@@ -4622,7 +4772,7 @@ impl Store {
         expected_generation: u64,
         now_ms: u64,
     ) -> Result<Receipt, String> {
-        grant.validate()?;
+        grant.validate_within(self.bounds()?.buy_attempts_total_max)?;
         // R9 review LOW-3: a presence signature recovers to a key for the
         // generation this grant is written as (whose key: the runtime's
         // anchor decides).
@@ -4668,8 +4818,8 @@ impl Store {
             return Err("the request ID is not a safe identifier".into());
         }
         if !entity.accepts(requested)
-            || (entity == Entity::BuyLimit
-                && matches!(requested, Mode::PerDay(n) if n > MAX_BUY_ATTEMPTS_TOTAL))
+            || (matches!(entity, Entity::BuyLimit | Entity::BuyTotal)
+                && matches!(requested, Mode::PerDay(n) if n > self.bounds()?.buy_attempts_total_max))
         {
             return Err(format!("{} takes {}", entity.name(), entity.modes()));
         }
@@ -4812,7 +4962,12 @@ impl Store {
     /// (BSC3-008; best effort): a request that expected a later generation
     /// keeps its refusal until that generation is past.
     fn prune(&self, current: u64) {
-        let Some(below) = current.checked_sub(self.keep) else {
+        // A reducing store keeps every generation (the next bounded write
+        // prunes).
+        let Some(below) = self
+            .limits
+            .and_then(|l| current.checked_sub(l.keep_generations))
+        else {
             return;
         };
         if let Ok(entries) = fs::read_dir(self.dir.join("receipts")) {
@@ -4905,10 +5060,28 @@ pub(crate) mod tests {
         check(&SwitchId::ALL, SwitchId::index);
     }
 
+    /// The owner's bounds of the shipped configuration.
+    pub(crate) fn shipped_limits() -> OwnerLimits {
+        OwnerLimits::of_config(include_str!("../../../../config/ingress.public.env")).unwrap()
+    }
+
+    /// The shipped attempts' maximum.
+    pub(crate) fn max() -> u32 {
+        shipped_limits().buy_attempts_total_max
+    }
+
+    /// The shipped bounds keeping `keep` generations.
+    pub(crate) fn keeping(keep: u64) -> OwnerLimits {
+        OwnerLimits {
+            keep_generations: keep,
+            ..shipped_limits()
+        }
+    }
+
     fn store(tag: &str) -> (PathBuf, Store) {
         let dir = std::env::temp_dir().join(format!("bsc-sources-{tag}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
-        let s = Store::open(&dir, 8).unwrap();
+        let s = Store::open(&dir, keeping(8)).unwrap();
         (dir, s)
     }
 
@@ -5193,7 +5366,7 @@ pub(crate) mod tests {
         assert_eq!((r.outcome, r.generation), ("REJECTED_STALE", 1));
         assert_eq!(r.effective, Effective::Off, "BlockReq unchanged");
         // A new process (restart) reads the same state.
-        let again = Store::open(&dir, 8).unwrap();
+        let again = Store::open(&dir, keeping(8)).unwrap();
         assert_eq!(again.current().unwrap(), s.current().unwrap());
         fs::remove_dir_all(dir).unwrap();
     }
@@ -5273,7 +5446,7 @@ pub(crate) mod tests {
             .create(&base)
             .unwrap();
         let dir = base.join("bsc-sources");
-        let s = Store::open_in_session(&dir, 8, Ok("boot-1".into())).unwrap();
+        let s = Store::open_in_session(&dir, keeping(8), Ok("boot-1".into())).unwrap();
         s.request("a", SwitchId::Sign, Mode::Enabled, 0, 1).unwrap();
         assert_eq!(require_enabled(&dir, "boot-1", &[SwitchId::Sign]), Ok(1));
         let mode =
@@ -5287,7 +5460,7 @@ pub(crate) mod tests {
             (base.clone(), 0o777, false),
         ] {
             mode(&p, m);
-            let e = Store::open_in_session(&dir, 8, Ok("boot-1".into()))
+            let e = Store::open_in_session(&dir, keeping(8), Ok("boot-1".into()))
                 .err()
                 .unwrap();
             assert!(
@@ -5302,7 +5475,7 @@ pub(crate) mod tests {
             mode(&p, 0o700);
         }
         mode(&base, 0o1777);
-        assert!(Store::open_in_session(&dir, 8, Ok("boot-1".into())).is_ok());
+        assert!(Store::open_in_session(&dir, keeping(8), Ok("boot-1".into())).is_ok());
         mode(&base, 0o700);
         // The current generation writable by others, or a link to another file.
         let current = s.generation_path(1);
@@ -5370,7 +5543,7 @@ pub(crate) mod tests {
     pub(crate) fn session(tag: &str, boot: &str) -> (PathBuf, Store) {
         let dir = std::env::temp_dir().join(format!("bsc-switch-{tag}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
-        let s = Store::open_in_session(&dir, 8, Ok(boot.into())).unwrap();
+        let s = Store::open_in_session(&dir, keeping(8), Ok(boot.into())).unwrap();
         (dir, s)
     }
 
@@ -5722,7 +5895,7 @@ pub(crate) mod tests {
                 .switch_now(SwitchId::WalletLauncher, None),
             Effective::Blocked(RESET_BY_RESTART)
         );
-        let after = Store::open_in_session(&dir, 8, Ok("boot-2".into())).unwrap();
+        let after = Store::open_in_session(&dir, keeping(8), Ok("boot-2".into())).unwrap();
         after
             .request("b-2", SourceId::Drpc, Mode::Shadow, 1, 2)
             .unwrap();
@@ -5734,7 +5907,7 @@ pub(crate) mod tests {
         assert_eq!(g.boot.as_deref(), Some("boot-2"));
         assert!(require_enabled(&dir, "boot-2", &[SwitchId::WalletLauncher]).is_err());
         // Without a boot session nothing can be written.
-        let blind = Store::open_in_session(&dir, 8, Err("no boot".into())).unwrap();
+        let blind = Store::open_in_session(&dir, keeping(8), Err("no boot".into())).unwrap();
         assert!(
             blind
                 .request("b-3", SwitchId::WalletLauncher, Mode::Enabled, 2, 3)
@@ -5835,7 +6008,7 @@ pub(crate) mod tests {
         let (dir, s) = session("runtime", "boot-1");
         let g = s.current().unwrap();
         assert_eq!(
-            (g.runtime.effective, g.buy_attempts_per_day()),
+            (g.runtime.effective, g.buy_attempts_per_day(max())),
             (Effective::Off, 0)
         );
         assert_eq!(Entity::parse(RUNTIME_MODE), Some(Entity::Runtime));
@@ -5877,7 +6050,7 @@ pub(crate) mod tests {
         .unwrap();
         let g = s.current().unwrap();
         assert_eq!(
-            (g.runtime.effective, g.buy_attempts_per_day()),
+            (g.runtime.effective, g.buy_attempts_per_day(max())),
             (Effective::Off, 0)
         );
         fs::remove_dir_all(dir).unwrap();
@@ -5938,21 +6111,21 @@ pub(crate) mod tests {
         assert_eq!(s.consume_buy_attempt("a2", now + 6).unwrap().slot, 1);
         let e = s.consume_buy_attempt("a3", now + 7).unwrap_err();
         assert!(e.starts_with("BUY_ATTEMPT_LIMIT_REACHED: 2 of 2"), "{e}");
-        let usage = buy_usage(&dir, now).unwrap();
+        let usage = buy_usage(&dir, now, max()).unwrap();
         assert_eq!((usage.used, usage.limit, usage.remaining()), (2, 2, 0));
         // The next UTC day starts empty.
         assert_eq!(s.consume_buy_attempt("a3", now + DAY_MS).unwrap().slot, 0);
         // A restart keeps the limit and the count.
-        let again = Store::open_in_session(&dir, 8, Ok("boot-2".into())).unwrap();
+        let again = Store::open_in_session(&dir, keeping(8), Ok("boot-2".into())).unwrap();
         again.restart(now + 8).unwrap();
-        assert_eq!(buy_usage(&dir, now).unwrap().used, 2);
-        assert_eq!(again.current().unwrap().buy_attempts_per_day(), 2);
+        assert_eq!(buy_usage(&dir, now, max()).unwrap().used, 2);
+        assert_eq!(again.current().unwrap().buy_attempts_per_day(max()), 2);
         // A lower limit leaves nothing remaining, never a negative count.
         let g = again.current().unwrap().generation;
         again
             .request("bl-2", Entity::BuyLimit, Mode::PerDay(1), g, now + 9)
             .unwrap();
-        let usage = buy_usage(&dir, now).unwrap();
+        let usage = buy_usage(&dir, now, max()).unwrap();
         assert_eq!((usage.used, usage.limit, usage.remaining()), (2, 1, 0));
         assert!(again.consume_buy_attempt("a4", now + 10).is_err());
         assert!(s.consume_buy_attempt("../x", now).is_err());
@@ -5980,17 +6153,17 @@ pub(crate) mod tests {
         let (again, total) = s.consume_attempt("a", 0, 2 * DAY + 5).unwrap();
         assert_eq!((again.day, again.slot), (day1.day.clone(), day1.slot));
         assert_eq!(total.slot, 0);
-        assert_eq!(buy_usage(&dir, 2 * DAY + 5).unwrap().used, 0);
+        assert_eq!(buy_usage(&dir, 2 * DAY + 5, max()).unwrap().used, 0);
         // A clock set back before the last attempt: refused, nothing taken.
         let e = s.consume_attempt("b", 0, DAY + 4).unwrap_err();
         assert!(e.contains("BUY_ATTEMPT_CLOCK_BEHIND"), "{e}");
-        assert_eq!(total_usage(&dir).unwrap().used, 1);
+        assert_eq!(total_usage(&dir, max()).unwrap().used, 1);
         // The daily limit lowered to 1 after it was read for "c": c's slot
         // 1 is taken (counted) but refused.
         let g = s.current().unwrap().generation;
         let at = dir.clone();
         let lower = move || {
-            let owner = Store::open_in_session(&at, 8, Ok("boot-1".into())).unwrap();
+            let owner = Store::open_in_session(&at, keeping(8), Ok("boot-1".into())).unwrap();
             owner
                 .request("bl-1", Entity::BuyLimit, Mode::PerDay(1), g, DAY + 6)
                 .unwrap();
@@ -5999,7 +6172,7 @@ pub(crate) mod tests {
         let e = s.consume_attempt("c", 0, DAY + 7).unwrap_err();
         BEFORE_SLOT_WRITE.with(|h| *h.borrow_mut() = None);
         assert!(e.contains("limit fell to 1"), "{e}");
-        assert_eq!(buy_usage(&dir, DAY + 7).unwrap().used, 2);
+        assert_eq!(buy_usage(&dir, DAY + 7, max()).unwrap().used, 2);
         // Review M2: tried again, its slot is still beyond the limit.
         let e = s.consume_attempt("c", 0, DAY + 8).unwrap_err();
         assert!(e.contains("beyond the limit"), "{e}");
@@ -6015,7 +6188,9 @@ pub(crate) mod tests {
             },
         );
         let back = Generation::decode(&stored.encode(1).unwrap()).unwrap();
-        assert_eq!(back.buy_attempts_per_day(), MAX_BUY_ATTEMPTS_TOTAL);
+        assert_eq!(back.buy_attempts_per_day(max()), max());
+        // Audit E 3.1: a lowered maximum caps it.
+        assert_eq!(back.buy_attempts_per_day(3), 3);
         // Review L4: a stray file among the days blocks nothing.
         fs::write(dir.join("buy-attempts/.DS_Store"), b"x").unwrap();
         assert!(s.consume_attempt("a", 0, DAY + 9).is_ok());
@@ -6043,7 +6218,7 @@ pub(crate) mod tests {
                 .count()
         });
         assert_eq!(ok, 3);
-        assert_eq!(buy_usage(&dir, 1).unwrap().used, 3);
+        assert_eq!(buy_usage(&dir, 1, max()).unwrap().used, 3);
         fs::remove_dir_all(dir).unwrap();
     }
 
@@ -6178,7 +6353,7 @@ pub(crate) mod tests {
     #[test]
     fn live_is_effective_only_when_every_condition_holds() {
         let (dir, _s, now) = live_ready("live-gate");
-        let (g, daily, total) = live_inputs(&dir, now).unwrap();
+        let (g, daily, total) = live_inputs(&dir, now, max()).unwrap();
         let q = qualified();
         let ctx = LiveContext {
             boot: Some("boot-1"),
@@ -6474,7 +6649,7 @@ pub(crate) mod tests {
         let grant_generation = s.current().unwrap().live_set_by.unwrap().generation;
         s.consume_attempt("l1", grant_generation, now).unwrap();
         s.consume_attempt("l2", grant_generation, now).unwrap();
-        let (g, daily, total) = live_inputs(&dir, now).unwrap();
+        let (g, daily, total) = live_inputs(&dir, now, max()).unwrap();
         assert_eq!(total.used_by_grant(grant_generation), 2);
         let q = qualified();
         let ctx = LiveContext {
@@ -6596,7 +6771,7 @@ pub(crate) mod tests {
         let mut twice = grant.clone();
         twice.sources.push(SourceId::PublicNode);
         let mut many = grant.clone();
-        many.max_attempts = MAX_BUY_ATTEMPTS_TOTAL + 1;
+        many.max_attempts = max() + 1;
         let mut nothing = grant.clone();
         nothing.adapters.clear();
         let mut over = grant.clone();
@@ -6664,7 +6839,7 @@ pub(crate) mod tests {
             now,
         )
         .unwrap();
-        let other_boot = Store::open_in_session(&dir, 8, Ok("boot-2".into())).unwrap();
+        let other_boot = Store::open_in_session(&dir, keeping(8), Ok("boot-2".into())).unwrap();
         let g = other_boot.current().unwrap();
         assert!(g.live.is_some());
         other_boot
@@ -6738,6 +6913,152 @@ pub(crate) mod tests {
         fs::remove_dir_all(dir).unwrap();
     }
 
+    /// Audit E 3.3: a runtime status is current within its own number of
+    /// its own intervals; without either it never is.
+    #[test]
+    fn a_status_is_current_within_its_own_factor() {
+        use crate::live_qualification::tests::filled;
+        use darkbot_bsc_record::schema::bsc_runtime::runtime_status as rs;
+        let read = |factor: Option<u64>| {
+            let mut d = filled(&rs::SCHEMA);
+            d.set(rs::PROVENANCE_OBSERVED_UNIX_MS, 10_000u64)
+                .set(rs::STATUS_INTERVAL_MS, 1_000u64);
+            if let Some(f) = factor {
+                d.set(rs::STATUS_STALE_INTERVALS, f);
+            }
+            darkbot_bsc_record::decode(&rs::SCHEMA, &d.encode().unwrap()).unwrap()
+        };
+        let five = read(Some(5));
+        assert!(status_is_current(&five, 15_000) && !status_is_current(&five, 15_001));
+        let two = read(Some(2));
+        assert!(status_is_current(&two, 12_000) && !status_is_current(&two, 12_001));
+        assert!(!status_is_current(&read(None), 10_000));
+    }
+
+    /// Audit E 3.1/3.4: the owner's bounds are the configuration's: both
+    /// keys required and in range; a request above the configured maximum
+    /// is refused, a stored limit above a lowered one is capped where it
+    /// counts (the slots, the gate), and the generations kept are its.
+    #[test]
+    fn the_configured_bounds_refuse_cap_and_prune() {
+        let text = |max: &str, keep: &str| {
+            format!("A=1\nBSC_BUY_ATTEMPTS_TOTAL_MAX={max}\nBSC_OWNER_KEEP_GENERATIONS={keep}\n")
+        };
+        assert_eq!(
+            OwnerLimits::of_config(&text("3", "2")),
+            Ok(OwnerLimits {
+                buy_attempts_total_max: 3,
+                keep_generations: 2
+            })
+        );
+        for (max, keep) in [("0", "2"), ("11", "2"), ("3", "0"), ("x", "2")] {
+            assert!(
+                OwnerLimits::of_config(&text(max, keep)).is_err(),
+                "{max} {keep}"
+            );
+        }
+        assert!(OwnerLimits::of_config("BSC_OWNER_KEEP_GENERATIONS=2\n").is_err());
+        // Review E3 L5: a key set twice is refused, as the runtime refuses it.
+        let twice = format!("{}BSC_BUY_ATTEMPTS_TOTAL_MAX=3\n", text("3", "2"));
+        assert!(OwnerLimits::of_config(&twice).is_err());
+        assert!(
+            OwnerLimits::of_config(&format!(
+                "#BSC_BUY_ATTEMPTS_TOTAL_MAX=9\n{}",
+                text("3", "2")
+            ))
+            .is_ok()
+        );
+        assert_eq!(shipped_limits().buy_attempts_total_max, 10);
+        // A total of ten on file, read under a maximum of three.
+        let (dir, ten) = session("owner-limits", "boot-1");
+        ten.request("bt", Entity::BuyTotal, Mode::PerDay(10), 0, 1)
+            .unwrap();
+        ten.request("bl", Entity::BuyLimit, Mode::PerDay(10), 1, 1)
+            .unwrap();
+        let three = OwnerLimits {
+            buy_attempts_total_max: 3,
+            keep_generations: 2,
+        };
+        let s = Store::open_in_session(&dir, three, Ok("boot-1".into())).unwrap();
+        let e = s
+            .request("bt-4", Entity::BuyTotal, Mode::PerDay(4), 2, 1)
+            .unwrap_err();
+        assert!(e.contains("at most BSC_BUY_ATTEMPTS_TOTAL_MAX"), "{e}");
+        assert!(
+            s.request("bl-4", Entity::BuyLimit, Mode::PerDay(4), 2, 1)
+                .is_err()
+        );
+        assert_eq!(total_usage(&dir, 3).unwrap().limit, 3);
+        assert_eq!(buy_usage(&dir, 1, 3).unwrap().limit, 3);
+        for a in ["a1", "a2", "a3"] {
+            s.consume_attempt(a, 0, 1).unwrap();
+        }
+        let e = s.consume_attempt("a4", 0, 1).unwrap_err();
+        assert!(
+            e.starts_with("BUY_ATTEMPT_") && e.contains("REACHED"),
+            "{e}"
+        );
+        // The gate reads them under the same maximum: nothing left.
+        let g = s.current().unwrap();
+        let reads = GateReads::read(&dir, &g, 1, 3);
+        assert_eq!(
+            (
+                reads.total.as_ref().map(TotalUsage::remaining),
+                reads.daily.as_ref().map(BuyUsage::remaining)
+            ),
+            (Some(0), Some(0))
+        );
+        // Review E3 M1: a store without bounds takes the reducing requests
+        // (init, reset, a revocation, a switch) and refuses what needs them.
+        let reducing = Store::open_reducing(&dir).unwrap();
+        let g = reducing.current().unwrap().generation;
+        let e = reducing
+            .request("bt-r", Entity::BuyTotal, Mode::PerDay(1), g, 1)
+            .unwrap_err();
+        assert!(e.contains("not configured"), "{e}");
+        let e = reducing.consume_attempt("a5", 0, 1).unwrap_err();
+        assert!(e.contains("not configured"), "{e}");
+        reducing
+            .request("off", Entity::Switch(SwitchId::Sign), Mode::Disabled, g, 1)
+            .unwrap();
+        reducing.restart(1).unwrap();
+        let mut grant = grant(u64::MAX);
+        grant.max_attempts = 4;
+        assert!(grant.validate().is_ok());
+        assert!(grant.validate_within(3).is_err() && grant.validate_within(4).is_ok());
+        // Two generations kept besides the current one, however many are
+        // written.
+        for (i, mode) in [Mode::Enabled, Mode::Disabled]
+            .repeat(3)
+            .into_iter()
+            .enumerate()
+        {
+            let g = s.current().unwrap().generation;
+            s.request(
+                &format!("sign-{i}"),
+                Entity::Switch(SwitchId::Sign),
+                mode,
+                g,
+                2,
+            )
+            .unwrap();
+        }
+        let current = s.current().unwrap().generation;
+        let mut kept: Vec<u64> = fs::read_dir(dir.join("generations"))
+            .unwrap()
+            .filter_map(|e| {
+                e.ok()?
+                    .file_name()
+                    .to_str()?
+                    .strip_suffix(".dbrec")?
+                    .parse()
+                    .ok()
+            })
+            .collect();
+        kept.sort();
+        assert_eq!(kept, [current - 2, current - 1, current]);
+    }
+
     /// Plan 28.10.: the campaign's total BUY limit, 0 initially and at most
     /// ten, bounds every attempt over every day and restart; the same
     /// attempt keeps its slot; concurrent attempts never exceed it.
@@ -6767,7 +7088,7 @@ pub(crate) mod tests {
         s.consume_attempt("a2", 7, now + 2).unwrap();
         let e = s.consume_buy_attempt("a3", now + DAY_MS).unwrap_err();
         assert!(e.starts_with("BUY_ATTEMPT_TOTAL_REACHED: 2 of 2"), "{e}");
-        let usage = total_usage(&dir).unwrap();
+        let usage = total_usage(&dir, max()).unwrap();
         assert_eq!(
             (
                 usage.used,
@@ -6777,10 +7098,10 @@ pub(crate) mod tests {
             ),
             (2, 2, 0, 1)
         );
-        let again = Store::open_in_session(&dir, 8, Ok("boot-2".into())).unwrap();
+        let again = Store::open_in_session(&dir, keeping(8), Ok("boot-2".into())).unwrap();
         again.restart(now).unwrap();
-        assert_eq!(total_usage(&dir).unwrap().used, 2);
-        assert_eq!(again.current().unwrap().buy_attempts_total(), 2);
+        assert_eq!(total_usage(&dir, max()).unwrap().used, 2);
+        assert_eq!(again.current().unwrap().buy_attempts_total(max()), 2);
         fs::remove_dir_all(dir).unwrap();
         let (dir, s) = session("buy-total-race", "boot-1");
         s.request("bl", Entity::BuyLimit, Mode::PerDay(10), 0, 1)
@@ -6800,7 +7121,7 @@ pub(crate) mod tests {
                 .count()
         });
         assert_eq!(ok, 3);
-        assert_eq!(total_usage(&dir).unwrap().used, 3);
+        assert_eq!(total_usage(&dir, max()).unwrap().used, 3);
         fs::remove_dir_all(dir).unwrap();
     }
 
@@ -7242,7 +7563,7 @@ pub(crate) mod tests {
         // exits neither.
         let mut g = s.current().unwrap();
         g.live.as_mut().unwrap().risk = None;
-        let (_, daily, total) = live_inputs(&dir, now).unwrap();
+        let (_, daily, total) = live_inputs(&dir, now, max()).unwrap();
         let ctx = LiveContext {
             boot: Some("boot-1"),
             now_unix_ms: now,
@@ -7287,7 +7608,7 @@ pub(crate) mod tests {
             s.live_now(&[ComponentId::ExecC3], &q, now).unwrap_err(),
             LIVE_GRANT_EXIT_ONLY
         );
-        let (_, daily, total) = live_inputs(&dir, now).unwrap();
+        let (_, daily, total) = live_inputs(&dir, now, max()).unwrap();
         let checklist = g.live_checklist(&LiveContext {
             boot: Some("boot-1"),
             now_unix_ms: now,
@@ -7321,7 +7642,7 @@ pub(crate) mod tests {
                 .unwrap_err(),
             LIVE_GRANT_EXIT_ONLY
         );
-        assert_eq!(buy_usage(&dir, now).unwrap().used, 0);
+        assert_eq!(buy_usage(&dir, now, max()).unwrap().used, 0);
         assert_eq!(spent_by_grant(&dir, armed.grant_generation()).unwrap(), 0);
         assert!(
             s.admit_live(&armed, &intent(1, LiveIntentKind::Approve), &q, now)
@@ -7336,7 +7657,7 @@ pub(crate) mod tests {
         );
         // A restart (another boot session): the switches and the grant are
         // reset, no exit until the operator authorizes again.
-        let restarted = Store::open_in_session(&dir, 8, Ok("boot-2".into())).unwrap();
+        let restarted = Store::open_in_session(&dir, keeping(8), Ok("boot-2".into())).unwrap();
         assert!(
             restarted
                 .live_now_exits(&[ComponentId::ExecC3], &q, now)
@@ -7394,7 +7715,7 @@ pub(crate) mod tests {
             LIVE_EXIT_RESERVE_MISSING
         );
         assert_eq!(spent_by_grant(&dir, armed.grant_generation()).unwrap(), 0);
-        assert_eq!(buy_usage(&dir, now).unwrap().used, 0);
+        assert_eq!(buy_usage(&dir, now, max()).unwrap().used, 0);
         // One that leaves exactly that: it, its approval and its SELL go.
         let buy = intent(1, LiveIntentKind::Buy, most - approve - sell);
         assert!(s.admit_live(&armed, &buy, &q, now).is_ok());
@@ -7501,7 +7822,7 @@ pub(crate) mod tests {
             .admit_live(&armed, &intent(3, LiveIntentKind::Sell, 0, 500), &q, now)
             .unwrap();
         assert_eq!((sell.slots, sell.spent_wei), (None, 4_500));
-        assert_eq!(buy_usage(&dir, now).unwrap().used, 2);
+        assert_eq!(buy_usage(&dir, now, max()).unwrap().used, 2);
         // Not the grant armed under; not in the scope; evidence missing.
         let other = LiveNow {
             grant_generation: generation + 1,
@@ -7533,7 +7854,7 @@ pub(crate) mod tests {
             LIVE_VENUE_UNQUALIFIED
         );
         // After a restart nothing is LIVE, an exit neither.
-        let restarted = Store::open_in_session(&dir, 8, Ok("boot-2".into())).unwrap();
+        let restarted = Store::open_in_session(&dir, keeping(8), Ok("boot-2".into())).unwrap();
         assert_eq!(
             restarted.admit_live(&armed, &exit, &q, now).unwrap_err(),
             ECONOMIC_LIVE_DISABLED
@@ -7664,8 +7985,8 @@ pub(crate) mod tests {
         // Each BUY took its slots, whatever it added (two added nothing):
         // the day's six are gone.
         assert_eq!(admit(8, 7, 1), Err(BUY_LIMIT_EXHAUSTED.into()));
-        assert_eq!(buy_usage(&dir, now).unwrap().used, 6);
-        let total = total_usage(&dir).unwrap();
+        assert_eq!(buy_usage(&dir, now, max()).unwrap().used, 6);
+        let total = total_usage(&dir, max()).unwrap();
         assert_eq!((total.used, total.grants), (6, vec![generation; 6]));
         // Every admitted entry stays, refused ones were never written.
         assert_eq!(admitted_intents(&dir).unwrap().len(), 7);
@@ -7904,8 +8225,8 @@ pub(crate) mod tests {
         // Renewed under the same attempt: its one slot, the nonce's spend once.
         s.lease_live(&armed, &lease(&two), &attempt, &q, now)
             .unwrap();
-        assert_eq!(total_usage(&dir).unwrap().used, 1);
-        assert_eq!(buy_usage(&dir, now).unwrap().used, 1);
+        assert_eq!(total_usage(&dir, max()).unwrap().used, 1);
+        assert_eq!(buy_usage(&dir, now, max()).unwrap().used, 1);
         let generation = armed.grant_generation;
         assert_eq!(spent_by_grant(&dir, generation).unwrap(), 1_000);
         let leased = admitted_intents(&dir).unwrap();
@@ -7918,7 +8239,7 @@ pub(crate) mod tests {
         s.return_leases(&[[0xa1; 32], [0xa2; 32]]).unwrap();
         assert!(admitted_intents(&dir).unwrap().is_empty());
         assert_eq!(spent_by_grant(&dir, generation).unwrap(), 0);
-        assert_eq!(total_usage(&dir).unwrap().used, 1);
+        assert_eq!(total_usage(&dir, max()).unwrap().used, 1);
         assert!(returns.join(format!("{one}.dbrec")).exists());
         assert!(returns.join(format!("{two}.dbrec")).exists());
         // Never a transaction's entry: a BUY entry is refused, kept.
@@ -7964,11 +8285,12 @@ pub(crate) mod tests {
             let mut r = filled(&rs::SCHEMA);
             r.set(rs::PROVENANCE_OBSERVED_UNIX_MS, written)
                 .set(rs::STATUS_INTERVAL_MS, 1_000u64)
+                .set(rs::STATUS_STALE_INTERVALS, 3u64)
                 .set(rs::LIVE, live.into_nested());
             fs::write(&status, r.encode().unwrap()).unwrap();
         };
         let runtime = |held: Option<String>| {
-            let reads = GateReads::read_holding(&dir, &g, now, held.as_deref());
+            let reads = GateReads::read_holding(&dir, &g, now, held.as_deref(), max());
             let ctx = LiveContext {
                 boot: Some("boot-1"),
                 ..reads.ctx(&q)
@@ -8034,14 +8356,14 @@ pub(crate) mod tests {
             s.lease_live(&armed, &lease(&id_a3), &other, &q, now)
                 .is_err()
         );
-        assert_eq!(buy_usage(&dir, now).unwrap().used, 1);
-        assert_eq!(total_usage(&dir).unwrap().used, 1);
+        assert_eq!(buy_usage(&dir, now, max()).unwrap().used, 1);
+        assert_eq!(total_usage(&dir, max()).unwrap().used, 1);
         // The next UTC day: renewed, it takes that day's slot.
         let tomorrow = now + 86_400_000;
         s.lease_live(&armed, &lease(&id_a4), &attempt, &q, tomorrow)
             .unwrap();
-        assert_eq!(buy_usage(&dir, tomorrow).unwrap().used, 1);
-        assert_eq!(total_usage(&dir).unwrap().used, 1);
+        assert_eq!(buy_usage(&dir, tomorrow, max()).unwrap().used, 1);
+        assert_eq!(total_usage(&dir, max()).unwrap().used, 1);
         fs::remove_dir_all(dir).unwrap();
     }
 
@@ -8271,8 +8593,8 @@ pub(crate) mod tests {
                 .contains("overflows")
         );
         assert!(admit().unwrap_err().starts_with(LIVE_SPEND_UNREADABLE));
-        assert_eq!(buy_usage(&dir, now).unwrap().used, 0);
-        assert_eq!(total_usage(&dir).unwrap().used, 0);
+        assert_eq!(buy_usage(&dir, now, max()).unwrap().used, 0);
+        assert_eq!(total_usage(&dir, max()).unwrap().used, 0);
         assert!(!spend_dir(&dir).join(format!("{id}.dbrec")).exists());
         fs::remove_dir_all(dir).unwrap();
     }
@@ -8292,7 +8614,7 @@ pub(crate) mod tests {
         let (went_on, go_on) = std::sync::mpsc::channel::<()>();
         let at = dir.clone();
         let first = std::thread::spawn(move || {
-            let s = Store::open_in_session(&at, 8, Ok("boot-1".into())).unwrap();
+            let s = Store::open_in_session(&at, keeping(8), Ok("boot-1".into())).unwrap();
             let q = qualified_in(&s);
             let armed = s.live_now(&[ComponentId::ExecC3], &q, now).unwrap();
             // Holds its read until the second admission has run.
@@ -8307,7 +8629,7 @@ pub(crate) mod tests {
                 .map(|a| a.spent_wei)
         });
         first_read.recv().unwrap();
-        let s = Store::open_in_session(&dir, 8, Ok("boot-1".into())).unwrap();
+        let s = Store::open_in_session(&dir, keeping(8), Ok("boot-1".into())).unwrap();
         let q = qualified_in(&s);
         let armed = s.live_now(&[ComponentId::ExecC3], &q, now).unwrap();
         let ids = [hex32(&[2; 32]), hex32(&[3; 32])];
@@ -8328,7 +8650,7 @@ pub(crate) mod tests {
             6_000
         );
         assert_eq!(admitted_intents(&dir).unwrap().len(), 1);
-        assert_eq!(buy_usage(&dir, now).unwrap().used, 1);
+        assert_eq!(buy_usage(&dir, now, max()).unwrap().used, 1);
         fs::remove_dir_all(dir).unwrap();
     }
 
@@ -8344,7 +8666,7 @@ pub(crate) mod tests {
             return;
         };
         let dir = PathBuf::from(dir);
-        let s = Store::open_in_session(&dir, 8, Ok("boot-1".into())).unwrap();
+        let s = Store::open_in_session(&dir, keeping(8), Ok("boot-1".into())).unwrap();
         let q = qualified_in(&s);
         let now = 1_793_059_200_000;
         let armed = s.live_now(&[ComponentId::ExecC3], &q, now).unwrap();
@@ -8427,7 +8749,7 @@ pub(crate) mod tests {
     #[test]
     fn the_live_checklist_names_every_condition_with_its_reason() {
         let (dir, _s, now) = live_ready("live-checklist");
-        let (g, daily, total) = live_inputs(&dir, now).unwrap();
+        let (g, daily, total) = live_inputs(&dir, now, max()).unwrap();
         let q = qualified();
         let ctx = LiveContext {
             boot: Some("boot-1"),
@@ -8486,8 +8808,8 @@ pub(crate) mod tests {
             .unwrap();
         let used = |at| {
             (
-                buy_usage(&dir, at).unwrap().used,
-                total_usage(&dir).unwrap().used,
+                buy_usage(&dir, at, max()).unwrap().used,
+                total_usage(&dir, max()).unwrap().used,
             )
         };
         assert_eq!(used(now), (2, 2));

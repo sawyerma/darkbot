@@ -46,7 +46,7 @@ describe("BSC LIVE tab (plan 28.10.)", () => {
       buySlippageBps: "300", exitSlippageBps: "500", gasPriceWei: "1000000000", buyGasLimit: "3000000", approveGasLimit: "100000", sellGasLimit: "1500000", outlierAck: true,
       maxOpenPositions: "3", maxRealizedLossWei: "5000", maxDailyRealizedLossWei: "2000", minBuyIntervalMs: "0" };
     const grantable = ["BSC_INGRESS_PUBLICNODE", "BSC_INGRESS_DRPC"];
-    const ok = grantScope(form, 1_000, grantable);
+    const ok = grantScope(form, 1_000, grantable, 10);
     expect("scope" in ok && ok.scope.expiresUnixMs).toBe(1_000n + 4n * 3_600_000n);
     expect("scope" in ok && ok.scope.venue).toBe("BSC_VENUE_FLAP");
     expect("scope" in ok && ok.scope.risk.outlierAck).toBe(true);
@@ -80,15 +80,21 @@ describe("BSC LIVE tab (plan 28.10.)", () => {
       // Audit E 1.6: a source the projection does not name grantable (no adapter endpoint).
       { ...form, sources: ["BSC_INGRESS_GETH"] },
       { ...form, sources: ["BSC_INGRESS_PUBLICNODE", "BSC_INGRESS_48CLUB"] },
-    ]) expect("error" in grantScope(bad, 1_000, grantable)).toBe(true);
+    ]) expect("error" in grantScope(bad, 1_000, grantable, 10)).toBe(true);
     // Before a choice the form names the first grantable source; without any it offers none.
-    const unchosen = grantScope({ ...form, sources: null }, 1_000, grantable);
+    const unchosen = grantScope({ ...form, sources: null }, 1_000, grantable, 10);
     expect("scope" in unchosen && unchosen.scope.sources).toEqual(["BSC_INGRESS_PUBLICNODE"]);
-    expect("error" in grantScope(form, 1_000, [])).toBe(true);
-    expect("error" in grantScope({ ...form, sources: null }, 1_000, [])).toBe(true);
+    expect("error" in grantScope(form, 1_000, [], 10)).toBe(true);
+    expect("error" in grantScope({ ...form, sources: null }, 1_000, [], 10)).toBe(true);
+    // Audit E 3.1: a lowered maximum bounds the attempts; without one no grant is formed.
+    expect("scope" in grantScope(form, 1_000, grantable, 2)).toBe(true);
+    expect("error" in grantScope({ ...form, maxAttempts: "3" }, 1_000, grantable, 2)).toBe(true);
+    expect("error" in grantScope(form, 1_000, grantable, undefined)).toBe(true);
     expect(weiOk("340282366920938463463374607431768211455")).toBe(true);
     expect(weiOk("340282366920938463463374607431768211456")).toBe(false);
-    expect([totalInputOk("10"), totalInputOk("0"), totalInputOk("11"), totalInputOk("01")]).toEqual([true, true, false, false]);
+    expect([totalInputOk("10", 10), totalInputOk("0", 10), totalInputOk("11", 10), totalInputOk("01", 10)]).toEqual([true, true, false, false]);
+    // Audit E 3.1: the configured maximum bounds it, none without one.
+    expect([totalInputOk("5", 5), totalInputOk("6", 5), totalInputOk("0", undefined)]).toEqual([true, false, false]);
   });
 
   it("lists the owner's conditions with its reasons and the requests that meet the scope", () => {

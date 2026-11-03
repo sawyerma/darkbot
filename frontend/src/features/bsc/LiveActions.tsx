@@ -48,15 +48,15 @@ const LIMIT_INPUTS: { key: "maxOpenPositions" | "maxRealizedLossWei" | "maxDaily
 
 /** The grant of one scope: the form, then the exact canonical scope and its SHA-256 to confirm.
  *  Only the sources the native projection names grantable (an adapter endpoint) are offered. */
-export function LiveGrantActions({ generation, available, grantable }: { generation: bigint; available: boolean; grantable: readonly string[] }) {
+export function LiveGrantActions({ generation, available, grantable, maxAttempts }: { generation: bigint; available: boolean; grantable: readonly string[]; maxAttempts: number | undefined }) {
   const { busy } = useSourceControl();
   const [form, setForm] = useState<GrantForm>(EMPTY);
   const [shown, setShown] = useState<{ scope: LiveGrantScope; text: string; sha: string } | null>(null);
-  const checked = grantScope(form, Date.now(), grantable);
+  const checked = grantScope(form, Date.now(), grantable, maxAttempts);
   const sources = formSources(form, grantable);
   const toggle = (list: string[], v: string) => list.includes(v) ? list.filter(x => x !== v) : [...list, v];
   const review = async () => {
-    const now = grantScope(form, Date.now(), grantable);
+    const now = grantScope(form, Date.now(), grantable, maxAttempts);
     if (!("scope" in now)) return;
     const text = scopeText(now.scope);
     setShown({ scope: now.scope, text, sha: await scopeSha256(text) });
@@ -70,7 +70,7 @@ export function LiveGrantActions({ generation, available, grantable }: { generat
       {LIVE_ADAPTERS.map(a => <label key={a}><input type="checkbox" checked={form.adapters.includes(a)} onChange={() => setForm({ ...form, adapters: toggle(form.adapters, a) })} data-testid={`${GRANT}-adapter-${a}`} />{a}</label>)}
       <input inputMode="numeric" aria-label="Max BUY input (wei)" placeholder="max input wei" value={form.maxInputWei} onChange={e => setForm({ ...form, maxInputWei: e.target.value.trim() })} data-testid={`${GRANT}-max-input`} />
       <input inputMode="numeric" aria-label="Max spend (wei)" placeholder="max spend wei" value={form.maxSpendWei} onChange={e => setForm({ ...form, maxSpendWei: e.target.value.trim() })} data-testid={`${GRANT}-max-spend`} />
-      <input inputMode="numeric" aria-label="BUY attempts" placeholder="attempts 1..10" value={form.maxAttempts} onChange={e => setForm({ ...form, maxAttempts: e.target.value.trim() })} data-testid={`${GRANT}-attempts`} />
+      <input inputMode="numeric" aria-label="BUY attempts" placeholder={`attempts 1..${maxAttempts ?? "?"}`} value={form.maxAttempts} onChange={e => setForm({ ...form, maxAttempts: e.target.value.trim() })} data-testid={`${GRANT}-attempts`} />
       <input inputMode="numeric" aria-label="Valid for hours" placeholder="hours" value={form.hours} onChange={e => setForm({ ...form, hours: e.target.value.trim() })} data-testid={`${GRANT}-hours`} />
       {RISK_INPUTS.map(r => <input key={r.key} inputMode="numeric" aria-label={r.label} placeholder={r.label} value={form[r.key]} onChange={e => setForm({ ...form, [r.key]: e.target.value.trim() })} data-testid={`${GRANT}-${r.test}`} />)}
       {LIMIT_INPUTS.map(r => <input key={r.key} inputMode="numeric" aria-label={r.label} placeholder={r.label} value={form[r.key]} onChange={e => setForm({ ...form, [r.key]: e.target.value.trim() })} data-testid={`${GRANT}-${r.test}`} />)}
@@ -110,20 +110,20 @@ export function LiveRevokeActions({ generation, granted, held }: { generation: b
 }
 
 const TOTAL = "bsc-live-total";
-/** The campaign's total BUY attempt limit (at most ten). */
-export function TotalLimitActions({ generation, available, limit }: { generation: bigint; available: boolean; limit: bigint }) {
+/** The campaign's total BUY attempt limit (at most BSC_BUY_ATTEMPTS_TOTAL_MAX, Audit E 3.1). */
+export function TotalLimitActions({ generation, available, limit, max }: { generation: bigint; available: boolean; limit: bigint; max: number | undefined }) {
   const { busy } = useSourceControl();
   const [text, setText] = useState("");
   const [open, setOpen] = useState(false);
-  const ok = totalInputOk(text);
+  const ok = totalInputOk(text, max);
   return <>
     <div className="bsc-filter" data-testid={`${TOTAL}-controls`}>
-      <input inputMode="numeric" aria-label="Campaign BUY attempts" placeholder="0..10" value={text} onChange={e => setText(e.target.value.trim())} disabled={!available || busy} data-testid={`${TOTAL}-input`} />
+      <input inputMode="numeric" aria-label="Campaign BUY attempts" placeholder={`0..${max ?? "?"}`} value={text} onChange={e => setText(e.target.value.trim())} disabled={!available || busy} data-testid={`${TOTAL}-input`} />
       <button className="g-secondary" disabled={!available || busy || !ok || (ok && BigInt(text) === limit)} data-testid={`${TOTAL}-set`} onClick={() => setOpen(true)}>Set campaign limit</button>
     </div>
     <Confirm open={open} testId={TOTAL} title={`Gesamtlimit auf ${text} BUY-Versuche setzen?`} onClose={() => setOpen(false)}
       onConfirm={() => { if (ok) void ownerCommand(TOTAL, "bsc.attempt.total.set", "BSC_BUY_ATTEMPTS_TOTAL", text, generation); }}>
-      <p>Höchstens zehn echte BUY-Versuche insgesamt, über jeden Tag und Neustart, unklare (UNKNOWN) eingeschlossen. Ein Limit ist keine Ausführungsfreigabe. Generation {generation.toString()}.</p>
+      <p>Höchstens {max ?? "?"} echte BUY-Versuche insgesamt (BSC_BUY_ATTEMPTS_TOTAL_MAX), über jeden Tag und Neustart, unklare (UNKNOWN) eingeschlossen. Ein Limit ist keine Ausführungsfreigabe. Generation {generation.toString()}.</p>
     </Confirm>
     <Receipt testId={TOTAL} />
   </>;

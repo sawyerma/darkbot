@@ -48,8 +48,9 @@ use alloy_sol_types::{SolCall, sol};
 use common::bytecode::{CodeScan, eip1967_implementation_slot, strip_metadata};
 use common::edge::{self, Endpoint, Pin, SimCall, SimLog, SimResult};
 use common::util::{bounded, utc_stamp};
-use darkbot_bsc_execution::live_qualification::PARITY_MIN_EXECUTED_PER_PATH;
+use darkbot_bsc_execution::live_qualification::{PARITY_MIN_RANGE, parity_min_of};
 use darkbot_bsc_execution::rpc_wire::Limits;
+use darkbot_bsc_execution::sources::RUNTIME_CONFIG_PATH;
 use darkbot_bsc_execution::venue_probe::PROBED_SELECTORS;
 use darkbot_bsc_qualification::c1_common::{self, Args};
 use darkbot_bsc_record::schema::bsc_flap_impl_parity::flap_impl_parity as fp;
@@ -103,10 +104,6 @@ mod defaults {
     /// `--per-class` (1..=1000): cases executed per class; the rest of a
     /// class is skipped (the frequent swaps do not crowd out launches).
     pub const PER_CLASS: u64 = 60;
-    /// `--min-launches`, `--min-buys`, `--min-sells`, `--min-launch-buys`
-    /// (the LIVE qualification's floor ..=1000): executed cases a parity
-    /// verdict needs per traded path (fewer: INSUFFICIENT).
-    pub const MIN_PER_PATH: u64 = super::PARITY_MIN_EXECUTED_PER_PATH;
     /// `--view-gas` (1..=10000000): the gas of each view after a call.
     pub const VIEW_GAS: u64 = 1_000_000;
     /// `--max-calldata` (the decoder's bound when classifying).
@@ -466,7 +463,7 @@ fn config() -> Result<Config, String> {
         blocks: bounded(&args, "blocks", defaults::BLOCKS, 1, 40_000)?,
         batch: bounded(&args, "block-batch", defaults::BLOCK_BATCH, 1, 100)?,
         per_class: bounded(&args, "per-class", defaults::PER_CLASS, 1, 1_000)?,
-        min: minimums(&args)?,
+        min: minimums(&args, parity_floor()?)?,
         view_gas: bounded(&args, "view-gas", defaults::VIEW_GAS, 1, 10_000_000)?,
         observed,
         out_root: PathBuf::from(args.opt("out-root")?.unwrap_or(defaults::OUT_ROOT)),
@@ -496,21 +493,25 @@ fn config() -> Result<Config, String> {
     })
 }
 
-/// The executed cases each traded path needs (`Class::PATHS`): at least the
-/// LIVE qualification's floor, a run may ask more of itself, never less.
-fn minimums(args: &Args) -> Result<[u64; 4], String> {
+/// Audit E 3.2: the LIVE qualification's floor as the runtime configuration
+/// of the repository root (the working directory) sets it.
+fn parity_floor() -> Result<u64, String> {
+    let text = std::fs::read_to_string(RUNTIME_CONFIG_PATH)
+        .map_err(|e| format!("{RUNTIME_CONFIG_PATH}: {e}"))?;
+    parity_min_of(&text)
+}
+
+/// The executed cases each traded path needs (`Class::PATHS`, `--min-launches`,
+/// `--min-buys`, `--min-sells`, `--min-launch-buys`; fewer: INSUFFICIENT): at
+/// least the LIVE qualification's `floor` (its default), a run may ask more
+/// of itself within the key's range, never less.
+fn minimums(args: &Args, floor: u64) -> Result<[u64; 4], String> {
     let mut out = [0u64; 4];
     for (m, flag) in
         out.iter_mut()
             .zip(["min-launches", "min-buys", "min-sells", "min-launch-buys"])
     {
-        *m = bounded(
-            args,
-            flag,
-            defaults::MIN_PER_PATH,
-            defaults::MIN_PER_PATH,
-            1_000,
-        )?;
+        *m = bounded(args, flag, floor, floor, *PARITY_MIN_RANGE.end())?;
     }
     Ok(out)
 }
@@ -1402,7 +1403,8 @@ mod tests {
 
     #[test]
     fn only_executed_cases_count_and_the_minimum_is_at_least_the_floor() {
-        let floor = PARITY_MIN_EXECUTED_PER_PATH;
+        let floor =
+            parity_min_of(include_str!("../../../../../config/ingress.public.env")).unwrap();
         let full: BTreeMap<Class, u64> = Class::PATHS.iter().map(|c| (*c, floor)).collect();
         let min = [floor; 4];
         assert_eq!(
@@ -1456,15 +1458,18 @@ mod tests {
         assert!(!executed(&seq(&reverted, &ok), &seq(&reverted, &ok), 2));
         // A run may raise a minimum, never lower it below the floor.
         let args = |v: &[&str]| Args::parse(v.iter().map(|s| s.to_string()));
-        assert_eq!(minimums(&args(&[])).unwrap(), [floor; 4]);
-        assert_eq!(minimums(&args(&["--min-buys", "40"])).unwrap()[1], 40);
+        assert_eq!(minimums(&args(&[]), floor).unwrap(), [floor; 4]);
+        assert_eq!(
+            minimums(&args(&["--min-buys", "40"]), floor).unwrap()[1],
+            40
+        );
         for flag in [
             "--min-launches",
             "--min-buys",
             "--min-sells",
             "--min-launch-buys",
         ] {
-            assert!(minimums(&args(&[flag, "1"])).is_err(), "{flag}");
+            assert!(minimums(&args(&[flag, "1"]), floor).is_err(), "{flag}");
         }
     }
 

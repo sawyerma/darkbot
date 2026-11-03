@@ -73,12 +73,12 @@ try:
     status=lambda: subprocess.run([str(h.ROOT/'bsc/engine/target/debug/dbrec_show'),str(h.WORK/'run/bsc-runtime/status.dbrec')],capture_output=True,text=True).stdout
     # The browser test left C2 and Strategy C BLOCKED (requested LIVE): SHADOW again, so the owner runs
     # and checkpoints, and the restarted run is the one the strategy replay below takes.
-    gen=int(subprocess.run([str(runtime),'source','show','--state',str(h.WORK/'run/bsc-sources')],capture_output=True,text=True,check=True).stdout.splitlines()[0].split('=')[1])
+    gen=int(subprocess.run([str(runtime),'source','show','--state',str(h.WORK/'run/bsc-sources'),'--config',str(h.WORK/'app/bsc-source/bsc/config/ingress.public.env')],capture_output=True,text=True,check=True).stdout.splitlines()[0].split('=')[1])
     h.run('bsc','source','request','BSC_STATE_C2','SHADOW',str(gen),'e2e-c2-crash')
     h.run('bsc','source','request','BSC_STRATEGY_C','SHADOW',str(gen+1),'e2e-strategy-crash')
     # Plan 27.10.: a wallet switch ENABLED before the crash is DISABLED by the restarted runtime.
     h.run('bsc','source','request','BSC_WALLET_LAUNCHER','ENABLED',str(gen+2),'e2e-launcher-crash')
-    show=lambda: subprocess.run([str(runtime),'source','show','--state',str(h.WORK/'run/bsc-sources')],capture_output=True,text=True,check=True).stdout
+    show=lambda: subprocess.run([str(runtime),'source','show','--state',str(h.WORK/'run/bsc-sources'),'--config',str(h.WORK/'app/bsc-source/bsc/config/ingress.public.env')],capture_output=True,text=True,check=True).stdout
     assert 'BSC_WALLET_LAUNCHER requested=ENABLED effective=ENABLED' in show(), show()
     for _ in range(60):
         if 'state.checkpoint_writes' in status() and 'state.checkpoint_writes = 0' not in status(): break

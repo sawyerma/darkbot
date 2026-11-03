@@ -51,8 +51,8 @@ use crate::paper_exec::{Arming, ExecBuy, ExecIntent, Executor, NonceEvidence, Re
 use crate::runtime::exec::{ExecSetup, Prober, launch_to, live_probe, strategy_to};
 use crate::runtime::state::{LaneEvidence, StateOwner};
 use crate::sources::{
-    ComponentId, KEEP_GENERATIONS, LiveAdapter, LiveIntentKind, LiveStrategies, NonceCosts,
-    NonceKey, NonceOrigin, SourceId, Store,
+    ComponentId, LiveAdapter, LiveIntentKind, LiveStrategies, NonceCosts, NonceKey, NonceOrigin,
+    SourceId, Store,
 };
 use crate::submission::tls::{AuthorizationToken, Q5A_TLS_POLICY, TlsSetup};
 use crate::submission::transport::Clock;
@@ -1991,9 +1991,9 @@ impl LiveRuntime {
         // The gate, as it holds now.
         let opened = match &self.boot {
             Some(boot) => {
-                Store::open_in_session(&self.state_dir, KEEP_GENERATIONS, Ok(boot.clone()))
+                Store::open_in_session(&self.state_dir, self.exec.owner, Ok(boot.clone()))
             }
-            None => Store::open(&self.state_dir, KEEP_GENERATIONS),
+            None => Store::open(&self.state_dir, self.exec.owner),
         };
         let store = match opened {
             // R4: its BUYs within the campaign's cumulative budget.
@@ -4049,7 +4049,12 @@ mod tests {
         assert_eq!(accepted.load(Ordering::SeqCst), 1);
         // Review MEDIUM-2: another grant (a new generation) or another
         // qualification record is another end; the old one never arms.
-        let owner_store = Store::open_in_session(&state, 8, Ok("boot-1".into())).unwrap();
+        let owner_store = Store::open_in_session(
+            &state,
+            crate::sources::tests::keeping(8),
+            Ok("boot-1".into()),
+        )
+        .unwrap();
         let regrant = |name: &str| {
             let grant = LiveGrant {
                 max_input_wei: 10_000_000_000_000_000,
@@ -4226,7 +4231,16 @@ mod tests {
                 .unwrap()
                 .contains("eth_sendBundle")
         );
-        assert_eq!(buy_usage(&state, NOW).unwrap().used, 1);
+        assert_eq!(
+            buy_usage(
+                &state,
+                NOW,
+                crate::sources::tests::shipped_limits().buy_attempts_total_max
+            )
+            .unwrap()
+            .used,
+            1
+        );
         let r = record(&x);
         assert_eq!(r.u64(l::RELEASED).unwrap(), 1);
         assert!(
@@ -4272,10 +4286,25 @@ mod tests {
         // default cap it takes nothing: no owner slot, nothing sent.
         let (hash_b, raw_b, launcher_b) = crate::runtime::exec::tests::launch_n(1);
         c2.pending(hash_b, launcher_b, 4, 0, 20);
-        let used = buy_usage(&state, NOW).unwrap().used;
+        let used = buy_usage(
+            &state,
+            NOW,
+            crate::sources::tests::shipped_limits().buy_attempts_total_max,
+        )
+        .unwrap()
+        .used;
         let second = x.on_launch(SourceId::PublicNode, hash_b, &raw_b, 20, &c2, &clock);
         assert!(second.is_none(), "{:?}", reason(&x));
-        assert_eq!(buy_usage(&state, NOW).unwrap().used, used);
+        assert_eq!(
+            buy_usage(
+                &state,
+                NOW,
+                crate::sources::tests::shipped_limits().buy_attempts_total_max
+            )
+            .unwrap()
+            .used,
+            used
+        );
         assert!(requests.recv_timeout(Duration::from_millis(300)).is_err());
         assert!(
             record(&x)
@@ -4284,7 +4313,12 @@ mod tests {
                 .contains(&"SESSION_CAP=1")
         );
         // Revoked: the path ends at the next pass, the key goes.
-        let owner_store = Store::open_in_session(&state, 8, Ok("boot-1".into())).unwrap();
+        let owner_store = Store::open_in_session(
+            &state,
+            crate::sources::tests::keeping(8),
+            Ok("boot-1".into()),
+        )
+        .unwrap();
         let g = owner_store.current().unwrap().generation;
         assert!(
             owner_store
@@ -4464,7 +4498,13 @@ mod tests {
         });
         assert_eq!(x.free_nonce(&c2), Some(6));
         let (used, spent) = (
-            buy_usage(&state, NOW).unwrap().used,
+            buy_usage(
+                &state,
+                NOW,
+                crate::sources::tests::shipped_limits().buy_attempts_total_max,
+            )
+            .unwrap()
+            .used,
             crate::sources::admitted_intents(&state).unwrap(),
         );
         assert_eq!((used, spent.len()), (1, 1));
@@ -4485,7 +4525,16 @@ mod tests {
                     .any(|f| f.tx_hash == second.handoff.tx_hash && f.nonce == 6),
                 "{facts:?}"
             );
-            assert_eq!(buy_usage(&state, NOW).unwrap().used, used + 1);
+            assert_eq!(
+                buy_usage(
+                    &state,
+                    NOW,
+                    crate::sources::tests::shipped_limits().buy_attempts_total_max
+                )
+                .unwrap()
+                .used,
+                used + 1
+            );
             assert_eq!(
                 crate::sources::admitted_intents(&state).unwrap().len(),
                 spent.len() + 1
@@ -4497,7 +4546,16 @@ mod tests {
             return;
         }
         assert!(second.is_none(), "{:?}", reason(&x));
-        assert_eq!(buy_usage(&state, NOW).unwrap().used, used);
+        assert_eq!(
+            buy_usage(
+                &state,
+                NOW,
+                crate::sources::tests::shipped_limits().buy_attempts_total_max
+            )
+            .unwrap()
+            .used,
+            used
+        );
         assert_eq!(crate::sources::admitted_intents(&state).unwrap(), spent);
         assert!(requests.recv_timeout(Duration::from_millis(300)).is_err());
         let r = record(&x);
@@ -5457,7 +5515,12 @@ mod tests {
         /// reset the switches or a revoke took the grant): every switch
         /// ENABLED and a new grant.
         fn authorize(&self, boot: &str, request: &str) {
-            let s = Store::open_in_session(&self.state, 8, Ok(boot.into())).unwrap();
+            let s = Store::open_in_session(
+                &self.state,
+                crate::sources::tests::keeping(8),
+                Ok(boot.into()),
+            )
+            .unwrap();
             s.restart(NOW).unwrap();
             for (i, id) in crate::sources::SwitchId::ALL.into_iter().enumerate() {
                 let g = s.current().unwrap().generation;
@@ -5820,7 +5883,12 @@ mod tests {
             .unwrap();
         r.requests.recv_timeout(Duration::from_secs(2)).unwrap();
         // Revoked with the BUY unresolved: the arm ends, its fence stays.
-        let s = Store::open_in_session(&r.state, 8, Ok("boot-1".into())).unwrap();
+        let s = Store::open_in_session(
+            &r.state,
+            crate::sources::tests::keeping(8),
+            Ok("boot-1".into()),
+        )
+        .unwrap();
         let g = s.current().unwrap().generation;
         assert!(
             s.request("revoke", Entity::LiveGrant, Mode::Disabled, g, NOW)
@@ -7169,7 +7237,12 @@ mod tests {
         assert_eq!(out[0].kind, IntentKind::Approve);
         r.requests.recv_timeout(wait).unwrap();
         // Revoked: everything ends.
-        let s = Store::open_in_session(&r.state, 8, Ok("boot-1".into())).unwrap();
+        let s = Store::open_in_session(
+            &r.state,
+            crate::sources::tests::keeping(8),
+            Ok("boot-1".into()),
+        )
+        .unwrap();
         let g = s.current().unwrap().generation;
         assert!(
             s.request("revoke", Entity::LiveGrant, Mode::Disabled, g, NOW)
@@ -7655,7 +7728,12 @@ mod tests {
         settle(&mut x, &c2);
         unsigned(&x);
         x.shutdown();
-        let store = Store::open_in_session(&r.state, 8, Ok("boot-1".into())).unwrap();
+        let store = Store::open_in_session(
+            &r.state,
+            crate::sources::tests::keeping(8),
+            Ok("boot-1".into()),
+        )
+        .unwrap();
         let state = store.current().unwrap();
         let grant = state.live.clone().unwrap();
         let signature = presence_signed(&grant, state.generation + 1);
@@ -7972,7 +8050,12 @@ mod tests {
         const TARGET: [u8; 32] = [0x7b; 32];
         let mut r = Rig::new("live-burn-exit-only", LiveStrategies::StrategyC);
         r.exec.exec.live_nonce_burn = true;
-        let s = Store::open_in_session(&r.state, 8, Ok("boot-1".into())).unwrap();
+        let s = Store::open_in_session(
+            &r.state,
+            crate::sources::tests::keeping(8),
+            Ok("boot-1".into()),
+        )
+        .unwrap();
         let grant = LiveGrant {
             max_input_wei: 10_000_000_000_000_000,
             max_spend_wei: 100_000_000_000_000_000,
@@ -8313,7 +8396,12 @@ mod tests {
         assert_eq!(r.fences(".fence"), vec!["live-7-0.fence"]);
         // Writable again: this process still does not arm.
         fs::set_permissions(&ledger, fs::Permissions::from_mode(0o700)).unwrap();
-        let s = Store::open_in_session(&r.state, 8, Ok("boot-1".into())).unwrap();
+        let s = Store::open_in_session(
+            &r.state,
+            crate::sources::tests::keeping(8),
+            Ok("boot-1".into()),
+        )
+        .unwrap();
         let g = s.current().unwrap().generation;
         assert!(
             s.request("revoke", Entity::LiveGrant, Mode::Disabled, g, NOW)
@@ -8648,12 +8736,27 @@ mod tests {
             x.poll_responses(&clock);
             std::thread::sleep(Duration::from_millis(5));
         }
-        let used = buy_usage(&r.state, NOW).unwrap().used;
+        let used = buy_usage(
+            &r.state,
+            NOW,
+            crate::sources::tests::shipped_limits().buy_attempts_total_max,
+        )
+        .unwrap()
+        .used;
         let (out, refused) = x
             .on_strategy(&sc.buy([0xB2; 20]), &c2, &clock, now_ms)
             .unwrap();
         assert_eq!((out.len(), refused), (0, Some(Refusal::Dispatch)));
-        assert_eq!(buy_usage(&r.state, NOW).unwrap().used, used);
+        assert_eq!(
+            buy_usage(
+                &r.state,
+                NOW,
+                crate::sources::tests::shipped_limits().buy_attempts_total_max
+            )
+            .unwrap()
+            .used,
+            used
+        );
         assert!(r.requests.recv_timeout(Duration::from_millis(300)).is_err());
         let status = record(&x);
         assert!(status.texts(l::RESPONSES).unwrap().contains(&"REJECT=1"));
@@ -8705,7 +8808,12 @@ mod tests {
         use crate::paper_exec::IntentKind;
         let r = Rig::new("live-rt-exit-only", LiveStrategies::StrategyC);
         let sc = Sc::new(r.buyer);
-        let s = Store::open_in_session(&r.state, 8, Ok("boot-1".into())).unwrap();
+        let s = Store::open_in_session(
+            &r.state,
+            crate::sources::tests::keeping(8),
+            Ok("boot-1".into()),
+        )
+        .unwrap();
         let grant = LiveGrant {
             max_input_wei: 10_000_000_000_000_000,
             max_spend_wei: 100_000_000_000_000_000,
@@ -9466,7 +9574,12 @@ mod tests {
         use crate::sources::LiveIntent;
         let r = Rig::new("live-alt-crash", LiveStrategies::C3);
         let b = r.buyer;
-        let store = Store::open_in_session(&r.state, 8, Ok("boot-1".into())).unwrap();
+        let store = Store::open_in_session(
+            &r.state,
+            crate::sources::tests::keeping(8),
+            Ok("boot-1".into()),
+        )
+        .unwrap();
         let q = crate::sources::tests::qualified_in(&store);
         let armed = store.live_now(&[ComponentId::ExecC3], &q, NOW).unwrap();
         let origin = NonceOrigin {
@@ -9619,7 +9732,16 @@ mod tests {
             refusals.texts(l::REFUSALS)
         );
         // BSC3-076: only the lease's attempt and entry, no transaction.
-        assert_eq!(buy_usage(&r.state, NOW).unwrap().used, 1);
+        assert_eq!(
+            buy_usage(
+                &r.state,
+                NOW,
+                crate::sources::tests::shipped_limits().buy_attempts_total_max
+            )
+            .unwrap()
+            .used,
+            1
+        );
         assert!(
             crate::sources::admitted_intents(&r.state)
                 .unwrap()
@@ -9635,7 +9757,16 @@ mod tests {
         let fresh = x.on_launch(SourceId::PublicNode, hash_b, &raw_b, 20, &c2, &clock);
         assert!(fresh.is_some(), "{:?}", reason(&x));
         assert!(r.requests.recv_timeout(Duration::from_secs(2)).is_ok());
-        assert_eq!(buy_usage(&r.state, NOW).unwrap().used, 1);
+        assert_eq!(
+            buy_usage(
+                &r.state,
+                NOW,
+                crate::sources::tests::shipped_limits().buy_attempts_total_max
+            )
+            .unwrap()
+            .used,
+            1
+        );
         x.shutdown();
         r.clean();
     }
@@ -9749,7 +9880,12 @@ mod tests {
     fn an_executor_beyond_the_granted_risk_does_not_arm() {
         use crate::sources::{GrantRisk, tests::TEST_RISK};
         let r = Rig::new("live-risk-arm", LiveStrategies::C3);
-        let s = Store::open_in_session(&r.state, 8, Ok("boot-1".into())).unwrap();
+        let s = Store::open_in_session(
+            &r.state,
+            crate::sources::tests::keeping(8),
+            Ok("boot-1".into()),
+        )
+        .unwrap();
         let grant = |risk: GrantRisk| LiveGrant {
             max_input_wei: 10_000_000_000_000_000,
             max_spend_wei: 100_000_000_000_000_000,
@@ -9825,7 +9961,12 @@ mod tests {
         // Every switch, both limits and the grant: requests of this very
         // process, applied with no presence asked.
         let r = Rig::new("live-authz", LiveStrategies::C3);
-        let s = Store::open_in_session(&r.state, 8, Ok("boot-1".into())).unwrap();
+        let s = Store::open_in_session(
+            &r.state,
+            crate::sources::tests::keeping(8),
+            Ok("boot-1".into()),
+        )
+        .unwrap();
         let q = crate::live_qualification::view(&r.root).0.view;
         assert!(s.live_now(&[ComponentId::ExecC3], &q, NOW).is_ok());
         let c2 = c2_at(&r.d, r.buyer, 5);
@@ -10090,12 +10231,26 @@ mod tests {
         assert!(x.armed(), "{:?}", reason(&x));
         let held = leases(&r.state);
         assert_eq!((held.len(), held[0].nonce), (1, Some(5)));
-        assert_eq!(buy_usage(&r.state, NOW).unwrap().used, 1);
+        assert_eq!(
+            buy_usage(
+                &r.state,
+                NOW,
+                crate::sources::tests::shipped_limits().buy_attempts_total_max
+            )
+            .unwrap()
+            .used,
+            1
+        );
         // Passes with nothing changed keep it (no write).
         settle(&mut x, &c2);
         settle(&mut x, &c2);
         assert_eq!(leases(&r.state), held);
-        let s = Store::open_in_session(&r.state, 8, Ok("boot-1".into())).unwrap();
+        let s = Store::open_in_session(
+            &r.state,
+            crate::sources::tests::keeping(8),
+            Ok("boot-1".into()),
+        )
+        .unwrap();
         let g = s.current().unwrap().generation;
         let applied = s
             .request("drpc", Entity::Source(SourceId::Drpc), Mode::Shadow, g, NOW)
@@ -10121,7 +10276,16 @@ mod tests {
             "{why}"
         );
         assert!(r.requests.recv_timeout(Duration::from_millis(300)).is_err());
-        assert_eq!(buy_usage(&r.state, NOW).unwrap().used, 1);
+        assert_eq!(
+            buy_usage(
+                &r.state,
+                NOW,
+                crate::sources::tests::shipped_limits().buy_attempts_total_max
+            )
+            .unwrap()
+            .used,
+            1
+        );
         // The next pass: a new lease, the old one back, one attempt.
         settle(&mut x, &c2);
         assert!(x.armed(), "{:?}", reason(&x));
@@ -10137,7 +10301,16 @@ mod tests {
             x.executor.as_ref().unwrap().end().last_refusal()
         );
         assert!(r.requests.recv_timeout(Duration::from_secs(2)).is_ok());
-        assert_eq!(buy_usage(&r.state, NOW).unwrap().used, 1);
+        assert_eq!(
+            buy_usage(
+                &r.state,
+                NOW,
+                crate::sources::tests::shipped_limits().buy_attempts_total_max
+            )
+            .unwrap()
+            .used,
+            1
+        );
         x.shutdown();
         r.clean();
     }
@@ -10216,10 +10389,23 @@ mod tests {
         assert_eq!(admitted.len(), 1);
         assert_eq!(spent(&r.state), admitted[0].max_wei);
         // Its attempt is the lease's slot; the strategy BUY took its own.
-        assert_eq!(crate::sources::total_usage(&r.state).unwrap().used, 2);
+        assert_eq!(
+            crate::sources::total_usage(
+                &r.state,
+                crate::sources::tests::shipped_limits().buy_attempts_total_max
+            )
+            .unwrap()
+            .used,
+            2
+        );
         // The arm ends (revoke): a lease it held goes back with it.
         settle(&mut x, &c2);
-        let s = Store::open_in_session(&r.state, 8, Ok("boot-1".into())).unwrap();
+        let s = Store::open_in_session(
+            &r.state,
+            crate::sources::tests::keeping(8),
+            Ok("boot-1".into()),
+        )
+        .unwrap();
         let g = s.current().unwrap().generation;
         assert!(
             s.request("revoke", Entity::LiveGrant, Mode::Disabled, g, NOW)
@@ -10229,7 +10415,15 @@ mod tests {
         settle(&mut x, &c2);
         assert!(!x.armed());
         assert!(leases(&r.state).is_empty());
-        assert_eq!(crate::sources::total_usage(&r.state).unwrap().used, 2);
+        assert_eq!(
+            crate::sources::total_usage(
+                &r.state,
+                crate::sources::tests::shipped_limits().buy_attempts_total_max
+            )
+            .unwrap()
+            .used,
+            2
+        );
         x.shutdown();
         r.clean();
     }
@@ -10257,7 +10451,16 @@ mod tests {
         assert_eq!(renewed.len(), 1);
         assert_ne!(renewed[0].tx_hash, first[0].tx_hash);
         assert_eq!(renewed[0].max_block, Some(HEAD + 1 + 4));
-        assert_eq!(buy_usage(&r.state, NOW).unwrap().used, 1);
+        assert_eq!(
+            buy_usage(
+                &r.state,
+                NOW,
+                crate::sources::tests::shipped_limits().buy_attempts_total_max
+            )
+            .unwrap()
+            .used,
+            1
+        );
         // The renewed one moved whole out of the spend (it grows not).
         let name = format!("{}.dbrec", alloy_primitives::hex::encode(first[0].tx_hash));
         assert!(r.state.join("live-lease-returns").join(&name).exists());
@@ -10277,7 +10480,12 @@ mod tests {
         settle(&mut x, &c2);
         assert!(x.armed(), "{:?}", reason(&x));
         assert_eq!(leases(&r.state).len(), 1);
-        let s = Store::open_in_session(&r.state, 8, Ok("boot-1".into())).unwrap();
+        let s = Store::open_in_session(
+            &r.state,
+            crate::sources::tests::keeping(8),
+            Ok("boot-1".into()),
+        )
+        .unwrap();
         let g = s.current().unwrap().generation;
         assert!(
             s.request(
@@ -10293,7 +10501,16 @@ mod tests {
         settle(&mut x, &c2);
         assert!(!x.armed());
         assert!(leases(&r.state).is_empty());
-        assert_eq!(buy_usage(&r.state, NOW).unwrap().used, 1);
+        assert_eq!(
+            buy_usage(
+                &r.state,
+                NOW,
+                crate::sources::tests::shipped_limits().buy_attempts_total_max
+            )
+            .unwrap()
+            .used,
+            1
+        );
         x.shutdown();
         r.clean();
     }
@@ -10355,12 +10572,24 @@ mod tests {
         assert!(x.armed(), "{:?}", reason(&x));
         // Re-review HIGH: the runtime's reconcile reads the gate as this arm
         // does: the venue, the runtime, C2, C3 and the source stay LIVE.
-        let s = Store::open_in_session(&r.state, 8, Ok("boot-1".into())).unwrap();
+        let s = Store::open_in_session(
+            &r.state,
+            crate::sources::tests::keeping(8),
+            Ok("boot-1".into()),
+        )
+        .unwrap();
         let g = s.current().unwrap();
         let q = crate::live_qualification::view(&r.root).0.view;
         let view = crate::runtime::LiveView {
             boot: Some("boot-1".into()),
-            ..crate::runtime::LiveView::of(&g, &r.state, Some(&q), NOW, Some(&x))
+            ..crate::runtime::LiveView::of(
+                &g,
+                &r.state,
+                Some(&q),
+                NOW,
+                Some(&x),
+                crate::sources::tests::max(),
+            )
         };
         for e in [
             Entity::Runtime,
@@ -10402,7 +10631,15 @@ mod tests {
             x.executor.as_ref().unwrap().end().last_refusal()
         );
         assert!(r.requests.recv_timeout(Duration::from_secs(2)).is_ok());
-        assert_eq!(crate::sources::total_usage(&r.state).unwrap().used, 1);
+        assert_eq!(
+            crate::sources::total_usage(
+                &r.state,
+                crate::sources::tests::shipped_limits().buy_attempts_total_max
+            )
+            .unwrap()
+            .used,
+            1
+        );
         x.shutdown();
         r.clean();
     }
@@ -10605,7 +10842,7 @@ mod tests {
     }
 
     fn granted_generation(state: &Path) -> u64 {
-        Store::open(state, 8)
+        Store::open(state, crate::sources::tests::keeping(8))
             .unwrap()
             .current()
             .unwrap()
@@ -12719,7 +12956,12 @@ mod tests {
         assert!(x.armed(), "{:?}", reason(&x));
         // The operator holds the granted PublicNode in SHADOW: the grant
         // still names it, the path stays armed (its exits need no source).
-        let s = Store::open_in_session(&r.state, 8, Ok("boot-1".into())).unwrap();
+        let s = Store::open_in_session(
+            &r.state,
+            crate::sources::tests::keeping(8),
+            Ok("boot-1".into()),
+        )
+        .unwrap();
         let g = s.current().unwrap().generation;
         let shadow = s
             .request("pn-shadow", SourceId::PublicNode, Mode::Shadow, g, NOW)
@@ -12757,13 +12999,28 @@ mod tests {
         let (hash, raw, launcher) = launch();
         c2.pending(hash, launcher, 3, 0, 10);
         // (The arm's lease holds its attempt already, BSC3-076.)
-        let used = buy_usage(&r.state, NOW).unwrap().used;
+        let used = buy_usage(
+            &r.state,
+            NOW,
+            crate::sources::tests::shipped_limits().buy_attempts_total_max,
+        )
+        .unwrap()
+        .used;
         let admitted = crate::sources::admitted_intents(&r.state).unwrap();
         assert!(sighted(&mut x, &c2, &raw, 10).is_none());
         assert!(r.requests.recv_timeout(Duration::from_millis(200)).is_err());
         assert_eq!(refused(&x, "SOURCE_NOT_LIVE").as_deref(), Some("1"));
         assert_eq!(refused(&x, "SOURCE_NOT_GRANTED"), None);
-        assert_eq!(buy_usage(&r.state, NOW).unwrap().used, used);
+        assert_eq!(
+            buy_usage(
+                &r.state,
+                NOW,
+                crate::sources::tests::shipped_limits().buy_attempts_total_max
+            )
+            .unwrap()
+            .used,
+            used
+        );
         assert_eq!(
             crate::sources::admitted_intents(&r.state).unwrap(),
             admitted
@@ -12847,7 +13104,13 @@ mod tests {
         assert!(r.requests.recv_timeout(Duration::from_secs(2)).is_ok());
         assert_eq!(buy.launch_hash, hash);
         // PublicNode again (a resubscription): no second BUY, no refusal.
-        let used = buy_usage(&r.state, NOW).unwrap().used;
+        let used = buy_usage(
+            &r.state,
+            NOW,
+            crate::sources::tests::shipped_limits().buy_attempts_total_max,
+        )
+        .unwrap()
+        .used;
         let refusals = |x: &LiveRuntime| {
             let r = record(x);
             let texts: Vec<String> = r
@@ -12860,7 +13123,16 @@ mod tests {
         };
         let before = refusals(&x);
         assert!(sighted(SourceId::PublicNode, &mut x, 13).is_none());
-        assert_eq!(buy_usage(&r.state, NOW).unwrap().used, used);
+        assert_eq!(
+            buy_usage(
+                &r.state,
+                NOW,
+                crate::sources::tests::shipped_limits().buy_attempts_total_max
+            )
+            .unwrap()
+            .used,
+            used
+        );
         assert_eq!(refusals(&x), before);
         assert!(r.requests.recv_timeout(Duration::from_millis(200)).is_err());
         x.shutdown();
@@ -13063,7 +13335,15 @@ mod tests {
             .lease()
             .unwrap()
             .attempt();
-        assert_eq!(crate::sources::total_usage(&r.state).unwrap().used, 1);
+        assert_eq!(
+            crate::sources::total_usage(
+                &r.state,
+                crate::sources::tests::shipped_limits().buy_attempts_total_max
+            )
+            .unwrap()
+            .used,
+            1
+        );
         LEASE_BOUND.with(|b| b.set(false));
         let t = Cell::new(10u64);
         let clock = FnClock {
@@ -13104,7 +13384,15 @@ mod tests {
                 .unwrap();
             settle(&mut x, &c2);
             assert!(!returns.exists());
-            assert_eq!(crate::sources::total_usage(&r.state).unwrap().used, 1);
+            assert_eq!(
+                crate::sources::total_usage(
+                    &r.state,
+                    crate::sources::tests::shipped_limits().buy_attempts_total_max
+                )
+                .unwrap()
+                .used,
+                1
+            );
             x.shutdown();
             r.clean();
             return;
@@ -13121,7 +13409,15 @@ mod tests {
             .unwrap()
             .attempt();
         assert_ne!(next, attempt);
-        assert_eq!(crate::sources::total_usage(&r.state).unwrap().used, 1);
+        assert_eq!(
+            crate::sources::total_usage(
+                &r.state,
+                crate::sources::tests::shipped_limits().buy_attempts_total_max
+            )
+            .unwrap()
+            .used,
+            1
+        );
         assert!(
             !record(&x)
                 .texts(l::REFUSALS)
@@ -13303,7 +13599,12 @@ mod tests {
         let live = r.state.join("live-ledger");
         fs::create_dir_all(&live).unwrap();
         fs::write(live.join(format!("{:020}.dbrec", 0)), b"torn").unwrap();
-        let s = Store::open_in_session(&r.state, 8, Ok("boot-1".into())).unwrap();
+        let s = Store::open_in_session(
+            &r.state,
+            crate::sources::tests::keeping(8),
+            Ok("boot-1".into()),
+        )
+        .unwrap();
         let g = s.current().unwrap().generation;
         Ledger::open(&r.state)
             .quarantine(0, "q-0", "operator", g, || Ok(g), NOW)

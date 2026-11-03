@@ -22,6 +22,8 @@ BSC_JOB_PLIST="$RUNDIR/$BSC_READINESS_LABEL.plist"
 BSC_REPORTER_PLIST="$RUNDIR/$BSC_REPORTER_LABEL.plist"
 BSC_RUNTIME_PLIST="$RUNDIR/$BSC_RUNTIME_LABEL.plist"
 BSC_ROOT="$APP_HOME/bsc-source"
+# The runtime configuration of the snapshot: the runtime's, and the owner's bounds (Audit E 3.1/3.4).
+BSC_CONFIG="$BSC_ROOT/bsc/config/ingress.public.env"
 
 bsc_pid() { launchctl list "$BSC_READINESS_LABEL" 2>/dev/null | sed -n 's/.*"PID" = \([0-9][0-9]*\);/\1/p' || true; }
 bsc_result_field() { sed -n "s/^$1=//p" "$RUNDIR/bsc.readiness.result" 2>/dev/null || true; }
@@ -71,7 +73,7 @@ bsc_runtime_pid() { launchctl list "$BSC_RUNTIME_LABEL" 2>/dev/null | sed -n 's/
 # REV.1.0 R10: the configuration as the runtime `$1` takes it (and the LIVE path's files, unread):
 # a refused start is never handed to launchd, which would restart it every BSC_LAUNCHD_THROTTLE_S.
 bsc_config_check() {
-  /usr/bin/env -i PATH=/usr/bin:/bin "$1" config-check --config "${2:-$BSC_ROOT/bsc/config/ingress.public.env}"
+  /usr/bin/env -i PATH=/usr/bin:/bin "$1" config-check --config "${2:-$BSC_CONFIG}"
 }
 bsc_runtime_up() {
   [ -x "$APP_HOME/current/bsc_runtime" ] || return 0
@@ -80,14 +82,14 @@ bsc_runtime_up() {
     say "BSC Runtime nicht gestartet: Konfiguration verweigert (darkbotctl bsc config-check)"; return 0; }
   rm -f "$RUNDIR/bsc.runtime.stop"
   local args
-  args="$(for a in run --sources "$RUNDIR/bsc-sources" --rundir "$RUNDIR" --config "$BSC_ROOT/bsc/config/ingress.public.env"; do printf '<string>%s</string>' "$(printf '%s' "$a" | xml_escape)"; done)"
+  args="$(for a in run --sources "$RUNDIR/bsc-sources" --rundir "$RUNDIR" --config "$BSC_CONFIG"; do printf '<string>%s</string>' "$(printf '%s' "$a" | xml_escape)"; done)"
   bsc_plist "$BSC_RUNTIME_LABEL" "$APP_HOME/current/bsc_runtime" "$args" "$LOGDIR/bsc-runtime.log" crash > "$BSC_RUNTIME_PLIST"
   launchctl bootstrap "$DOMAIN" "$BSC_RUNTIME_PLIST"
 }
 # The runtime's own stop bound (validated by it against its derived stop path).
 bsc_runtime_stop_timeout_ms() {
   local ms
-  ms="$(sed -n 's/^BSC_RUNTIME_STOP_TIMEOUT_MS=\([0-9][0-9]*\)$/\1/p' "$BSC_ROOT/bsc/config/ingress.public.env" 2>/dev/null | tail -n 1)"
+  ms="$(sed -n 's/^BSC_RUNTIME_STOP_TIMEOUT_MS=\([0-9][0-9]*\)$/\1/p' "$BSC_CONFIG" 2>/dev/null | tail -n 1)"
   [ -n "$ms" ] || die "BSC_RUNTIME_STOP_TIMEOUT_MS fehlt in ingress.public.env"
   printf '%s\n' "$ms"
 }
@@ -252,27 +254,27 @@ bsc_live() {
   [ "$#" -gt 0 ] && shift
   case "$cmd" in
     scope) [ "$#" -eq 20 ] || die "$BSC_LIVE_USAGE"; bsc_live_flags "$@"
-      /usr/bin/env -i PATH=/usr/bin:/bin "$rt" live scope "${LIVE_FLAGS[@]}" ;;
+      /usr/bin/env -i PATH=/usr/bin:/bin "$rt" live scope "${LIVE_FLAGS[@]}" --config "$BSC_CONFIG" ;;
     grant) [ "$#" -eq 23 ] || die "$BSC_LIVE_USAGE"; bsc_live_flags "$@"
       case "${21}" in ''|*[!$BSC_HEX]*) die "scope_sha256 is 64 lowercase hex digits" ;; esac
       [ "${#21}" -eq 64 ] || die "scope_sha256 is 64 lowercase hex digits"
       case "${22}" in ''|*[!0-9]*) die "generation must be an unsigned integer" ;; esac
       /usr/bin/env -i PATH=/usr/bin:/bin "$rt" live grant "${LIVE_FLAGS[@]}" --scope-sha256 "${21}" \
-        --expect-generation "${22}" --request-id "${23}" --state "$RUNDIR/bsc-sources" ;;
+        --expect-generation "${22}" --request-id "${23}" --state "$RUNDIR/bsc-sources" --config "$BSC_CONFIG" ;;
     revoke) [ "$#" -eq 2 ] || die "$BSC_LIVE_USAGE"
       case "$1" in ''|*[!0-9]*) die "generation must be an unsigned integer" ;; esac
       /usr/bin/env -i PATH=/usr/bin:/bin "$rt" live revoke --expect-generation "$1" --request-id "$2" \
         --state "$RUNDIR/bsc-sources" ;;
     status) [ "$#" -eq 0 ] || die "$BSC_LIVE_USAGE"
       /usr/bin/env -i PATH=/usr/bin:/bin "$rt" live status --state "$RUNDIR/bsc-sources" --root "$BSC_ROOT" \
-        --rundir "$RUNDIR" ;;
+        --rundir "$RUNDIR" --config "$BSC_CONFIG" ;;
     positions|idle) [ "$#" -eq 0 ] || die "$BSC_LIVE_USAGE"
       /usr/bin/env -i PATH=/usr/bin:/bin "$rt" live "$cmd" --state "$RUNDIR/bsc-sources" ;;
     ledger-check) [ "$#" -eq 0 ] || die "$BSC_LIVE_USAGE"
       /usr/bin/env -i PATH=/usr/bin:/bin "$rt" live ledger check --state "$RUNDIR/bsc-sources" ;;
     attempts) [ "$#" -eq 0 ] || die "$BSC_LIVE_USAGE"
       /usr/bin/env -i PATH=/usr/bin:/bin "$rt" live attempts --rundir "$RUNDIR" --state "$RUNDIR/bsc-sources" \
-        --config "$BSC_ROOT/bsc/config/ingress.public.env" --manifest "$BSC_ROOT/bsc/config/live_campaign.env" ;;
+        --config "$BSC_CONFIG" --manifest "$BSC_ROOT/bsc/config/live_campaign.env" ;;
     campaign-precommit) [ "$#" -eq 0 ] || die "$BSC_LIVE_USAGE"
       /usr/bin/env -i PATH=/usr/bin:/bin "$rt" live campaign-precommit --rundir "$RUNDIR" \
         --manifest "$BSC_ROOT/bsc/config/live_campaign.env" --decided-by "$(/usr/bin/id -un)" ;;
@@ -285,18 +287,18 @@ bsc_live() {
       /usr/bin/env -i PATH=/usr/bin:/bin "$rt" live loopback-identity "$1" --state "$2" --root "$ROOT" ;;
     adopt-g07) [ "$#" -eq 3 ] || die "$BSC_LIVE_USAGE"
       bsc_live_ledger "$rt" "$3" adopt-g07 --g08 "$1" --capture "$2" \
-        --config "$BSC_ROOT/bsc/config/ingress.public.env" ;;
+        --config "$BSC_CONFIG" ;;
     lot) [ "$#" -eq 4 ] || die "$BSC_LIVE_USAGE"; bsc_live_hash "$1"
       local what
       case "$2" in RESUME) what=resume ;; WRITE_OFF) what=write-off ;; EXIT_NOW) what=exit-now ;;
         *) die "a lot's decision is RESUME, WRITE_OFF or EXIT_NOW" ;; esac
       bsc_live_number "$3" "the ledger version"
       bsc_live_ledger "$rt" "$4" lot "$what" --lot "$1" --expect-version "$3" \
-        --config "$BSC_ROOT/bsc/config/ingress.public.env" ;;
+        --config "$BSC_CONFIG" ;;
     nonce-burn) [ "$#" -eq 3 ] || die "$BSC_LIVE_USAGE"; bsc_live_hash "$1"
       bsc_live_number "$2" "the ledger version"
       bsc_live_ledger "$rt" "$3" nonce-burn --tx "$1" --expect-version "$2" \
-        --config "$BSC_ROOT/bsc/config/ingress.public.env" ;;
+        --config "$BSC_CONFIG" ;;
     ledger-quarantine) [ "$#" -eq 3 ] || die "$BSC_LIVE_USAGE"
       bsc_live_number "$1" "a ledger entry's sequence number"
       bsc_live_number "$2" "generation"
@@ -311,14 +313,14 @@ bsc_source_request() {
   [ -x "$APP_HOME/current/bsc_runtime" ] || die "BSC runtime nicht deployed"
   /usr/bin/env -i PATH=/usr/bin:/bin "$APP_HOME/current/bsc_runtime" source request "$1" "$2" \
     --expect-generation "$3" --request-id "$4" --state "$RUNDIR/bsc-sources" --root "$BSC_ROOT" \
-    --rundir "$RUNDIR"
+    --rundir "$RUNDIR" --config "$BSC_CONFIG"
 }
 cmd_bsc() {
   case "${1:-}" in
     source) case "${2:-}" in
       request) locked bsc_source_request "${@:3}" ;;
       show) [ -x "$APP_HOME/current/bsc_runtime" ] || die "BSC runtime nicht deployed"
-        /usr/bin/env -i PATH=/usr/bin:/bin "$APP_HOME/current/bsc_runtime" source show --state "$RUNDIR/bsc-sources" ;;
+        /usr/bin/env -i PATH=/usr/bin:/bin "$APP_HOME/current/bsc_runtime" source show --state "$RUNDIR/bsc-sources" --config "$BSC_CONFIG" ;;
       *) die "$BSC_REQUEST_USAGE" ;;
     esac ;;
     live) case "${2:-}" in

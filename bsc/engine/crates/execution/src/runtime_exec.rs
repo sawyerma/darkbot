@@ -56,6 +56,8 @@ pub struct ExecSetup {
     pub reprobe: Duration,
     /// Consecutive failed re-probes an armed path tolerates.
     pub reprobe_failures: u32,
+    /// The owner's bounds the LIVE path opens the owner state with.
+    pub owner: crate::sources::OwnerLimits,
 }
 
 impl ExecSetup {
@@ -737,6 +739,7 @@ pub(crate) mod tests {
     pub(crate) fn setup(path: PathBuf, reprobe: Duration) -> ExecSetup {
         ExecSetup {
             identity_path: path,
+            owner: crate::sources::tests::shipped_limits(),
             refused_accounts: Vec::new(),
             exec: ExecConfig {
                 input_wei: 1_000_000_000_000_000,

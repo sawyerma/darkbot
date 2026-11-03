@@ -2,6 +2,31 @@ use super::{projection, publisher, wire::control::*};
 use darkbot_bsc_record::{Draft, schema};
 use prost::Message;
 use std::{fs, path::PathBuf};
+/// The shipped runtime configuration.
+const SHIPPED_CONFIG: &str = include_str!("../../../../../config/ingress.public.env");
+/// Its owner bounds keeping `keep` generations.
+fn keeping(keep: u64) -> darkbot_bsc_execution::sources::OwnerLimits {
+    darkbot_bsc_execution::sources::OwnerLimits {
+        keep_generations: keep,
+        ..darkbot_bsc_execution::sources::OwnerLimits::of_config(SHIPPED_CONFIG).unwrap()
+    }
+}
+/// The shipped configuration in `root`, as a snapshot holds it (the owner's bounds the tabs read).
+fn with_runtime_config(root: &std::path::Path) {
+    let path = root.join(super::live::RUNTIME_CONFIG_PATH);
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(path, SHIPPED_CONFIG).unwrap();
+}
+/// The shipped configuration, parsed.
+fn shipped() -> darkbot_bsc_execution::runtime::RuntimeConfig {
+    darkbot_bsc_execution::runtime::RuntimeConfig::parse(SHIPPED_CONFIG).unwrap()
+}
+/// Its attempts' maximum, the campaign section's rows.
+fn max_attempts() -> usize {
+    darkbot_bsc_execution::sources::OwnerLimits::of_config(SHIPPED_CONFIG)
+        .unwrap()
+        .buy_attempts_total_max as usize
+}
 fn repo() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../..")
 }
@@ -992,7 +1017,7 @@ fn the_source_modes_reach_monitoring_from_their_native_owner() {
     };
     let snap = projection::project(&root, &run);
     assert!(!names(&snap).contains(&"darkbot.bsc.source-modes.v1".to_string()));
-    let store = Store::open(run.join("bsc-sources"), 8).unwrap();
+    let store = Store::open(run.join("bsc-sources"), keeping(8)).unwrap();
     store.init(1).unwrap();
     store
         .request("r1", SourceId::PublicNode, Mode::Live, 0, 2)
@@ -1036,7 +1061,8 @@ fn the_source_modes_reach_monitoring_from_their_native_owner() {
             .set(rs::JOURNAL_RECORDS, 0u64)
             .set(rs::JOURNAL_LOST, 0u64)
             .set(rs::MODE, "READ_ONLY")
-            .set(rs::STATUS_INTERVAL_MS, 1_000u64);
+            .set(rs::STATUS_INTERVAL_MS, 1_000u64)
+            .set(rs::STATUS_STALE_INTERVALS, 3u64);
         fs::create_dir_all(run.join("bsc-runtime")).unwrap();
         fs::write(run.join("bsc-runtime/status.dbrec"), d.encode().unwrap()).unwrap();
         let snap = projection::project(&root, &run);
@@ -1420,7 +1446,7 @@ fn the_wallet_and_economic_switches_are_projected_typed() {
     let s = projection::project(&root, &run);
     assert_eq!(s.wallets.launcher_control, None);
     assert!(s.launch.economic_controls.is_empty());
-    let store = Store::open(run.join("bsc-sources"), 8).unwrap();
+    let store = Store::open(run.join("bsc-sources"), keeping(8)).unwrap();
     store.restart(1).unwrap();
     let s = projection::project(&root, &run);
     let launcher = s.wallets.launcher_control.clone().unwrap();
@@ -1469,7 +1495,7 @@ fn the_wallet_and_economic_switches_are_projected_typed() {
     // The same state in another boot session: BLOCKED, never ENABLED.
     let other = Store::open_in_session(
         run.join("bsc-sources"),
-        8,
+        keeping(8),
         Ok(format!("{}-other", boot_session().unwrap())),
     )
     .unwrap();
@@ -1528,6 +1554,7 @@ fn the_runtime_mode_and_the_daily_buy_limit_are_projected_typed() {
     use darkbot_bsc_execution::sources::{Entity, Mode, Store};
     let root = std::env::temp_dir().join(format!("darkbot-bsc-settings-{}", std::process::id()));
     let _ = fs::remove_dir_all(&root);
+    with_runtime_config(&root);
     let run = root.join("run");
     fs::create_dir_all(&run).unwrap();
     let s = projection::project(&root, &run);
@@ -1538,7 +1565,7 @@ fn the_runtime_mode_and_the_daily_buy_limit_are_projected_typed() {
         ),
         (None, None)
     );
-    let store = Store::open(run.join("bsc-sources"), 8).unwrap();
+    let store = Store::open(run.join("bsc-sources"), keeping(8)).unwrap();
     store.restart(1).unwrap();
     let s = projection::project(&root, &run);
     let mode = s.launch.runtime_mode.unwrap();
@@ -1603,8 +1630,12 @@ fn a_live_reason_of_an_earlier_boot_is_projected_as_it_holds_now() {
     let _ = fs::remove_dir_all(&root);
     let run = root.join("run");
     fs::create_dir_all(&run).unwrap();
-    let earlier =
-        Store::open_in_session(run.join("bsc-sources"), 8, Ok("an-earlier-boot".into())).unwrap();
+    let earlier = Store::open_in_session(
+        run.join("bsc-sources"),
+        keeping(8),
+        Ok("an-earlier-boot".into()),
+    )
+    .unwrap();
     earlier
         .request("l-on", SwitchId::Live, Mode::Enabled, 0, 1)
         .unwrap();
@@ -1660,10 +1691,11 @@ fn the_tabs_count_the_running_paths_held_attempt_as_its_own() {
     use darkbot_bsc_record::schema::bsc_runtime::runtime_status as rs;
     let root = std::env::temp_dir().join(format!("darkbot-bsc-held-{}", std::process::id()));
     let _ = fs::remove_dir_all(&root);
+    with_runtime_config(&root);
     let rundir = root.join("run");
     let dir = rundir.join("bsc-sources");
     fs::create_dir_all(rundir.join("bsc-runtime")).unwrap();
-    let store = Store::open(&dir, 8).unwrap();
+    let store = Store::open(&dir, keeping(8)).unwrap();
     let now = projection::clock_s().unwrap() * 1_000;
     let mut g = 0;
     let mut req = |e: Entity, m: Mode| {
@@ -1720,6 +1752,7 @@ fn the_tabs_count_the_running_paths_held_attempt_as_its_own() {
         let mut d = filled(&rs::SCHEMA);
         d.set(rs::PROVENANCE_OBSERVED_UNIX_MS, written)
             .set(rs::STATUS_INTERVAL_MS, 1_000u64)
+            .set(rs::STATUS_STALE_INTERVALS, 3u64)
             .set(rs::LIVE, live.into_nested());
         fs::write(rundir.join("bsc-runtime/status.dbrec"), d.encode().unwrap()).unwrap();
     };
@@ -1876,6 +1909,7 @@ fn the_live_tab_shows_the_exit_deciders_the_recovery_and_the_quarantine() {
         let mut d = filled(&rs::SCHEMA);
         d.set(rs::PROVENANCE_OBSERVED_UNIX_MS, written)
             .set(rs::STATUS_INTERVAL_MS, 60_000u64)
+            .set(rs::STATUS_STALE_INTERVALS, 3u64)
             .set(rs::CANONICAL, canonical.clone().into_nested())
             .set(rs::LIVE, path.into_nested());
         fs::write(rundir.join("bsc-runtime/status.dbrec"), d.encode().unwrap()).unwrap();
@@ -2263,10 +2297,11 @@ fn the_live_tab_projects_the_gate_grant_and_ledger() {
     };
     let root = std::env::temp_dir().join(format!("darkbot-bsc-live-tab-{}", std::process::id()));
     let _ = fs::remove_dir_all(&root);
+    with_runtime_config(&root);
     let rundir = root.join("run");
     let dir = rundir.join("bsc-sources");
     fs::create_dir_all(&rundir).unwrap();
-    let store = Store::open(&dir, 8).unwrap();
+    let store = Store::open(&dir, keeping(8)).unwrap();
     let now = projection::clock_s().unwrap() * 1_000;
     let mut g = 0;
     let mut req = |e: Entity, m: Mode| {
@@ -2364,6 +2399,15 @@ fn the_live_tab_projects_the_gate_grant_and_ledger() {
     Ledger::open(&dir).append(&buy, now).unwrap();
     let config = super::live::runtime_config(&root);
     let live = super::live::live_state(&root, &rundir, config.as_ref().map_err(|w| *w), Some(now));
+    // Audit E 3.1: the gate reads under the configured maximum; without one
+    // no attempt count reads (the gate names them unreadable).
+    {
+        let g = darkbot_bsc_execution::sources::current_generation(&dir).unwrap();
+        let bounded = super::projection::gate_reads(&rundir, &dir, &g, now, Some(2));
+        assert!(bounded.total.is_some_and(|t| t.limit <= 2));
+        let blind = super::projection::gate_reads(&rundir, &dir, &g, now, None);
+        assert!(blind.daily.is_none() && blind.total.is_none());
+    }
     assert_eq!(live.gate, "BLOCKED");
     assert_eq!(
         live.blockers.first().map(String::as_str),
@@ -2713,10 +2757,10 @@ fn attempt_file(n: u64) -> String {
 }
 /// The warning of `total` attempt records, more than the campaign's limit (re-check F2).
 fn beyond_limit(total: usize) -> String {
-    use super::campaign::MAX_ATTEMPTS;
+    let max = max_attempts();
     format!(
-        "LIVE_ATTEMPTS_BEYOND_LIMIT {total}/{MAX_ATTEMPTS}, shown: the first {MAX_ATTEMPTS} by ordinal of the first {} by transaction",
-        MAX_ATTEMPTS + 1
+        "LIVE_ATTEMPTS_BEYOND_LIMIT {total}/{max}, shown: the first {max} by ordinal of the first {} by transaction",
+        max + 1
     )
 }
 /// [`evaluated_attempt`]`(n)` as the LIVE tab must show it from a record of the evaluation `ms`:
@@ -2824,8 +2868,7 @@ fn the_live_tab_shows_the_campaign_verdict_and_the_attempts_as_recorded() {
     let rundir = root.join("run");
     let dir = rundir.join(ATTEMPTS_DIR);
     fs::create_dir_all(&dir).unwrap();
-    let live =
-        || super::live::live_state(&root, &rundir, Err("TEST_ONLY"), Some(1_793_000_100_000));
+    let live = || super::live::live_state(&root, &rundir, Ok(&shipped()), Some(1_793_000_100_000));
     let empty = live();
     assert!(empty.campaign.is_none() && empty.attempts.is_empty());
     assert_eq!(campaign_warnings(&empty), Vec::<String>::new());
@@ -3043,6 +3086,21 @@ fn the_live_tab_shows_the_campaign_verdict_and_the_attempts_as_recorded() {
             ..projected_attempt(1, MS)
         }
     );
+    // Review E3 L4: without the configured maximum no attempt is shown, and
+    // the tab says why (never "beyond the limit 0").
+    let blind = super::live::live_state(&root, &rundir, Err("no configuration"), Some(MS));
+    assert!(blind.attempts.is_empty());
+    assert!(
+        blind
+            .warnings
+            .contains(&super::campaign::LIVE_ATTEMPTS_MAX_UNKNOWN.to_string())
+    );
+    assert!(
+        !blind
+            .warnings
+            .iter()
+            .any(|w| w.starts_with("LIVE_ATTEMPTS_BEYOND_LIMIT"))
+    );
     fs::remove_dir_all(&root).unwrap();
 }
 /// REV.1.0 R2b review (M2, M3, M4, L6, re-check L-2/L-3): a damaged record is a warning, never a
@@ -3055,7 +3113,7 @@ fn the_live_tab_shows_the_campaign_verdict_and_the_attempts_as_recorded() {
 /// limit and one more record are read, the first by transaction.
 #[test]
 fn damaged_campaign_records_are_warnings_and_the_attempts_stay_bounded() {
-    use super::campaign::MAX_ATTEMPTS;
+    let max = max_attempts();
     use darkbot_bsc_execution::live_attempts::{ATTEMPTS_DIR, Campaign, VERDICT_PATH};
     use std::os::unix::fs::symlink;
     let root =
@@ -3064,7 +3122,7 @@ fn damaged_campaign_records_are_warnings_and_the_attempts_stay_bounded() {
     let rundir = root.join("run");
     let dir = rundir.join(ATTEMPTS_DIR);
     fs::create_dir_all(&dir).unwrap();
-    let live = || super::live::live_state(&root, &rundir, Err("TEST_ONLY"), Some(1));
+    let live = || super::live::live_state(&root, &rundir, Ok(&shipped()), Some(1));
     let write = |n: u64, ms: u64| {
         fs::write(
             dir.join(attempt_file(n)),
@@ -3199,34 +3257,34 @@ fn damaged_campaign_records_are_warnings_and_the_attempts_stay_bounded() {
     // More records than the campaign can have attempts: the first ones and a warning. Nothing
     // beyond the limit and one more is read: a damaged record after them stays unread, a short
     // name is never one of them.
-    for n in 1..=MAX_ATTEMPTS as u64 + 1 {
+    for n in 1..=max as u64 + 1 {
         write(n, 7);
     }
     fs::write(dir.join(attempt_file(0xF0)), b"not a record").unwrap();
     fs::write(dir.join("0x01.dbrec"), b"not a record").unwrap();
     let l = live();
-    assert_eq!(ordinals(&l), (1..=MAX_ATTEMPTS as u64).collect::<Vec<_>>());
+    assert_eq!(ordinals(&l), (1..=max as u64).collect::<Vec<_>>());
     assert_eq!(
         campaign_warnings(&l),
         [
             "LIVE_ATTEMPT_INVALID 1, first 0x01.dbrec".to_string(),
-            beyond_limit(MAX_ATTEMPTS + 2)
+            beyond_limit(max + 2)
         ]
     );
     // Re-check F2, F4: ordinals against the transactions' order; of the limit and one more first
     // by transaction, the first by ordinal are shown, and the warnings are of those shown only
     // (the first by transaction, the one not shown, is of another evaluation).
-    for n in 1..=MAX_ATTEMPTS as u64 + 1 {
+    for n in 1..=max as u64 + 1 {
         let mut a = evaluated_attempt(n);
-        a.ordinal = MAX_ATTEMPTS as u64 + 2 - n;
+        a.ordinal = max as u64 + 2 - n;
         let ms = if n == 1 { 8 } else { 7 };
         fs::write(dir.join(attempt_file(n)), a.encode(ms).unwrap()).unwrap();
     }
     let l = live();
-    assert_eq!(ordinals(&l), (1..=MAX_ATTEMPTS as u64).collect::<Vec<_>>());
+    assert_eq!(ordinals(&l), (1..=max as u64).collect::<Vec<_>>());
     assert_eq!(
         l.attempts.iter().map(|a| a.tx.clone()).collect::<Vec<_>>(),
-        (2..=MAX_ATTEMPTS as u64 + 1)
+        (2..=max as u64 + 1)
             .rev()
             .map(|n| attempt_file(n)[..66].to_string())
             .collect::<Vec<_>>()
@@ -3235,7 +3293,7 @@ fn damaged_campaign_records_are_warnings_and_the_attempts_stay_bounded() {
         campaign_warnings(&l),
         [
             "LIVE_ATTEMPT_INVALID 1, first 0x01.dbrec".to_string(),
-            beyond_limit(MAX_ATTEMPTS + 2)
+            beyond_limit(max + 2)
         ]
     );
     fs::remove_dir_all(&root).unwrap();
@@ -3249,7 +3307,8 @@ fn damaged_campaign_records_are_warnings_and_the_attempts_stay_bounded() {
 /// shown, counted, and when not even that count fits, the rest alone (re-check F1).
 #[test]
 fn the_campaign_section_takes_only_what_the_rest_of_the_live_tab_leaves() {
-    use super::campaign::{MAX_ATTEMPTS, share};
+    use super::campaign::share;
+    let max = max_attempts();
     use super::publisher::MAX_STATE_BYTES;
     use super::wire::bsc::{
         BscLiveState, LiveGrant, LivePosition, LivePrecondition, LiveTransaction,
@@ -3266,7 +3325,7 @@ fn the_campaign_section_takes_only_what_the_rest_of_the_live_tab_leaves() {
     // Texts as long as a record allows, four times what the whole state could hold of them per
     // record: far more than any share.
     let longest = darkbot_bsc_record::DEFAULT_MAX_LEN as usize;
-    let many = 4 * MAX_STATE_BYTES / (MAX_ATTEMPTS + 2) / longest;
+    let many = 4 * MAX_STATE_BYTES / (max + 2) / longest;
     let texts = |tag: char| {
         (0..many)
             .map(|i| format!("{i:04}{}", tag.to_string().repeat(longest - 4)))
@@ -3291,7 +3350,7 @@ fn the_campaign_section_takes_only_what_the_rest_of_the_live_tab_leaves() {
         many
     ];
     fs::write(dir.join(attempt_file(1)), over.encode(7).unwrap()).unwrap();
-    for k in 2..=MAX_ATTEMPTS as u64 + 1 {
+    for k in 2..=max as u64 + 1 {
         let mut a = evaluated_attempt(k);
         a.reasons = texts('A');
         fs::write(dir.join(attempt_file(k)), a.encode(7).unwrap()).unwrap();
@@ -3307,10 +3366,10 @@ fn the_campaign_section_takes_only_what_the_rest_of_the_live_tab_leaves() {
     // `l` behind `rest`: every record within its share of what `rest` leaves, its lists the
     // evaluator's first texts in their order, the section's warnings after the rest's.
     let check = |l: &BscLiveState, rest: &BscLiveState| {
-        let s = share(MAX_STATE_BYTES - rest.encoded_len());
+        let s = share(MAX_STATE_BYTES - rest.encoded_len(), max);
         assert_eq!(
             l.attempts.iter().map(|a| a.ordinal).collect::<Vec<_>>(),
-            (2..=MAX_ATTEMPTS as u64 + 1).collect::<Vec<_>>()
+            (2..=max as u64 + 1).collect::<Vec<_>>()
         );
         let c = l.campaign.as_ref().unwrap();
         assert!(c.encoded_len() <= s && first(&c.reasons, 'R'));
@@ -3333,7 +3392,7 @@ fn the_campaign_section_takes_only_what_the_rest_of_the_live_tab_leaves() {
                     "LIVE_ATTEMPT_REASONS_BEYOND_LIMIT {hidden_attempts}, first {}",
                     attempt_file(2)
                 ),
-                beyond_limit(MAX_ATTEMPTS + 1),
+                beyond_limit(max + 1),
             ]
         );
         assert!(
@@ -3343,7 +3402,7 @@ fn the_campaign_section_takes_only_what_the_rest_of_the_live_tab_leaves() {
         );
     };
     // The LIVE tab of this run directory: the section last, behind everything else.
-    let l = super::live::live_state(&root, &rundir, Err("TEST_ONLY"), Some(1));
+    let l = super::live::live_state(&root, &rundir, Ok(&shipped()), Some(1));
     let rest = BscLiveState {
         campaign: None,
         attempts: Vec::new(),
@@ -3360,8 +3419,9 @@ fn the_campaign_section_takes_only_what_the_rest_of_the_live_tab_leaves() {
     // reporter lets one be, its ledger several lots and transactions per attempt.
     let text = super::projection::safe_text(&"T".repeat(longest));
     let word = "9".repeat(78);
-    let lots = 4 * MAX_ATTEMPTS;
+    let lots = 4 * max;
     let full = BscLiveState {
+        buy_attempts_total_max: Some(max as u32),
         gate: "BLOCKED".into(),
         blockers: vec![text.clone(); 8],
         preconditions: (0..16)
@@ -3462,9 +3522,15 @@ fn the_campaign_section_takes_only_what_the_rest_of_the_live_tab_leaves() {
     }
     .encoded_len()
         - MAX_STATE_BYTES;
-    let mut edge = BscLiveState {
-        path_reason: "T".repeat(MAX_STATE_BYTES - framing - cost),
+    // Audit E 3.1: the section's rows are the configured maximum's.
+    let maxed = BscLiveState {
+        buy_attempts_total_max: Some(max as u32),
         ..Default::default()
+    };
+    let field = maxed.encoded_len();
+    let mut edge = BscLiveState {
+        path_reason: "T".repeat(MAX_STATE_BYTES - framing - cost - field),
+        ..maxed.clone()
     };
     super::campaign::project(&rundir, &mut edge);
     assert!(edge.campaign.is_none() && edge.attempts.is_empty());
@@ -3472,8 +3538,8 @@ fn the_campaign_section_takes_only_what_the_rest_of_the_live_tab_leaves() {
     assert_eq!(edge.encoded_len(), MAX_STATE_BYTES);
     // Re-check F1: one byte less left, not even that count fits: the rest alone, within the bound.
     let rest = BscLiveState {
-        path_reason: "T".repeat(MAX_STATE_BYTES - framing - cost + 1),
-        ..Default::default()
+        path_reason: "T".repeat(MAX_STATE_BYTES - framing - cost - field + 1),
+        ..maxed.clone()
     };
     let mut beyond = rest.clone();
     super::campaign::project(&rundir, &mut beyond);
@@ -3500,7 +3566,7 @@ fn the_campaign_section_takes_only_what_the_rest_of_the_live_tab_leaves() {
         ..campaign
     };
     fs::write(rundir.join(VERDICT_PATH), over.encode(7).unwrap()).unwrap();
-    let l = super::live::live_state(&root, &rundir, Err("TEST_ONLY"), Some(1));
+    let l = super::live::live_state(&root, &rundir, Ok(&shipped()), Some(1));
     assert!(l.campaign.is_none());
     assert!(
         l.warnings

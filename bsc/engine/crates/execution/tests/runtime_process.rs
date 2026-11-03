@@ -427,7 +427,14 @@ impl Rt {
     }
 
     fn show(&self) -> String {
-        let (code, out) = cli(&["source", "show", "--state", self.state.to_str().unwrap()]);
+        let (code, out) = cli(&[
+            "source",
+            "show",
+            "--state",
+            self.state.to_str().unwrap(),
+            "--config",
+            self.config.to_str().unwrap(),
+        ]);
         assert_eq!(code, 0, "{out}");
         out
     }
@@ -460,6 +467,8 @@ impl Rt {
             &rid,
             "--state",
             self.state.to_str().unwrap(),
+            "--config",
+            self.config.to_str().unwrap(),
         ]);
         assert_eq!(code, 0, "{id} {mode}: {out}");
         self.generation = out
@@ -1045,13 +1054,14 @@ fn owner_races_replays_and_an_unreadable_owner_fail_closed() {
     let p = Wss::start();
     let mut rt = Rt::start("owner", &[("PUBLICNODE", &p.url())], &[]);
     let state = rt.state.to_str().unwrap().to_string();
+    let config = rt.config.to_str().unwrap().to_string();
     // C17: five rounds of two concurrent requests on the same generation.
     for round in 0..5 {
         let g = rt.show_generation().to_string();
         let spawn = |id: &str, mode: &str, rid: String| {
             Command::new(bin())
                 .args(["source", "request", id, mode, "--expect-generation", &g])
-                .args(["--request-id", &rid, "--state", &state])
+                .args(["--request-id", &rid, "--state", &state, "--config", &config])
                 .output()
                 .unwrap()
         };
@@ -1089,6 +1099,8 @@ fn owner_races_replays_and_an_unreadable_owner_fail_closed() {
             "c18",
             "--state",
             &state,
+            "--config",
+            &config,
         ])
     };
     let (code, first) = request("SHADOW");

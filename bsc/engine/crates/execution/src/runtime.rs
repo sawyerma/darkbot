@@ -238,6 +238,11 @@ pub struct RuntimeConfig {
     pub preflight_min_rates_s: u64,
     pub disk_reserve_bytes: u64,
     pub status_ms: u64,
+    /// Audit E 3.3: after how many status intervals a reader takes the
+    /// status as stale (written into every status record).
+    pub status_stale_intervals: u64,
+    /// Audit E 3.1/3.4: the owner's bounds.
+    pub owner: crate::sources::OwnerLimits,
     /// Every bound of the WSS adapters, validated by `WssLimits::validate`.
     pub wss: WssLimits,
     /// The canonical chain follower, when `BSC_CANONICAL_RPC` is set.
@@ -346,6 +351,25 @@ impl CanonicalConfig {
     }
 }
 
+/// Audit E 3.12: the PAPER path refuses at least the frozen G0.7 launcher
+/// and buyer (`acceptance_contract`), checked as the configuration is read;
+/// the configuration may refuse more.
+fn refused_g07_accounts(accounts: Vec<[u8; 20]>) -> Result<Vec<[u8; 20]>, String> {
+    use crate::acceptance_contract::{BUYER, LAUNCHER};
+    for (role, address) in [("launcher", LAUNCHER), ("buyer", BUYER)] {
+        let account: [u8; 20] = alloy_primitives::hex::decode(address)
+            .ok()
+            .and_then(|b| b.try_into().ok())
+            .ok_or_else(|| format!("the G0.7 {role} {address} is no address"))?;
+        if !accounts.contains(&account) {
+            return Err(format!(
+                "BSC_EXEC_REFUSED_ACCOUNTS must refuse the G0.7 {role} {address}"
+            ));
+        }
+    }
+    Ok(accounts)
+}
+
 fn bounded(name: &str, value: &str, min: u64, max: u64) -> Result<u64, String> {
     let v: u64 = value
         .parse()
@@ -387,6 +411,11 @@ impl RuntimeConfig {
         let watched = values.remove("BSC_STATE_WATCHED");
         let paper_identity = values.remove("BSC_EXEC_PAPER_IDENTITY");
         let refused_accounts = values.remove("BSC_EXEC_REFUSED_ACCOUNTS");
+        let parity_min = values.remove(crate::live_qualification::PARITY_MIN_KEY);
+        let owner = crate::sources::OwnerLimits::new(
+            values.remove(crate::sources::OwnerLimits::BUY_ATTEMPTS_TOTAL_MAX),
+            values.remove(crate::sources::OwnerLimits::KEEP_GENERATIONS),
+        )?;
         let sender_paths = values.remove("BSC_EXEC_SENDER_PATHS");
         let exit_slippage = values.remove("BSC_EXEC_EXIT_SLIPPAGE_BPS");
         let operator_exit = values.remove("BSC_EXEC_LIVE_OPERATOR_EXIT");
@@ -607,6 +636,12 @@ impl RuntimeConfig {
                 if dex_exit.is_some() {
                     return Err("BSC_EXEC_LIVE_DEX_EXIT needs BSC_EXEC_PAPER_IDENTITY".into());
                 }
+                if parity_min.is_some() {
+                    return Err(format!(
+                        "{} needs BSC_EXEC_PAPER_IDENTITY",
+                        crate::live_qualification::PARITY_MIN_KEY
+                    ));
+                }
                 if divergence.is_some() {
                     return Err(
                         "BSC_EXEC_LIVE_DIVERGENCE_QUARANTINE needs BSC_EXEC_PAPER_IDENTITY".into(),
@@ -629,14 +664,18 @@ impl RuntimeConfig {
                     Some(v) => bounded("BSC_EXEC_EXIT_SLIPPAGE_BPS", v, 0, 9_999)? as u16,
                     None => slippage_bps,
                 };
+                // Audit E 3.2: the parity floor every verification of a LIVE
+                // qualification reads from this file, checked with it.
+                crate::live_qualification::parity_min(parity_min)?;
                 ExecSetup {
                     identity_path: ExecSetup::expand_home(path)?,
+                    owner,
                     reprobe: ms(take("BSC_EXEC_REPROBE_MS", 1_000, 3_600_000)?),
                     reprobe_failures: take("BSC_EXEC_REPROBE_FAILURES", 0, 100)? as u32,
-                    refused_accounts: StateConfig::parse_watched(
+                    refused_accounts: refused_g07_accounts(StateConfig::parse_watched(
                         refused_accounts.ok_or("BSC_EXEC_REFUSED_ACCOUNTS is required")?,
                     )
-                    .map_err(|e| e.replace("BSC_STATE_WATCHED", "BSC_EXEC_REFUSED_ACCOUNTS"))?,
+                    .map_err(|e| e.replace("BSC_STATE_WATCHED", "BSC_EXEC_REFUSED_ACCOUNTS"))?)?,
                     exec: ExecConfig {
                         input_wei: u128::from(take("BSC_EXEC_INPUT_WEI", 1, u64::MAX)?),
                         slippage_bps,
@@ -1009,6 +1048,8 @@ impl RuntimeConfig {
             preflight_min_rates_s: take("BSC_RUNTIME_PREFLIGHT_MIN_RATES_S", 1, 604_800)?,
             disk_reserve_bytes: take("BSC_RUNTIME_DISK_RESERVE_BYTES", 0, 1 << 40)?,
             status_ms: take("BSC_RUNTIME_STATUS_MS", 100, 60_000)?,
+            status_stale_intervals: take("BSC_RUNTIME_STATUS_STALE_INTERVALS", 2, 1_000)?,
+            owner,
             wss,
             canonical,
             census_ms: take("BSC_RUNTIME_CENSUS_MS", 1_000, 86_400_000)?,
@@ -1935,11 +1976,12 @@ impl LiveView {
         qualification: Option<&crate::sources::LiveQualification>,
         now_ms: u64,
         live: Option<&LiveRuntime>,
+        max: u32,
     ) -> Self {
         let held = live
             .and_then(|l| l.held_attempt(g.live_set_by.as_ref().map(|by| by.generation)))
             .map(alloy_primitives::hex::encode);
-        Self::read(g, state, qualification, now_ms, held.as_deref())
+        Self::read(g, state, qualification, now_ms, held.as_deref(), max)
     }
 
     /// The owner state as it holds now; `qualification` is the reconcile's
@@ -1953,6 +1995,7 @@ impl LiveView {
         qualification: Option<&crate::sources::LiveQualification>,
         now_ms: u64,
         held: Option<&str>,
+        max: u32,
     ) -> Self {
         let Some(qualification) = qualification else {
             return LiveView {
@@ -1964,7 +2007,7 @@ impl LiveView {
                 qualification: Default::default(),
             };
         };
-        let (daily, total) = crate::sources::usage_besides(state, now_ms, held);
+        let (daily, total) = crate::sources::usage_besides(state, now_ms, held, max);
         LiveView {
             boot: crate::sources::boot_session().ok(),
             now_ms,
@@ -3446,6 +3489,7 @@ fn status_bytes(
     exec: Option<&ExecRuntime>,
     live: Option<&LiveRuntime>,
     status_interval_ms: u64,
+    bounds: (u64, crate::sources::OwnerLimits),
     census: &CensusRefresh,
 ) -> Result<Vec<u8>, String> {
     let now = clock.now_ns();
@@ -3467,7 +3511,12 @@ fn status_bytes(
                 "READ_ONLY"
             },
         )
-        .set(rs::STATUS_INTERVAL_MS, status_interval_ms);
+        .set(rs::STATUS_INTERVAL_MS, status_interval_ms)
+        .set(rs::STATUS_STALE_INTERVALS, bounds.0)
+        .set(
+            rs::BUY_ATTEMPTS_TOTAL_MAX,
+            u64::from(bounds.1.buy_attempts_total_max),
+        );
     if let Some(state) = &census.state {
         d.set(rs::CENSUS_STATE, state.as_str());
     }
@@ -3587,7 +3636,7 @@ pub fn run(
     rundir: &Path,
     repo_root: &Path,
 ) -> Result<(), String> {
-    let store = Store::open(sources_dir, crate::sources::KEEP_GENERATIONS)?;
+    let store = Store::open(sources_dir, config.owner)?;
     let clock = Clock(Instant::now());
     let started_ms = observed_now()?;
     let dir = rundir.join("bsc-runtime");
@@ -3802,6 +3851,7 @@ pub fn run(
                     qualified.as_ref().map(|(q, _)| &q.view),
                     now_ms,
                     live.as_ref(),
+                    config.owner.buy_attempts_total_max,
                 );
                 let exits = live.as_ref().is_some_and(|l| l.holds_positions());
                 let eff = |e: crate::sources::Entity| live_view.effective(&generation, e, exits);
@@ -4273,6 +4323,7 @@ pub fn run(
                 exec.as_ref(),
                 live.as_ref(),
                 config.status_ms,
+                (config.status_stale_intervals, config.owner),
                 &census_refresh,
             )?;
             replace_volatile(&status_path, &bytes)?;
@@ -4469,7 +4520,14 @@ mod tests {
         // The owner state's session (the switches are enabled in it).
         let view = |held: Option<&str>| LiveView {
             boot: Some("boot-1".into()),
-            ..LiveView::read(&g, &dir, Some(&q), now, held)
+            ..LiveView::read(
+                &g,
+                &dir,
+                Some(&q),
+                now,
+                held,
+                crate::sources::tests::shipped_limits().buy_attempts_total_max,
+            )
         };
         let other = alloy_primitives::hex::encode([0xb0; 32]);
         let (held, others, none) = (view(Some(&attempt)), view(Some(&other)), view(None));
@@ -4503,8 +4561,17 @@ mod tests {
         let view = LiveView {
             boot: Some("boot-1".into()),
             now_ms: now,
-            daily: crate::sources::buy_usage(&dir, now).ok(),
-            total: crate::sources::total_usage(&dir).ok(),
+            daily: crate::sources::buy_usage(
+                &dir,
+                now,
+                crate::sources::tests::shipped_limits().buy_attempts_total_max,
+            )
+            .ok(),
+            total: crate::sources::total_usage(
+                &dir,
+                crate::sources::tests::shipped_limits().buy_attempts_total_max,
+            )
+            .ok(),
             spent: Some(0),
             qualification: qualified(),
         };
@@ -4540,8 +4607,17 @@ mod tests {
         let view = LiveView {
             boot: Some("boot-1".into()),
             now_ms: now,
-            daily: crate::sources::buy_usage(&dir, now).ok(),
-            total: crate::sources::total_usage(&dir).ok(),
+            daily: crate::sources::buy_usage(
+                &dir,
+                now,
+                crate::sources::tests::shipped_limits().buy_attempts_total_max,
+            )
+            .ok(),
+            total: crate::sources::total_usage(
+                &dir,
+                crate::sources::tests::shipped_limits().buy_attempts_total_max,
+            )
+            .ok(),
             spent: Some(0),
             qualification: qualified(),
         };
@@ -5212,6 +5288,31 @@ mod tests {
             CONFIG.replace("MAX_LAUNCH_CALLDATA=16384", "MAX_LAUNCH_CALLDATA=1023"),
             CONFIG.replace(REFUSED, ""),
             CONFIG.replace(REFUSED, "BSC_EXEC_REFUSED_ACCOUNTS=0x12\n"),
+            // Audit E 3.12: the frozen G0.7 launcher and buyer always among them.
+            CONFIG.replace(
+                REFUSED,
+                "BSC_EXEC_REFUSED_ACCOUNTS=0x9c8a0Db41914beEE52Dd49790c4F087E252743DE\n",
+            ),
+            CONFIG.replace(
+                REFUSED,
+                "BSC_EXEC_REFUSED_ACCOUNTS=0x3e7B487Ae5e1c49aB1cF6222BDb5cf016e86aacd,0x1111111111111111111111111111111111111111\n",
+            ),
+            // Audit E 3.1–3.4: the owner's bounds, the stale factor and the
+            // parity floor, each required and in its range.
+            CONFIG.replace("BSC_BUY_ATTEMPTS_TOTAL_MAX=10\n", ""),
+            CONFIG.replace("BSC_BUY_ATTEMPTS_TOTAL_MAX=10", "BSC_BUY_ATTEMPTS_TOTAL_MAX=11"),
+            CONFIG.replace("BSC_OWNER_KEEP_GENERATIONS=64\n", ""),
+            CONFIG.replace("BSC_OWNER_KEEP_GENERATIONS=64", "BSC_OWNER_KEEP_GENERATIONS=0"),
+            CONFIG.replace("BSC_RUNTIME_STATUS_STALE_INTERVALS=3\n", ""),
+            CONFIG.replace(
+                "BSC_RUNTIME_STATUS_STALE_INTERVALS=3",
+                "BSC_RUNTIME_STATUS_STALE_INTERVALS=1",
+            ),
+            CONFIG.replace("BSC_EXEC_LIVE_PARITY_MIN_EXECUTED_PER_PATH=30\n", ""),
+            CONFIG.replace(
+                "BSC_EXEC_LIVE_PARITY_MIN_EXECUTED_PER_PATH=30",
+                "BSC_EXEC_LIVE_PARITY_MIN_EXECUTED_PER_PATH=29",
+            ),
             // Gate M2: the paths that take the sender, required and exact.
             CONFIG.replace("BSC_EXEC_SENDER_PATHS=C3+STRATEGY_C\n", ""),
             CONFIG.replace("BSC_EXEC_SENDER_PATHS=C3+STRATEGY_C", "BSC_EXEC_SENDER_PATHS=C3+C2"),
@@ -5550,9 +5651,28 @@ mod tests {
             ..Default::default()
         };
         let g = Generation::initial();
-        assert_eq!(LiveView::read(&g, &dir, Some(&q), 1, None).qualification, q);
         assert_eq!(
-            LiveView::read(&g, &dir, None, 1, None).qualification,
+            LiveView::read(
+                &g,
+                &dir,
+                Some(&q),
+                1,
+                None,
+                crate::sources::tests::shipped_limits().buy_attempts_total_max
+            )
+            .qualification,
+            q
+        );
+        assert_eq!(
+            LiveView::read(
+                &g,
+                &dir,
+                None,
+                1,
+                None,
+                crate::sources::tests::shipped_limits().buy_attempts_total_max
+            )
+            .qualification,
             crate::sources::LiveQualification::default()
         );
     }
@@ -5655,6 +5775,7 @@ mod tests {
             None,
             None,
             config.status_ms,
+            (config.status_stale_intervals, config.owner),
             &refresh,
         )
         .unwrap();
@@ -5710,6 +5831,7 @@ mod tests {
                 None,
                 None,
                 config.status_ms,
+                (config.status_stale_intervals, config.owner),
                 &CensusRefresh::default(),
             )
             .unwrap();
@@ -5773,6 +5895,7 @@ mod tests {
                 None,
                 None,
                 config.status_ms,
+                (config.status_stale_intervals, config.owner),
                 &CensusRefresh::default(),
             )
             .unwrap();
@@ -5913,6 +6036,7 @@ mod tests {
             None,
             None,
             config.status_ms,
+            (config.status_stale_intervals, config.owner),
             &CensusRefresh::default(),
         )
         .unwrap();
@@ -6130,6 +6254,7 @@ mod tests {
             None,
             None,
             config.status_ms,
+            (config.status_stale_intervals, config.owner),
             &CensusRefresh::default(),
         )
         .unwrap();
@@ -6139,6 +6264,22 @@ mod tests {
             "no C2 owner, no state record"
         );
         assert_eq!(r.u64(rs::STATUS_INTERVAL_MS).unwrap(), config.status_ms);
+        // Audit E 3.1/3.3: the stale factor every reader applies, and the
+        // attempts' maximum the tabs offer.
+        assert_eq!(
+            (
+                r.u64(rs::STATUS_STALE_INTERVALS).unwrap(),
+                r.u64(rs::BUY_ATTEMPTS_TOTAL_MAX).unwrap()
+            ),
+            (
+                config.status_stale_intervals,
+                u64::from(config.owner.buy_attempts_total_max)
+            )
+        );
+        let written = r.u64(rs::PROVENANCE_OBSERVED_UNIX_MS).unwrap();
+        let bound = config.status_stale_intervals * config.status_ms;
+        assert!(crate::sources::status_is_current(&r, written + bound));
+        assert!(!crate::sources::status_is_current(&r, written + bound + 1));
         // Phase F: the capture's storage health rides along.
         let k = r.nested(rs::CAPTURE).unwrap();
         assert_eq!(
@@ -6350,7 +6491,10 @@ mod tests {
             .collect();
         let config = RuntimeConfig::parse(&text).unwrap();
         let sources = base.join("bsc-sources");
-        Store::open(&sources, 8).unwrap().init(1).unwrap();
+        Store::open(&sources, crate::sources::tests::keeping(8))
+            .unwrap()
+            .init(1)
+            .unwrap();
         let rundir = base.clone();
         // BSC3-039: the loop writes its status every interval, never
         // flushing it to the device (counted on the loop's own thread).

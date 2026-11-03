@@ -30,11 +30,9 @@ export interface StrategyView { state: string; detail: string; decisions: string
 export interface RuntimeView { state: "RUNNING" | "STALE" | "NOT_RUNNING"; mode: string; launches: string; journal: string; observedMs?: number; canonical?: CanonicalView; chainState?: ChainStateView; exec?: ExecView; capture?: CaptureView; strategy?: StrategyView }
 export interface SourceControlView { available: boolean; reason: string; generation: bigint; rows: SourceRow[]; components: SourceRow[]; venues: SourceRow[]; runtime: RuntimeView }
 
-/** Rewrites a runtime status may miss before it is STALE. */
-export const STALE_AFTER_INTERVALS = 3;
-
-/** The runtime's own status record; stale once older than STALE_AFTER_INTERVALS × its own
- *  rewrite interval (`status_interval_ms`, never assumed running; without it nothing is fresh). */
+/** The runtime's own status record; stale once older than its own `status_stale_intervals` ×
+ *  its rewrite interval (`status_interval_ms`; Audit E 3.3: the runtime's one rule, never assumed;
+ *  without either nothing is fresh). */
 export function runtimeView(records: readonly NativeRecordView[], nowMs: number): { view: RuntimeView; health: Map<string, { health: string; counters: string }> } {
   const health = new Map<string, { health: string; counters: string }>();
   const record = records.find(r => r.schema === RUNTIME_SCHEMA);
@@ -42,8 +40,9 @@ export function runtimeView(records: readonly NativeRecordView[], nowMs: number)
   const f = new Map(record.fields.map(x => [x.name, x.value]));
   const observed = Number(f.get("_provenance.observed_unix_ms"));
   const interval = Number(f.get("status_interval_ms"));
+  const intervals = Number(f.get("status_stale_intervals"));
   const fresh = Number.isFinite(observed) && observed > 0 && Number.isFinite(interval) && interval > 0
-    && nowMs - observed <= STALE_AFTER_INTERVALS * interval;
+    && Number.isFinite(intervals) && intervals > 0 && nowMs - observed <= intervals * interval;
   for (let i = 0; f.has(`sources[${i}].source_id`); i++) {
     const g = (k: string) => f.get(`sources[${i}].${k}`) ?? "?";
     health.set(f.get(`sources[${i}].source_id`) ?? "", {

@@ -1115,7 +1115,11 @@ fn the_switch_check_never_honors_a_state_under_another_home() {
     let home = std::env::temp_dir().join(format!("g06a-switch-home-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&home);
     std::fs::create_dir_all(home.join(".darkbot/run")).unwrap();
-    let store = Store::open(home.join(".darkbot/run/bsc-sources"), 8).unwrap();
+    let limits = darkbot_bsc_execution::sources::OwnerLimits::of_config(include_str!(
+        "../../../../config/ingress.public.env"
+    ))
+    .unwrap();
+    let store = Store::open(home.join(".darkbot/run/bsc-sources"), limits).unwrap();
     store.restart(1).unwrap();
     for (g, id) in [SwitchId::WalletLauncher, SwitchId::WalletBuyer, SwitchId::Sign]
         .into_iter()

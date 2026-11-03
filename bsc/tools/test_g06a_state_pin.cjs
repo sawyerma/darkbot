@@ -28,6 +28,8 @@ const ADDRESS1 = '0x7e5f4552091a69125d5dfcb7b8c2659029395bdf';
 const ADDRESS2 = '0x2b5ad5c4795c026514f8317c7a215e218dccd6cf';
 const SIMULATOR = path.join(__dirname, 'g06a_local_simulate.cjs');
 const PIN_MODULE = path.join(__dirname, 'g06a_state_pin.cjs');
+// Audit E 3.1/3.4: the owner's bounds, from the shipped runtime configuration.
+const CONFIG = path.join(__dirname, '../config/ingress.public.env');
 const BSC_RUNTIME = path.join(__dirname, '../engine/target/debug/bsc_runtime');
 const SIGNING_SWITCHES = ['BSC_WALLET_LAUNCHER', 'BSC_WALLET_BUYER', 'BSC_ECON_SIGN'];
 const STATE_METHODS = ['eth_getStorageAt', 'eth_getCode', 'eth_getBalance', 'eth_getTransactionCount', 'eth_getProof'];
@@ -120,7 +122,7 @@ function isolatedOwner(state, ids) {
   const init = bscRuntime(['source', 'init', '--state', state]);
   assert.equal(init.status, 0, init.stdout + init.stderr);
   ids.forEach((id, g) => {
-    const r = bscRuntime(['source', 'request', id, 'ENABLED', '--expect-generation', String(g), '--request-id', `t-${g}`, '--state', state]);
+    const r = bscRuntime(['source', 'request', id, 'ENABLED', '--expect-generation', String(g), '--request-id', `t-${g}`, '--state', state, '--config', CONFIG]);
     assert.match(r.stdout, /^outcome=APPLIED /m, r.stdout + r.stderr);
   });
   return ids.length;
@@ -186,7 +188,7 @@ test('B: the native owner refuses DISABLED signing switches in an isolated state
     const on = bscRuntime(['control', 'require', '--state', state, ...SIGNING_SWITCHES]);
     assert.equal(on.status, 0, on.stdout + on.stderr);
     assert.match(on.stdout, new RegExp(`^controls=ENABLED generation=${g}$`, 'm'));
-    const back = bscRuntime(['source', 'request', 'BSC_ECON_SIGN', 'DISABLED', '--expect-generation', String(g), '--request-id', 't-off', '--state', state]);
+    const back = bscRuntime(['source', 'request', 'BSC_ECON_SIGN', 'DISABLED', '--expect-generation', String(g), '--request-id', 't-off', '--state', state, '--config', CONFIG]);
     assert.match(back.stdout, /^outcome=APPLIED /m, back.stdout + back.stderr);
     const one = bscRuntime(['control', 'require', '--state', state, ...SIGNING_SWITCHES]);
     assert.notEqual(one.status, 0);

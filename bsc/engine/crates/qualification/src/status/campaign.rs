@@ -15,7 +15,6 @@ use super::wire::bsc::*;
 use darkbot_bsc_execution::live_attempts::{
     ATTEMPT_FILE_SUFFIX, ATTEMPTS_DIR, VERDICT_PATH, attempt_file_tx,
 };
-use darkbot_bsc_execution::sources::MAX_BUY_ATTEMPTS_TOTAL;
 use darkbot_bsc_record::schema::bsc_runtime::{live_attempt as la, live_campaign_verdict as lv};
 use darkbot_bsc_record::{self as record, Record, RecordError, Schema, hex};
 use prost::Message;
@@ -24,15 +23,22 @@ use std::io::ErrorKind;
 use std::path::Path;
 
 /// The attempts the LIVE tab shows: every real BUY attempt takes one of the
-/// campaign's total slots, so more records than slots are a warning.
-pub(super) const MAX_ATTEMPTS: usize = MAX_BUY_ATTEMPTS_TOTAL as usize;
+/// campaign's total slots (at most `buy_attempts_total_max`, Audit E 3.1),
+/// so more records than slots are a warning; without a readable
+/// configuration none is shown, and the tab says so (review E3 L4).
+pub(super) fn max_attempts(out: &BscLiveState) -> Option<usize> {
+    out.buy_attempts_total_max.map(|m| m as usize)
+}
+
+/// No attempt shown: the configured maximum is unknown.
+pub const LIVE_ATTEMPTS_MAX_UNKNOWN: &str = "LIVE_ATTEMPTS_MAX_UNKNOWN: no attempt shown without the runtime configuration's BSC_BUY_ATTEMPTS_TOTAL_MAX";
 
 /// One record's share of `left`, what the rest of the LIVE tab leaves of
 /// the publisher's state bound (encoded bytes): the campaign verdict and
-/// each attempt the limit admits take at most one share, one more share is
+/// each of the `max` attempts takes at most one share, one more share is
 /// this section's warnings and framing (review L-1).
-pub(super) fn share(left: usize) -> usize {
-    left / (MAX_ATTEMPTS + 2)
+pub(super) fn share(left: usize, max: usize) -> usize {
+    left / (max + 2)
 }
 
 /// The record at `path` with the SHA-256 of its bytes: none when absent,
@@ -302,10 +308,15 @@ impl Counted {
 /// that count fits, the rest of the tab alone, within the bound).
 pub fn project(rundir: &Path, out: &mut BscLiveState) {
     let warned = out.warnings.len();
+    let max = max_attempts(out);
     section(
         rundir,
         out,
-        share(MAX_STATE_BYTES.saturating_sub(out.encoded_len())),
+        share(
+            MAX_STATE_BYTES.saturating_sub(out.encoded_len()),
+            max.unwrap_or(0),
+        ),
+        max,
     );
     if out.encoded_len() > MAX_STATE_BYTES {
         let records = usize::from(out.campaign.take().is_some()) + out.attempts.len();
@@ -321,7 +332,7 @@ pub fn project(rundir: &Path, out: &mut BscLiveState) {
     }
 }
 
-fn section(rundir: &Path, out: &mut BscLiveState, share: usize) {
+fn section(rundir: &Path, out: &mut BscLiveState, share: usize, max: Option<usize>) {
     match record_at(&rundir.join(VERDICT_PATH), &lv::SCHEMA) {
         Ok(None) => {}
         Ok(Some((r, sha))) => match campaign(&r, &sha, share) {
@@ -346,6 +357,10 @@ fn section(rundir: &Path, out: &mut BscLiveState, share: usize) {
             return;
         }
     }
+    let Some(max) = max else {
+        out.warnings.push(LIVE_ATTEMPTS_MAX_UNKNOWN.into());
+        return;
+    };
     let Ok(entries) = std::fs::read_dir(&dir) else {
         out.warnings.push("LIVE_ATTEMPTS_UNREADABLE".into());
         return;
@@ -370,7 +385,7 @@ fn section(rundir: &Path, out: &mut BscLiveState, share: usize) {
         }
         total += 1;
         names.insert(name);
-        if names.len() > MAX_ATTEMPTS + 1 {
+        if names.len() > max + 1 {
             names.pop_last();
         }
     }
@@ -391,7 +406,7 @@ fn section(rundir: &Path, out: &mut BscLiveState, share: usize) {
     // The first by ordinal (a tie by transaction) of those read; the
     // warnings below are of the attempts shown (re-check F4).
     rows.sort_by(|(a, ..), (b, ..)| a.ordinal.cmp(&b.ordinal).then_with(|| a.tx.cmp(&b.tx)));
-    rows.truncate(MAX_ATTEMPTS);
+    rows.truncate(max);
     // One evaluation writes every record with one time: the verdict's, and
     // without a verdict the newest attempt's.
     let evaluation = out
@@ -418,10 +433,10 @@ fn section(rundir: &Path, out: &mut BscLiveState, share: usize) {
     cut.warn("LIVE_ATTEMPT_REASONS_BEYOND_LIMIT", &mut out.warnings);
     other.warn("LIVE_ATTEMPT_OF_ANOTHER_EVALUATION", &mut out.warnings);
     tie.warn("LIVE_ATTEMPT_DUPLICATE_ORDINAL", &mut out.warnings);
-    if total > MAX_ATTEMPTS {
+    if total > max {
         out.warnings.push(format!(
-            "LIVE_ATTEMPTS_BEYOND_LIMIT {total}/{MAX_ATTEMPTS}, shown: the first {MAX_ATTEMPTS} by ordinal of the first {} by transaction",
-            MAX_ATTEMPTS + 1
+            "LIVE_ATTEMPTS_BEYOND_LIMIT {total}/{max}, shown: the first {max} by ordinal of the first {} by transaction",
+            max + 1
         ));
     }
     out.attempts = rows.into_iter().map(|(a, ..)| a).collect();

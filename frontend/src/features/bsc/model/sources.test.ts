@@ -95,7 +95,7 @@ describe("BSC source control", () => {
   it("takes health only from a fresh runtime status, a stale one is STALE, never HEALTHY", () => {
     const status = (observed: number): NativeRecordView => ({ schema: RUNTIME_SCHEMA, provenance: "NATIVE_CREATED", fields: [
       { name: "_provenance.observed_unix_ms", value: String(observed), kind: 2, unit: "unix_milliseconds" },
-      { name: "status_interval_ms", value: "1000", kind: 2, unit: "milliseconds" },
+      { name: "status_interval_ms", value: "1000", kind: 2, unit: "milliseconds" }, { name: "status_stale_intervals", value: "3", kind: 2, unit: "" },
       { name: "mode", value: "READ_ONLY", kind: 7, unit: "" }, { name: "launches", value: "4", kind: 2, unit: "" },
       { name: "sources[0].source_id", value: "BSC_INGRESS_PUBLICNODE", kind: 7, unit: "" },
       { name: "sources[0].health", value: "HEALTHY", kind: 7, unit: "" }, { name: "sources[0].full", value: "12", kind: 2, unit: "" }] });
@@ -103,10 +103,17 @@ describe("BSC source control", () => {
     const fresh = sourceControlView([modes, status(10_000)], 11_000);
     expect(fresh.runtime).toMatchObject({ state: "RUNNING", mode: "READ_ONLY", launches: "4" });
     expect(fresh.rows.find(r => r.id === "BSC_INGRESS_PUBLICNODE")?.health).toBe("HEALTHY");
-    // Stale after STALE_AFTER_INTERVALS rewrites of the record's own interval (3 × 1 s).
+    // Stale after the record's own status_stale_intervals rewrites of its interval (3 × 1 s).
     const stale = sourceControlView([modes, status(10_000)], 13_001);
     expect(stale.runtime.state).toBe("STALE");
     expect(stale.rows.find(r => r.id === "BSC_INGRESS_PUBLICNODE")?.health).toBe("STALE");
+    // Audit E 3.3: the record's factor rules, and without one nothing is fresh.
+    const factor = (n: string | null): NativeRecordView => {
+      const r = status(10_000);
+      return { ...r, fields: r.fields.flatMap(x => x.name !== "status_stale_intervals" ? [x] : n === null ? [] : [{ ...x, value: n }]) };
+    };
+    expect(sourceControlView([modes, factor("5")], 14_500).runtime.state).toBe("RUNNING");
+    expect(sourceControlView([modes, factor(null)], 10_001).runtime.state).toBe("STALE");
   });
   it("without its own rewrite interval a runtime status is never fresh", () => {
     const record: NativeRecordView = { schema: RUNTIME_SCHEMA, provenance: "NATIVE_CREATED", fields: [
@@ -116,7 +123,7 @@ describe("BSC source control", () => {
   it("shows the canonical follower only when the runtime reports it, stale as STALE", () => {
     const status = (observed: number, canonical: boolean): NativeRecordView => ({ schema: RUNTIME_SCHEMA, provenance: "NATIVE_CREATED", fields: [
       { name: "_provenance.observed_unix_ms", value: String(observed), kind: 2, unit: "unix_milliseconds" },
-      { name: "status_interval_ms", value: "1000", kind: 2, unit: "milliseconds" },
+      { name: "status_interval_ms", value: "1000", kind: 2, unit: "milliseconds" }, { name: "status_stale_intervals", value: "3", kind: 2, unit: "" },
       ...(canonical ? [{ name: "canonical[0].state", value: "FOLLOWING", kind: 7, unit: "" }, { name: "canonical[0].head", value: "100", kind: 2, unit: "" },
         { name: "canonical[0].flap_launches", value: "3", kind: 2, unit: "" }, { name: "canonical[0].seen_full_before", value: "2", kind: 2, unit: "" },
         { name: "canonical[0].evicted", value: "1", kind: 2, unit: "" }, { name: "canonical[0].four_evicted", value: "4", kind: 2, unit: "" },
@@ -141,7 +148,7 @@ describe("BSC source control", () => {
 
   it("shows the C2 chain state only while its owner runs, coherent from the native bool, stale as STALE", () => {
     const status = (observed: number, state: boolean, coherent = "true"): NativeRecordView => ({ schema: RUNTIME_SCHEMA, provenance: "NATIVE_CREATED", fields: [
-      { name: "_provenance.observed_unix_ms", value: String(observed), kind: 2, unit: "" }, { name: "status_interval_ms", value: "1000", kind: 2, unit: "" },
+      { name: "_provenance.observed_unix_ms", value: String(observed), kind: 2, unit: "" }, { name: "status_interval_ms", value: "1000", kind: 2, unit: "" }, { name: "status_stale_intervals", value: "3", kind: 2, unit: "" },
       ...(state ? [{ name: "state[0].coherent", value: coherent, kind: 1, unit: "" }, { name: "state[0].retained_blocks", value: "64", kind: 2, unit: "" },
         { name: "state[0].last_conflict", value: "DISCONTINUITY", kind: 7, unit: "" }, { name: "state[0].last_refused", value: "MALFORMED_BLOCK", kind: 7, unit: "" }, { name: "state[0].checkpoint_restore", value: "RESTORED", kind: 7, unit: "" }] : [])] });
     expect(runtimeView([status(10_000, false)], 11_000).view.chainState).toBeUndefined();
@@ -158,7 +165,7 @@ describe("BSC source control", () => {
 
   it("shows the C3 PAPER path only while configured, never claiming a transport", () => {
     const status = (observed: number, exec: boolean, latency = false): NativeRecordView => ({ schema: RUNTIME_SCHEMA, provenance: "NATIVE_CREATED", fields: [
-      { name: "_provenance.observed_unix_ms", value: String(observed), kind: 2, unit: "" }, { name: "status_interval_ms", value: "1000", kind: 2, unit: "" },
+      { name: "_provenance.observed_unix_ms", value: String(observed), kind: 2, unit: "" }, { name: "status_interval_ms", value: "1000", kind: 2, unit: "" }, { name: "status_stale_intervals", value: "3", kind: 2, unit: "" },
       ...(exec ? [{ name: "exec[0].state", value: "ECONOMICS_UNQUALIFIED", kind: 7, unit: "" }, { name: "exec[0].reason", value: "Portal v5.27.0 is decode-only", kind: 7, unit: "" },
         { name: "exec[0].lanes_armed", value: "64", kind: 2, unit: "" }, { name: "exec[0].handoffs", value: "0", kind: 2, unit: "" },
         { name: "exec[0].sender_paths", value: "C3+STRATEGY_C", kind: 7, unit: "" }, { name: "exec[0].refusals[0]", value: "NONCE_TAKEN=1", kind: 7, unit: "" }] : []),
@@ -179,7 +186,7 @@ describe("BSC source control", () => {
 
   it("shows Strategy C's decisions and PAPER ledger only while it runs, a refusal with its reason", () => {
     const status = (observed: number, state?: string, reason?: string): NativeRecordView => ({ schema: RUNTIME_SCHEMA, provenance: "NATIVE_CREATED", fields: [
-      { name: "_provenance.observed_unix_ms", value: String(observed), kind: 2, unit: "" }, { name: "status_interval_ms", value: "1000", kind: 2, unit: "" },
+      { name: "_provenance.observed_unix_ms", value: String(observed), kind: 2, unit: "" }, { name: "status_interval_ms", value: "1000", kind: 2, unit: "" }, { name: "status_stale_intervals", value: "3", kind: 2, unit: "" },
       ...(state ? [{ name: "strategy[0].state", value: state, kind: 7, unit: "" }, { name: "strategy[0].launches", value: "3", kind: 2, unit: "" },
         { name: "strategy[0].passed", value: "1", kind: 2, unit: "" }, { name: "strategy[0].entered", value: "1", kind: 2, unit: "" },
         { name: "strategy[0].loss_wei", value: "120000000000000", kind: 9, unit: "" }] : []),
@@ -199,7 +206,7 @@ describe("BSC source control", () => {
 
   it("shows the segmented capture's storage health from the runtime, a durable sequence only once synced", () => {
     const status = (observed: number, capture: boolean, durable = false): NativeRecordView => ({ schema: RUNTIME_SCHEMA, provenance: "NATIVE_CREATED", fields: [
-      { name: "_provenance.observed_unix_ms", value: String(observed), kind: 2, unit: "" }, { name: "status_interval_ms", value: "1000", kind: 2, unit: "" },
+      { name: "_provenance.observed_unix_ms", value: String(observed), kind: 2, unit: "" }, { name: "status_interval_ms", value: "1000", kind: 2, unit: "" }, { name: "status_stale_intervals", value: "3", kind: 2, unit: "" },
       { name: "journal_lost", value: "1", kind: 2, unit: "" },
       ...(capture ? [{ name: "capture[0].state", value: "HEALTHY", kind: 7, unit: "" }, { name: "capture[0].records", value: "42", kind: 2, unit: "" },
         { name: "capture[0].segments_sealed", value: "2", kind: 2, unit: "" }, { name: "capture[0].budget_peak_bytes", value: "900", kind: 2, unit: "" },

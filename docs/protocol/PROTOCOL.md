@@ -284,7 +284,7 @@ transactions and the net result. A view of the native owner and ledger, never a 
 | runtime_mode | [ControlSwitch](#darkbot-bsc-v1-ControlSwitch) |  | The runtime mode BSC_RUNTIME_MODE as it holds now. |
 | economic_live | [ControlSwitch](#darkbot-bsc-v1-ControlSwitch) |  | The economic LIVE switch BSC_ECON_LIVE. |
 | daily | [BuyAttemptLimit](#darkbot-bsc-v1-BuyAttemptLimit) |  | The daily BUY attempt limit and today&#39;s use. |
-| total_limit | [uint64](#uint64) |  | The campaign&#39;s total BUY attempt limit (at most ten) and its use. |
+| total_limit | [uint64](#uint64) |  | The campaign&#39;s total BUY attempt limit (at most buy_attempts_total_max) and its use. |
 | total_used | [uint64](#uint64) |  | Total attempts taken, every day and restart counted. |
 | grant_attempts_used | [uint64](#uint64) |  | Attempts the current grant took. |
 | spent_wei | [string](#string) |  | What the current grant has spent at most (admitted intents), decimal wei. |
@@ -354,6 +354,7 @@ transactions and the net result. A view of the native owner and ledger, never a 
 | qualification_risk_scope_sha256 | [string](#string) |  | REV.1.0 R8 (BSC3-049): the grant risk scope the qualification&#39;s risk decision is made for. |
 | qualification_observed_unix_ms | [uint64](#uint64) | optional | The qualification&#39;s age: the oldest of its record, evidence and risk decision (unix ms). |
 | qualification_max_age_ms | [uint64](#uint64) | optional | BSC_EXEC_LIVE_QUALIFICATION_MAX_AGE_MS (0: no bound): an older qualification admits no BUY. |
+| buy_attempts_total_max | [uint32](#uint32) | optional | Audit E 3.1 (BSC_BUY_ATTEMPTS_TOTAL_MAX): the most BUY attempts a UTC day or the whole campaign may take, and the most a grant may name; absent: no readable runtime configuration. |
 
 
 

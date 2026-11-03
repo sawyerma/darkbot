@@ -1789,6 +1789,12 @@ pub mod runtime_status {
     /// v23 (BSC3-015): wall-clock reads that failed in this process (each
     /// counted as expired time).
     pub const CLOCK_UNREADABLE: u16 = 20;
+    /// v28 (Audit E 3.3): after how many of its intervals this record is
+    /// stale (`BSC_RUNTIME_STATUS_STALE_INTERVALS`; every reader's rule).
+    pub const STATUS_STALE_INTERVALS: u16 = 21;
+    /// v28 (Audit E 3.1): the most BUY attempts a day or the campaign may
+    /// take (`BSC_BUY_ATTEMPTS_TOTAL_MAX`), as the tabs offer them.
+    pub const BUY_ATTEMPTS_TOTAL_MAX: u16 = 22;
 
     pub const SCHEMA: Schema = Schema {
         name: "darkbot.bsc.runtime-status.v1",
@@ -1796,8 +1802,9 @@ pub mod runtime_status {
         // v24 (BSC3-078): `live.lease_attempt`. v25 (BSC3-062):
         // `canonical.evicted`, `canonical.four_evicted`. v26 (BSC3-036):
         // `canonical.endpoint`, `canonical.failovers`, `canonical.stalls`.
-        // v27 (BSC3-056): `canonical.confirm_*`.
-        schema_version: 27,
+        // v27 (BSC3-056): `canonical.confirm_*`. v28 (Audit E 3.1/3.3):
+        // `status_stale_intervals`, `buy_attempts_total_max`.
+        schema_version: 28,
         fields: &[
             Field::req(GENERATION, "generation", U64),
             Field::nested(SOURCES, "sources", Presence::Repeated, &source::SCHEMA),
@@ -1828,6 +1835,8 @@ pub mod runtime_status {
             Field::opt(CENSUS_STATE, "census_state", Text),
             Field::opt(CENSUS_WRITTEN_UNIX_MS, "census_written_unix_ms", U64),
             Field::opt(CLOCK_UNREADABLE, "clock_unreadable", U64),
+            Field::opt(STATUS_STALE_INTERVALS, "status_stale_intervals", U64),
+            Field::opt(BUY_ATTEMPTS_TOTAL_MAX, "buy_attempts_total_max", U64),
         ],
     };
 }

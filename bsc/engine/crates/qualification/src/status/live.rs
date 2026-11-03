@@ -27,8 +27,7 @@ fn hex0x(bytes: &[u8]) -> String {
 /// rule (or the clock is unreadable): its probe values are not shown.
 pub const RUNTIME_STATUS_STALE: &str = "RUNTIME_STATUS_STALE";
 
-/// Where a snapshot keeps the configuration its runtime runs with (`bsc_runtime run --config`).
-pub const RUNTIME_CONFIG_PATH: &str = "bsc/config/ingress.public.env";
+pub use darkbot_bsc_execution::sources::RUNTIME_CONFIG_PATH;
 
 /// The snapshot's runtime configuration by the runtime's own rule (`RuntimeConfig::parse`), or
 /// the warning why there is none: unreadable, or one the runtime would refuse.
@@ -115,19 +114,9 @@ fn path(rundir: &Path, out: &mut BscLiveState, now_ms: Option<u64>) {
         .into();
     // R10 review L4: the probe's values (balance, nonce, the arm and the
     // next C3 attempt) only from a status the owner's own rule still takes
-    // as current (written within STATUS_STALE_AFTER_INTERVALS of its
-    // rewrites); the arm and the attempt only while ARMED.
-    let fresh = match (
-        now_ms,
-        r.u64(rs::PROVENANCE_OBSERVED_UNIX_MS),
-        r.u64(rs::STATUS_INTERVAL_MS),
-    ) {
-        (Some(now), Ok(written), Ok(interval)) => {
-            now.saturating_sub(written)
-                <= sources::STATUS_STALE_AFTER_INTERVALS.saturating_mul(interval)
-        }
-        _ => false,
-    };
+    // as current (`sources::status_is_current`); the arm and the attempt
+    // only while ARMED.
+    let fresh = now_ms.is_some_and(|now| sources::status_is_current(&r, now));
     if !fresh {
         out.warnings.push(RUNTIME_STATUS_STALE.into());
     }
@@ -260,6 +249,8 @@ fn owner_tab(
                     bp::live_bound(root, &x.live_builder_policy, x.gas_price_wei, now).err()
                 });
             }
+            // Audit E 3.1: the attempts' maximum.
+            out.buy_attempts_total_max = Some(c.owner.buy_attempts_total_max);
             // R4: the campaign's cumulative budget.
             out.campaign_spend_max_wei = c
                 .exec
@@ -389,7 +380,7 @@ fn owner_tab(
         out.warnings.push("CLOCK_UNREADABLE".into());
         return out;
     };
-    let reads = super::projection::gate_reads(rundir, &dir, &g, now);
+    let reads = super::projection::gate_reads(rundir, &dir, &g, now, out.buy_attempts_total_max);
     let ctx = reads.ctx(&verified.view);
     let (boot, daily, total, spent) = (&reads.boot, &reads.daily, &reads.total, reads.spent_wei);
     let blockers = g.live_blockers(&ctx);

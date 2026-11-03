@@ -8,8 +8,6 @@ import type { BscLiveView, ControlSwitchView, LiveAttemptView, LiveCampaignView 
 export const LIVE_VENUES = ["BSC_VENUE_FLAP"] as const;
 export const LIVE_STRATEGIES = ["C3", "STRATEGY_C", "C3+STRATEGY_C"] as const;
 export const LIVE_ADAPTERS = ["CLUB48_BUILDER_V1", "BLOCKRAZOR_BUILDER_V1"] as const;
-/** The campaign's limit: at most ten real BUY attempts (PHASENPLAN 28.10.); the owner checks again. */
-export const MAX_ATTEMPTS_TOTAL = 10;
 
 /** The one LIVE indicator (Audit E 4.10), from bsc.live.state alone: LIVE while the owner's gate
  *  is CLEAR and the runtime's LIVE path ARMED, UNKNOWN without the owner's state, else BLOCKED. */
@@ -31,7 +29,7 @@ export const CONDITION_TEXT: Record<string, { label: string; where: string }> = 
   ECON_ATTEMPT: { label: "Attempt ENABLED", where: "Launch / BUY tab" },
   RUNTIME_LIVE: { label: "Runtime mode LIVE requested", where: "Scope on this tab" },
   BUY_LIMIT_DAILY: { label: "Daily BUY attempts left", where: "Attempts on this tab" },
-  BUY_LIMIT_TOTAL: { label: "Campaign BUY attempts left (at most 10)", where: "Attempts on this tab" },
+  BUY_LIMIT_TOTAL: { label: "Campaign BUY attempts left (at most BSC_BUY_ATTEMPTS_TOTAL_MAX)", where: "Attempts on this tab" },
   GRANT_ATTEMPTS: { label: "The grant's attempts left", where: "A new grant" },
   GRANT_SPEND: { label: "The grant's spend left", where: "A new grant" },
   GRANT_BUYS: { label: "The grant admits BUYs (not EXIT-ONLY)", where: "A new grant" },
@@ -111,8 +109,9 @@ export function formSources(f: GrantForm, grantable: readonly string[]): string[
 }
 
 /** The scope of a grant form at `nowMs`, or why it is not one (the owner checks again). Only the
- *  native projection's grantable sources can be named. */
-export function grantScope(f: GrantForm, nowMs: number, grantable: readonly string[]): { scope: LiveGrantScope } | { error: string } {
+ *  native projection's grantable sources can be named, at most `maxAttempts` attempts
+ *  (bsc.live.state's buy_attempts_total_max, Audit E 3.1; none without it). */
+export function grantScope(f: GrantForm, nowMs: number, grantable: readonly string[], maxAttempts: number | undefined): { scope: LiveGrantScope } | { error: string } {
   if (!(LIVE_STRATEGIES as readonly string[]).includes(f.strategies)) return { error: "strategies: C3, STRATEGY_C or C3+STRATEGY_C" };
   const unique = (xs: string[]) => new Set(xs).size === xs.length;
   const sources = formSources(f, grantable);
@@ -121,7 +120,8 @@ export function grantScope(f: GrantForm, nowMs: number, grantable: readonly stri
   if (!f.adapters.length || !unique(f.adapters) || !f.adapters.every(a => (LIVE_ADAPTERS as readonly string[]).includes(a))) return { error: "at least one adapter, each once" };
   if (!weiOk(f.maxInputWei) || BigInt(f.maxInputWei) === 0n) return { error: "max input: a positive plain decimal in wei" };
   if (!weiOk(f.maxSpendWei) || BigInt(f.maxSpendWei) < BigInt(f.maxInputWei)) return { error: "max spend: a plain decimal in wei, at least the max input" };
-  if (!/^([1-9]|10)$/.test(f.maxAttempts) || Number(f.maxAttempts) > MAX_ATTEMPTS_TOTAL) return { error: `attempts: 1..${MAX_ATTEMPTS_TOTAL}` };
+  if (maxAttempts === undefined) return { error: "attempts: no maximum without a readable runtime configuration (BSC_BUY_ATTEMPTS_TOTAL_MAX)" };
+  if (!/^[1-9][0-9]{0,9}$/.test(f.maxAttempts) || Number(f.maxAttempts) > maxAttempts) return { error: `attempts: 1..${maxAttempts}` };
   if (!/^[1-9][0-9]{0,3}$/.test(f.hours)) return { error: "validity: whole hours" };
   if (!bpsOk(f.buySlippageBps) || !bpsOk(f.exitSlippageBps)) return { error: "slippage: basis points below 10000" };
   if (!u64Ok(f.gasPriceWei, 1n)) return { error: "gas price: a positive plain decimal in wei" };
@@ -149,9 +149,10 @@ export function grantScope(f: GrantForm, nowMs: number, grantable: readonly stri
   };
 }
 
-/** The total limit an operator may set: 0..10 (the owner checks again). */
-export function totalInputOk(text: string): boolean {
-  return /^([0-9]|10)$/.test(text);
+/** The total limit an operator may set: 0..`max` (buy_attempts_total_max; none without it; the
+ *  owner checks again). */
+export function totalInputOk(text: string, max: number | undefined): boolean {
+  return max !== undefined && /^(0|[1-9][0-9]{0,9})$/.test(text) && Number(text) <= max;
 }
 
 /** The owner request that asks an entity of the scope for LIVE (its CAS is the owner generation). */

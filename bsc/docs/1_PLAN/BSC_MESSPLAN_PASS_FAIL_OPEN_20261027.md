@@ -154,6 +154,26 @@ Code `b72bf2ed`…`4b0139ee` (Owner `sources.rs`, Projektion, `darkbot.bsc.v1`, 
 
 **Offene LOW:** ein Einzellauf nur des Qualification-Pakets prüft das Readiness-Binary nur auf Existenz (Identität nur im Workspace-Lauf/CI); CI-Läufe `e2db7431` (Dep-Info fehlt bei `cargo test`) FAIL, behoben in `0ac597ca`.
 
+### 2a.5 REV.1.0 — Gate je Paket ab R4 (R1–R3b: `STATUS.md`, Tabelle „BSC-Gate je Paket“)
+
+Gate = Workspace im T63-Umfang (`--workspace --all-features --no-fail-fast`, `bsc/engine`) + T62 (8 Werkzeugtests) + Clippy (Workspace, alle Features/Targets, `-D warnings`) + F0-VAR, alles auf demselben unveränderten Baum. Ein Lastflake zählt nur mit grünem Wiederholungslauf der betroffenen Suite auf identischem Baum.
+
+| Test-ID | Paket, SHA | Workspace PASS/FAIL/ignored | Werkzeugtests / Clippy / F0-VAR | Zusätzlich | Status |
+|---|---|---|---|---|---|
+| T69 | R4a `424116f7` | 1.671/0/27 | 8/8 / 0 / PASS | – | **LOCAL_PASS** |
+| T70 | R4b-1 `d658dbcd` | 1.673/0/27 | 8/8 / 0 / PASS | – | **LOCAL_PASS** |
+| T71 | R4b-2+R4c `4a316db2` | 1.683/0/27 | 8/8 / 0 / PASS | 18 Mutanten RED; CI 3 Workflows | **LOCAL_PASS + CI_PASS** |
+| T72 | R5a `8dff5404` | 1.688/0/27 | 8/8 / 0 / PASS | – | **LOCAL_PASS** |
+| T73 | R5b `d57e1a19` | 1.694/0/27 | 8/8 / 0 / PASS | – | **LOCAL_PASS** |
+| T74 | R6a `0338f72c` | 1.697/0/27 | 8/8 / 0 / PASS | – | **LOCAL_PASS** |
+| T75 | R6b+R6c `51609d68` | 1.702/0/27 | 8/8 / 0 / PASS | – | **LOCAL_PASS** |
+| T76 | R7 `bdc1f324` | 1.706/0/27 | 8/8 / 0 / PASS | CI Run 41520511990 | **LOCAL_PASS + CI_PASS** |
+| T77 | R8 `b04d42fa` | 1.708/2/27 (2 LIVE-Settle-Lastflakes; Lib-Wiederholung grün) | 8/8 / 0 / PASS | CI Run 41547228926 | **LOCAL_PASS + CI_PASS** |
+| T78 | R9 `9e9f067d` | 1.712/0/27 | 8/8 / 0 / PASS | – | **LOCAL_PASS** |
+| T79 | R10 `fad44af7` | 1.716/1/27 (Lastflake `the_granted_losses_refuse_buys_from_the_ledger`; Lib-Wiederholung 487/0) | 8/8 / 0 / PASS | – | **LOCAL_PASS** |
+| T80 | R11 `4524c72d` | 1.724/1/27 (Lastflake `live_ledger` operator.lock; Lib-Wiederholung 488/0) | 8/8 / 0 / PASS nach Repin | `runtime_process.rs` 7/7 (§3b, s. u.), 12 Mutanten RED; CI grün | **LOCAL_PASS + CI_PASS** |
+| T81 | Audit E3 (Commit mit dieser Zeile) | 1.726/1/27 (`test_bsc_control.py`: zwei 30-s-Timeouts im parallelen Lauf; Einzellauf 6/6) | 8/8 / 0 / PASS (3.539 Felder) | Gateway, Vitest, tsc, Protokollvertrag; 11 Mutanten RED | **LOCAL_PASS** |
+
 ---
 
 **Präzisierung 27.10.:** Die verbindliche aktuelle Nutzerentscheidung lautet **maximal 10 echte BUY-Versuche insgesamt (1 G0.7 + höchstens 9 weitere), nicht 1+10**; jeweils kleinster reproduzierbar qualifizierter BUY-Betrag und kumulatives Verlustbudget. `BSC_BUY_ATTEMPTS_PER_DAY` ist ein tägliches, **kein kampagnenweites** Limit. G0.7-Self-BUY und tatsächlicher LIVE-SELL sind unterschiedliche Fähigkeiten; Strategy-C-Exit und signierter PAPER-SELL beweisen keinen realen Exit. Details im neuesten Abschnitt von `PHASENPLAN.md`.
@@ -304,6 +324,8 @@ L = WALLET_LAUNCHER, B = WALLET_BUYER, S = ECON_SIGN, A = ECON_ARM, D = ECON_SEN
 **Vollständige relevante Unterkombinationen:** Alle **8 Belegungen** von L/B/S als isolierter SIGN-Guard; alle **8 Belegungen** von A/D/T bei sonst gültigen synthetischen Pflichtbedingungen; V=0 und V=1 jeweils mit Source-, Venue- und Runtime-LIVE-Request; Limit 0/1/mehrere/ausgeschöpft/UTC-Tageswechsel. Jede einzelne der sechs G0.7-Bedingungen muss bei DISABLED eine eigene fail-closed-Probe bestehen. Kein wahlloser 128-Zustände-Test ohne Betriebszweck.
 
 #### D. Verbindlicher Nachweis / STOP-Regel
+
+**Stand 03.11.2026 (R11 `4524c72d`, T80):** A01–A16, B01–B16, C01–C19, Crash/Disk-full **PASS** (Testname je Fall: `S3B_REGISTER.md`); B05/B07/B09 im echten Prozess EXTERNAL_BLOCKED (Portal-v5.27.2-Code), im Testprozess PASS; C20 **OPEN** (hermetische Release-E2E, R14).
 
 **Für jede Test-ID**: Request wirklich am isolierten nativen Owner stellen und reale Wirkung am zuständigen Fach-Caller prüfen; dazu Native CLI (darkbotctl bsc source request/show), Source-DBREC, Protobuf-Status, Gateway-Receipt und die fünf BSC-Frontend-Reiter auf exakte requested/effective/blocked_reason/generation/request_id abgleichen. Negativfälle verlangen null unautorisierte Signatur/Netzwerksendung, null Doppel-BUY/Nonce- oder Limitumgehung. Auch Crash, Restart, CAS-Race und Frontend-Stale prüfen. Pro Fall Git-/Release-Binary-/Config-SHA, konkrete Eingaben, Test-Scope, Original-Evidence, unabhängiger Review und PASS/FAIL/OPEN. Ein bloßer Quelltexttest oder alternativ akzeptierter Frühabbruch ersetzt keinen echten Verhaltensnachweis (BSC-002-Regressionslehre).
 

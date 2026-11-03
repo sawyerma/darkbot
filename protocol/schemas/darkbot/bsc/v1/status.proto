@@ -485,7 +485,7 @@ message BscLiveState {
   ControlSwitch economic_live = 7;
   // The daily BUY attempt limit and today's use.
   BuyAttemptLimit daily = 8;
-  // The campaign's total BUY attempt limit (at most ten) and its use.
+  // The campaign's total BUY attempt limit (at most buy_attempts_total_max) and its use.
   uint64 total_limit = 9;
   // Total attempts taken, every day and restart counted.
   uint64 total_used = 10;
@@ -655,6 +655,9 @@ message BscLiveState {
   optional uint64 qualification_observed_unix_ms = 77;
   // BSC_EXEC_LIVE_QUALIFICATION_MAX_AGE_MS (0: no bound): an older qualification admits no BUY.
   optional uint64 qualification_max_age_ms = 78;
+  // Audit E 3.1 (BSC_BUY_ATTEMPTS_TOTAL_MAX): the most BUY attempts a UTC day or the whole campaign
+  // may take, and the most a grant may name; absent: no readable runtime configuration.
+  optional uint32 buy_attempts_total_max = 79;
 }
 // One cell of the LIVE campaign (REV.1.0 R2), as the verdict record holds it.
 message LiveCampaignCell {

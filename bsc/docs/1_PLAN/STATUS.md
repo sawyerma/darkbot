@@ -20,7 +20,7 @@ Pakete aus den Audits A–E (01.11.); fertig = Code + Tests + Review + Gate + CI
 | R12 | Four Classic/OpenFour Economics + Ausführung | EXTERNAL_BLOCKED: Quote-Formel unbewiesen (Implementierungen unverifiziert, Key nötig; bezeugte BUYs ohne native BNB/Slippage), Encoder ohne Quote = toter Code; `FOUR_EXECUTION_PATH_MISSING` bleibt | – |
 | R13 | FOREIGN_AUTO-Profile | EXTERNAL_BLOCKED: keine fremde Launch-Klasse mit bezeugtem Zustand (Creator-Buy, Nicht-BNB-Quote, Steuerdauer, Identitätsbindung); erst Zensus der 7-Tage-Kampagne → Klasse → freie RPC-Probe je Klasse | – |
 | R14 | fmt/clippy-CI, Läufe nach 03.11., Rebaseline, Gesamtabnahme | OFFEN | – |
-| E1–E11 | Audit E (Pflichtstatus unten) | TEILWEISE (E-A fertig, Rest offen) | E-A `8a9584d9`…`f6156fa0` |
+| E1–E11 | Audit E (Pflichtstatus unten) | TEILWEISE (E-A, E3 fertig; Rest offen) | E-A `8a9584d9`…`f6156fa0` |
 
 **BSC-Gate je Paket** (technischer Nachweis, nicht REV.1.0-Status):
 
@@ -35,6 +35,7 @@ Pakete aus den Audits A–E (01.11.); fertig = Code + Tests + Review + Gate + CI
 | R3b-2a | GR3b2a5 (Workspace 1667/0/27, bsc_tools, Clippy, F0-VAR; 26 Mutanten RED; Review PASS nach 2 Runden) | GATE_OK | `b3523732` |
 | R3b-2b-1 | GR3b2b1c (Workspace 1669/0/27, bsc_tools, Clippy, F0-VAR; Gateway 61+18+4, Clippy, fmt; 21 Mutanten RED; Review PASS + Re-Check PASS) | GATE_OK | `4a1bae86` |
 | R3b-2b-2 | GR3b2b2 (Workspace 1669/0/27, bsc_tools, Clippy, F0-VAR) + gezielt nach Review-Fix (execution lib, Status, Gateway, vitest 155, test:bsc 9) | GATE_OK | dieser Commit |
+| R4–R11, E3 | Messplan §2a.5 (T69–T81) | GATE_OK (Lastflakes nur mit grüner Wiederholung) | s. dort |
 
 **Audit E — Pflichtstatus je Befund** (FIX / FIX+REPIN / FIX+REFREEZE / KEEP mit Grund; Abschluss = Commit):
 
@@ -63,11 +64,11 @@ Pakete aus den Audits A–E (01.11.); fertig = Code + Tests + Review + Gate + CI
 | 2.18 Submission/TLS-Doku | FIX | E1 | E-A `8a9584d9` (mod.rs, tls/config.rs); `send.rs` R10a |
 | 2.19 `flap_gas_20261026.txt` | KEEP: p8-Recovery-Evidence nennt sie (mit 1.7 verschoben) | E10 | – |
 | 2.20 `__pycache__`; `runtime_live.rs.orig` | FIX (pycache); `.orig` KEEP: Nutzer-Vorgabe „nicht anfassen“ | E2 | E-A: schon git-ignoriert (`.gitignore` `__pycache__/`), nichts versioniert; lokal nur im Hauptcheckout |
-| 3.1–3.4 Kampagnenmax., Paritätsminimum, Stale-Faktor, KEEP_GENERATIONS | FIX+REPIN | E3 | – |
+| 3.1–3.4 Kampagnenmax., Paritätsminimum, Stale-Faktor, KEEP_GENERATIONS | FIX+REPIN | E3 | dieser Commit (Config `BSC_BUY_ATTEMPTS_TOTAL_MAX`, `BSC_OWNER_KEEP_GENERATIONS`, `BSC_RUNTIME_STATUS_STALE_INTERVALS` (im Status-Record), `BSC_EXEC_LIVE_PARITY_MIN_EXECUTED_PER_PATH`; Owner-CLI `--config`; Tabs/Gateway aus Projektion bzw. Owner) |
 | 3.5–3.6 Socket/Label, launchd-Zahlen | FIX+REPIN | E3/E8 | E-A `8a9584d9` (Socket aus `$SOCK`-Verzeichnis, Reporter ohne Default; BSC_LAUNCHD_*/BSC_STOP_BUDGET_S) |
 | 3.7–3.8 Gateway-/Frontend-Timeouts | FIX | E3 | E-A `8a9584d9` (`Limits`; `COMMAND_TIMEOUT_MS`/VITE_COMMAND_TIMEOUT_MS) |
 | 3.9–3.11, 3.13 Q5A-Hosts, Deployment-Pins, Owner-Pfad, Protokollkonstanten | KEEP: eingefrorene Pins / Sicherheitsanker / Protokoll | – | – |
-| 3.12 abgelehnte Konten doppelt | FIX | E3 | – |
+| 3.12 abgelehnte Konten doppelt | FIX | E3 | dieser Commit (Config verweigert ohne G0.7-Launcher/Buyer) |
 | 4.1, 4.14, 5.1 `startup.rs` toter Parallelpfad | FIX | E2 | E-A `8a9584d9` (entfernt, kein Aufrufer) |
 | 4.2 PaperEnd/LiveEnd-Planung doppelt | FIX | E7 | – |
 | 4.3–4.5, 5.14 JSON-RPC-Hex, HTTP-Framer, TLS-Builder, https-Prüfung | FIX | E6 | – |
@@ -225,7 +226,7 @@ Pakete 0–9 schließen nur C0–I technisch ab; **Gate 0 ist nicht bestanden**.
 | G0.4 | Kampagne läuft seit 27.10. 08:05Z (Plan 28.10.: optional höchstens 10 min, keine Voraussetzung); geordneter Stopp (`campaign.stop`) zweimal vom Sitzungs-Berechtigungsfilter blockiert; Census v10 mit N+1-Platzierung (`b3b0fd48`); Urteil `g04-verdict` (`93d3c22e`) | Zeile P | Nutzer: `echo stop > ~/.darkbot/g04/campaign_20261027/campaign.stop`; Rohdaten danach einmal auswerten |
 | G0.5 | Self-Launch-Transport PASS (02.10.); Produktionspfad lokal bis zur PAPER-Senke p50 218 / p99 258 µs (M4 Max, nicht `T_send`) | `c3/`, `g06/` | `T_send` des Produktionspfads: synchronisierter geth (≥ 2–3 TB; MacBook 336 GB frei) oder freigegebene nicht ausführbare Builder-Probe wie 16.10. |
 | G0.6 | DRY PASS (Self-Launch); Head-of-Line gleichzeitiger Launches: bis 3 unter 1 ms (p99), der 4. bei 1,02 ms, ab dem 5. jeder > 1 ms; Gültigkeit je BUY | `g06/` (`fc657eec`) | Inclusion-Seite UNQUALIFIED bis G0.7; LIVE-Nonce-Folge gleichzeitiger BUYs nicht geübt (PAPER-Alternativen) |
-| G0.7 | nicht ausgeführt; Guard UNARMED; native Schalter DISABLED; Funding vorhanden (Launcher/Buyer je 0,005 BNB, `funding_pass`, PREPARE-Preflight 27.10.) | Runbook oben, `g06a/g06a_prepare_20261027T082739Z` | Reihenfolge PHASENPLAN 28.10. (`0a647175`): (I) produktiver LIVE-Code + LIVE-Reiter — TECHNISCH FERTIG 28.10. (P1–P8 `b1108b27`…`5d144aa7` + P8 2/2: GUI-Aktivierung bis Gate CLEAR, Receipt/Monitoring = LIVE-Gate; synthetisch, nichts gesendet), (II) Systemtest-Kampagne inkl. 20-Control-Matrix (`77d83502`) und §3a/S2a, (III) SIGN-DRY/V5/Readiness, (IV) G0.7. SIGN-DRY schlüsselfrei vorbereitet: Operator setzt `BSC_WALLET_LAUNCHER`, `BSC_WALLET_BUYER`, `BSC_ECON_SIGN` ENABLED (`bsc_runtime source request … --state ~/.darkbot/run/bsc-sources`), dann `BSC_MAINNET_RPC_HTTPS=https://bsc-dataseed.bnbchain.org DARKBOT_G06A_SIGN=YES bsc/tools/g06a_final_dry.sh --sign bsc/native/evidence/g06a/g06a_prepare_20261027T082739Z` (Sitzungsfilter blockiert die Ausführung durch Claude); danach V5-Vorschlag, Readiness `PASS_READ_ONLY` (Builder-Quellen ≤ 24 h); V5-Freigabe, ARM, Grant, Schalter + Tageslimit (Nutzer); Portal v5.27.2 nur bytecode-gebunden (O03) |
+| G0.7 | nicht ausgeführt; Guard UNARMED; native Schalter DISABLED; Funding vorhanden (Launcher/Buyer je 0,005 BNB, `funding_pass`, PREPARE-Preflight 27.10.) | Runbook oben, `g06a/g06a_prepare_20261027T082739Z` | Reihenfolge PHASENPLAN 28.10. (`0a647175`): (I) produktiver LIVE-Code + LIVE-Reiter — TECHNISCH FERTIG 28.10. (P1–P8 `b1108b27`…`5d144aa7` + P8 2/2: GUI-Aktivierung bis Gate CLEAR, Receipt/Monitoring = LIVE-Gate; synthetisch, nichts gesendet), (II) Systemtest-Kampagne inkl. 20-Control-Matrix (`77d83502`) und §3a/S2a, (III) SIGN-DRY/V5/Readiness, (IV) G0.7. SIGN-DRY schlüsselfrei vorbereitet: Operator setzt `BSC_WALLET_LAUNCHER`, `BSC_WALLET_BUYER`, `BSC_ECON_SIGN` ENABLED (`bsc_runtime source request … --state ~/.darkbot/run/bsc-sources --config <ingress.public.env>`), dann `BSC_MAINNET_RPC_HTTPS=https://bsc-dataseed.bnbchain.org DARKBOT_G06A_SIGN=YES bsc/tools/g06a_final_dry.sh --sign bsc/native/evidence/g06a/g06a_prepare_20261027T082739Z` (Sitzungsfilter blockiert die Ausführung durch Claude); danach V5-Vorschlag, Readiness `PASS_READ_ONLY` (Builder-Quellen ≤ 24 h); V5-Freigabe, ARM, Grant, Schalter + Tageslimit (Nutzer); Portal v5.27.2 nur bytecode-gebunden (O03) |
 | G0.8 | Werkzeug bereit; Blast-Archiv am 27.10. `QUALIFIED` (Tiefe 1/128/1200/28800) | `g08_mainnet_verify --qualify-history` | G0.7-Evidence |
 | G0.9–G0.11 | nach G0.8 (Abhängigkeit); Builder-Liste: 34 Einträge von 6 Betreibern (good-will-alliance `123165bf`), Validator-Liste nicht mehr veröffentlicht | – | G0.7/G0.8 |
 | J / KB / K | gesperrt durch ihre Abhängigkeiten (G0.8-Verdikt, G0.4, Nutzer-Risikoentscheidung) | – | – |

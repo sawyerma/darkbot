@@ -100,6 +100,13 @@ fn filled(s: &'static Schema) -> Draft {
     d
 }
 
+/// The shipped runtime configuration, and its path (the owner commands' `--config`).
+const SHIPPED: &str = include_str!("../../../../config/ingress.public.env");
+const SHIPPED_PATH: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../../config/ingress.public.env"
+);
+
 /// The synthetic buyer key's secret ([`buyer_key`]).
 const BUYER_SECRET: [u8; 32] = [0x44; 32];
 
@@ -115,6 +122,8 @@ fn write_evidence(root: &Path, ev: &str, verdict: &str) {
     use darkbot_bsc_record::schema::{bsc_runtime, g06a, g07, g08};
     fs::create_dir_all(root.join(ev)).unwrap();
     fs::create_dir_all(root.join("bsc/config")).unwrap();
+    // Audit E 3.2: the parity floor the qualification reads.
+    fs::write(root.join("bsc/config/ingress.public.env"), SHIPPED).unwrap();
     let pin = bsc_mainnet_v5_27_2();
     let portal = Value::Address(pin.portal.into_array());
     let implementation = Value::Address(pin.portal_implementation.into_array());
@@ -158,7 +167,7 @@ fn write_evidence(root: &Path, ev: &str, verdict: &str) {
         .set(fp::CHAIN_VERSION_CHECKED, true);
     // Per traded path the floor of cases executed under both, each
     // identical (the qualification counts them from the cases).
-    let floor = darkbot_bsc_execution::live_qualification::PARITY_MIN_EXECUTED_PER_PATH;
+    let floor = darkbot_bsc_execution::live_qualification::parity_min_of(SHIPPED).unwrap();
     for (path, min) in [
         ("LAUNCH", fp::MIN_LAUNCHES),
         ("BUY", fp::MIN_BUYS),
@@ -582,7 +591,7 @@ const BROWSER_SCOPE: (&str, &str) = ("C3", "1");
 
 /// The synthetic LIVE grant's scope arguments with `strategies` and
 /// `attempts`, valid until `expires`.
-fn scope_args<'a>(strategies: &'a str, attempts: &'a str, expires: &'a str) -> [&'a str; 36] {
+fn scope_args<'a>(strategies: &'a str, attempts: &'a str, expires: &'a str) -> [&'a str; 38] {
     [
         "--venue",
         "BSC_VENUE_FLAP",
@@ -622,6 +631,9 @@ fn scope_args<'a>(strategies: &'a str, attempts: &'a str, expires: &'a str) -> [
         "50000000000000000",
         "--min-buy-interval-ms",
         "0",
+        // Audit E 3.1: the maximum the owner bounds attempts by.
+        "--config",
+        SHIPPED_PATH,
     ]
 }
 
@@ -645,6 +657,8 @@ fn activate(state: &Path, skip: &[&str], expires: u64) {
             &rid,
             "--state",
             state_s,
+            "--config",
+            SHIPPED_PATH,
         ]);
         assert_eq!(code, 0, "{id} {mode}: {out}");
         *generation += 1;
@@ -694,6 +708,8 @@ fn activate(state: &Path, skip: &[&str], expires: u64) {
                     "e2e-grant",
                     "--state",
                     state_s,
+                    "--config",
+                    SHIPPED_PATH,
                 ],
             ]
             .concat());
@@ -728,6 +744,7 @@ fn limits() -> FollowerLimits {
 fn exec_setup() -> ExecSetup {
     ExecSetup {
         identity_path: PathBuf::from("/nonexistent/paper.key"),
+        owner: darkbot_bsc_execution::sources::OwnerLimits::of_config(SHIPPED).unwrap(),
         refused_accounts: Vec::new(),
         exec: ExecConfig {
             input_wei: u128::from(INPUT),
@@ -1046,6 +1063,8 @@ fn live_buy_to_sell_is_synthetic_and_never_leaves_the_host() {
         state.to_str().unwrap(),
         "--root",
         root.to_str().unwrap(),
+        "--config",
+        SHIPPED_PATH,
     ]);
     assert_eq!(code, 0, "{out}");
     assert!(
@@ -1349,6 +1368,8 @@ fn live_buy_to_sell_is_synthetic_and_never_leaves_the_host() {
             state.to_str().unwrap(),
             "--root",
             root.to_str().unwrap(),
+            "--config",
+            SHIPPED_PATH,
         ]);
         if let Some(reason) = reason {
             assert_eq!(code, 2, "{tag}: {out}");
@@ -1864,6 +1885,8 @@ fn the_operators_lot_and_ledger_commands_write_their_facts_once() {
         "e2e-bump",
         "--state",
         s,
+        "--config",
+        SHIPPED_PATH,
     ]);
     assert_eq!(code, 0, "{out}");
     let (code, out) = quarantine(g + 1);

@@ -67,7 +67,7 @@ export function LivePanel() {
         <Line label="Grant risk scope SHA-256" value={l.grant.riskScopeSha256 || "—"} hint="BSC3-049: the scope a qualification's risk decision names" />
         <pre data-testid="bsc-live-grant-scope">{l.grant.scopeText}</pre>
       </> : null}
-      <LiveGrantActions generation={generation} available={owner} grantable={l?.grantableSources ?? []} />
+      <LiveGrantActions generation={generation} available={owner} grantable={l?.grantableSources ?? []} maxAttempts={l?.buyAttemptsTotalMax} />
     </PlacedSection>
     <PlacedSection panel="live" section={3} records={records}>
       <Line label="Runtime mode" value={<ValueState state={l?.runtimeMode?.effective} />} hint={`requested ${l?.runtimeMode?.requested ?? "—"}${l?.runtimeMode?.blockReason ? ` · ${l.runtimeMode.blockReason}` : ""}`} />
@@ -82,10 +82,10 @@ export function LivePanel() {
     <PlacedSection panel="live" section={4} records={records}>
       <Line label="Daily BUY attempts" value={buyLimitRow(l?.daily).summary} />
       <BuyLimitActions row={buyLimitRow(l?.daily)} />
-      <Line label="Campaign BUY attempts" value={`${(l?.totalUsed ?? 0n).toString()} of ${(l?.totalLimit ?? 0n).toString()} (at most 10)`} />
+      <Line label="Campaign BUY attempts" value={`${(l?.totalUsed ?? 0n).toString()} of ${(l?.totalLimit ?? 0n).toString()} (at most ${l?.buyAttemptsTotalMax ?? "?"})`} />
       <Line label="This grant's attempts" value={`${(l?.grantAttemptsUsed ?? 0n).toString()} of ${l?.grant?.maxAttempts ?? 0}`} />
       <Line label="Next C3 attempt" value={l?.leaseAttempt || "—"} hint="BSC3-078: the attempt the next C3 BUY takes (its lease holds it, or it was kept from a returned one)" />
-      <TotalLimitActions generation={generation} available={owner} limit={l?.totalLimit ?? 0n} />
+      <TotalLimitActions generation={generation} available={owner} limit={l?.totalLimit ?? 0n} max={l?.buyAttemptsTotalMax} />
       <LiveCampaign campaign={l?.campaign} attempts={l?.attempts ?? []} warnings={l?.warnings ?? []} />
     </PlacedSection>
     <PlacedSection panel="live" section={5} records={records}>

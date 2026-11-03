@@ -414,14 +414,14 @@ Paketschlüssel: E1 Texte, E2 Totcode/Platzhalter, E3 Konfiguration, E4 Projekti
 | 2.18 | Submission/TLS-Doku | FIX/E1 | TEILWEISE: `mod.rs` und `tls/config.rs` DONE `8a9584d9`; **`send.rs`-Kopf OFFEN** |
 | 2.19 | `flap_gas_20261026.txt` | KEEP (mit 1.7 verschieben) | offen mit 1.7 |
 | 2.20 | `__pycache__`; `runtime_live.rs.orig` | FIX/KEEP | geschlossen (`.orig` nie anfassen) |
-| 3.1 | Kampagnen-Maximum 10 dreifach (`sources.rs` ~404, `gateway/src/control.rs` ~95, `frontend live.ts` ~13) → Config `BSC_BUY_ATTEMPTS_TOTAL_MAX` projiziert | FIX+REPIN/E3 | OFFEN |
-| 3.2 | `PARITY_MIN_EXECUTED_PER_PATH=30` → Kriterien-Config | FIX+REPIN/E3 | OFFEN |
-| 3.3 | Stale-Faktor 3 doppelt (`sources.rs` `STATUS_STALE_AFTER_INTERVALS`, `sources.ts` ~33) | FIX+REPIN/E3 | OFFEN |
-| 3.4 | `KEEP_GENERATIONS=64` → Config | FIX+REPIN/E3 | OFFEN |
+| 3.1 | Kampagnen-Maximum 10 dreifach (`sources.rs` ~404, `gateway/src/control.rs` ~95, `frontend live.ts` ~13) → Config `BSC_BUY_ATTEMPTS_TOTAL_MAX` projiziert | FIX+REPIN/E3 | DONE (E3) |
+| 3.2 | `PARITY_MIN_EXECUTED_PER_PATH=30` → Kriterien-Config | FIX+REPIN/E3 | DONE (E3) |
+| 3.3 | Stale-Faktor 3 doppelt (`sources.rs` `STATUS_STALE_AFTER_INTERVALS`, `sources.ts` ~33) | FIX+REPIN/E3 | DONE (E3) |
+| 3.4 | `KEEP_GENERATIONS=64` → Config | FIX+REPIN/E3 | DONE (E3) |
 | 3.5/3.6 | Socket/Label, launchd-Zahlen | FIX+REPIN | DONE `8a9584d9` |
 | 3.7/3.8 | Gateway-/Frontend-Timeouts | FIX | DONE `8a9584d9` (**Rest aus E-A:** Timeout-Literale der P0-Clients im Frontend gehören zu Project_0, **nicht BSC**) |
 | 3.9–3.11, 3.13 | Q5A-Hosts, Deployment-Pins, Owner-Pfad, Protokollkonstanten | KEEP | geschlossen |
-| 3.12 | abgelehnte Konten doppelt (Config vs. acceptance_contract) → Prüfung beim Start | FIX/E3 | OFFEN |
+| 3.12 | abgelehnte Konten doppelt (Config vs. acceptance_contract) → Prüfung beim Start | FIX/E3 | DONE (E3) |
 | 4.1/4.14/5.1 | `startup.rs` toter Parallelpfad, SecretSources | FIX/E2 | DONE `8a9584d9` |
 | 4.2 | PaperEnd/LiveEnd-Planung und -Frames doppelt | FIX/E7 (Hot-Path, messen) | OFFEN |
 | 4.3–4.5, 5.14 | JSON-RPC-Hex/Rate-Limit-Module, HTTP-Framer (follower `http.rs` vs. submission `response.rs`), rustls-Builder (wss vs. tls), https-Reparse als wss | FIX/E6 | OFFEN |

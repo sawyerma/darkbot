@@ -1686,7 +1686,12 @@ pub(crate) mod tests {
         let refused = LiveEnd::new(
             other,
             armed.clone(),
-            Store::open_in_session(&state, 8, Ok("boot-1".into())).unwrap(),
+            Store::open_in_session(
+                &state,
+                crate::sources::tests::keeping(8),
+                Ok("boot-1".into()),
+            )
+            .unwrap(),
             foreign,
             LiveRoute::Loopback { port },
             56,
@@ -1755,7 +1760,16 @@ pub(crate) mod tests {
         let from = recover_legacy_sender(&signed, 56, &mut Vec::new()).unwrap();
         assert_eq!(from.into_array(), buyer);
         let c3_most = 1_000_000_000_000_000u128 + 1_000_000_000 * 300_000;
-        assert_eq!(buy_usage(&state, now).unwrap().used, 1);
+        assert_eq!(
+            buy_usage(
+                &state,
+                now,
+                crate::sources::tests::shipped_limits().buy_attempts_total_max
+            )
+            .unwrap()
+            .used,
+            1
+        );
         assert_eq!(spent_by_grant(&state, generation).unwrap(), c3_most);
         // Strategy C, once nonce 0 is canonical: the BUY alone, then its
         // approval and SELL.
@@ -1776,7 +1790,16 @@ pub(crate) mod tests {
             .unwrap();
         let request = String::from_utf8(requests.recv_timeout(wait).unwrap()).unwrap();
         assert!(request.contains(&format!("\"txs\":[\"0x{}\"]", hex(&entry.raw))));
-        assert_eq!(buy_usage(&state, now).unwrap().used, 2);
+        assert_eq!(
+            buy_usage(
+                &state,
+                now,
+                crate::sources::tests::shipped_limits().buy_attempts_total_max
+            )
+            .unwrap()
+            .used,
+            2
+        );
         let call =
             decode_swap_exact_input_native(decode_signed(&entry.raw).unwrap().tx.input).unwrap();
         let tokens = call.min_output_amount;
@@ -1823,7 +1846,12 @@ pub(crate) mod tests {
         assert_eq!(released.len(), 4);
         assert!(released.iter().all(|r| r.handed_off));
         // Revoked: the owner admits nothing more, nothing leaves.
-        let owner = Store::open_in_session(&state, 8, Ok("boot-1".into())).unwrap();
+        let owner = Store::open_in_session(
+            &state,
+            crate::sources::tests::keeping(8),
+            Ok("boot-1".into()),
+        )
+        .unwrap();
         let g = owner.current().unwrap().generation;
         let r = owner
             .request("revoke", Entity::LiveGrant, Mode::Disabled, g, now)
@@ -1846,7 +1874,16 @@ pub(crate) mod tests {
                 .recv_timeout(std::time::Duration::from_millis(300))
                 .is_err()
         );
-        assert_eq!(buy_usage(&state, now).unwrap().used, 2);
+        assert_eq!(
+            buy_usage(
+                &state,
+                now,
+                crate::sources::tests::shipped_limits().buy_attempts_total_max
+            )
+            .unwrap()
+            .used,
+            2
+        );
         assert_eq!(exec.end().released().len(), 4);
         // The key file was only read.
         assert_eq!(fs::read(&key_path).unwrap(), [0x33u8; 32]);
@@ -2104,7 +2141,15 @@ pub(crate) mod tests {
         let refused = exec.on_launch(pending(), &c2_next(Some(HEAD), 0), &late);
         assert_eq!(refused.unwrap_err(), Refusal::Deadline);
         assert!(requests.recv_timeout(silent).is_err());
-        assert_eq!(total_usage(&state).unwrap().used, 1);
+        assert_eq!(
+            total_usage(
+                &state,
+                crate::sources::tests::shipped_limits().buy_attempts_total_max
+            )
+            .unwrap()
+            .used,
+            1
+        );
         assert_eq!(crate::sources::admitted_intents(&state).unwrap(), leased);
         assert!(Ledger::open(&state).facts().unwrap().is_empty());
         // The lease is still held: the next launch in time (another token;
@@ -2122,7 +2167,15 @@ pub(crate) mod tests {
             .on_launch(next, &c2_next(Some(HEAD), 0), &clock(100, 7))
             .unwrap();
         requests.recv_timeout(wait).unwrap();
-        assert_eq!(total_usage(&state).unwrap().used, 1);
+        assert_eq!(
+            total_usage(
+                &state,
+                crate::sources::tests::shipped_limits().buy_attempts_total_max
+            )
+            .unwrap()
+            .used,
+            1
+        );
         assert!(exec.end().lease().is_none());
         let facts = Ledger::open(&state).facts().unwrap();
         assert_eq!(
@@ -2163,7 +2216,15 @@ pub(crate) mod tests {
         assert_eq!(refused.unwrap_err(), Refusal::Deadline);
         assert!(requests.recv_timeout(silent).is_err());
         assert!(exec.end().released().is_empty());
-        assert_eq!(total_usage(&state).unwrap().used, 1);
+        assert_eq!(
+            total_usage(
+                &state,
+                crate::sources::tests::shipped_limits().buy_attempts_total_max
+            )
+            .unwrap()
+            .used,
+            1
+        );
         let facts = Ledger::open(&state).facts().unwrap();
         assert_eq!(facts.len(), 1);
         assert_eq!(
@@ -2228,7 +2289,15 @@ pub(crate) mod tests {
         let book = fold(&facts);
         assert_eq!(book.unresolved().count(), 0);
         assert!(book.positions.is_empty());
-        assert_eq!(crate::sources::total_usage(&state).unwrap().used, 1);
+        assert_eq!(
+            crate::sources::total_usage(
+                &state,
+                crate::sources::tests::shipped_limits().buy_attempts_total_max
+            )
+            .unwrap()
+            .used,
+            1
+        );
         LEASE_BOUND.with(|b| b.set(false));
         exec.disarm().unwrap();
         fs::remove_dir_all(d).unwrap();
@@ -2252,7 +2321,15 @@ pub(crate) mod tests {
             });
         let start = clock.load(Ordering::SeqCst);
         let midnight = (start / DAY + 1) * DAY;
-        let usage = |at: u64| crate::sources::buy_usage(&state, at).unwrap().used;
+        let usage = |at: u64| {
+            crate::sources::buy_usage(
+                &state,
+                at,
+                crate::sources::tests::shipped_limits().buy_attempts_total_max,
+            )
+            .unwrap()
+            .used
+        };
         clock.store(midnight - 60_000, Ordering::SeqCst);
         lease_c3(&mut exec, 0);
         assert_eq!(usage(midnight - 60_000), 1);
