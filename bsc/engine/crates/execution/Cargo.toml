@@ -52,6 +52,11 @@ rpc-wire = []
 # serde_json only at the WSS source's JSON-RPC wire (`wss::jsonrpc`).
 runtime = ["dep:darkbot-bsc-record", "dep:tungstenite", "dep:serde_json", "dep:darkbot-bsc-tx-encoding", "dep:darkbot-bsc-geth-ipc", "dep:darkbot-bsc-journal", "dep:signal-hook", "dep:zeroize", "dep:sha2", "dep:secp256k1"]
 g07-mainnet = ["acceptance-guard", "rpc-wire", "dep:serde_json", "dep:sha2", "dep:hex", "dep:darkbot-bsc-journal", "dep:alloy-sol-types", "dep:k256", "dep:zeroize"]
+# REV.1.0 R11: the harness build of bsc_runtime for the Messplan §3b cases:
+# its TLS clients also trust the test CA of tests/fixtures/tls, so the real
+# process reaches loopback mock WSS/RPC servers. Never enabled by the
+# production build (darkbotctl build: --features runtime).
+loopback-harness = ["runtime"]
 
 [lints.rust]
 # BSC3-063 review: under `secp256k1_fuzz` libsecp256k1 recovers a key from
@@ -153,3 +158,8 @@ required-features = ["g07-mainnet", "runtime"]
 [[test]]
 name = "live_e2e"
 required-features = ["runtime"]
+
+# REV.1.0 R11: the Messplan §3b cases on the real runtime process.
+[[test]]
+name = "runtime_process"
+required-features = ["loopback-harness"]

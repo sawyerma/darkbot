@@ -87,13 +87,29 @@ fn parse_port(port: &str) -> Result<u16, UrlError> {
 /// default), the webpki roots, ALPN `http/1.1` for the upgrade.
 pub(crate) fn tls_config() -> Result<Arc<ClientConfig>, rustls::Error> {
     let provider = Arc::new(rustls::crypto::ring::default_provider());
-    let roots = RootCertStore::from_iter(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    let roots = harness_roots(RootCertStore::from_iter(
+        webpki_roots::TLS_SERVER_ROOTS.iter().cloned(),
+    ))?;
     let mut config = ClientConfig::builder_with_provider(provider)
         .with_safe_default_protocol_versions()?
         .with_root_certificates(roots)
         .with_no_client_auth();
     config.alpn_protocols = vec![b"http/1.1".to_vec()];
     Ok(Arc::new(config))
+}
+
+/// REV.1.0 R11: the harness build (feature `loopback-harness`, never the
+/// production build) also trusts the test CA, for loopback mock servers.
+#[cfg(feature = "loopback-harness")]
+fn harness_roots(mut roots: RootCertStore) -> Result<RootCertStore, rustls::Error> {
+    const TEST_CA: &[u8] = include_bytes!("../../tests/fixtures/tls/ca.der");
+    roots.add(rustls::pki_types::CertificateDer::from(TEST_CA))?;
+    Ok(roots)
+}
+
+#[cfg(not(feature = "loopback-harness"))]
+fn harness_roots(roots: RootCertStore) -> Result<RootCertStore, rustls::Error> {
+    Ok(roots)
 }
 
 /// Applies the socket bounds of `limits` to a connected TCP stream.

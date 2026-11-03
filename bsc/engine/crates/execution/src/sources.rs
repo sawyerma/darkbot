@@ -5374,6 +5374,41 @@ pub(crate) mod tests {
         (dir, s)
     }
 
+    /// Messplan §3b C10: the six switches the G0.7 runner requires before
+    /// it signs, consumes its authority and sends (both wallets, SIGN, ARM,
+    /// SEND, ATTEMPT; `g07_no_send` pins that set and the three checks):
+    /// all six ENABLED pass; each one alone DISABLED refuses, naming it.
+    #[test]
+    fn each_of_the_six_attempt_switches_alone_refuses_the_attempt() {
+        let ids = [
+            SwitchId::WalletLauncher,
+            SwitchId::WalletBuyer,
+            SwitchId::Sign,
+            SwitchId::Arm,
+            SwitchId::Send,
+            SwitchId::Attempt,
+        ];
+        for off in 0..ids.len() {
+            let (dir, s) = session(&format!("c10-{off}"), "boot-1");
+            for (i, id) in ids.iter().enumerate() {
+                s.request(&format!("on-{i}"), *id, Mode::Enabled, i as u64, 1)
+                    .unwrap();
+            }
+            assert!(require_enabled(&dir, "boot-1", &ids).is_ok());
+            s.request("off", ids[off], Mode::Disabled, ids.len() as u64, 1)
+                .unwrap();
+            let e = require_enabled(&dir, "boot-1", &ids).unwrap_err();
+            for (i, id) in ids.iter().enumerate() {
+                assert_eq!(
+                    e.contains(&format!("{} DISABLED", id.name())),
+                    i == off,
+                    "{e}"
+                );
+            }
+            fs::remove_dir_all(dir).unwrap();
+        }
+    }
+
     /// Messplan §3b C02–C07 and the sub-combination: the isolated SIGN guard
     /// over LAUNCHER, BUYER and SIGN passes for exactly one of the eight
     /// settings and names every switch that is off; from all three ENABLED,

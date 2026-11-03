@@ -113,7 +113,7 @@ impl TestServer {
     }
 }
 
-fn server_config(served: Served, alpn: ServerAlpn) -> ServerConfig {
+pub fn server_config(served: Served, alpn: ServerAlpn) -> ServerConfig {
     let (cert, key) = match served {
         Served::Localhost => (LOCALHOST_CERT, LOCALHOST_KEY),
         Served::OtherName => (OTHER_NAME_CERT, OTHER_NAME_KEY),

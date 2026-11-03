@@ -1993,7 +1993,11 @@ fn the_live_tab_shows_the_exit_deciders_the_recovery_and_the_quarantine() {
     status_in(now, "DISARMED");
     let idle = tab();
     assert_eq!(
-        (idle.next_nonce, idle.armed_generation, idle.lease_attempt.as_str()),
+        (
+            idle.next_nonce,
+            idle.armed_generation,
+            idle.lease_attempt.as_str()
+        ),
         (Some(41), None, "")
     );
     status(now);

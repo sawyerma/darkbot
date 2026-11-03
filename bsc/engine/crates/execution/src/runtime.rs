@@ -3610,10 +3610,16 @@ pub fn run(
     journal.set_identity(RunIdentity {
         host: host_label(),
         build: format!(
-            "darkbot-bsc-execution {} checkout-at-start {}{}",
+            "darkbot-bsc-execution {} checkout-at-start {}{}{}",
             env!("CARGO_PKG_VERSION"),
             checkout.as_deref().unwrap_or("unknown"),
-            if dirty == Some(true) { "+dirty" } else { "" }
+            if dirty == Some(true) { "+dirty" } else { "" },
+            // R11: a harness build (test CA trusted) names itself.
+            if cfg!(feature = "loopback-harness") {
+                " loopback-harness"
+            } else {
+                ""
+            }
         ),
         config_sha256: config.source_sha256,
         build_sha256: own_binary_sha256(),
