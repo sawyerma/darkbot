@@ -14,6 +14,8 @@ darkbot-bsc-trading = { path = "../trading" }
 # The C1.6 host profile and the C1.9/C1.9b raw evidence as typed binary
 # records (DBREC001) and tables; no cycle: the record crate depends on sha2 only.
 darkbot-bsc-record = { path = "../record" }
+# The one RLP decoder and encoder (Audit E 4.16): canonical items only.
+darkbot-bsc-tx-encoding = { path = "../tx_encoding" }
 
 [dev-dependencies]
 # `IntentLane::dispatched_for_tests` for the egress tests and the C1.9

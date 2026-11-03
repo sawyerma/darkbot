@@ -738,6 +738,7 @@ dependencies = [
  "alloy-primitives",
  "darkbot-bsc-record",
  "darkbot-bsc-trading",
+ "darkbot-bsc-tx-encoding",
  "libc",
 ]
 

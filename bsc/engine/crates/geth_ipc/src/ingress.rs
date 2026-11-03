@@ -35,6 +35,7 @@
 //! are a golden value that darkbot-core recomputes from the committed venue
 //! constants.
 
+use darkbot_bsc_tx_encoding::rlp::{self, Item as RlpItem};
 use std::collections::{HashMap, VecDeque};
 
 use crate::RecordKind;
@@ -314,72 +315,27 @@ pub enum EnvelopeErrorV2 {
     UnsupportedType(u8),
 }
 
-#[derive(Clone, Copy)]
-struct RlpItem<'a> {
-    list: bool,
-    payload: &'a [u8],
-}
-
-fn rlp_length(bytes: &[u8], width: usize) -> Result<usize, EnvelopeErrorV2> {
-    if width == 0 || width > 8 || bytes.len() < width {
-        return Err(EnvelopeErrorV2::Malformed("rlp: truncated length"));
-    }
-    if bytes[0] == 0 {
-        return Err(EnvelopeErrorV2::Malformed("rlp: length with leading zero"));
-    }
-    let mut length = 0u64;
-    for byte in &bytes[..width] {
-        length = (length << 8) | u64::from(*byte);
-    }
-    usize::try_from(length).map_err(|_| EnvelopeErrorV2::Malformed("rlp: length overflow"))
-}
-
-/// Splits the first RLP item off `bytes`.
+/// Splits the first RLP item off `bytes`: the one canonical decoder of
+/// `darkbot-bsc-tx-encoding` (Audit E 4.16).
 fn rlp_next(bytes: &[u8]) -> Result<(RlpItem<'_>, &[u8]), EnvelopeErrorV2> {
-    let (&prefix, rest) = bytes
-        .split_first()
-        .ok_or(EnvelopeErrorV2::Malformed("rlp: missing item"))?;
-    let (list, width, length) = match prefix {
-        0x00..=0x7f => {
-            return Ok((
-                RlpItem {
-                    list: false,
-                    payload: &bytes[..1],
-                },
-                rest,
-            ));
-        }
-        0x80..=0xb7 => (false, 0, usize::from(prefix - 0x80)),
-        0xb8..=0xbf => {
-            let width = usize::from(prefix - 0xb7);
-            (false, width, rlp_length(rest, width)?)
-        }
-        0xc0..=0xf7 => (true, 0, usize::from(prefix - 0xc0)),
-        _ => {
-            let width = usize::from(prefix - 0xf7);
-            (true, width, rlp_length(rest, width)?)
-        }
-    };
-    let body = &rest[width..];
-    if body.len() < length {
-        return Err(EnvelopeErrorV2::Malformed("rlp: truncated item"));
-    }
-    Ok((
-        RlpItem {
-            list,
-            payload: &body[..length],
-        },
-        &body[length..],
-    ))
+    rlp::take_item(bytes).map_err(|e| EnvelopeErrorV2::Malformed(e.as_str()))
 }
 
 /// Field `index` of an RLP list payload.
 fn rlp_field(list_payload: &[u8], index: usize) -> Result<RlpItem<'_>, EnvelopeErrorV2> {
     let mut rest = list_payload;
     for _ in 0..index {
-        rest = rlp_next(rest)?.1;
+        rest = next_field(rest)?.1;
     }
-    Ok(rlp_next(rest)?.0)
+    Ok(next_field(rest)?.0)
+}
+
+/// The next field of an RLP list payload; none left: the field is missing.
+fn next_field(rest: &[u8]) -> Result<(RlpItem<'_>, &[u8]), EnvelopeErrorV2> {
+    if rest.is_empty() {
+        return Err(EnvelopeErrorV2::Malformed("envelope: missing field"));
+    }
+    rlp_next(rest)
 }
 
 /// REV.1.0 R6: what the signature of a signed transaction commits to, and
@@ -430,15 +386,7 @@ pub fn decode_tx_signature(raw: &[u8]) -> Result<TxSignatureV2, EnvelopeErrorV2>
     }
     /// `rlp(list)` of already encoded `items` into `out`.
     fn list(items: &[&[u8]], out: &mut Vec<u8>) {
-        let body: usize = items.iter().map(|i| i.len()).sum();
-        if body <= 55 {
-            out.push(0xc0 + body as u8);
-        } else {
-            let length = (body as u64).to_be_bytes();
-            let skip = length.iter().take_while(|b| **b == 0).count();
-            out.push(0xf7 + (8 - skip) as u8);
-            out.extend_from_slice(&length[skip..]);
-        }
+        rlp::put_list_header(out, items.iter().map(|i| i.len()).sum());
         for i in items {
             out.extend_from_slice(i);
         }
@@ -490,17 +438,8 @@ pub fn decode_tx_signature(raw: &[u8]) -> Result<TxSignatureV2, EnvelopeErrorV2>
             };
             let chain_id = offset / 2;
             // `chainId` as an rlp integer, then two empty strings.
-            let bytes = chain_id.to_be_bytes();
-            let skip = bytes.iter().take_while(|b| **b == 0).count();
-            let value = &bytes[skip..];
             let mut chain = Vec::with_capacity(9);
-            match value {
-                [b] if *b < 0x80 => chain.push(*b),
-                _ => {
-                    chain.push(0x80 + value.len() as u8);
-                    chain.extend_from_slice(value);
-                }
-            }
+            rlp::put_u64(&mut chain, chain_id);
             let mut items: Vec<&[u8]> = fields[..6].to_vec();
             items.push(&chain);
             items.push(&[0x80]);
@@ -1343,6 +1282,48 @@ mod tests {
             decode_tx_target(&short_to),
             Err(EnvelopeErrorV2::Malformed(_))
         ));
+    }
+
+    /// Audit E 4.16: the envelopes go through the one canonical RLP decoder
+    /// (`darkbot-bsc-tx-encoding`): a byte below 0x80 in a string header, a
+    /// short string or list in the long form is refused (before: taken).
+    #[test]
+    fn non_canonical_envelopes_are_refused() {
+        // A legacy EIP-155 transaction: v = 35 + 2·56, r = s = 1.
+        let fields = |to: Vec<u8>, data: Vec<u8>| {
+            vec![
+                rlp_uint(0),
+                rlp_uint(1),
+                rlp_uint(2),
+                to,
+                rlp_uint(0),
+                data,
+                rlp_uint(147),
+                rlp_uint(1),
+                rlp_uint(1),
+            ]
+        };
+        let canonical = rlp_list(&fields(rlp_bytes(&PORTAL), rlp_bytes(&[0x05])));
+        assert_eq!(decode_tx_target(&canonical).unwrap().data, &[0x05]);
+        assert_eq!(decode_tx_signature(&canonical).unwrap().chain_id, 56);
+        let non_canonical = Some(EnvelopeErrorV2::Malformed("rlp: non-canonical encoding"));
+        let mut long_to = vec![0xb8, 20];
+        long_to.extend_from_slice(&PORTAL);
+        let mut long_list = vec![0xf8, (canonical.len() - 1) as u8];
+        long_list.extend_from_slice(&canonical[1..]);
+        for refused in [
+            rlp_list(&fields(rlp_bytes(&PORTAL), vec![0x81, 0x05])),
+            rlp_list(&fields(long_to, rlp_bytes(&[0x05]))),
+            long_list,
+        ] {
+            assert_eq!(decode_tx_target(&refused).err(), non_canonical);
+            assert_eq!(decode_tx_signature(&refused).err(), non_canonical);
+        }
+        // A field the type needs is missing (review L5).
+        assert_eq!(
+            decode_tx_target(&[0xc0]),
+            Err(EnvelopeErrorV2::Malformed("envelope: missing field"))
+        );
     }
 
     #[test]

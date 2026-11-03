@@ -83,9 +83,33 @@ fn check_u64(input: &[u8]) {
     }
 }
 
+/// Audit E 4.16: one item, string or list, as alloy-rlp's canonical header
+/// reads it (its flag, payload and rest).
+fn check_item(input: &[u8]) {
+    let mut buf = input;
+    let theirs = Header::decode(&mut buf).and_then(|h| {
+        if buf.len() < h.payload_length {
+            return Err(alloy_rlp::Error::InputTooShort);
+        }
+        Ok((h.list, &buf[..h.payload_length], &buf[h.payload_length..]))
+    });
+    match (rlp::take_item(input), theirs) {
+        (Ok((item, rest)), Ok((list, payload, their_rest))) => {
+            assert_eq!(item.list, list, "item kind differs: {input:02x?}");
+            assert_eq!(item.payload, payload, "item payload differs: {input:02x?}");
+            assert_eq!(rest, their_rest, "item rest differs: {input:02x?}");
+        }
+        (Err(_), Err(_)) => {}
+        (ours, theirs) => {
+            panic!("item disagreement on {input:02x?}: ours={ours:?} theirs={theirs:?}")
+        }
+    }
+}
+
 fn check_all(input: &[u8]) {
     check_string(input);
     check_list(input);
+    check_item(input);
     check_u64(input);
 }
 

@@ -15,7 +15,8 @@
 //!
 //! Order of checks: chain, then Keccak-256 of the signed bytes against the
 //! announced hash (cheap, binds every field), then signer recovery against
-//! the announced sender, then the independent envelope decoder.
+//! the announced sender, then the geth ingress envelope decoder
+//! (`decode_tx_target`; one RLP decoder, the hash binds the bytes).
 
 use std::sync::LazyLock;
 

@@ -13,7 +13,7 @@
 //! came: `verify` rebuilds its canonical signed bytes (legacy EIP-155,
 //! EIP-2930, EIP-1559), requires their Keccak-256 to be the announced hash,
 //! recovers the signer and requires it to be the announced sender, and
-//! cross-checks the bytes with the independent envelope decoder of
+//! cross-checks the bytes with the ingress envelope decoder of
 //! `darkbot-bsc-geth-ipc`. Anything else is [`WssEvent::Rejected`].
 //!
 //! Bounds: every timeout, the frame and message size and the reconnect
@@ -237,7 +237,7 @@ pub enum RejectReason {
     Signature(SignerError),
     /// The recovered signer is not the announced `from`.
     SignerMismatch,
-    /// The independent envelope decoder disagrees with the rebuilt bytes.
+    /// The geth ingress envelope decoder disagrees with the rebuilt bytes.
     Envelope,
 }
 

@@ -187,16 +187,23 @@ pub enum DecodeError {
     TrailingBytes,
 }
 
-impl core::fmt::Display for DecodeError {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.write_str(match self {
+impl DecodeError {
+    /// The reason as text.
+    pub fn as_str(&self) -> &'static str {
+        match self {
             Self::UnexpectedEnd => "rlp: input ends before the item does",
             Self::ExpectedString => "rlp: expected a byte string, found a list",
             Self::ExpectedList => "rlp: expected a list, found a byte string",
             Self::NonCanonical => "rlp: non-canonical encoding",
             Self::LengthOverflow => "rlp: length or integer exceeds the supported width",
             Self::TrailingBytes => "rlp: trailing bytes after the last item",
-        })
+        }
+    }
+}
+
+impl core::fmt::Display for DecodeError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 
@@ -253,19 +260,44 @@ pub fn take_bytes(input: &[u8]) -> Result<(&[u8], &[u8]), DecodeError> {
     }
 }
 
-/// Requires `input` to be exactly one list and returns its payload (the
-/// concatenated encoded items).
-pub fn list_payload_exact(input: &[u8]) -> Result<&[u8], DecodeError> {
+/// One item: a byte string's or a list's payload.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Item<'a> {
+    pub list: bool,
+    pub payload: &'a [u8],
+}
+
+/// Splits one item, a byte string or a list, off the front of `input`
+/// (Audit E 4.16: the one RLP decoder, also of the geth ingress envelopes).
+/// The item's own header is checked canonical; a list's items are not
+/// decoded. Returns `(item, rest)`; both borrow from `input`.
+pub fn take_item(input: &[u8]) -> Result<(Item<'_>, &[u8]), DecodeError> {
     let first = *input.first().ok_or(DecodeError::UnexpectedEnd)?;
-    let (payload, rest) = match first {
-        0x00..=0xbf => return Err(DecodeError::ExpectedList),
-        0xc0..=0xf7 => split_payload(input, 1, usize::from(first - 0xc0))?,
+    let (list, (payload, rest)) = match first {
+        0x00..=0xbf => (false, take_bytes(input)?),
+        0xc0..=0xff => (true, take_list(input)?),
+    };
+    Ok((Item { list, payload }, rest))
+}
+
+/// Splits one list off the front of `input`: `(payload, rest)`.
+fn take_list(input: &[u8]) -> Result<(&[u8], &[u8]), DecodeError> {
+    let first = *input.first().ok_or(DecodeError::UnexpectedEnd)?;
+    match first {
+        0x00..=0xbf => Err(DecodeError::ExpectedList),
+        0xc0..=0xf7 => split_payload(input, 1, usize::from(first - 0xc0)),
         0xf8..=0xff => {
             let len_of_len = usize::from(first - 0xf7);
             let len = read_long_len(input, len_of_len)?;
-            split_payload(input, 1 + len_of_len, len)?
+            split_payload(input, 1 + len_of_len, len)
         }
-    };
+    }
+}
+
+/// Requires `input` to be exactly one list and returns its payload (the
+/// concatenated encoded items).
+pub fn list_payload_exact(input: &[u8]) -> Result<&[u8], DecodeError> {
+    let (payload, rest) = take_list(input)?;
     if !rest.is_empty() {
         return Err(DecodeError::TrailingBytes);
     }
@@ -449,6 +481,42 @@ mod tests {
         assert_eq!(full[0], 0xa0);
         assert_eq!(full.len(), 33);
         assert_eq!(uint_be_encoded_len(&word), 33);
+    }
+
+    #[test]
+    fn take_item_splits_strings_and_lists_in_canonical_form_only() {
+        let list = encode_list(&[encode_u64(1), encode_bytes(b"ab")]);
+        let mut input = list.clone();
+        input.extend_from_slice(&encode_bytes(&[0x7f]));
+        let (item, rest) = take_item(&input).unwrap();
+        assert_eq!(
+            item,
+            Item {
+                list: true,
+                payload: &list[1..]
+            }
+        );
+        assert_eq!(
+            take_item(rest).unwrap(),
+            (
+                Item {
+                    list: false,
+                    payload: &[0x7f][..]
+                },
+                &[][..]
+            )
+        );
+        assert_eq!(take_item(&[0x81, 0x05]), Err(DecodeError::NonCanonical));
+        assert_eq!(
+            take_item(&[0xf8, 0x01, 0x80]),
+            Err(DecodeError::NonCanonical)
+        );
+        assert_eq!(take_item(&[0xc2, 0x80]), Err(DecodeError::UnexpectedEnd));
+        assert_eq!(take_item(&[]), Err(DecodeError::UnexpectedEnd));
+        assert_eq!(
+            DecodeError::NonCanonical.to_string(),
+            DecodeError::NonCanonical.as_str()
+        );
     }
 
     #[test]
