@@ -87,22 +87,22 @@ impl StrategyConfig {
     /// (the snapshot guard keeps the tree equal to the frozen snapshot).
     pub const FROZEN_GAS_EVIDENCE: [(&'static str, &'static [u8]); 4] = [
         (
-            "bsc/engine/crates/trading/fixtures/bsc/receipts_20261026.txt",
-            include_bytes!("../../trading/fixtures/bsc/receipts_20261026.txt"),
+            "bsc/native/evidence/gas/receipts_20261026.txt",
+            include_bytes!("../../../../native/evidence/gas/receipts_20261026.txt"),
         ),
         (
-            "bsc/engine/crates/trading/fixtures/bsc/flap_gas_20261031.txt",
-            include_bytes!("../../trading/fixtures/bsc/flap_gas_20261031.txt"),
+            "bsc/native/evidence/gas/flap_gas_20261031.txt",
+            include_bytes!("../../../../native/evidence/gas/flap_gas_20261031.txt"),
         ),
         // BSC3-079: older windows of the v5.27.2 era (the largest gas of a
         // class depends on the window), with the launch-block BUY class.
         (
-            "bsc/engine/crates/trading/fixtures/bsc/flap_gas_20261031_w130100000.txt",
-            include_bytes!("../../trading/fixtures/bsc/flap_gas_20261031_w130100000.txt"),
+            "bsc/native/evidence/gas/flap_gas_20261031_w130100000.txt",
+            include_bytes!("../../../../native/evidence/gas/flap_gas_20261031_w130100000.txt"),
         ),
         (
-            "bsc/engine/crates/trading/fixtures/bsc/flap_gas_20261031_w130500000.txt",
-            include_bytes!("../../trading/fixtures/bsc/flap_gas_20261031_w130500000.txt"),
+            "bsc/native/evidence/gas/flap_gas_20261031_w130500000.txt",
+            include_bytes!("../../../../native/evidence/gas/flap_gas_20261031_w130500000.txt"),
         ),
     ];
 

@@ -293,7 +293,7 @@ pub fn bsc_mainnet_v5_27_0() -> FlapDeployment {
 /// the production quote equal to `Portal.quoteExactInput`
 /// (`fixtures/flap/quote_parity_g02_v4.txt`) and to executed trades
 /// (`fixtures/flap/executed_parity_g02_v3.txt`), the gas sampled on it
-/// (`fixtures/bsc/flap_gas_20261031.txt`).
+/// (`bsc/native/evidence/gas/flap_gas_20261031.txt`).
 pub fn bsc_mainnet_v5_27_2() -> FlapDeployment {
     FlapDeployment {
         portal_version: "v5.27.2",

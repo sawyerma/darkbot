@@ -146,7 +146,7 @@ mod tests {
     /// The Flap BUY, approval and SELL classes of the receipts fixture.
     fn evidence() -> GasEvidence {
         let mut e = GasEvidence::default();
-        for l in include_str!("../../../fixtures/bsc/receipts_20261026.txt")
+        for l in include_str!("../../../../../../native/evidence/gas/receipts_20261026.txt")
             .lines()
             .filter(|l| !l.starts_with('#') && !l.trim().is_empty())
         {

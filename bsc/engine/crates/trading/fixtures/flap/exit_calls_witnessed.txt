@@ -1,4 +1,4 @@
-# The first Portal-direct SELL and approve(Portal) of the Flap gas sample (fixtures/bsc/flap_gas_20261026.txt),
+# The first Portal-direct SELL and approve(Portal) of the Flap gas sample (bsc/native/evidence/gas/flap_gas_20261026.txt),
 # their transaction objects by eth_getTransactionByHash (bsc-dataseed, read-only), fetched 2026-10-26: the exit calls a
 # PAPER SELL encodes (swapExactInput with a token input and native output, empty permit; ERC-20 approve of the Portal).
 # <SELL|APPROVE> <tx-hash> <block> <to> <calldata-hex>

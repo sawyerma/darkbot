@@ -2025,10 +2025,21 @@ mod tests {
         assert!(configured.gas(&root).is_ok());
         for bad in [
             &["bsc/config/ingress.public.env"][..],
-            &["bsc/engine/crates/trading/fixtures/bsc/../bsc/flap_gas_20261031.txt"][..],
+            &["bsc/native/evidence/gas/../gas/flap_gas_20261031.txt"][..],
+            // Audit E 1.7: the former test-fixture location is no gas evidence.
+            &["bsc/engine/crates/trading/fixtures/bsc/flap_gas_20261031.txt"][..],
             &[][..],
         ] {
             assert!(with(bad).gas(&root).is_err(), "{bad:?}");
+        }
+        // Audit E 1.7: the frozen gas evidence is evidence, each file one the
+        // economics snapshot binds.
+        for (path, _) in crate::runtime::StrategyConfig::FROZEN_GAS_EVIDENCE {
+            assert!(path.starts_with("bsc/native/evidence/gas/"), "{path}");
+            assert!(
+                darkbot_bsc_trading::economics::snapshot::BOUND_FILES.contains(&path),
+                "{path}"
+            );
         }
         // H gate L9: the right path with other content is refused.
         let copy = std::env::temp_dir().join(format!("bsc-gas-bound-{}", std::process::id()));

@@ -361,18 +361,6 @@ pub fn parse_v4(bytes: &[u8]) -> Result<ContractSnapshot, String> {
         .map_err(|e| format!("acceptance contract v4: {e}"))
 }
 
-/// The superseded v4 contract, for inspection only.
-pub fn inspect_v4(path: &Path) -> Result<ContractSnapshot, String> {
-    if path != Path::new(V4_RELATIVE_PATH) {
-        return Err(format!(
-            "wrong acceptance contract path: expected exactly {V4_RELATIVE_PATH}, got {}",
-            path.display()
-        ));
-    }
-    let bytes = fs::read(path).map_err(|e| format!("read {}: {e}", path.display()))?;
-    parse_v4(&bytes)
-}
-
 /// A v5 contract from its exact bytes (fail-closed decode).
 pub fn parse_v5(bytes: &[u8]) -> Result<ContractSnapshot, String> {
     decode(&contract::V5, bytes)

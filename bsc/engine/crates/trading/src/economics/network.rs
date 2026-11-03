@@ -177,7 +177,7 @@ impl GasEvidence {
         Ok(())
     }
 
-    /// The receipts of a frozen evidence file (`fixtures/bsc/*.txt`: `venue
+    /// The receipts of a frozen evidence file (`bsc/native/evidence/gas/*.txt`: `venue
     /// class block block-hash tx-hash status gas-limit gas-used
     /// effective-gas-price tx-type to selector`, `#` comments). Every line
     /// is checked: a known venue and class, a status that fits the class

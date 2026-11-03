@@ -36,8 +36,9 @@ const PLAN: &str = include_str!("../src/bin/g07_builder_probe/plan.rs");
 /// Audit E 4.16: the geth_ipc -> tx_encoding edge in Cargo.lock (was b522f502…).
 /// Audit E 4.15: secp256k1 moved from execution to trading in Cargo.lock (was 41a95658…).
 /// Audit E 4.13: the qualification -> signal-hook edge in Cargo.lock (was 6653bba8…).
-/// No value is an approval.
-const PINNED_PLAN_SHA256: &str = "331ade1f0718f8303c8c118174e5dc18cd67b4b2aec1a60e9d747c9a09c26e37";
+/// Audit E 2.14/5.9 (refreeze): dead code out of acceptance_guard.rs and chain_reads.rs
+/// (was 331ade1f…). No value is an approval.
+const PINNED_PLAN_SHA256: &str = "0c6fa31edc98a8a8867b90280c9b0a15459bd24d437a8e254722b71957c9c82c";
 
 fn run(env: &[(&str, &str)]) -> std::process::Output {
     let mut cmd = Command::new(PROBE);

@@ -1,14 +1,14 @@
 //! The network cost model against the real receipts of
-//! `fixtures/bsc/receipts_20261026.txt` (bsc-dataseed, read-only).
+//! `bsc/native/evidence/gas/receipts_20261026.txt` (bsc-dataseed, read-only).
 
 use super::*;
 
-const RECEIPTS: &str = include_str!("../../../fixtures/bsc/receipts_20261026.txt");
-const FLAP_GAS: &str = include_str!("../../../fixtures/bsc/flap_gas_20261031.txt");
+const RECEIPTS: &str = include_str!("../../../../../../native/evidence/gas/receipts_20261026.txt");
+const FLAP_GAS: &str = include_str!("../../../../../../native/evidence/gas/flap_gas_20261031.txt");
 const FLAP_GAS_W130100000: &str =
-    include_str!("../../../fixtures/bsc/flap_gas_20261031_w130100000.txt");
+    include_str!("../../../../../../native/evidence/gas/flap_gas_20261031_w130100000.txt");
 const FLAP_GAS_W130500000: &str =
-    include_str!("../../../fixtures/bsc/flap_gas_20261031_w130500000.txt");
+    include_str!("../../../../../../native/evidence/gas/flap_gas_20261031_w130500000.txt");
 
 struct Row {
     class: PathClass,

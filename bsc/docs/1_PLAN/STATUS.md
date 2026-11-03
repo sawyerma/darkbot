@@ -20,7 +20,7 @@ Pakete aus den Audits A–E (01.11.); fertig = Code + Tests + Review + Gate + CI
 | R12 | Four Classic/OpenFour Economics + Ausführung | EXTERNAL_BLOCKED: Quote-Formel unbewiesen (Implementierungen unverifiziert, Key nötig; bezeugte BUYs ohne native BNB/Slippage), Encoder ohne Quote = toter Code; `FOUR_EXECUTION_PATH_MISSING` bleibt | – |
 | R13 | FOREIGN_AUTO-Profile | EXTERNAL_BLOCKED: keine fremde Launch-Klasse mit bezeugtem Zustand (Creator-Buy, Nicht-BNB-Quote, Steuerdauer, Identitätsbindung); erst Zensus der 7-Tage-Kampagne → Klasse → freie RPC-Probe je Klasse | – |
 | R14 | fmt/clippy-CI, Läufe nach 03.11., Rebaseline, Gesamtabnahme | OFFEN | – |
-| E1–E11 | Audit E (Pflichtstatus unten) | TEILWEISE (E-A, E2–E9 fertig; Rest offen) | E-A `8a9584d9`…`f6156fa0` |
+| E1–E11 | Audit E (Pflichtstatus unten) | TEILWEISE (E-A, E2–E10 fertig; Rest offen) | E-A `8a9584d9`…`f6156fa0` |
 
 **BSC-Gate je Paket** (technischer Nachweis, nicht REV.1.0-Status):
 
@@ -35,7 +35,7 @@ Pakete aus den Audits A–E (01.11.); fertig = Code + Tests + Review + Gate + CI
 | R3b-2a | GR3b2a5 (Workspace 1667/0/27, bsc_tools, Clippy, F0-VAR; 26 Mutanten RED; Review PASS nach 2 Runden) | GATE_OK | `b3523732` |
 | R3b-2b-1 | GR3b2b1c (Workspace 1669/0/27, bsc_tools, Clippy, F0-VAR; Gateway 61+18+4, Clippy, fmt; 21 Mutanten RED; Review PASS + Re-Check PASS) | GATE_OK | `4a1bae86` |
 | R3b-2b-2 | GR3b2b2 (Workspace 1669/0/27, bsc_tools, Clippy, F0-VAR) + gezielt nach Review-Fix (execution lib, Status, Gateway, vitest 155, test:bsc 9) | GATE_OK | dieser Commit |
-| R4–R11, E2–E9 | Messplan §2a.5 (T69–T88) | GATE_OK (Lastflakes nur mit grüner Wiederholung) | s. dort |
+| R4–R11, E2–E10 | Messplan §2a.5 (T69–T89) | GATE_OK (Lastflakes nur mit grüner Wiederholung) | s. dort |
 
 **Audit E — Pflichtstatus je Befund** (FIX / FIX+REPIN / FIX+REFREEZE / KEEP mit Grund; Abschluss = Commit):
 
@@ -47,7 +47,7 @@ Pakete aus den Audits A–E (01.11.); fertig = Code + Tests + Review + Gate + CI
 | 1.4 Projektions-Fallbacks `working-tree`/0 | FIX+REPIN | E4 | E-A `8a9584d9` (UNKNOWN/0 mit Warnung; an_unreadable_snapshot_identity_is_unknown) |
 | 1.5 LOOPBACK-Stand-in | KEEP: BSC3-026, freigegebene isolierte Testidentität, fail-closed | – | – |
 | 1.6 Grant-Formular bietet nicht anschließbare Quellen | FIX | E4 | E-A `8a9584d9` (`BscLiveState.grantable_sources` = Quellen mit Adapter-Endpunkt; live.test.ts, bsc.spec.ts) |
-| 1.7 produktive Gas-Evidence unter `fixtures/` | FIX+REFREEZE | E10 | – |
+| 1.7 produktive Gas-Evidence unter `fixtures/` | FIX+REFREEZE | E10 | dieser Commit (nach `bsc/native/evidence/gas/`, Ökonomie-Snapshot neu `economics_snapshot_20261103T223726Z` fc24a5b8; eine vorher erstellte LIVE-Qualifikation bindet den alten Snapshot: `live qualify --replace`) |
 | 2.1–2.2 falsche „read-only“-Doku/Usage (Rust) | FIX | E1 | R10a (runtime.rs, lib.rs, Cargo.toml, Usage; trading-Doku geprüft, stimmt) |
 | 2.3–2.5 dieselben Aussagen in proto/Gateway/bsc-control.sh | FIX+REPIN | E1 | E-A `8a9584d9` |
 | 2.6 Frontend-Hinweise „read-only“/„fünf Panels“ | FIX | E1 | E-A `8a9584d9` |
@@ -55,14 +55,14 @@ Pakete aus den Audits A–E (01.11.); fertig = Code + Tests + Review + Gate + CI
 | 2.8 `bsc-fields.json` decisions veraltet | FIX | E1 | E-A `8a9584d9` |
 | 2.9–2.10 tote Tool-Skripte (V2-Guard, SUPERSEDED) | FIX | E2 | E-A `8a9584d9` (entfernt; test_g07_tools_stop_before_credentials_or_network, weiter 7 Tests) |
 | 2.11 Python-C1-JSON-Tools | FIX (ohne Referenz entfernen); `c14a_*` KEEP: C1.4a-Evidence nennt sie | E2 | E-A `8a9584d9` (zwei entfernt) |
-| 2.12 Q5A-TLS-Evidence als JSON | FIX: Schreiber DBREC (R8); bestehende JSON-Evidence KEEP bis Requalifikation (braucht BSC_ECON_SEND) | E10 | R8 |
+| 2.12 Q5A-TLS-Evidence als JSON | FIX: Schreiber DBREC (R8); bestehende JSON-Evidence KEEP bis Requalifikation (braucht BSC_ECON_SEND) | E10 | R8; KEEP bestätigt, Requalifikation EXTERNAL_BLOCKED (Betreiber: BSC_ECON_SEND) |
 | 2.13 `legacy_import` | KEEP: einziger Leser der eingefrorenen G0.7-Legacy-Evidence | – | – |
-| 2.14, 5.9 toter Code in eingefrorenen G0.7-Dateien | FIX+REFREEZE (PROBE_SOURCES/PLAN_SHA256) | E10 | – |
+| 2.14, 5.9 toter Code in eingefrorenen G0.7-Dateien | FIX+REFREEZE (PROBE_SOURCES/PLAN_SHA256) | E10 | dieser Commit (`inspect_v4`, `rpc_logs`/`LogSeen`/`wire_word`: von keinem der sechs einbindenden Binaries genutzt, gebaut ohne dead_code-Erlaubnis; übrige Erlaubnisse = je Binary teilgenutzte Module; Probe-Plan-Pin 0c6fa31e, keine Freigabe) |
 | 2.15 LIVE-Qualifikation V1–V3-Leser | FIX+REPIN | R1 | `0159c1a7` (Leser/Schemas entfernt, Verifier+Lister verweigern alte Layouts; Test a_record_of_an_earlier_layout_is_refused) |
 | 2.16 Owner-Generation V1–V5-Decoder | KEEP: 64 gehaltene Owner-Generationen des Betreibers bleiben lesbar (sonst alle Schalter fail-closed) | – | – |
 | 2.17 `startup.rs`-Doku | FIX | E2 | E-A `8a9584d9` (Modul entfernt) |
 | 2.18 Submission/TLS-Doku | FIX | E1 | E-A `8a9584d9` (mod.rs, tls/config.rs); `send.rs` R10a |
-| 2.19 `flap_gas_20261026.txt` | KEEP: p8-Recovery-Evidence nennt sie (mit 1.7 verschoben) | E10 | – |
+| 2.19 `flap_gas_20261026.txt` | KEEP: p8-Recovery-Evidence nennt sie (mit 1.7 verschoben) | E10 | dieser Commit (mit 1.7 nach `bsc/native/evidence/gas/`; p8-Replays bauen ihren eigenen Commit) |
 | 2.20 `__pycache__`; `runtime_live.rs.orig` | FIX (pycache); `.orig` KEEP: Nutzer-Vorgabe „nicht anfassen“ | E2 | E-A: schon git-ignoriert (`.gitignore` `__pycache__/`), nichts versioniert; lokal nur im Hauptcheckout |
 | 3.1–3.4 Kampagnenmax., Paritätsminimum, Stale-Faktor, KEEP_GENERATIONS | FIX+REPIN | E3 | dieser Commit (Config `BSC_BUY_ATTEMPTS_TOTAL_MAX`, `BSC_OWNER_KEEP_GENERATIONS`, `BSC_RUNTIME_STATUS_STALE_INTERVALS` (im Status-Record), `BSC_EXEC_LIVE_PARITY_MIN_EXECUTED_PER_PATH`; Owner-CLI `--config`; Tabs/Gateway aus Projektion bzw. Owner) |
 | 3.5–3.6 Socket/Label, launchd-Zahlen | FIX+REPIN | E3/E8 | E-A `8a9584d9` (Socket aus `$SOCK`-Verzeichnis, Reporter ohne Default; BSC_LAUNCHD_*/BSC_STOP_BUDGET_S) |
