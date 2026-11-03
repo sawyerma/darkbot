@@ -197,6 +197,10 @@ pub struct ExecConfig {
     /// BUY to go (`BSC_EXEC_LIVE_QUALIFICATION_MAX_AGE_MS`; 0: no bound);
     /// its exits go on.
     pub live_qualification_max_age_ms: u64,
+    /// REV.1.0 R9 (BSC3-001): the operator's presence key
+    /// (`BSC_EXEC_LIVE_PRESENCE_ANCHOR`; none, the default: OFF): a BUY
+    /// needs the grant signed by it; its exits go on.
+    pub live_presence_anchor: Option<[u8; 20]>,
     /// REV.1.0 R4: the campaign's cumulative worst-case budget every LIVE
     /// BUY with its exits is admitted within, all grants together
     /// (`BSC_EXEC_LIVE_SPEND_TOTAL_WEI`; 0: no BUY).
@@ -2605,6 +2609,7 @@ pub(crate) mod tests {
             live_public_only: true,
             live_grant_max_duration_ms: 0,
             live_qualification_max_age_ms: 0,
+            live_presence_anchor: None,
             live_spend_total_wei: u128::from(u64::MAX),
             // No test grant is an outlier.
             live_risk_soft_buy_slippage_bps: 9_999,

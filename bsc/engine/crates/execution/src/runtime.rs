@@ -397,6 +397,7 @@ impl RuntimeConfig {
         let public_exit_rpc = values.remove("BSC_EXEC_LIVE_PUBLIC_EXIT_RPC");
         let dex_exit = values.remove("BSC_EXEC_LIVE_DEX_EXIT");
         let divergence = values.remove("BSC_EXEC_LIVE_DIVERGENCE_QUARANTINE");
+        let presence = values.remove("BSC_EXEC_LIVE_PRESENCE_ANCHOR");
         let live_key = values.remove("BSC_LIVE_KEY");
         let live_buyer = values.remove("BSC_LIVE_BUYER");
         let live_route = values.remove("BSC_LIVE_ROUTE");
@@ -605,6 +606,11 @@ impl RuntimeConfig {
                         "BSC_EXEC_LIVE_DIVERGENCE_QUARANTINE needs BSC_EXEC_PAPER_IDENTITY".into(),
                     );
                 }
+                if presence.is_some() {
+                    return Err(
+                        "BSC_EXEC_LIVE_PRESENCE_ANCHOR needs BSC_EXEC_PAPER_IDENTITY".into(),
+                    );
+                }
                 None
             }
             Some(_) if canonical.is_none() => {
@@ -716,6 +722,23 @@ impl RuntimeConfig {
                             0,
                             31_536_000_000,
                         )?,
+                        // R9 (BSC3-001): empty, OFF; else the operator's
+                        // presence address.
+                        live_presence_anchor: match presence {
+                            None => {
+                                return Err("BSC_EXEC_LIVE_PRESENCE_ANCHOR is required".into());
+                            }
+                            Some("") => None,
+                            Some(a) => Some(
+                                a.strip_prefix("0x")
+                                    .filter(|h| h.len() == 40)
+                                    .and_then(|h| alloy_primitives::hex::decode(h).ok())
+                                    .and_then(|b| <[u8; 20]>::try_from(b).ok())
+                                    .ok_or(
+                                        "BSC_EXEC_LIVE_PRESENCE_ANCHOR is no 0x address of 20 bytes",
+                                    )?,
+                            ),
+                        },
                         live_spend_total_wei: u128::from(take(
                             "BSC_EXEC_LIVE_SPEND_TOTAL_WEI",
                             0,
@@ -5055,6 +5078,15 @@ mod tests {
             .map(|l| format!("{l}\n"))
             .collect();
         assert_eq!(RuntimeConfig::parse(&without).unwrap().canonical, None);
+        // R9 review: the presence anchor never without the path.
+        assert!(
+            RuntimeConfig::parse(&format!(
+                "{without}BSC_EXEC_LIVE_PRESENCE_ANCHOR=0x{}\n",
+                "ab".repeat(20)
+            ))
+            .unwrap_err()
+            .contains("BSC_EXEC_LIVE_PRESENCE_ANCHOR needs BSC_EXEC_PAPER_IDENTITY")
+        );
         // R7 review L2: the divergence quarantine never without the path.
         assert!(
             RuntimeConfig::parse(&format!(
@@ -5165,6 +5197,12 @@ mod tests {
             CONFIG.replace("BSC_EXEC_LIVE_GRANT_MAX_DURATION_MS=0\n", ""),
             // R8: the qualification's age bound, required, at most a year.
             CONFIG.replace("BSC_EXEC_LIVE_QUALIFICATION_MAX_AGE_MS=0\n", ""),
+            // R9: the presence anchor, required (empty: OFF), an address.
+            CONFIG.replace("BSC_EXEC_LIVE_PRESENCE_ANCHOR=\n", ""),
+            CONFIG.replace(
+                "BSC_EXEC_LIVE_PRESENCE_ANCHOR=\n",
+                "BSC_EXEC_LIVE_PRESENCE_ANCHOR=0xab\n",
+            ),
             CONFIG.replace(
                 "BSC_EXEC_LIVE_QUALIFICATION_MAX_AGE_MS=0",
                 "BSC_EXEC_LIVE_QUALIFICATION_MAX_AGE_MS=31536000001",
@@ -5304,6 +5342,16 @@ mod tests {
         );
         assert_eq!(exec(CONFIG).live_grant_max_duration_ms, 0);
         assert_eq!(exec(CONFIG).live_qualification_max_age_ms, 0);
+        // R9: no presence anchor (OFF); an address turns it on.
+        assert_eq!(exec(CONFIG).live_presence_anchor, None);
+        assert_eq!(
+            exec(&CONFIG.replace(
+                "BSC_EXEC_LIVE_PRESENCE_ANCHOR=\n",
+                &format!("BSC_EXEC_LIVE_PRESENCE_ANCHOR=0x{}\n", "ab".repeat(20)),
+            ))
+            .live_presence_anchor,
+            Some([0xab; 20])
+        );
         // The campaign's budget: none in the repository (no BUY).
         assert_eq!(exec(CONFIG).live_spend_total_wei, 0);
         // R4 (BSC3-069): the soft bounds are the qualified values; an

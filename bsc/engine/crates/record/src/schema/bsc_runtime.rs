@@ -205,6 +205,9 @@ pub mod source_modes {
         /// REV.1.0 R4 (BSC3-069): the operator confirmed a risk above the
         /// runtime's soft bounds (an outlier); absent: not confirmed.
         pub const RISK_OUTLIER_ACK: u16 = 24;
+        /// REV.1.0 R9 (BSC3-001): the operator's presence signature of the
+        /// grant (65 bytes, `personal_sign`); absent: unsigned.
+        pub const PRESENCE_SIGNATURE: u16 = 25;
 
         pub const SCHEMA: Schema = Schema {
             name: "darkbot.bsc.source-modes.live",
@@ -239,6 +242,7 @@ pub mod source_modes {
                 ),
                 Field::opt(MIN_BUY_INTERVAL_MS, "min_buy_interval_ms", U64),
                 Field::opt(RISK_OUTLIER_ACK, "risk_outlier_ack", Bool),
+                Field::opt(PRESENCE_SIGNATURE, "presence_signature", Bytes),
             ],
         };
     }

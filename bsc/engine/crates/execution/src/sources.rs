@@ -413,6 +413,52 @@ pub const LIVE_NONCE_BURN_FIRST: &str = "LIVE_NONCE_BURN_FIRST";
 /// REV.1.0 R4 (BSC3-059): the grant runs longer than
 /// `BSC_EXEC_LIVE_GRANT_MAX_DURATION_MS` admits for a BUY (exits go on).
 pub const LIVE_GRANT_DURATION_ABOVE_MAX: &str = "LIVE_GRANT_DURATION_ABOVE_MAX";
+/// REV.1.0 R9 (BSC3-001): a presence anchor is configured
+/// (`BSC_EXEC_LIVE_PRESENCE_ANCHOR`) and the grant is not signed by it: no
+/// BUY (exits go on).
+pub const LIVE_PRESENCE_UNSIGNED: &str = "LIVE_PRESENCE_UNSIGNED";
+/// R9: what a presence signature binds, before its grant's fields.
+const PRESENCE_DOMAIN: &[u8] = b"darkbot.bsc.live-grant-presence.v1";
+
+/// REV.1.0 R9 (BSC3-001): the 32 bytes the operator's presence key signs
+/// for `grant` written as owner generation `generation` (as an EIP-191
+/// `personal_sign` message): keccak of the domain, the grant's scope
+/// SHA-256 (its whole scope, expiry and exit-only flag included) and the
+/// generation (review M1: a signature is good for one grant write, never
+/// again after a revocation or a restart).
+pub fn presence_digest(grant: &LiveGrant, generation: u64) -> [u8; 32] {
+    let mut message = PRESENCE_DOMAIN.to_vec();
+    message.extend_from_slice(&grant.scope_sha256());
+    message.extend_from_slice(&generation.to_be_bytes());
+    alloy_primitives::keccak256(&message).0
+}
+
+/// R9: the address whose `personal_sign` of [`presence_digest`] is
+/// `signature` (`r ‖ s ‖ v`, `v` 27/28 or 0/1), if it recovers (low `s`).
+pub fn presence_signer(
+    grant: &LiveGrant,
+    generation: u64,
+    signature: &[u8; 65],
+) -> Option<[u8; 20]> {
+    let mut message = b"\x19Ethereum Signed Message:\n32".to_vec();
+    message.extend_from_slice(&presence_digest(grant, generation));
+    let y_parity = match signature[64] {
+        0 | 27 => false,
+        1 | 28 => true,
+        _ => return None,
+    };
+    let mut r = [0u8; 32];
+    let mut s = [0u8; 32];
+    r.copy_from_slice(&signature[..32]);
+    s.copy_from_slice(&signature[32..64]);
+    darkbot_bsc_trading::signer::recover_signer(
+        &alloy_primitives::keccak256(&message),
+        &darkbot_bsc_trading::transactions::legacy::RecoverableSignature { r, s, y_parity },
+    )
+    .ok()
+    .map(|address| address.into_array())
+}
+
 /// REV.1.0 R8 (BSC3-049): the LIVE qualification is older than
 /// `BSC_EXEC_LIVE_QUALIFICATION_MAX_AGE_MS` admits for a BUY (exits go on).
 pub const LIVE_QUALIFICATION_STALE: &str = "LIVE_QUALIFICATION_STALE";
@@ -1483,6 +1529,9 @@ pub struct Generation {
     pub live: Option<LiveGrant>,
     /// The request (or restart reset) that last granted or revoked LIVE.
     pub live_set_by: Option<SetBy>,
+    /// REV.1.0 R9 (BSC3-001): the operator's presence signature of the
+    /// grant in force, as granted with it (none: unsigned).
+    pub live_presence: Option<[u8; 65]>,
     pub request_id: Option<String>,
     /// The host boot session this generation was written in (none for the
     /// initial state and generations from before switches existed).
@@ -1533,6 +1582,7 @@ impl Generation {
             },
             live: None,
             live_set_by: None,
+            live_presence: None,
             request_id: None,
             boot: None,
         }
@@ -1882,9 +1932,10 @@ impl Generation {
     }
 
     /// Grants LIVE for `grant`'s scope, or revokes it (`None`).
-    fn set_live(&mut self, grant: Option<LiveGrant>, set_by: SetBy) {
+    fn set_live(&mut self, grant: Option<LiveGrant>, set_by: SetBy, presence: Option<[u8; 65]>) {
         self.live = grant;
         self.live_set_by = Some(set_by);
+        self.live_presence = presence;
     }
 
     fn set(&mut self, entity: Entity, requested: Mode, set_by: SetBy) {
@@ -1921,7 +1972,7 @@ impl Generation {
             }
             // A grant's scope comes only through `Store::grant_live`; a
             // request here revokes.
-            Entity::LiveGrant => self.set_live(None, set_by),
+            Entity::LiveGrant => self.set_live(None, set_by, None),
         }
         self.rederive();
     }
@@ -1945,7 +1996,7 @@ impl Generation {
             }
         }
         if self.live.is_some() {
-            self.set_live(None, reset);
+            self.set_live(None, reset, None);
         }
         self.rederive();
     }
@@ -2053,6 +2104,12 @@ impl Generation {
                             darkbot_bsc_record::Value::B256(g.scope_sha256()),
                         )
                         .set_opt(k::EXIT_ONLY, g.exit_only.then_some(true));
+                    if let Some(sig) = &self.live_presence {
+                        e.set(
+                            k::PRESENCE_SIGNATURE,
+                            darkbot_bsc_record::Value::Bytes(sig.to_vec()),
+                        );
+                    }
                     if let Some(r) = &g.risk {
                         e.set(k::MAX_BUY_SLIPPAGE_BPS, u64::from(r.max_buy_slippage_bps))
                             .set(k::MAX_EXIT_SLIPPAGE_BPS, u64::from(r.max_exit_slippage_bps))
@@ -2361,6 +2418,15 @@ impl Generation {
                     Some(grant)
                 }
                 _ => return Err("a LIVE grant is either the whole scope or a revocation".into()),
+            };
+            // R9 (BSC3-001): a presence signature only with a grant, 65 bytes.
+            g.live_presence = match (row.opt_bytes(k::PRESENCE_SIGNATURE).map_err(e)?, &grant) {
+                (None, _) => None,
+                (Some(sig), Some(_)) => Some(
+                    sig.try_into()
+                        .map_err(|_| "a presence signature is 65 bytes")?,
+                ),
+                (Some(_), None) => return Err("a revocation carries no presence signature".into()),
             };
             g.live = grant;
             g.live_set_by = Some(by);
@@ -3681,11 +3747,18 @@ pub struct LiveNow {
     grant_generation: u64,
     at_ms: u64,
     sources_live: Vec<SourceId>,
+    presence: Option<[u8; 65]>,
 }
 
 impl LiveNow {
     pub fn grant(&self) -> &LiveGrant {
         &self.grant
+    }
+
+    /// REV.1.0 R9 (BSC3-001): who signed the grant's presence, if it is
+    /// signed and the signature recovers ([`presence_signer`]).
+    pub fn presence_signer(&self) -> Option<[u8; 20]> {
+        presence_signer(&self.grant, self.grant_generation, self.presence.as_ref()?)
     }
 
     /// The grant's sources effective LIVE now (requested LIVE and in the
@@ -3783,6 +3856,12 @@ impl Store {
     /// The highest generation on file, or generation 0 when there is none.
     pub fn current(&self) -> Result<Generation, String> {
         current_generation(&self.dir)
+    }
+
+    /// R9: the presence signature generation `n` holds, while it is kept.
+    fn presence_at(&self, n: u64) -> Option<Option<[u8; 65]>> {
+        let bytes = read_private(&self.generation_path(n), self.owner).ok()?;
+        Generation::decode(&bytes).ok().map(|g| g.live_presence)
     }
 
     /// Writes generation 0 (everything OFF and DISABLED) unless a generation
@@ -4334,6 +4413,7 @@ impl Store {
             grant_generation: by.generation,
             at_ms: now_ms,
             sources_live,
+            presence: g.live_presence,
         })
     }
 
@@ -4520,7 +4600,37 @@ impl Store {
         expected_generation: u64,
         now_ms: u64,
     ) -> Result<Receipt, String> {
+        self.grant_live_present(
+            request_id,
+            grant,
+            confirmed_sha256,
+            None,
+            expected_generation,
+            now_ms,
+        )
+    }
+
+    /// [`Store::grant_live`] with the operator's presence signature of the
+    /// grant (R9, BSC3-001: stored with it, checked by the runtime against
+    /// its anchor, `BSC_EXEC_LIVE_PRESENCE_ANCHOR`).
+    pub fn grant_live_present(
+        &self,
+        request_id: &str,
+        grant: LiveGrant,
+        confirmed_sha256: [u8; 32],
+        presence: Option<[u8; 65]>,
+        expected_generation: u64,
+        now_ms: u64,
+    ) -> Result<Receipt, String> {
         grant.validate()?;
+        // R9 review LOW-3: a presence signature recovers to a key for the
+        // generation this grant is written as (whose key: the runtime's
+        // anchor decides).
+        if let Some(signature) = &presence
+            && presence_signer(&grant, expected_generation + 1, signature).is_none()
+        {
+            return Err("the presence signature recovers to no key".into());
+        }
         // BSC3-069: a new grant names the execution risk it admits.
         if grant.risk.is_none() {
             return Err(format!(
@@ -4539,7 +4649,7 @@ impl Store {
             request_id,
             Entity::LiveGrant,
             Mode::Granted(digest),
-            Some(grant),
+            Some((grant, presence)),
             expected_generation,
             now_ms,
         )
@@ -4550,7 +4660,7 @@ impl Store {
         request_id: &str,
         entity: Entity,
         requested: Mode,
-        grant: Option<LiveGrant>,
+        grant: Option<(LiveGrant, Option<[u8; 65]>)>,
         expected_generation: u64,
         now_ms: u64,
     ) -> Result<Receipt, String> {
@@ -4575,10 +4685,19 @@ impl Store {
         match read_private(&receipt_path, self.owner) {
             Ok(bytes) => {
                 let r = Receipt::decode(&bytes)?;
-                return if same(&r) {
-                    Ok(r)
-                } else {
+                return if !same(&r) {
                     Err("the request ID already belongs to another request".into())
+                } else if let Some((_, presence)) = &grant
+                    && r.applied()
+                    && self
+                        .presence_at(r.generation)
+                        .is_some_and(|p| p != *presence)
+                {
+                    // R9 review LOW-2: a retry is the same grant with the
+                    // same presence signature.
+                    Err("the request ID already granted with another presence signature".into())
+                } else {
+                    Ok(r)
                 };
             }
             Err(e) if e.kind() == ErrorKind::NotFound => {}
@@ -4640,7 +4759,7 @@ impl Store {
                 generation: next.generation,
             };
             match grant {
-                Some(grant) => next.set_live(Some(grant), set_by),
+                Some((grant, presence)) => next.set_live(Some(grant), set_by, presence),
                 None => next.set(entity, requested, set_by),
             }
             match write_new(
@@ -6338,6 +6457,86 @@ pub(crate) mod tests {
             "{blockers:?}"
         );
         assert!(!blockers.contains(&ATTEMPT_TOTAL_EXHAUSTED), "{blockers:?}");
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// The `personal_sign` of a grant's presence digest for owner generation
+    /// `generation` by the key [0x31; 32] (R9 tests).
+    pub(crate) fn presence_signed(grant: &LiveGrant, generation: u64) -> [u8; 65] {
+        let key = k256::ecdsa::SigningKey::from_slice(&[0x31; 32]).unwrap();
+        let mut message = b"\x19Ethereum Signed Message:\n32".to_vec();
+        message.extend_from_slice(&presence_digest(grant, generation));
+        let (sig, id) = key
+            .sign_prehash_recoverable(alloy_primitives::keccak256(&message).as_slice())
+            .unwrap();
+        let mut out = [0u8; 65];
+        out[..64].copy_from_slice(&sig.to_bytes());
+        out[64] = 27 + u8::from(id.is_y_odd());
+        out
+    }
+
+    /// The address of the key [`presence_signed`] signs with.
+    pub(crate) fn presence_operator() -> [u8; 20] {
+        darkbot_bsc_trading::signer::Signer::from_secret_bytes(&[0x31; 32])
+            .unwrap()
+            .address()
+            .into_array()
+    }
+
+    /// REV.1.0 R9 (BSC3-001): a grant's presence signature goes with it
+    /// (stored, read back); its signer is the key that signed the grant's
+    /// digest for the generation it is written as (its expiry or exit-only
+    /// flag changed, another generation: not; an unknown `v`: none, refused
+    /// at the grant); a later grant without one and a revocation carry none;
+    /// a retry of the same request with another signature is refused.
+    #[test]
+    fn a_presence_signature_goes_with_its_grant() {
+        let (dir, s) = session("presence-store", "boot-1");
+        let now = 1_793_059_200_000;
+        let grant = grant(now + 1_000);
+        let signature = presence_signed(&grant, 1);
+        let operator = Some(presence_operator());
+        assert_eq!(presence_signer(&grant, 1, &signature), operator);
+        assert_ne!(presence_signer(&grant, 4, &signature), operator);
+        let mut exit_only = grant.clone();
+        exit_only.exit_only = true;
+        let mut later = grant.clone();
+        later.expires_unix_ms += 1;
+        for other in [exit_only, later] {
+            assert_ne!(presence_signer(&other, 1, &signature), operator);
+        }
+        let mut v = signature;
+        v[64] = 29;
+        assert_eq!(presence_signer(&grant, 1, &v), None);
+        let present = |id: &str, signature, generation| {
+            s.grant_live_present(
+                id,
+                grant.clone(),
+                grant.scope_sha256(),
+                Some(signature),
+                generation,
+                now,
+            )
+        };
+        let e = present("g0", v, 0).unwrap_err();
+        assert!(e.contains("recovers to no key"), "{e}");
+        let first = present("g1", signature, 0).unwrap();
+        assert!(first.applied(), "{}", first.line());
+        assert_eq!(s.current().unwrap().live_presence, Some(signature));
+        // Review LOW-2: the same request, another signature.
+        let e = present("g1", presence_signed(&grant, 2), 0).unwrap_err();
+        assert!(e.contains("another presence signature"), "{e}");
+        s.grant_live("g2", grant.clone(), grant.scope_sha256(), 1, now)
+            .unwrap();
+        assert_eq!(s.current().unwrap().live_presence, None);
+        assert!(
+            present("g3", presence_signed(&grant, 3), 2)
+                .unwrap()
+                .applied()
+        );
+        s.request("r1", Entity::LiveGrant, Mode::Disabled, 3, now)
+            .unwrap();
+        assert_eq!(s.current().unwrap().live_presence, None);
         fs::remove_dir_all(dir).unwrap();
     }
 

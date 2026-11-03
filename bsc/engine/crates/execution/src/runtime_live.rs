@@ -2039,6 +2039,14 @@ impl LiveRuntime {
                     false => Ok(n),
                 },
             )
+            // R9 (BSC3-001): with a presence anchor, a BUY needs the grant
+            // signed by its key; its exits go on.
+            .and_then(|n| match self.exec.exec.live_presence_anchor {
+                Some(anchor) if n.presence_signer() != Some(anchor) => {
+                    Err(crate::sources::LIVE_PRESENCE_UNSIGNED.into())
+                }
+                _ => Ok(n),
+            })
             // R8 (BSC3-049): a qualification older than the runtime's
             // bound admits no BUY; its exits go on.
             .and_then(|n| {
@@ -7588,6 +7596,80 @@ mod tests {
         settle(&mut x, &c2);
         assert!(x.armed(), "{:?}", reason(&x));
         assert_eq!(x.buys_closed, None, "exactly the longest admits BUYs");
+        x.shutdown();
+        r.clean();
+    }
+
+    /// REV.1.0 R9 (BSC3-001): with a presence anchor, an unsigned grant (or
+    /// one signed by another key, or for another generation) admits no BUY
+    /// (nothing to exit: nothing arms, LIVE_PRESENCE_UNSIGNED); the grant
+    /// signed by the anchor's key for its generation arms.
+    #[test]
+    fn a_presence_anchor_admits_only_a_grant_its_key_signed() {
+        use crate::sources::tests::{presence_operator, presence_signed};
+        let mut r = Rig::new("live-presence", LiveStrategies::C3);
+        r.exec.exec.live_presence_anchor = Some(presence_operator());
+        let c2 = c2_at(&r.d, r.buyer, 5);
+        let unsigned = |x: &LiveRuntime| {
+            assert!(!x.armed());
+            assert_eq!(
+                reason(x).1.as_deref(),
+                Some(crate::sources::LIVE_PRESENCE_UNSIGNED)
+            );
+        };
+        let mut x = r.runtime("boot-1");
+        settle(&mut x, &c2);
+        unsigned(&x);
+        x.shutdown();
+        let store = Store::open_in_session(&r.state, 8, Ok("boot-1".into())).unwrap();
+        let state = store.current().unwrap();
+        let grant = state.live.clone().unwrap();
+        let signature = presence_signed(&grant, state.generation + 1);
+        store
+            .grant_live_present(
+                "g-presence",
+                grant.clone(),
+                grant.scope_sha256(),
+                Some(signature),
+                state.generation,
+                NOW,
+            )
+            .unwrap();
+        let mut x = r.runtime("boot-1");
+        settle(&mut x, &c2);
+        assert!(x.armed(), "{:?}", reason(&x));
+        x.shutdown();
+        // Another key's anchor: the same signature is no presence.
+        r.exec.exec.live_presence_anchor = Some([0x77; 20]);
+        let mut x = r.runtime("boot-1");
+        settle(&mut x, &c2);
+        unsigned(&x);
+        x.shutdown();
+        // Review M1: the old signature on the same grant written again
+        // (after a revocation) is no presence for its new generation.
+        r.exec.exec.live_presence_anchor = Some(presence_operator());
+        let revoked = store
+            .request(
+                "r-revoke",
+                Entity::LiveGrant,
+                Mode::Disabled,
+                state.generation + 1,
+                NOW,
+            )
+            .unwrap();
+        store
+            .grant_live_present(
+                "g-replayed",
+                grant.clone(),
+                grant.scope_sha256(),
+                Some(signature),
+                revoked.generation,
+                NOW,
+            )
+            .unwrap();
+        let mut x = r.runtime("boot-1");
+        settle(&mut x, &c2);
+        unsigned(&x);
         x.shutdown();
         r.clean();
     }
