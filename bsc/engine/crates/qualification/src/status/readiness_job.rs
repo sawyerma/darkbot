@@ -172,6 +172,23 @@ pub fn controller_available(root: &Path, readiness_bin: Option<&Path>) -> bool {
 /// The job's state, its one derivation: launchd's view of `label` with the
 /// marks of the current launch.
 pub fn status(rundir: &Path, label: &str, controller_available: bool) -> JobStatus {
+    status_with(rundir, label, controller_available, launchd_list)
+}
+
+/// `launchctl list <label>` (macOS).
+fn launchd_list(label: &str) -> io::Result<std::process::Output> {
+    Command::new("/bin/launchctl")
+        .args(["list", label])
+        .output()
+}
+
+/// [`status`] over `list`, launchd's answer for a label.
+fn status_with(
+    rundir: &Path,
+    label: &str,
+    controller_available: bool,
+    list: fn(&str) -> io::Result<std::process::Output>,
+) -> JobStatus {
     let launch = read(rundir, Mark::Launch).unwrap_or_default();
     let mut status = JobStatus {
         job: "readiness".into(),
@@ -188,10 +205,13 @@ pub fn status(rundir: &Path, label: &str, controller_available: bool) -> JobStat
     let completed = result
         .as_ref()
         .is_some_and(|r| COMPLETED.contains(&r.result_code.as_str()));
-    let Ok(out) = Command::new("/bin/launchctl")
-        .args(["list", label])
-        .output()
-    else {
+    // BSC3-086: the launch's result is its own, whatever launchd answers
+    // (without launchd the state alone stays unknown).
+    if let Some(r) = result {
+        status.ended_unix_s = r.at_unix_s;
+        status.result_code = r.result_code;
+    }
+    let Ok(out) = list(label) else {
         return status;
     };
     let text = String::from_utf8_lossy(&out.stdout);
@@ -231,10 +251,6 @@ pub fn status(rundir: &Path, label: &str, controller_available: bool) -> JobStat
             "FAILED"
         }
         .into();
-    }
-    if let Some(r) = result {
-        status.ended_unix_s = r.at_unix_s;
-        status.result_code = r.result_code;
     }
     status
 }
@@ -505,4 +521,42 @@ fn publish(job: &Job<'_>, root: &Path, temporary: &Path) -> Result<(), &'static 
     fs::File::open(parent)
         .and_then(|d| d.sync_all())
         .map_err(|_| "result directory")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A host without launchd (Linux CI): `launchctl` cannot be run.
+    fn no_launchd(_: &str) -> io::Result<std::process::Output> {
+        Err(io::Error::from(io::ErrorKind::NotFound))
+    }
+
+    /// BSC3-086 (CI Ubuntu on `eb63f5c3`): without launchd the current
+    /// launch's result still reads (before: the status returned before the
+    /// result mark was taken, `result_code` empty); its state stays unknown.
+    #[test]
+    fn the_result_reads_without_launchd() {
+        let dir =
+            std::env::temp_dir().join(format!("bsc-readiness-nolaunchd-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        write(&dir, Mark::Launch, "job-1", 100, None).unwrap();
+        let s = status_with(&dir, "com.darkbot.test.none", true, no_launchd);
+        assert_eq!(
+            (s.launch_id.as_str(), s.result_code.as_str()),
+            ("job-1", "")
+        );
+        write(&dir, Mark::Result, "job-1", 200, Some(("BLOCKED", 2))).unwrap();
+        let s = status_with(&dir, "com.darkbot.test.none", true, no_launchd);
+        assert_eq!(
+            (s.state.as_str(), s.result_code.as_str(), s.ended_unix_s),
+            ("UNKNOWN", "BLOCKED", 200)
+        );
+        // Another launch's result is not this one's.
+        write(&dir, Mark::Launch, "job-2", 300, None).unwrap();
+        let s = status_with(&dir, "com.darkbot.test.none", true, no_launchd);
+        assert_eq!((s.result_code.as_str(), s.ended_unix_s), ("", 0));
+        fs::remove_dir_all(&dir).unwrap();
+    }
 }
