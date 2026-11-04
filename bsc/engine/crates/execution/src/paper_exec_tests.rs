@@ -42,6 +42,7 @@ pub(crate) fn config(lanes: usize, buys: u128) -> ExecConfig {
     let one = 1_000_000_000_000_000 + u128::from(gas_price_wei) * u128::from(gas_limit);
     ExecConfig {
         four: None,
+        openfour: None,
         // The amount covered by witnessed evidence.
         input_wei: 1_000_000_000_000_000,
         slippage_bps: 500,
@@ -233,6 +234,7 @@ fn a_signed_launch_reaches_the_sink_through_plan_frame_and_dispatch() {
             PendingLaunch {
                 hash,
                 raw: &raw,
+                from: [0; 20],
                 to: Some(portal),
                 value: &[],
                 input: &input,
@@ -287,7 +289,7 @@ fn a_signed_launch_reaches_the_sink_through_plan_frame_and_dispatch() {
 fn a_four_classic_launch_takes_the_four_arm_or_is_refused_at_its_stage() {
     use crate::runtime::exec::tests::{four_config, four_launch, four_observation};
     use darkbot_bsc_geth_ipc::ingress::decode_tx_target;
-    use darkbot_bsc_trading::venues::fourmeme::deployment::bsc_mainnet_r12b_131568366;
+    use darkbot_bsc_trading::venues::fourmeme::deployment::bsc_mainnet_r12d_131608421;
     use darkbot_bsc_trading::venues::fourmeme::profile::UnsupportedClassicLaunch;
     use darkbot_bsc_trading::venues::fourmeme::recognize::decode_classic_buy_amap;
     let mut cfg = config(4, 4);
@@ -300,6 +302,7 @@ fn a_four_classic_launch_takes_the_four_arm_or_is_refused_at_its_stage() {
             PendingLaunch {
                 hash,
                 raw: &raw,
+                from: [0; 20],
                 to: target.to,
                 value,
                 input: target.data,
@@ -310,7 +313,7 @@ fn a_four_classic_launch_takes_the_four_arm_or_is_refused_at_its_stage() {
         )
     };
     assert_eq!(on(&mut exec, target.value).err(), Some(Refusal::NotDecoded));
-    let four = bsc_mainnet_r12b_131568366();
+    let four = bsc_mainnet_r12d_131608421();
     exec.arm_four(
         four.validate(&four_observation(&four).observed, CODEHASH_GENERATION)
             .unwrap(),
@@ -358,6 +361,121 @@ fn a_four_classic_launch_takes_the_four_arm_or_is_refused_at_its_stage() {
     fs::remove_dir_all(&d).unwrap();
 }
 
+/// R12d: an OpenFour launch on the C3 path. Without the OpenFour arm it is
+/// NOT_DECODED (it is no Flap launch); armed, a call value other than its
+/// creator word is no witnessed profile (PROFILE); the priced launch
+/// reaches the sink as its admitted exact BUY (Core, the input as value and
+/// `maxPay`) of the token derived from the verified sender, another sender
+/// another token; the same launch again is a duplicate.
+#[test]
+fn an_openfour_launch_takes_the_openfour_arm_or_is_refused_at_its_stage() {
+    use crate::runtime::exec::tests::{four_observation, openfour_config, openfour_launch};
+    use darkbot_bsc_geth_ipc::ingress::decode_tx_target;
+    use darkbot_bsc_trading::venues::fourmeme::deployment::{
+        bsc_mainnet_r12b_131568366, bsc_mainnet_r12d_131608421,
+    };
+    use darkbot_bsc_trading::venues::fourmeme::profile::UnsupportedOpenFourLaunch;
+    use darkbot_bsc_trading::venues::fourmeme::recognize::{
+        decode_openfour_buy, decode_openfour_create,
+    };
+    // Room for two OpenFour BUYs (input and 2M gas each).
+    let mut cfg = config(4, 6);
+    cfg.openfour = Some(openfour_config());
+    let (mut exec, d) = armed("openfour", cfg);
+    let (hash, raw, launcher) = openfour_launch(9);
+    let target = decode_tx_target(&raw).unwrap();
+    let on = |e: &mut PaperExecutor, from: [u8; 20], value: &[u8]| {
+        e.on_launch(
+            PendingLaunch {
+                hash,
+                raw: &raw,
+                from,
+                to: target.to,
+                value,
+                input: target.data,
+                ingress_ns: 100,
+            },
+            &c2(Some(HEAD)),
+            &clock(100, 1),
+        )
+    };
+    assert_eq!(
+        on(&mut exec, launcher, target.value).err(),
+        Some(Refusal::NotDecoded)
+    );
+    // A pin without an executed bonding preset arms no OpenFour BUY.
+    let earlier = bsc_mainnet_r12b_131568366();
+    assert!(matches!(
+        exec.arm_openfour(
+            earlier
+                .validate(&four_observation(&earlier).observed, CODEHASH_GENERATION)
+                .unwrap()
+        ),
+        Err(ArmError::Config(_))
+    ));
+    assert!(!exec.openfour_armed());
+    let four = bsc_mainnet_r12d_131608421();
+    let validated = four
+        .validate(&four_observation(&four).observed, CODEHASH_GENERATION)
+        .unwrap();
+    exec.arm_openfour(validated).unwrap();
+    assert!(exec.openfour_armed() && !exec.four_armed());
+    let other = (U256::from_be_slice(target.value) + U256::from(1)).to_be_bytes_trimmed_vec();
+    assert_eq!(
+        on(&mut exec, launcher, &other).err(),
+        Some(Refusal::OpenFourProfile(
+            UnsupportedOpenFourLaunch::CreatorValue
+        ))
+    );
+    let launch = decode_openfour_create(target.data).unwrap();
+    let token_of = |creator: [u8; 20]| {
+        four.openfour_token(
+            launch.preset_id,
+            launch.init.token_salt,
+            launch.request_id,
+            Some(Address::from(creator)),
+        )
+        .unwrap()
+    };
+    let buy = on(&mut exec, launcher, target.value).unwrap();
+    assert_eq!(buy.token, token_of(launcher).into_array());
+    let signed = decode_signed(&buy.raw).unwrap();
+    assert_eq!(signed.tx.to, four.openfour_core);
+    assert_eq!(signed.tx.value, U256::from(1_000_000_000_000_000u64));
+    assert_eq!(signed.tx.gas_limit, openfour_config().gas_limit);
+    let call = decode_openfour_buy(signed.tx.input).unwrap();
+    assert_eq!(call.token.into_array(), buy.token);
+    assert_eq!(call.max_pay_amount, signed.tx.value);
+    assert!(call.amount > U256::ZERO);
+    // The request carries the launch and the BUY.
+    assert!(buy.handoff.raw_len > 2 * (raw.len() + buy.raw.len()));
+    assert_eq!(
+        on(&mut exec, launcher, target.value).err(),
+        Some(Refusal::DuplicateToken)
+    );
+    // The same calldata from another sender creates another token.
+    let elsewhere = on(&mut exec, [0x11; 20], target.value).unwrap();
+    assert_eq!(elsewhere.token, token_of([0x11; 20]).into_array());
+    assert_ne!(elsewhere.token, buy.token);
+    let c = exec.counters();
+    assert_eq!(
+        (
+            c.handoffs,
+            c.refused("NOT_DECODED"),
+            c.refused("PROFILE"),
+            c.refused("DUPLICATE_TOKEN")
+        ),
+        (2, 1, 1, 1)
+    );
+    // Each OpenFour BUY's exposure: its input and its gas.
+    assert_eq!(
+        exec.spent_wei(),
+        U256::from(2 * (1_000_000_000_000_000u64 + 1_000_000_000 * openfour_config().gas_limit))
+    );
+    exec.disarm().unwrap();
+    fs::remove_dir_all(&d).unwrap();
+}
+
 /// Gate review M1: the pool keeps one session exposure and one BUY per
 /// token, as one production session does (before: every lane its own
 /// cap and dedup, so a second BUY of the same token reached the sink).
@@ -374,6 +492,7 @@ fn the_pool_keeps_one_session_cap_and_one_buy_per_token() {
             PendingLaunch {
                 hash: h,
                 raw: r,
+                from: [0; 20],
                 to: Some(portal),
                 value: &[],
                 input: i,
@@ -417,6 +536,7 @@ fn refusals_are_counted_at_their_stage() {
             PendingLaunch {
                 hash,
                 raw: &raw,
+                from: [0; 20],
                 to: Some([7; 20]),
                 value: &[],
                 input: &input,
@@ -436,6 +556,7 @@ fn refusals_are_counted_at_their_stage() {
             PendingLaunch {
                 hash,
                 raw: &raw,
+                from: [0; 20],
                 to: Some(portal),
                 value: &[],
                 input: &foreign,
@@ -457,6 +578,7 @@ fn refusals_are_counted_at_their_stage() {
             PendingLaunch {
                 hash,
                 raw: &raw,
+                from: [0; 20],
                 to: Some(portal),
                 value: &[],
                 input: &input,
@@ -472,6 +594,7 @@ fn refusals_are_counted_at_their_stage() {
             PendingLaunch {
                 hash,
                 raw: &raw,
+                from: [0; 20],
                 to: Some(portal),
                 value: &[],
                 input: &input,
@@ -490,6 +613,7 @@ fn refusals_are_counted_at_their_stage() {
             PendingLaunch {
                 hash,
                 raw: &other_raw,
+                from: [0; 20],
                 to: Some(portal),
                 value: &[],
                 input: &input,
@@ -508,6 +632,7 @@ fn refusals_are_counted_at_their_stage() {
             PendingLaunch {
                 hash: h2,
                 raw: &r2,
+                from: [0; 20],
                 to: Some(portal),
                 value: &[],
                 input: &i2,
@@ -525,6 +650,7 @@ fn refusals_are_counted_at_their_stage() {
             PendingLaunch {
                 hash: h3,
                 raw: &r3,
+                from: [0; 20],
                 to: Some(portal),
                 value: &[],
                 input: &i3,
@@ -1142,6 +1268,7 @@ fn c3_and_the_strategy_share_one_nonce_sequence() {
             PendingLaunch {
                 hash,
                 raw: &raw,
+                from: [0; 20],
                 to: Some(portal),
                 value: &[],
                 input: &call,
@@ -1223,6 +1350,7 @@ fn a_path_left_out_does_not_take_the_sender() {
     let launch = PendingLaunch {
         hash,
         raw: &raw,
+        from: [0; 20],
         to: Some(portal),
         value: &[],
         input: &call,
@@ -1493,6 +1621,7 @@ fn the_one_path_reaches_any_end() {
     let pending = PendingLaunch {
         hash,
         raw: &raw,
+        from: [0; 20],
         to: Some(portal),
         value: &[],
         input: &input,

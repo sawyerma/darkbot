@@ -39,11 +39,15 @@
 
 use alloy_primitives::{Address, B256, U256, b256};
 
-use super::deployment::ValidatedFourDeployment;
-use super::recognize::ClassicLaunch;
+use super::deployment::{OPENFOUR_MODULES, ValidatedFourDeployment};
+use super::recognize::{ClassicLaunch, OpenFourLaunch};
 use crate::economics::four_classic::{
     ClassicBuyQuote, ClassicCurve, ClassicFee, ClassicQuoteError, LaunchTerms, launch_curve,
     quote_buy,
+};
+use crate::economics::openfour::{
+    OpenFourCurve, OpenFourFee, OpenFourQuoteError, creator_buy,
+    launch_curve as openfour_launch_curve,
 };
 
 /// One priced template word.
@@ -442,5 +446,342 @@ pub fn classify_classic_holding(
             min_fee: read.venue_fee.min_fee,
             tax_bps: profile.tax_bps,
         },
+    })
+}
+
+/// R12d: the OpenFour launch terms the bonding preset was executed with
+/// (`fixtures/fourmeme/openfour_parity_20261104.txt`): WBNB quote paid
+/// natively, 1e27 supply, 8e26 for sale, an 18 BNB raise, the creator values
+/// of its launches (its fee terms are the validated pin's, probed at the
+/// fee router).
+pub const OPENFOUR_WITNESSED_QUOTE: Address =
+    alloy_primitives::address!("bb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c");
+pub const OPENFOUR_WITNESSED_RAISE: U256 = U256::from_limbs([0xf9cc_d8a1_c508_0000, 0, 0, 0]);
+pub const OPENFOUR_CREATOR_VALUES: &[U256] =
+    &[U256::from_limbs([300_000_000_000_000_000, 0, 0, 0])];
+/// The `createArgs` head word that carries the creator's BUY value (equal to
+/// the call's value in the witness); the others must be as witnessed: the
+/// first free (a deadline), the rest zero.
+const OPENFOUR_CREATOR_WORD: usize = 2;
+
+/// Why an OpenFour launch is not priced (the first deviating field).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UnsupportedOpenFourLaunch {
+    /// The deployment pins no bonding preset (or not this one).
+    EconomicsNotWitnessed,
+    Preset,
+    /// No frozen token implementation names its token.
+    NoToken,
+    Quote,
+    /// Supply, sale or raise other than the witnessed.
+    Terms,
+    /// A module or custom data parameter is set (the witness had none).
+    ModuleParams,
+    /// An unnamed `createArgs` word the witness did not set.
+    UnknownArgument,
+    /// The creator word is not the call's value.
+    CreatorValue,
+    UnwitnessedCreatorValue,
+    Curve(OpenFourQuoteError),
+}
+
+impl core::fmt::Display for UnsupportedOpenFourLaunch {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::EconomicsNotWitnessed => {
+                f.write_str("openfour launch: no executed bonding preset is pinned")
+            }
+            Self::Preset => f.write_str("openfour launch: preset not executed"),
+            Self::NoToken => f.write_str("openfour launch: no frozen token derivation"),
+            Self::Quote => f.write_str("openfour launch: quote asset not witnessed"),
+            Self::Terms => f.write_str("openfour launch: supply, sale or raise not witnessed"),
+            Self::ModuleParams => f.write_str("openfour launch: module parameters set"),
+            Self::UnknownArgument => f.write_str("openfour launch: an unwitnessed argument is set"),
+            Self::CreatorValue => {
+                f.write_str("openfour launch: creator value is not the call's value")
+            }
+            Self::UnwitnessedCreatorValue => {
+                f.write_str("openfour launch: creator value not witnessed")
+            }
+            Self::Curve(e) => write!(f, "openfour launch: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for UnsupportedOpenFourLaunch {}
+
+/// An OpenFour launch priced on the bonding preset: its token (derived
+/// before execution), the curve after its creator BUY and the fee terms.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ClassifiedOpenFourLaunch {
+    candidate: B256,
+    codehash_generation: u64,
+    token: Address,
+    curve: OpenFourCurve,
+    fee: OpenFourFee,
+}
+
+impl ClassifiedOpenFourLaunch {
+    #[inline]
+    pub fn candidate(&self) -> B256 {
+        self.candidate
+    }
+
+    #[inline]
+    pub fn codehash_generation(&self) -> u64 {
+        self.codehash_generation
+    }
+
+    #[inline]
+    pub fn token(&self) -> Address {
+        self.token
+    }
+
+    /// The curve after the launch and its creator BUY.
+    #[inline]
+    pub fn curve(&self) -> OpenFourCurve {
+        self.curve
+    }
+
+    #[inline]
+    pub fn fee(&self) -> OpenFourFee {
+        self.fee
+    }
+}
+
+fn openfour_terms(max_supply: U256, sale: U256, raise: U256) -> Option<LaunchTerms> {
+    (max_supply == WITNESSED_TOTAL_SUPPLY
+        && sale == WITNESSED_MAX_OFFERS
+        && raise == OPENFOUR_WITNESSED_RAISE)
+        .then_some(LaunchTerms {
+            total_supply: max_supply,
+            max_offers: sale,
+            max_raising: raise,
+        })
+}
+
+/// Classifies an OpenFour `launch` sent by `creator` with `value` in
+/// transaction `candidate` on the validated `deployment`: priced only on the
+/// executed bonding preset with the witnessed terms, no module parameter,
+/// and a witnessed creator value.
+pub fn classify_openfour_launch(
+    validated: &ValidatedFourDeployment,
+    launch: &OpenFourLaunch<'_>,
+    creator: Address,
+    value: U256,
+    candidate: B256,
+) -> Result<ClassifiedOpenFourLaunch, UnsupportedOpenFourLaunch> {
+    let bonding = validated
+        .openfour_bonding()
+        .ok_or(UnsupportedOpenFourLaunch::EconomicsNotWitnessed)?;
+    if launch.preset_id != bonding.preset_id {
+        return Err(UnsupportedOpenFourLaunch::Preset);
+    }
+    let init = &launch.init;
+    let token = validated
+        .deployment()
+        .openfour_token(
+            launch.preset_id,
+            init.token_salt,
+            launch.request_id,
+            Some(creator),
+        )
+        .ok_or(UnsupportedOpenFourLaunch::NoToken)?;
+    if init.quote_asset != OPENFOUR_WITNESSED_QUOTE {
+        return Err(UnsupportedOpenFourLaunch::Quote);
+    }
+    let terms = openfour_terms(init.max_supply, init.sale_amount, init.raise_amount)
+        .ok_or(UnsupportedOpenFourLaunch::Terms)?;
+    if [
+        init.token_params,
+        init.vault_params,
+        init.curve_params,
+        init.trade_params,
+        init.migrate_params,
+        init.custom_data_params,
+    ]
+    .iter()
+    .any(|p| !p.is_empty())
+    {
+        return Err(UnsupportedOpenFourLaunch::ModuleParams);
+    }
+    if launch
+        .unnamed
+        .iter()
+        .enumerate()
+        .any(|(i, w)| i != 0 && i != OPENFOUR_CREATOR_WORD && *w != B256::ZERO)
+    {
+        return Err(UnsupportedOpenFourLaunch::UnknownArgument);
+    }
+    if U256::from_be_bytes(launch.unnamed[OPENFOUR_CREATOR_WORD].0) != value {
+        return Err(UnsupportedOpenFourLaunch::CreatorValue);
+    }
+    if !OPENFOUR_CREATOR_VALUES.contains(&value) {
+        return Err(UnsupportedOpenFourLaunch::UnwitnessedCreatorValue);
+    }
+    // The fee terms the drift probe validated for the preset.
+    let fee = bonding.fee;
+    let start = openfour_launch_curve(&terms).map_err(UnsupportedOpenFourLaunch::Curve)?;
+    let bought = creator_buy(&start, &fee, value).map_err(UnsupportedOpenFourLaunch::Curve)?;
+    Ok(ClassifiedOpenFourLaunch {
+        candidate,
+        codehash_generation: validated.codehash_generation(),
+        token,
+        curve: bought.after,
+        fee,
+    })
+}
+
+/// R12d: a held OpenFour token as read at one canonical block:
+/// `Core.tokens(token)`, its vault's `phase()`, each module proxy's beacon
+/// and `Tools.getCurveLiquiditySnapshot(token)`, all at `block_hash`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct OpenFourTokenRead {
+    pub token: Address,
+    pub block_number: u64,
+    pub block_hash: B256,
+    pub preset_id: U256,
+    pub max_supply: U256,
+    pub sale_amount: U256,
+    pub raise_amount: U256,
+    pub quote_asset: Address,
+    pub exists: bool,
+    pub paused: bool,
+    pub anti_sniper_enabled: bool,
+    pub custom_data: Address,
+    /// The vault's phase (`Trading` is 1).
+    pub phase: u8,
+    /// The beacons of its token module, vault, curve, trade and migrate
+    /// module proxies.
+    pub module_beacons: [Address; OPENFOUR_MODULES.len()],
+    pub initial_quote: U256,
+    pub initial_token: U256,
+    pub current_quote: U256,
+    pub current_token: U256,
+    pub remaining: U256,
+}
+
+/// The vault phase of an internal market that trades.
+pub const OPENFOUR_PHASE_TRADING: u8 = 1;
+
+/// Why a held OpenFour token's state is not priced.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UnsupportedOpenFourHolding {
+    EconomicsNotWitnessed,
+    Preset,
+    Quote,
+    Terms,
+    /// Not existing, paused, with anti-sniper fees or a custom data module.
+    Mode,
+    /// Its vault does not trade (created, migrating, sold out, migrated).
+    OffCurve,
+    /// A module proxy follows another beacon than the pinned preset's.
+    Modules,
+    /// The snapshot's initial liquidity is not the terms' curve.
+    Curve,
+}
+
+impl core::fmt::Display for UnsupportedOpenFourHolding {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(match self {
+            Self::EconomicsNotWitnessed => "openfour holding: no executed bonding preset is pinned",
+            Self::Preset => "openfour holding: preset not executed",
+            Self::Quote => "openfour holding: quote asset not witnessed",
+            Self::Terms => "openfour holding: supply, sale or raise not witnessed",
+            Self::Mode => "openfour holding: paused, anti-sniper, custom data or unknown token",
+            Self::OffCurve => "openfour holding: the vault does not trade",
+            Self::Modules => "openfour holding: a module follows another beacon",
+            Self::Curve => "openfour holding: initial liquidity is not the terms' curve",
+        })
+    }
+}
+
+impl std::error::Error for UnsupportedOpenFourHolding {}
+
+/// A held OpenFour token whose state at one block is priced.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ClassifiedOpenFourHolding {
+    codehash_generation: u64,
+    token: Address,
+    block_hash: B256,
+    curve: OpenFourCurve,
+    fee: OpenFourFee,
+}
+
+impl ClassifiedOpenFourHolding {
+    #[inline]
+    pub fn codehash_generation(&self) -> u64 {
+        self.codehash_generation
+    }
+
+    #[inline]
+    pub fn token(&self) -> Address {
+        self.token
+    }
+
+    #[inline]
+    pub fn block_hash(&self) -> B256 {
+        self.block_hash
+    }
+
+    #[inline]
+    pub fn curve(&self) -> OpenFourCurve {
+        self.curve
+    }
+
+    #[inline]
+    pub fn fee(&self) -> OpenFourFee {
+        self.fee
+    }
+}
+
+/// Classifies a held OpenFour token's state `read` on the validated
+/// `deployment`: priced only on the executed bonding preset's terms and
+/// modules, while its vault trades.
+pub fn classify_openfour_holding(
+    validated: &ValidatedFourDeployment,
+    read: &OpenFourTokenRead,
+) -> Result<ClassifiedOpenFourHolding, UnsupportedOpenFourHolding> {
+    let bonding = validated
+        .openfour_bonding()
+        .ok_or(UnsupportedOpenFourHolding::EconomicsNotWitnessed)?;
+    if read.preset_id != bonding.preset_id {
+        return Err(UnsupportedOpenFourHolding::Preset);
+    }
+    if read.quote_asset != OPENFOUR_WITNESSED_QUOTE {
+        return Err(UnsupportedOpenFourHolding::Quote);
+    }
+    let terms = openfour_terms(read.max_supply, read.sale_amount, read.raise_amount)
+        .ok_or(UnsupportedOpenFourHolding::Terms)?;
+    if !read.exists || read.paused || read.anti_sniper_enabled || read.custom_data != Address::ZERO
+    {
+        return Err(UnsupportedOpenFourHolding::Mode);
+    }
+    if read.phase != OPENFOUR_PHASE_TRADING {
+        return Err(UnsupportedOpenFourHolding::OffCurve);
+    }
+    if bonding
+        .modules
+        .iter()
+        .zip(read.module_beacons)
+        .any(|(m, beacon)| m.beacon != beacon)
+    {
+        return Err(UnsupportedOpenFourHolding::Modules);
+    }
+    let start = openfour_launch_curve(&terms).map_err(|_| UnsupportedOpenFourHolding::Curve)?;
+    if (start.quote_reserve, start.token_reserve) != (read.initial_quote, read.initial_token) {
+        return Err(UnsupportedOpenFourHolding::Curve);
+    }
+    Ok(ClassifiedOpenFourHolding {
+        codehash_generation: validated.codehash_generation(),
+        token: read.token,
+        block_hash: read.block_hash,
+        curve: OpenFourCurve {
+            k: start.k,
+            token_reserve: read.current_token,
+            quote_reserve: read.current_quote,
+            remaining: read.remaining,
+        },
+        fee: bonding.fee,
     })
 }

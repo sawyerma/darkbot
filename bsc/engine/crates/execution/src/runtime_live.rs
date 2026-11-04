@@ -2544,6 +2544,7 @@ impl LiveRuntime {
         &mut self,
         source: SourceId,
         hash: [u8; 32],
+        from: [u8; 20],
         first: bool,
         raw: &[u8],
         ingress_ns: u64,
@@ -2551,8 +2552,8 @@ impl LiveRuntime {
         clock: &dyn Clock,
     ) -> Option<ExecBuy<LiveHandoff>> {
         match first {
-            true => self.on_launch(source, hash, raw, ingress_ns, owner, clock),
-            false => self.on_later(source, hash, raw, ingress_ns, owner, clock),
+            true => self.on_launch(source, hash, from, raw, ingress_ns, owner, clock),
+            false => self.on_later(source, hash, from, raw, ingress_ns, owner, clock),
         }
     }
 
@@ -2560,10 +2561,12 @@ impl LiveRuntime {
     /// sighting came from a source the grant does not name (or that is not
     /// effective LIVE): the first such sighting from a granted source
     /// effective LIVE triggers its BUY, once.
+    #[allow(clippy::too_many_arguments)]
     pub fn on_later(
         &mut self,
         source: SourceId,
         hash: [u8; 32],
+        from: [u8; 20],
         raw: &[u8],
         ingress_ns: u64,
         owner: &StateOwner,
@@ -2574,16 +2577,18 @@ impl LiveRuntime {
         if !granted || !self.awaiting_granted.take(&hash) {
             return None;
         }
-        self.on_launch(source, hash, raw, ingress_ns, owner, clock)
+        self.on_launch(source, hash, from, raw, ingress_ns, owner, clock)
     }
 
     /// A verified full pending C1-scope launch first seen by `source`,
     /// when armed: only a source the grant names and the owner makes
     /// effective LIVE triggers a LIVE BUY.
+    #[allow(clippy::too_many_arguments)]
     pub fn on_launch(
         &mut self,
         source: SourceId,
         hash: [u8; 32],
+        from: [u8; 20],
         raw: &[u8],
         ingress_ns: u64,
         owner: &StateOwner,
@@ -2629,7 +2634,7 @@ impl LiveRuntime {
         );
         let x = self.executor.as_mut()?;
         let before = x.end().released().len();
-        let buy = launch_to(x, hash, raw, ingress_ns, owner, next, reserve, clock);
+        let buy = launch_to(x, hash, from, raw, ingress_ns, owner, next, reserve, clock);
         self.record_responses();
         // Review of the limits (LOW): a BUY whose bytes may have left counts
         // for the interval, handed over or UNKNOWN.

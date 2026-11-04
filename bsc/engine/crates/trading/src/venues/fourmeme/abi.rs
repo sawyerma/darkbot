@@ -1,8 +1,10 @@
 //! Canonical ABI reading for the Four.meme calls and events: borrowed
 //! words, no allocation, fail closed. A value is accepted only in the one
 //! canonical encoding (minimal offsets in order, zero padding, nothing
-//! after the last member). Two encoders: the Classic BUY
-//! [`encode_buy_token_amap`] and (R12c-3) SELL [`encode_sell_token_min_funds`].
+//! after the last member). Encoders: the Classic BUY
+//! [`encode_buy_token_amap`] and (R12c-3) SELL [`encode_sell_token_min_funds`],
+//! (R12d) the OpenFour BUY of an exact amount [`encode_openfour_buy`] and
+//! SELL [`encode_openfour_sell`].
 
 use alloy_primitives::{Address, B256, U256};
 
@@ -204,6 +206,68 @@ pub fn encode_buy_token_amap(
     out[4 + WORD..4 + 2 * WORD].copy_from_slice(&funds.to_be_bytes::<32>());
     out[4 + 2 * WORD..].copy_from_slice(&min_amount.to_be_bytes::<32>());
     Ok(out)
+}
+
+/// Exact size of an OpenFour `buy`/`sell(address,uint256,uint256,uint256,
+/// bytes)` call with no options and an empty proof (R12d).
+pub const OPENFOUR_TRADE_LEN: usize = 4 + 6 * WORD;
+
+/// `selector(token, amount, bound, 0, "")`.
+fn openfour_trade(
+    selector: [u8; 4],
+    token: Address,
+    amount: U256,
+    bound: U256,
+) -> Result<[u8; OPENFOUR_TRADE_LEN], AbiError> {
+    if amount.is_zero() {
+        return Err(AbiError::ZeroAmount);
+    }
+    if bound.is_zero() {
+        return Err(AbiError::ZeroMinAmount);
+    }
+    let mut out = [0u8; OPENFOUR_TRADE_LEN];
+    out[..4].copy_from_slice(&selector);
+    out[4 + 12..4 + WORD].copy_from_slice(token.as_slice());
+    out[4 + WORD..4 + 2 * WORD].copy_from_slice(&amount.to_be_bytes::<32>());
+    out[4 + 2 * WORD..4 + 3 * WORD].copy_from_slice(&bound.to_be_bytes::<32>());
+    // options 0, the proof's offset (the fifth head word) and its length 0.
+    out[4 + 5 * WORD - 1] = (5 * WORD) as u8;
+    Ok(out)
+}
+
+/// R12d: the calldata of OpenFour `Core.buy(token, amount, maxPayAmount, 0,
+/// "")`, sent with `msg.value = maxPayAmount` (the native quote path):
+/// exactly `amount` tokens for their payment, the rest refunded, reverted
+/// above `maxPayAmount` (executed: the fixture's OFEXACT and OFADMIT rows).
+/// The one [`super::recognize::decode_openfour_buy`] decodes.
+pub fn encode_openfour_buy(
+    token: Address,
+    amount: U256,
+    max_pay: U256,
+) -> Result<[u8; OPENFOUR_TRADE_LEN], AbiError> {
+    openfour_trade(
+        super::recognize::FourCall::OpenFourBuy.selector(),
+        token,
+        amount,
+        max_pay,
+    )
+}
+
+/// R12d: the calldata of OpenFour `Core.sell(token, amount,
+/// minReceiveAmount, 0, "")` after `approve(Core, amount)`: reverted when
+/// the seller's net proceeds are below `minReceiveAmount` (executed: the
+/// fixture's OFSELL rows).
+pub fn encode_openfour_sell(
+    token: Address,
+    amount: U256,
+    min_receive: U256,
+) -> Result<[u8; OPENFOUR_TRADE_LEN], AbiError> {
+    openfour_trade(
+        super::recognize::FourCall::OpenFourSell.selector(),
+        token,
+        amount,
+        min_receive,
+    )
 }
 
 /// Exact size of a Classic `sellToken(address,uint256,uint256)` call.

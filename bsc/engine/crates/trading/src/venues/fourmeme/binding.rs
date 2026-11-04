@@ -4,15 +4,23 @@
 //! its build by the production signer, and the final check of the signed
 //! bytes at the send boundary. The lane and the plan take it as
 //! [`ExpectedTx::ClassicBuy`](crate::venues::flap::binding::ExpectedTx);
-//! (R12c-3) the exit's approval and SELL as `ClassicApprove`/`ClassicSell`.
+//! (R12c-3) the exit's approval and SELL as `ClassicApprove`/`ClassicSell`;
+//! (R12d) the OpenFour BUY of an exact amount and its exit as `OpenFourBuy`,
+//! `OpenFourApprove`/`OpenFourSell`.
 
 use alloy_primitives::{Address, B256, U256};
 
-use super::abi::{encode_buy_token_amap, encode_sell_token_min_funds};
+use super::abi::{
+    encode_buy_token_amap, encode_openfour_buy, encode_openfour_sell, encode_sell_token_min_funds,
+};
 use super::deployment::ValidatedFourDeployment;
-use super::recognize::{decode_classic_buy_amap, decode_classic_sell_min_funds};
+use super::recognize::{
+    decode_classic_buy_amap, decode_classic_sell_min_funds, decode_openfour_buy,
+    decode_openfour_sell,
+};
 use crate::chain_state::SnapshotId;
 use crate::economics::four_classic::{AdmittedClassicBuy, AdmittedClassicSell};
+use crate::economics::openfour::{AdmittedOpenFourBuy, AdmittedOpenFourSell};
 use crate::economics::policy::{BuyPolicy, ExitPolicy};
 use crate::signer::{Signer, recover_legacy_sender};
 use crate::transactions::legacy::{LegacyTx, decode_signed, tx_hash};
@@ -362,12 +370,24 @@ impl ExpectedClassicExit {
     }
 }
 
-/// The common envelope checks of a Classic exit transaction: no value.
-fn classic_exit_envelope<'a>(
+/// What a Four transaction's envelope is bound to: its snapshot, chain,
+/// sender, gas price and the venue contract (TokenManager2 or OpenFour
+/// Core).
+struct Envelope {
+    snapshot: SnapshotId,
+    chain_id: u64,
+    sender: Address,
+    gas_price: u64,
+    venue: Address,
+}
+
+/// The common envelope checks of a Four transaction at `nonce` to `to` with
+/// `gas_limit` and `value`; returns its calldata.
+fn four_envelope<'a>(
     raw_signed: &'a [u8],
-    expected: &ExpectedClassicExit,
+    expected: &Envelope,
     current: &SnapshotId,
-    (nonce, to, gas_limit): (u64, Address, u64),
+    (nonce, to, gas_limit, value): (u64, Address, u64, U256),
     scratch: &mut Vec<u8>,
 ) -> Result<&'a [u8], BindingError> {
     if expected.snapshot != *current {
@@ -383,7 +403,7 @@ fn classic_exit_envelope<'a>(
         return Err(BindingError::WrongNonce);
     }
     if signed.tx.to != to {
-        return Err(if to == expected.token_manager2 {
+        return Err(if to == expected.venue {
             BindingError::WrongPortal
         } else {
             BindingError::WrongToken
@@ -395,10 +415,63 @@ fn classic_exit_envelope<'a>(
     if signed.tx.gas_limit != gas_limit {
         return Err(BindingError::WrongGasLimit);
     }
-    if !signed.tx.value.is_zero() {
+    if signed.tx.value != value {
         return Err(BindingError::WrongValue);
     }
     Ok(signed.tx.input)
+}
+
+/// The common envelope checks of a Classic exit transaction: no value.
+fn classic_exit_envelope<'a>(
+    raw_signed: &'a [u8],
+    expected: &ExpectedClassicExit,
+    current: &SnapshotId,
+    (nonce, to, gas_limit): (u64, Address, u64),
+    scratch: &mut Vec<u8>,
+) -> Result<&'a [u8], BindingError> {
+    four_envelope(
+        raw_signed,
+        &Envelope {
+            snapshot: expected.snapshot,
+            chain_id: expected.chain_id,
+            sender: expected.sender,
+            gas_price: expected.gas_price,
+            venue: expected.token_manager2,
+        },
+        current,
+        (nonce, to, gas_limit, U256::ZERO),
+        scratch,
+    )
+}
+
+/// Signs one Four transaction of `sender` into `out` (cleared first).
+#[allow(clippy::too_many_arguments)]
+fn sign_four(
+    signer: &Signer,
+    sender: Address,
+    (chain_id, nonce, gas_price, gas_limit): (u64, u64, u64, u64),
+    to: Address,
+    value: U256,
+    input: &[u8],
+    scratch: &mut Vec<u8>,
+    out: &mut Vec<u8>,
+) -> Result<B256, BuildError> {
+    out.clear();
+    if signer.address() != sender {
+        return Err(BuildError::WrongSigner);
+    }
+    let tx = LegacyTx {
+        chain_id,
+        nonce,
+        gas_price,
+        gas_limit,
+        to,
+        value,
+        input,
+    };
+    signer
+        .sign_legacy(&tx, scratch, out)
+        .map_err(BuildError::Sign)
 }
 
 /// Verifies, at the send boundary, that `raw_signed` is exactly the exit's
@@ -454,6 +527,418 @@ pub fn verify_final_classic_sell(
     }
     if call.min_funds != expected.min_funds {
         return Err(BindingError::WrongMinOutput);
+    }
+    Ok(tx_hash(raw_signed))
+}
+
+/// R12d: the OpenFour BUY of an exact amount a signed transaction must
+/// encode: `Core.buy(token, amount, maxPay, 0, "")` with `maxPay` as value.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ExpectedOpenFourBuy {
+    chain_id: u64,
+    core: Address,
+    sender: Address,
+    nonce: u64,
+    gas_price: u64,
+    gas_limit: u64,
+    token: Address,
+    amount: U256,
+    max_pay: U256,
+    snapshot: SnapshotId,
+}
+
+impl ExpectedOpenFourBuy {
+    /// The expectation of an admitted BUY under the policy it was admitted
+    /// with; `sender` signs and receives, `nonce` is reserved for it.
+    pub fn from_admitted(
+        validated: &ValidatedFourDeployment,
+        admitted: &AdmittedOpenFourBuy,
+        policy: &BuyPolicy,
+        sender: Address,
+        nonce: u64,
+    ) -> Result<Self, IntentError> {
+        let snapshot = admitted.snapshot();
+        if validated.codehash_generation() != snapshot.codehash_generation {
+            return Err(IntentError::GenerationMismatch);
+        }
+        if policy.generation() != snapshot.policy_generation {
+            return Err(IntentError::PolicyGenerationMismatch);
+        }
+        if policy.input_amount() != admitted.max_pay()
+            || policy.slippage_bps() != admitted.slippage_bps()
+        {
+            return Err(IntentError::PolicyMismatch);
+        }
+        Ok(Self {
+            chain_id: validated.deployment().chain_id,
+            core: validated.deployment().openfour_core,
+            sender,
+            nonce,
+            gas_price: policy.gas_price(),
+            gas_limit: policy.gas_limit(),
+            token: admitted.token(),
+            amount: admitted.amount(),
+            max_pay: admitted.max_pay(),
+            snapshot,
+        })
+    }
+
+    #[inline]
+    pub fn chain_id(&self) -> u64 {
+        self.chain_id
+    }
+
+    /// OpenFour Core, the contract the BUY calls.
+    #[inline]
+    pub fn core(&self) -> Address {
+        self.core
+    }
+
+    #[inline]
+    pub fn sender(&self) -> Address {
+        self.sender
+    }
+
+    #[inline]
+    pub fn nonce(&self) -> u64 {
+        self.nonce
+    }
+
+    #[inline]
+    pub fn gas_price(&self) -> u64 {
+        self.gas_price
+    }
+
+    #[inline]
+    pub fn gas_limit(&self) -> u64 {
+        self.gas_limit
+    }
+
+    #[inline]
+    pub fn token(&self) -> Address {
+        self.token
+    }
+
+    #[inline]
+    pub fn amount(&self) -> U256 {
+        self.amount
+    }
+
+    /// `maxPayAmount` and the transaction's value, in wei.
+    #[inline]
+    pub fn max_pay(&self) -> U256 {
+        self.max_pay
+    }
+
+    #[inline]
+    pub fn snapshot(&self) -> SnapshotId {
+        self.snapshot
+    }
+
+    /// Signs the BUY into `out` (cleared first); returns its hash.
+    pub fn sign(
+        &self,
+        signer: &Signer,
+        scratch: &mut Vec<u8>,
+        out: &mut Vec<u8>,
+    ) -> Result<B256, BuildError> {
+        out.clear();
+        let calldata = encode_openfour_buy(self.token, self.amount, self.max_pay)
+            .map_err(BuildError::FourCalldata)?;
+        sign_four(
+            signer,
+            self.sender,
+            (self.chain_id, self.nonce, self.gas_price, self.gas_limit),
+            self.core,
+            self.max_pay,
+            &calldata,
+            scratch,
+            out,
+        )
+    }
+}
+
+/// Verifies, at the send boundary, that `raw_signed` is exactly the BUY of
+/// `expected` and that `expected` still belongs to the `current` snapshot.
+pub fn verify_final_openfour_buy(
+    raw_signed: &[u8],
+    expected: &ExpectedOpenFourBuy,
+    current: &SnapshotId,
+    scratch: &mut Vec<u8>,
+) -> Result<B256, BindingError> {
+    let input = four_envelope(
+        raw_signed,
+        &Envelope {
+            snapshot: expected.snapshot,
+            chain_id: expected.chain_id,
+            sender: expected.sender,
+            gas_price: expected.gas_price,
+            venue: expected.core,
+        },
+        current,
+        (
+            expected.nonce,
+            expected.core,
+            expected.gas_limit,
+            expected.max_pay,
+        ),
+        scratch,
+    )?;
+    let call = decode_openfour_buy(input).map_err(BindingError::FourCalldata)?;
+    if call.token != expected.token {
+        return Err(BindingError::WrongToken);
+    }
+    if call.amount != expected.amount {
+        return Err(BindingError::WrongInputAmount);
+    }
+    if call.max_pay_amount != expected.max_pay {
+        return Err(BindingError::WrongMinOutput);
+    }
+    if !call.options.is_zero() || !call.proof.is_empty() {
+        return Err(BindingError::FourCalldata(
+            crate::venues::fourmeme::abi::AbiError::UnwitnessedLayout,
+        ));
+    }
+    Ok(tx_hash(raw_signed))
+}
+
+/// R12d: the two transactions an OpenFour exit signs, bound to one admitted
+/// SELL: `approve(Core, amount)` on the token at `nonce`, then
+/// `Core.sell(token, amount, minReceive, 0, "")` at `nonce + 1`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ExpectedOpenFourExit {
+    chain_id: u64,
+    core: Address,
+    sender: Address,
+    nonce: u64,
+    gas_price: u64,
+    approve_gas_limit: u64,
+    sell_gas_limit: u64,
+    token: Address,
+    amount: U256,
+    min_receive: U256,
+    snapshot: SnapshotId,
+}
+
+impl ExpectedOpenFourExit {
+    /// The expectation of an admitted SELL under the exit policy it was
+    /// admitted with; `nonce` is the approval's, the SELL takes the next.
+    pub fn from_admitted(
+        validated: &ValidatedFourDeployment,
+        admitted: &AdmittedOpenFourSell,
+        policy: &ExitPolicy,
+        sender: Address,
+        nonce: u64,
+    ) -> Result<Self, IntentError> {
+        let snapshot = admitted.snapshot();
+        if validated.codehash_generation() != snapshot.codehash_generation {
+            return Err(IntentError::GenerationMismatch);
+        }
+        if policy.generation() != snapshot.policy_generation {
+            return Err(IntentError::PolicyGenerationMismatch);
+        }
+        if policy.slippage_bps() != admitted.slippage_bps() || nonce == u64::MAX {
+            return Err(IntentError::PolicyMismatch);
+        }
+        Ok(Self {
+            chain_id: validated.deployment().chain_id,
+            core: validated.deployment().openfour_core,
+            sender,
+            nonce,
+            gas_price: policy.gas_price(),
+            approve_gas_limit: policy.approve_gas_limit(),
+            sell_gas_limit: policy.sell_gas_limit(),
+            token: admitted.token(),
+            amount: admitted.amount(),
+            min_receive: admitted.min_receive(),
+            snapshot,
+        })
+    }
+
+    #[inline]
+    pub fn chain_id(&self) -> u64 {
+        self.chain_id
+    }
+
+    #[inline]
+    pub fn core(&self) -> Address {
+        self.core
+    }
+
+    #[inline]
+    pub fn sender(&self) -> Address {
+        self.sender
+    }
+
+    /// The approval's nonce; the SELL's is the next.
+    #[inline]
+    pub fn nonce(&self) -> u64 {
+        self.nonce
+    }
+
+    #[inline]
+    pub fn gas_price(&self) -> u64 {
+        self.gas_price
+    }
+
+    #[inline]
+    pub fn approve_gas_limit(&self) -> u64 {
+        self.approve_gas_limit
+    }
+
+    #[inline]
+    pub fn sell_gas_limit(&self) -> u64 {
+        self.sell_gas_limit
+    }
+
+    #[inline]
+    pub fn token(&self) -> Address {
+        self.token
+    }
+
+    #[inline]
+    pub fn amount(&self) -> U256 {
+        self.amount
+    }
+
+    #[inline]
+    pub fn min_receive(&self) -> U256 {
+        self.min_receive
+    }
+
+    #[inline]
+    pub fn snapshot(&self) -> SnapshotId {
+        self.snapshot
+    }
+
+    fn envelope(&self) -> Envelope {
+        Envelope {
+            snapshot: self.snapshot,
+            chain_id: self.chain_id,
+            sender: self.sender,
+            gas_price: self.gas_price,
+            venue: self.core,
+        }
+    }
+
+    /// Signs the approval into `out` (cleared first); returns its hash.
+    pub fn sign_approve(
+        &self,
+        signer: &Signer,
+        scratch: &mut Vec<u8>,
+        out: &mut Vec<u8>,
+    ) -> Result<B256, BuildError> {
+        out.clear();
+        let calldata = encode_approve(self.core, self.amount).map_err(BuildError::Calldata)?;
+        sign_four(
+            signer,
+            self.sender,
+            (
+                self.chain_id,
+                self.nonce,
+                self.gas_price,
+                self.approve_gas_limit,
+            ),
+            self.token,
+            U256::ZERO,
+            &calldata,
+            scratch,
+            out,
+        )
+    }
+
+    /// Signs the SELL into `out` (cleared first); returns its hash.
+    pub fn sign_sell(
+        &self,
+        signer: &Signer,
+        scratch: &mut Vec<u8>,
+        out: &mut Vec<u8>,
+    ) -> Result<B256, BuildError> {
+        out.clear();
+        let calldata = encode_openfour_sell(self.token, self.amount, self.min_receive)
+            .map_err(BuildError::FourCalldata)?;
+        sign_four(
+            signer,
+            self.sender,
+            (
+                self.chain_id,
+                self.nonce + 1,
+                self.gas_price,
+                self.sell_gas_limit,
+            ),
+            self.core,
+            U256::ZERO,
+            &calldata,
+            scratch,
+            out,
+        )
+    }
+}
+
+/// Verifies, at the send boundary, that `raw_signed` is exactly the
+/// OpenFour exit's approval: on the token, of Core, for the tokens sold.
+pub fn verify_final_openfour_approve(
+    raw_signed: &[u8],
+    expected: &ExpectedOpenFourExit,
+    current: &SnapshotId,
+    scratch: &mut Vec<u8>,
+) -> Result<B256, BindingError> {
+    let input = four_envelope(
+        raw_signed,
+        &expected.envelope(),
+        current,
+        (
+            expected.nonce,
+            expected.token,
+            expected.approve_gas_limit,
+            U256::ZERO,
+        ),
+        scratch,
+    )?;
+    let (spender, amount) = decode_approve(input).map_err(BindingError::Calldata)?;
+    if spender != expected.core {
+        return Err(BindingError::WrongSpender);
+    }
+    if amount != expected.amount {
+        return Err(BindingError::WrongInputAmount);
+    }
+    Ok(tx_hash(raw_signed))
+}
+
+/// Verifies, at the send boundary, that `raw_signed` is exactly the
+/// OpenFour exit's `Core.sell(token, amount, minReceive, 0, "")`.
+pub fn verify_final_openfour_sell(
+    raw_signed: &[u8],
+    expected: &ExpectedOpenFourExit,
+    current: &SnapshotId,
+    scratch: &mut Vec<u8>,
+) -> Result<B256, BindingError> {
+    let input = four_envelope(
+        raw_signed,
+        &expected.envelope(),
+        current,
+        (
+            expected.nonce + 1,
+            expected.core,
+            expected.sell_gas_limit,
+            U256::ZERO,
+        ),
+        scratch,
+    )?;
+    let call = decode_openfour_sell(input).map_err(BindingError::FourCalldata)?;
+    if call.token != expected.token {
+        return Err(BindingError::WrongToken);
+    }
+    if call.amount != expected.amount {
+        return Err(BindingError::WrongInputAmount);
+    }
+    if call.min_receive_amount != expected.min_receive {
+        return Err(BindingError::WrongMinOutput);
+    }
+    if !call.options.is_zero() || !call.proof.is_empty() {
+        return Err(BindingError::FourCalldata(
+            crate::venues::fourmeme::abi::AbiError::UnwitnessedLayout,
+        ));
     }
     Ok(tx_hash(raw_signed))
 }

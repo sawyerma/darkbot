@@ -9,6 +9,7 @@ pub mod fees;
 pub mod flap;
 pub mod four_classic;
 pub mod network;
+pub mod openfour;
 pub mod policy;
 pub mod slippage;
 pub mod snapshot;

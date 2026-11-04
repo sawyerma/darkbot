@@ -24,7 +24,7 @@ use alloy_primitives::Address;
 use darkbot_bsc_geth_ipc::ingress::{C14_FLAP_SCOPE, decode_tx_target};
 use darkbot_bsc_trading::venues::flap::recognize::{Recognized, recognize};
 use darkbot_bsc_trading::venues::fourmeme::deployment::{
-    FourDeployment, bsc_mainnet_r12b_131568366,
+    FourDeployment, bsc_mainnet_r12d_131608421,
 };
 use darkbot_bsc_trading::venues::fourmeme::recognize as four;
 use std::collections::{HashMap, VecDeque};
@@ -253,13 +253,15 @@ fn addresses_venue(four: &FourDeployment, to: Option<Address>) -> bool {
     })
 }
 
-/// The pre-execution token of canonical signed bytes that the production
-/// Four.meme decoder (Phase E) recognizes as a launch (Classic or OpenFour
-/// `createToken` of `deployment`); `None` for anything else, including
-/// calldata the decoder refuses or above `max_calldata`.
+/// The pre-execution token of canonical signed bytes, sent by their verified
+/// signer `sender`, that the production Four.meme decoder (Phase E)
+/// recognizes as a launch (Classic or OpenFour `createToken` of
+/// `deployment`); `None` for anything else, including calldata the decoder
+/// refuses or above `max_calldata`.
 pub fn four_launch_token(
     deployment: &FourDeployment,
     raw: &[u8],
+    sender: [u8; 20],
     max_calldata: usize,
 ) -> Option<four::PendingToken> {
     let target = decode_tx_target(raw).ok()?;
@@ -273,7 +275,7 @@ pub fn four_launch_token(
         recognized,
         four::Recognized::ClassicLaunch(_) | four::Recognized::OpenFourLaunch(_)
     )
-    .then(|| four::pending_token(deployment, &recognized))
+    .then(|| four::pending_token(deployment, &recognized, Some(Address::from(sender))))
 }
 
 impl IngressCore {
@@ -292,7 +294,7 @@ impl IngressCore {
             stats: [SourceStats::default(); 5],
             launches: 0,
             max_launch_calldata,
-            four: bsc_mainnet_r12b_131568366(),
+            four: bsc_mainnet_r12d_131608421(),
             last_first_full: false,
             last_venue_target: false,
         }
@@ -870,7 +872,7 @@ mod tests {
                 .unwrap(),
         )
         .unwrap();
-        let four = bsc_mainnet_r12b_131568366();
+        let four = bsc_mainnet_r12d_131608421();
         assert!(venue_target(&four, &buy));
         assert!(venue_target(&four, &legacy(PORTAL, LAUNCH)));
         assert!(!venue_target(&four, &legacy([7; 20], LAUNCH)));
@@ -917,7 +919,7 @@ mod tests {
     /// table decodes, but its token is UNKNOWN before execution.
     #[test]
     fn an_unfrozen_openfour_preset_has_no_pending_token() {
-        use darkbot_bsc_trading::venues::fourmeme::deployment::bsc_mainnet_r12b_131568366;
+        use darkbot_bsc_trading::venues::fourmeme::deployment::bsc_mainnet_r12d_131608421;
         let calls = include_str!("../../trading/fixtures/fourmeme/freeze_20261026_calls.txt");
         let row: Vec<&str> = calls
             .lines()
@@ -926,9 +928,10 @@ mod tests {
             .split_whitespace()
             .collect();
         let mut raw = alloy_primitives::hex::decode(row[10]).unwrap();
-        let d = bsc_mainnet_r12b_131568366();
+        let d = bsc_mainnet_r12d_131608421();
+        // The fixture's launch carries its own salt: no sender needed.
         assert!(matches!(
-            four_launch_token(&d, &raw, MAX_CALLDATA),
+            four_launch_token(&d, &raw, [0; 20], MAX_CALLDATA),
             Some(four::PendingToken::Derived(_))
         ));
         // The presetId word (createArgs head word 1) of the signed bytes,
@@ -946,7 +949,7 @@ mod tests {
             + 31;
         raw[at] ^= 1;
         assert_eq!(
-            four_launch_token(&d, &raw, MAX_CALLDATA),
+            four_launch_token(&d, &raw, [0; 20], MAX_CALLDATA),
             Some(four::PendingToken::Unknown)
         );
     }

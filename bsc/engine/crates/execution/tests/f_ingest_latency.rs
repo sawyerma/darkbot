@@ -29,7 +29,7 @@ use darkbot_bsc_execution::sources::SourceId;
 use darkbot_bsc_journal::RecordKind;
 use darkbot_bsc_record::Draft;
 use darkbot_bsc_record::schema::bsc_capture::ingest_latency as il;
-use darkbot_bsc_trading::venues::fourmeme::deployment::bsc_mainnet_r12b_131568366;
+use darkbot_bsc_trading::venues::fourmeme::deployment::bsc_mainnet_r12d_131608421;
 use std::fs;
 use std::hint::black_box;
 use std::path::Path;
@@ -127,7 +127,7 @@ fn stage(name: &str, values: &[u64]) -> (Draft, String) {
 #[test]
 #[ignore = "Phase F ingest latency measurement; run in release"]
 fn f_ingest_latency() {
-    let four = bsc_mainnet_r12b_131568366();
+    let four = bsc_mainnet_r12d_131608421();
     let flap_launch = legacy(
         PORTAL,
         &alloy_primitives::hex::decode(
@@ -141,7 +141,7 @@ fn f_ingest_latency() {
     // The inputs are what the code says they are.
     assert_eq!(launch_venue(&four, &other, MAX_CALLDATA), None);
     assert!(launch_venue(&four, &flap_launch, MAX_CALLDATA).is_some());
-    assert!(four_launch_token(&four, &open_launch, MAX_CALLDATA).is_some());
+    assert!(four_launch_token(&four, &open_launch, [0; 20], MAX_CALLDATA).is_some());
 
     let clock = measure(|_| {});
     let mut stages: Vec<(&str, Vec<u64>)> = vec![
@@ -169,6 +169,7 @@ fn f_ingest_latency() {
                 black_box(four_launch_token(
                     &four,
                     black_box(&open_launch),
+                    [0; 20],
                     MAX_CALLDATA,
                 ));
             }),

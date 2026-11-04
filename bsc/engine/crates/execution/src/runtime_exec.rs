@@ -9,7 +9,10 @@
 //!    PAPER sender stop here, visibly; (R12c) with the Four Classic venue
 //!    admitted and `BSC_EXEC_FOUR_*` set, the Four.meme deployment and fee
 //!    terms too, and the executor arms the Four Classic BUY beside the Flap
-//!    one (a change of that scope starts the path over);
+//!    one; (R12d) with the OpenFour venue admitted and
+//!    `BSC_EXEC_OPENFOUR_*` set, the same deployment with its executed
+//!    bonding preset, and the OpenFour BUY (a change of that scope starts
+//!    the path over);
 //! 3. once C2 knows the PAPER sender's next nonce exactly (zero: the
 //!    identity never sends), the executor arms its fenced lanes;
 //! 4. every C1-scope launch then runs the production path to the PAPER
@@ -43,7 +46,7 @@ use darkbot_bsc_trading::venues::flap::deployment::{
     FlapDeployment, ValidatedDeployment, bsc_mainnet_v5_27_2,
 };
 use darkbot_bsc_trading::venues::fourmeme::deployment::{
-    FourDeployment, ValidatedFourDeployment, bsc_mainnet_r12b_131568366,
+    FourDeployment, ValidatedFourDeployment, bsc_mainnet_r12d_131608421,
 };
 use darkbot_bsc_trading::venues::fourmeme::profile::WITNESSED_VENUE_FEE;
 use std::path::{Path, PathBuf};
@@ -144,24 +147,57 @@ struct Validated {
     four: Option<ValidatedFourDeployment>,
 }
 
-/// The Four Classic arm's deployment, validated against the refrozen pin at
-/// `generation` (the Flap path's): a drift, decode-only economics or other
-/// fee terms end the path as the Flap ones do.
-fn validate_four(f: &FourObservation, generation: u64) -> Result<ValidatedFourDeployment, Phase> {
+/// Which Four.meme BUYs the path probes and arms: each with its venue
+/// admitted and its keys configured.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct FourScope {
+    classic: bool,
+    /// R12d.
+    openfour: bool,
+}
+
+impl FourScope {
+    fn any(self) -> bool {
+        self.classic || self.openfour
+    }
+
+    /// The Four.meme pin the scope probes and validates: the OpenFour
+    /// bonding preset (its modules, fee router and fee terms) only with the
+    /// OpenFour BUY, so that its drift does not end a Classic-only path.
+    fn pin(self) -> FourDeployment {
+        let pin = bsc_mainnet_r12d_131608421();
+        FourDeployment {
+            openfour_bonding: pin.openfour_bonding.filter(|_| self.openfour),
+            ..pin
+        }
+    }
+}
+
+/// The Four.meme arms' deployment, validated against the refrozen pin at
+/// `generation` (the Flap path's), its OpenFour presets and their modules
+/// included: a drift ends the path as the Flap one does; for the Classic
+/// BUY decode-only economics or other fee terms too (the OpenFour arm
+/// refuses a pin without its executed bonding preset itself).
+fn validate_four(
+    f: &FourObservation,
+    generation: u64,
+    scope: FourScope,
+) -> Result<ValidatedFourDeployment, Phase> {
     let seen = format!(
         "observed TokenManager2 implementation {} at block {}",
         f.observed.token_manager2_implementation, f.block_number
     );
-    let v = bsc_mainnet_r12b_131568366()
+    let v = scope
+        .pin()
         .validate(&f.observed, generation)
         .map_err(|e| Phase::DeploymentDrift(format!("{e}: {seen}")))?;
-    if !v.classic_economics_witnessed() {
+    if scope.classic && !v.classic_economics_witnessed() {
         return Err(Phase::EconomicsUnqualified(format!(
             "four: {seen} is decode-only"
         )));
     }
     // The fee terms it is armed on are the witnessed ones, at every probe.
-    if v.venue_fee() != WITNESSED_VENUE_FEE {
+    if scope.classic && v.venue_fee() != WITNESSED_VENUE_FEE {
         return Err(Phase::TermsDrift(format!("four: {:?}", v.venue_fee())));
     }
     Ok(v)
@@ -228,11 +264,13 @@ pub struct ExecRuntime {
     last_probe_error: Option<String>,
     prober: Prober,
     four_prober: FourProber,
-    /// Whether the probes and the arm include the Four Classic BUY: its
-    /// venue admitted and `BSC_EXEC_FOUR_*` configured.
-    four_scope: bool,
-    /// The Four Classic venue is admitted without `BSC_EXEC_FOUR_*`.
-    four_unconfigured: bool,
+    /// Which Four.meme BUYs the probes and the arm include: the Four
+    /// Classic one with its venue admitted and `BSC_EXEC_FOUR_*`
+    /// configured, (R12d) the OpenFour one with its venue admitted and
+    /// `BSC_EXEC_OPENFOUR_*` configured.
+    four_scope: FourScope,
+    /// The Four venues admitted without their keys (Classic, OpenFour).
+    four_unconfigured: FourScope,
 }
 
 impl ExecRuntime {
@@ -274,18 +312,26 @@ impl ExecRuntime {
             last_probe_error: None,
             prober,
             four_prober,
-            four_scope: false,
-            four_unconfigured: false,
+            four_scope: FourScope::default(),
+            four_unconfigured: FourScope::default(),
         }
     }
 
-    /// R12c: whether the Four Classic venue is admitted now (the reconcile's
-    /// gates, before [`ExecRuntime::tick`]). A change of what the path
-    /// includes ends it as switching it off does; the next tick probes and
-    /// arms it again with (or without) the Four Classic BUY.
-    pub fn set_four_wanted(&mut self, wanted: bool) {
-        let scope = wanted && self.setup.exec.four.is_some();
-        self.four_unconfigured = wanted && self.setup.exec.four.is_none();
+    /// R12c: whether the Four Classic venue (R12d: and the OpenFour venue)
+    /// is admitted now (the reconcile's gates, before
+    /// [`ExecRuntime::tick`]). A change of what the path includes ends it as
+    /// switching it off does; the next tick probes and arms it again with
+    /// (or without) the Four BUYs.
+    pub fn set_four_wanted(&mut self, classic: bool, openfour: bool) {
+        let exec = &self.setup.exec;
+        let scope = FourScope {
+            classic: classic && exec.four.is_some(),
+            openfour: openfour && exec.openfour.is_some(),
+        };
+        self.four_unconfigured = FourScope {
+            classic: classic && exec.four.is_none(),
+            openfour: openfour && exec.openfour.is_none(),
+        };
         if scope != self.four_scope {
             self.four_scope = scope;
             self.probe = None;
@@ -300,6 +346,13 @@ impl ExecRuntime {
         self.executor
             .as_ref()
             .is_some_and(PaperExecutor::four_armed)
+    }
+
+    /// R12d: whether the armed path holds the OpenFour BUY.
+    pub fn openfour_armed(&self) -> bool {
+        self.executor
+            .as_ref()
+            .is_some_and(PaperExecutor::openfour_armed)
     }
 
     /// The PAPER sender, when its identity loaded.
@@ -333,7 +386,8 @@ impl ExecRuntime {
         let endpoint = endpoint.to_string();
         let limits = *limits;
         let prober = self.prober;
-        let four_prober = self.four_scope.then_some(self.four_prober);
+        let four_prober = self.four_scope.any().then_some(self.four_prober);
+        let four_pin = self.four_scope.pin();
         let spawned = thread::Builder::new()
             .name("bsc-exec-probe".into())
             .spawn(move || {
@@ -345,7 +399,7 @@ impl ExecRuntime {
                 );
                 let four = four_prober
                     .filter(|_| flap.is_ok())
-                    .map(|p| p(&endpoint, &limits, &bsc_mainnet_r12b_131568366()));
+                    .map(|p| p(&endpoint, &limits, &four_pin));
                 let _ = tx.send(Probed { flap, four });
             });
         match spawned {
@@ -402,7 +456,11 @@ impl ExecRuntime {
             }
             Ok(_) if balance != U256::ZERO => self.stop(Phase::Funded(format!("{balance} wei"))),
             Ok(v) => {
-                let four = match four.map(|f| validate_four(&f, generation)).transpose() {
+                let scope = self.four_scope;
+                let four = match four
+                    .map(|f| validate_four(&f, generation, scope))
+                    .transpose()
+                {
                     Ok(four) => four,
                     Err(phase) => return self.stop(phase),
                 };
@@ -530,18 +588,30 @@ impl ExecRuntime {
             .map_err(|e| e.to_string())
         });
         self.arms += 1;
-        // The Four Classic arm joins the armed executor; when it cannot,
-        // the whole path stays unarmed (its fence goes).
+        // The Four arms join the armed executor; when one cannot, the whole
+        // path stays unarmed (its fence goes).
+        let scope = self.four_scope;
         let armed = match (armed, four) {
-            (Ok(mut executor), Some(v)) => match executor.arm_four(v) {
-                Ok(()) => Ok(executor),
-                Err(e) => {
-                    if executor.disarm().is_err() {
-                        self.disarm_errors += 1;
-                    }
-                    Err(format!("four: {e}"))
+            (Ok(mut executor), Some(v)) => {
+                let mut joined = Ok(());
+                if scope.classic {
+                    joined = executor.arm_four(v).map_err(|e| format!("four: {e}"));
                 }
-            },
+                if joined.is_ok() && scope.openfour {
+                    joined = executor
+                        .arm_openfour(v)
+                        .map_err(|e| format!("openfour: {e}"));
+                }
+                match joined {
+                    Ok(()) => Ok(executor),
+                    Err(e) => {
+                        if executor.disarm().is_err() {
+                            self.disarm_errors += 1;
+                        }
+                        Err(e)
+                    }
+                }
+            }
             (armed, _) => armed,
         };
         match armed {
@@ -559,6 +629,7 @@ impl ExecRuntime {
     pub fn on_launch(
         &mut self,
         hash: [u8; 32],
+        from: [u8; 20],
         raw: &[u8],
         ingress_ns: u64,
         owner: &StateOwner,
@@ -566,7 +637,9 @@ impl ExecRuntime {
     ) -> Option<PaperBuy> {
         let x = self.executor.as_mut()?;
         let next_nonce = owner.clean_next_nonce(&x.sender());
-        launch_to(x, hash, raw, ingress_ns, owner, next_nonce, None, clock)
+        launch_to(
+            x, hash, from, raw, ingress_ns, owner, next_nonce, None, clock,
+        )
     }
 
     /// Phase I: one Strategy C decision on the PAPER path, when armed:
@@ -621,8 +694,14 @@ impl ExecRuntime {
                         )
                     })
                     .or_else(|| {
-                        self.four_unconfigured.then(|| {
+                        self.four_unconfigured.classic.then(|| {
                             "BSC_VENUE_FOUR_CLASSIC is SHADOW without BSC_EXEC_FOUR_*: no Four BUY"
+                                .to_string()
+                        })
+                    })
+                    .or_else(|| {
+                        self.four_unconfigured.openfour.then(|| {
+                            "BSC_VENUE_OPENFOUR is SHADOW without BSC_EXEC_OPENFOUR_*: no OpenFour BUY"
                                 .to_string()
                         })
                     });
@@ -740,6 +819,7 @@ impl ExecRuntime {
 pub fn launch_to<E: End>(
     executor: &mut Executor<E>,
     hash: [u8; 32],
+    from: [u8; 20],
     raw: &[u8],
     ingress_ns: u64,
     owner: &StateOwner,
@@ -756,6 +836,7 @@ pub fn launch_to<E: End>(
             PendingLaunch {
                 hash,
                 raw,
+                from,
                 to: target.to,
                 value: target.value,
                 input: target.data,
@@ -887,6 +968,7 @@ pub(crate) mod tests {
             refused_accounts: Vec::new(),
             exec: ExecConfig {
                 four: None,
+                openfour: None,
                 input_wei: 1_000_000_000_000_000,
                 slippage_bps: 100,
                 exit_slippage_bps: 100,
@@ -1061,6 +1143,23 @@ pub(crate) mod tests {
                     .classic_templates
                     .map(|t| (t.deployer_runtime_keccak256, t.template_runtime_keccak256)),
                 venue_fee: darkbot_bsc_trading::venues::fourmeme::profile::WITNESSED_VENUE_FEE,
+                openfour_bonding: d.openfour_bonding.map(|b| {
+                    darkbot_bsc_trading::venues::fourmeme::deployment::ObservedOpenFourBonding {
+                        token_implementation: d
+                            .openfour_template(b.preset_id)
+                            .unwrap_or(Address::ZERO),
+                        token_implementation_runtime_keccak256: b
+                            .token_implementation_runtime_keccak256,
+                        modules: b.modules,
+                        custom_data_module: Address::ZERO,
+                        fee_router: b.fee_router,
+                        fee_charged: darkbot_bsc_trading::venues::fourmeme::deployment::OPENFOUR_FEE_PROBE_QUOTES
+                            .map(|q| {
+                                darkbot_bsc_trading::economics::openfour::charged(&b.fee, q)
+                                    .unwrap()
+                            }),
+                    }
+                }),
             },
         }
     }
@@ -1081,6 +1180,36 @@ pub(crate) mod tests {
     ) -> Result<FourObservation, String> {
         let mut o = four_observation(d);
         o.observed.token_manager2_implementation = Address::repeat_byte(0x7f);
+        Ok(o)
+    }
+
+    /// R12d review: an OpenFour trade module upgraded behind its beacon;
+    /// asked for the pin with the bonding preset, it refuses (only an
+    /// OpenFour scope asks for it).
+    fn openfour_module_upgraded(
+        _: &str,
+        _: &FollowerLimits,
+        d: &FourDeployment,
+    ) -> Result<FourObservation, String> {
+        let mut o = four_observation(&bsc_mainnet_r12d_131608421());
+        if let Some(b) = o.observed.openfour_bonding.as_mut() {
+            b.modules[3].implementation = Address::repeat_byte(0x7e);
+        }
+        match d.openfour_bonding {
+            Some(_) => Err("asked for the OpenFour preset".into()),
+            None => Ok(o),
+        }
+    }
+
+    fn openfour_module_upgraded_always(
+        _: &str,
+        _: &FollowerLimits,
+        _: &FourDeployment,
+    ) -> Result<FourObservation, String> {
+        let mut o = four_observation(&bsc_mainnet_r12d_131608421());
+        if let Some(b) = o.observed.openfour_bonding.as_mut() {
+            b.modules[3].implementation = Address::repeat_byte(0x7e);
+        }
         Ok(o)
     }
 
@@ -1120,7 +1249,7 @@ pub(crate) mod tests {
         use darkbot_bsc_trading::venues::fourmeme::recognize::decode_classic_create;
         const FIXTURE: &str =
             include_str!("../../trading/fixtures/fourmeme/classic_parity_20261104.txt");
-        let d = bsc_mainnet_r12b_131568366();
+        let d = bsc_mainnet_r12d_131608421();
         let v = d.validate(&four_observation(&d).observed, 1).unwrap();
         let (input, value) = FIXTURE
             .lines()
@@ -1145,6 +1274,48 @@ pub(crate) mod tests {
                     gas_price: 1_000_000_000,
                     gas_limit: 2_500_000,
                     to: d.token_manager2,
+                    value,
+                    input: &input,
+                },
+                &mut scratch,
+                &mut raw,
+            )
+            .unwrap();
+        (keccak256(&raw).0, raw, launcher.address().into_array())
+    }
+
+    /// R12d: the OpenFour BUY's values (as shipped).
+    pub(crate) fn openfour_config() -> crate::paper_exec::FourExecConfig {
+        crate::paper_exec::FourExecConfig {
+            input_wei: 1_000_000_000_000_000,
+            slippage_bps: 100,
+            gas_limit: 2_000_000,
+        }
+    }
+
+    /// R12d: the witnessed OpenFour launch of the parity fixture, its
+    /// creator value and calldata, signed by a third party (nonce `nonce`)
+    /// to the pinned Core: its token is derived from that signer.
+    pub(crate) fn openfour_launch(nonce: u64) -> ([u8; 32], Vec<u8>, [u8; 20]) {
+        const FIXTURE: &str =
+            include_str!("../../trading/fixtures/fourmeme/openfour_parity_20261104.txt");
+        let f = FIXTURE
+            .lines()
+            .find(|l| l.starts_with("OFLAUNCH "))
+            .map(|l| l.split(' ').collect::<Vec<_>>())
+            .expect("the fixture's launch");
+        let input = alloy_primitives::hex::decode(f[31]).unwrap();
+        let value = U256::from_str_radix(f[7], 10).unwrap();
+        let launcher = Signer::from_secret_bytes(&[0x4e; 32]).unwrap();
+        let (mut scratch, mut raw) = (Vec::new(), Vec::new());
+        launcher
+            .sign_legacy(
+                &LegacyTx {
+                    chain_id: 56,
+                    nonce,
+                    gas_price: 1_000_000_000,
+                    gas_limit: 6_000_000,
+                    to: bsc_mainnet_r12d_131608421().openfour_core,
                     value,
                     input: &input,
                 },
@@ -1408,7 +1579,10 @@ pub(crate) mod tests {
         // under no projected name); the paths that take the sender too.
         let (hash, raw, launcher) = launch();
         owner.pending(hash, launcher, 3, 0, 10);
-        assert!(x.on_launch(hash, &raw, 10, &owner, &clock).is_none());
+        assert!(
+            x.on_launch(hash, [0; 20], &raw, 10, &owner, &clock)
+                .is_none()
+        );
         let r = record(&x);
         assert_eq!(r.u64(e::LAUNCHES).unwrap(), 1);
         assert_eq!(r.texts(e::REFUSALS).unwrap(), ["NONCE_TAKEN=1"]);
@@ -1467,10 +1641,15 @@ pub(crate) mod tests {
                 now.get()
             },
         };
-        let buy = x.on_launch(hash, &raw, 10, &owner, &clock).unwrap();
+        let buy = x
+            .on_launch(hash, [0; 20], &raw, 10, &owner, &clock)
+            .unwrap();
         assert_eq!(buy.launch_hash, hash);
         // Signed bytes that are no transaction are counted, not lost.
-        assert!(x.on_launch([9; 32], b"no tx", 20, &owner, &clock).is_none());
+        assert!(
+            x.on_launch([9; 32], [0; 20], b"no tx", 20, &owner, &clock)
+                .is_none()
+        );
         let r = record(&x);
         assert_eq!(r.u64(e::LAUNCHES).unwrap(), 2);
         assert_eq!(r.u64(e::HANDOFFS).unwrap(), 1);
@@ -1516,7 +1695,10 @@ pub(crate) mod tests {
         assert!(reason.unwrap().contains("v5.28.0"));
         assert_eq!(record(&x).u64(e::LANES_ARMED).unwrap(), 0);
         assert_eq!(std::fs::read_dir(&fences).unwrap().count(), 0);
-        assert!(x.on_launch(hash, &raw, 30, &owner, &clock).is_none());
+        assert!(
+            x.on_launch(hash, [0; 20], &raw, 30, &owner, &clock)
+                .is_none()
+        );
 
         // OFF, then SHADOW on the witnessed deployment: a new arm (M2).
         x.prober = witnessed;
@@ -1559,7 +1741,7 @@ pub(crate) mod tests {
         // The Flap BUY's own slippage: the Four BUY takes its own policy.
         s.exec.slippage_bps = 500;
         let mut x = ExecRuntime::with_prober(s, repo, fences.clone(), witnessed, four_witnessed);
-        x.set_four_wanted(true);
+        x.set_four_wanted(true, false);
         let sender = x.sender().unwrap();
         let mut owner = owner(&dir, sender);
         owner.canonical(&CanonicalEvent::Block {
@@ -1592,10 +1774,12 @@ pub(crate) mod tests {
                 now.get()
             },
         };
-        let buy = x.on_launch(hash, &raw, 10, &owner, &clock).unwrap();
+        let buy = x
+            .on_launch(hash, launcher, &raw, 10, &owner, &clock)
+            .unwrap();
         assert_eq!(buy.launch_hash, hash);
         // The admission, independently: the launch's token and minimum.
-        let d = bsc_mainnet_r12b_131568366();
+        let d = bsc_mainnet_r12d_131608421();
         let v = d.validate(&four_observation(&d).observed, 1).unwrap();
         let target = decode_tx_target(&raw).unwrap();
         let launch = decode_classic_create(target.data, d.classic_args_len).unwrap();
@@ -1674,6 +1858,114 @@ pub(crate) mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
+    /// R12d: with `BSC_EXEC_OPENFOUR_*` and the OpenFour venue admitted
+    /// (the Classic one not), the arm probes the Four.meme deployment with
+    /// its OpenFour presets and modules and holds the OpenFour BUY alone; the
+    /// witnessed launch, sent by another signer, runs the production path to
+    /// the PAPER sink as the admitted exact BUY (Core, the input as value and
+    /// `maxPay`, `buy` of the executed admission's amount of the token
+    /// derived from the verified sender). Admitted without its keys, the
+    /// armed path says so.
+    #[test]
+    fn an_openfour_launch_reaches_the_sink_on_the_validated_openfour_arm() {
+        use darkbot_bsc_trading::transactions::legacy::decode_signed;
+        use darkbot_bsc_trading::venues::fourmeme::recognize::{
+            decode_openfour_buy, decode_openfour_create,
+        };
+        const FIXTURE: &str =
+            include_str!("../../trading/fixtures/fourmeme/openfour_parity_20261104.txt");
+        let dir = std::env::temp_dir().join(format!("bsc-exec-openfour-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let repo = Path::new("/nonexistent-repo");
+        let key = dir.join("id/paper.key");
+        PaperIdentity::create(&key, repo).unwrap();
+        let fences = dir.join("fences");
+        let mut s = setup(key.clone(), Duration::from_secs(3_600));
+        s.exec.openfour = Some(openfour_config());
+        s.exec.slippage_bps = 500;
+        let mut x = ExecRuntime::with_prober(s, repo, fences.clone(), witnessed, four_witnessed);
+        x.set_four_wanted(false, true);
+        let sender = x.sender().unwrap();
+        let mut owner = armable_owner(&dir, sender);
+        settle(&mut x, &owner, "https://probe.invalid");
+        assert_eq!(state(&x), ("ARMED".to_owned(), None));
+        assert!(x.openfour_armed() && !x.four_armed());
+
+        let (hash, raw, launcher) = openfour_launch(3);
+        owner.pending(hash, launcher, 3, 0, 10);
+        let now = Cell::new(10u64);
+        let clock = FnClock {
+            id: 1,
+            now: || {
+                now.set(now.get() + 3);
+                now.get()
+            },
+        };
+        let buy = x
+            .on_launch(hash, launcher, &raw, 10, &owner, &clock)
+            .unwrap();
+        assert_eq!(buy.launch_hash, hash);
+        let d = bsc_mainnet_r12d_131608421();
+        let launch = decode_openfour_create(decode_tx_target(&raw).unwrap().data).unwrap();
+        let token = d
+            .openfour_token(
+                launch.preset_id,
+                launch.init.token_salt,
+                launch.request_id,
+                Some(Address::from(launcher)),
+            )
+            .unwrap();
+        assert_eq!(buy.token, token.into_array());
+        let signed = decode_signed(&buy.raw).unwrap();
+        assert_eq!(signed.tx.to, d.openfour_core);
+        assert_eq!(signed.tx.value, U256::from(openfour_config().input_wei));
+        assert_eq!(signed.tx.gas_limit, openfour_config().gas_limit);
+        assert_eq!(signed.tx.nonce, 0);
+        let call = decode_openfour_buy(signed.tx.input).unwrap();
+        // The amount the executed admission bought on the state after the
+        // launch (OFADMIT: its block, 0.001 BNB, 100 bps).
+        let admitted = FIXTURE
+            .lines()
+            .map(|l| l.split(' ').collect::<Vec<_>>())
+            .find(|f| {
+                f[0] == "OFADMIT"
+                    && f[1] == "131608421"
+                    && f[3] == "1000000000000000"
+                    && f[4] == "100"
+            })
+            .unwrap();
+        assert_eq!(admitted[8], "OK");
+        assert_eq!(
+            (call.token, call.amount, call.max_pay_amount, call.options),
+            (
+                token,
+                U256::from_str_radix(admitted[6], 10).unwrap(),
+                signed.tx.value,
+                U256::ZERO
+            )
+        );
+        assert!(call.proof.is_empty());
+        x.shutdown();
+
+        // Admitted without BSC_EXEC_OPENFOUR_*: armed for Flap, visibly no
+        // OpenFour.
+        let mut x = ExecRuntime::with_prober(
+            setup(key, Duration::from_secs(3_600)),
+            repo,
+            fences.clone(),
+            witnessed,
+            no_four,
+        );
+        x.set_four_wanted(false, true);
+        settle(&mut x, &owner, "https://probe.invalid");
+        let (s, reason) = state(&x);
+        assert_eq!(s, "ARMED");
+        assert!(reason.unwrap().contains("without BSC_EXEC_OPENFOUR_*"));
+        assert!(!x.openfour_armed());
+        x.shutdown();
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
     /// R12c: a first probe that cannot read the Four.meme deployment, or
     /// finds it drifted, arms nothing: the whole path stops visibly (the
     /// Flap probe alone succeeded).
@@ -1708,7 +2000,7 @@ pub(crate) mod tests {
             let mut s = setup(key, Duration::from_secs(3_600));
             s.exec.four = Some(four_config());
             let mut x = ExecRuntime::with_prober(s, repo, dir.join("fences"), witnessed, four);
-            x.set_four_wanted(true);
+            x.set_four_wanted(true, false);
             let owner = owner(&dir, x.sender().unwrap());
             settle(&mut x, &owner, "https://probe.invalid");
             let (s, reason) = state(&x);
@@ -1762,7 +2054,7 @@ pub(crate) mod tests {
         // thread), the Flap path arms alone.
         let mut x = ExecRuntime::with_prober(s, repo, fences.clone(), witnessed, no_four);
         let owner = armable_owner(&dir, x.sender().unwrap());
-        x.set_four_wanted(false);
+        x.set_four_wanted(false, false);
         settle(&mut x, &owner, "https://probe.invalid");
         assert_eq!(state(&x), ("ARMED".to_owned(), None));
         assert!(!x.four_armed());
@@ -1774,18 +2066,18 @@ pub(crate) mod tests {
             .path();
         // Admitted: the path starts over and arms with it.
         x.four_prober = four_witnessed;
-        x.set_four_wanted(true);
+        x.set_four_wanted(true, false);
         assert_eq!(state(&x).0, "OFF");
         assert!(!first.exists());
         settle(&mut x, &owner, "https://probe.invalid");
         assert_eq!(state(&x), ("ARMED".to_owned(), None));
         assert!(x.four_armed());
         // The same scope again changes nothing.
-        x.set_four_wanted(true);
+        x.set_four_wanted(true, false);
         assert!(x.four_armed());
         // Switched off: armed without it again.
         x.four_prober = no_four;
-        x.set_four_wanted(false);
+        x.set_four_wanted(false, false);
         settle(&mut x, &owner, "https://probe.invalid");
         assert_eq!(state(&x), ("ARMED".to_owned(), None));
         assert!(!x.four_armed());
@@ -1800,11 +2092,45 @@ pub(crate) mod tests {
             witnessed,
             no_four,
         );
-        x.set_four_wanted(true);
+        x.set_four_wanted(true, false);
         settle(&mut x, &owner, "https://probe.invalid");
         let (s, reason) = state(&x);
         assert_eq!(s, "ARMED");
         assert!(reason.unwrap().contains("without BSC_EXEC_FOUR_*"));
+        assert!(!x.four_armed());
+        x.shutdown();
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// R12d review: a Classic-only arm neither probes nor validates the
+    /// OpenFour bonding preset, so the preset's drift leaves it armed; an
+    /// OpenFour arm probes it, and the drift ends the path.
+    #[test]
+    fn an_openfour_preset_drift_ends_only_an_openfour_arm() {
+        let dir = std::env::temp_dir().join(format!("bsc-exec-of-drift-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let repo = Path::new("/nonexistent-repo");
+        let key = dir.join("id/paper.key");
+        PaperIdentity::create(&key, repo).unwrap();
+        let fences = dir.join("fences");
+        let mut s = setup(key, Duration::from_secs(3_600));
+        s.exec.four = Some(four_config());
+        s.exec.openfour = Some(openfour_config());
+        let mut x =
+            ExecRuntime::with_prober(s, repo, fences.clone(), witnessed, openfour_module_upgraded);
+        let owner = armable_owner(&dir, x.sender().unwrap());
+        x.set_four_wanted(true, false);
+        settle(&mut x, &owner, "https://probe.invalid");
+        assert_eq!(state(&x), ("ARMED".to_owned(), None));
+        assert!(x.four_armed() && !x.openfour_armed());
+        // The OpenFour venue admitted too: the path starts over, probes the
+        // preset and ends on its drift.
+        x.four_prober = openfour_module_upgraded_always;
+        x.set_four_wanted(true, true);
+        settle(&mut x, &owner, "https://probe.invalid");
+        let (s, reason) = state(&x);
+        assert_eq!(s, "DEPLOYMENT_DRIFT");
+        assert!(reason.unwrap().contains("OpenFour preset trade"));
         assert!(!x.four_armed());
         x.shutdown();
         std::fs::remove_dir_all(&dir).unwrap();
@@ -1826,7 +2152,7 @@ pub(crate) mod tests {
             ..four_config()
         });
         let mut x = ExecRuntime::with_prober(s, repo, fences.clone(), witnessed, four_witnessed);
-        x.set_four_wanted(true);
+        x.set_four_wanted(true, false);
         let owner = armable_owner(&dir, x.sender().unwrap());
         settle(&mut x, &owner, "https://probe.invalid");
         let (s, reason) = state(&x);

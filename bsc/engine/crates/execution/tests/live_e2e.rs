@@ -748,6 +748,7 @@ fn exec_setup() -> ExecSetup {
         refused_accounts: Vec::new(),
         exec: ExecConfig {
             four: None,
+            openfour: None,
             input_wei: u128::from(INPUT),
             slippage_bps: 100,
             exit_slippage_bps: 100,
@@ -1117,7 +1118,7 @@ fn live_buy_to_sell_is_synthetic_and_never_leaves_the_host() {
         },
     };
     let buy = x
-        .on_launch(source, first, &raw, at, &owner, &clock)
+        .on_launch(source, first, [0; 20], &raw, at, &owner, &clock)
         .expect("the LIVE BUY");
     let request =
         String::from_utf8(requests.recv_timeout(Duration::from_secs(2)).unwrap()).unwrap();
@@ -1391,7 +1392,7 @@ fn live_buy_to_sell_is_synthetic_and_never_leaves_the_host() {
         assert!(!blocked.armed(), "{tag}");
         assert!(
             blocked
-                .on_launch(source, first, &raw, at, &owner, &clock)
+                .on_launch(source, first, [0; 20], &raw, at, &owner, &clock)
                 .is_none(),
             "{tag}"
         );
@@ -1488,7 +1489,7 @@ fn live_buy_to_sell_is_synthetic_and_never_leaves_the_host() {
     settle(&mut armed, &fresh);
     assert!(
         armed
-            .on_launch(SourceId::Drpc, first, &raw, at, &fresh, &clock)
+            .on_launch(SourceId::Drpc, first, [0; 20], &raw, at, &fresh, &clock)
             .is_none()
     );
     // Not one request more reached the stand-in.

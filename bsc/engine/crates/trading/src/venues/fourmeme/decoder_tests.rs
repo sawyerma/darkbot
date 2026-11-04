@@ -186,7 +186,7 @@ fn every_fixture_call_decodes_and_agrees_with_its_event() {
                 assert_eq!(e.creator, c.from);
                 assert_eq!(l.signature.len(), 65);
                 assert!(
-                    matches!(pending_token(&deployment, &r), PendingToken::Candidates(t) if t[0] == e.token),
+                    matches!(pending_token(&deployment, &r, Some(c.from)), PendingToken::Candidates(t) if t[0] == e.token),
                     "{}",
                     c.tx
                 );
@@ -215,7 +215,7 @@ fn every_fixture_call_decodes_and_agrees_with_its_event() {
                 );
                 assert_eq!(e.creator, c.from);
                 assert_eq!(
-                    pending_token(&deployment, &r),
+                    pending_token(&deployment, &r, Some(c.from)),
                     PendingToken::Derived(e.token),
                     "{}",
                     c.tx
@@ -234,7 +234,10 @@ fn every_fixture_call_decodes_and_agrees_with_its_event() {
                     panic!("no TokenPurchase in {}", c.tx);
                 };
                 assert_eq!((b.token, e.account), (e.token, c.from));
-                assert_eq!(pending_token(&deployment, &r), PendingToken::Unknown);
+                assert_eq!(
+                    pending_token(&deployment, &r, Some(c.from)),
+                    PendingToken::Unknown
+                );
             }
             ("OPENFOUR", "BUY", Recognized::OpenFourBuy(b)) => {
                 let Some(FourEvent::TradeExecutedBuy(e)) = events
@@ -256,7 +259,10 @@ fn every_fixture_call_decodes_and_agrees_with_its_event() {
                     panic!("no TokenSale in {}", c.tx);
                 };
                 assert_eq!((s.token, e.account), (e.token, c.from));
-                assert_eq!(pending_token(&deployment, &r), PendingToken::Unknown);
+                assert_eq!(
+                    pending_token(&deployment, &r, Some(c.from)),
+                    PendingToken::Unknown
+                );
             }
             ("OPENFOUR", "SELL", Recognized::OpenFourSell(s)) => {
                 let Some(FourEvent::TradeExecutedSell(e)) = events
@@ -504,7 +510,7 @@ fn pre_execution_token_address_is_proven_or_unknown() {
         panic!()
     };
     assert!(matches!(
-        pending_token(&deployment, &r),
+        pending_token(&deployment, &r, None),
         PendingToken::Derived(_)
     ));
     let mut other_preset = c.input.clone();
@@ -515,7 +521,7 @@ fn pre_execution_token_address_is_proven_or_unknown() {
         panic!()
     };
     assert_ne!(l2.preset_id, l.preset_id);
-    assert_eq!(pending_token(&deployment, &r2), PendingToken::Unknown);
+    assert_eq!(pending_token(&deployment, &r2, None), PendingToken::Unknown);
     // Classic: a candidate only; another salt is another candidate.
     let c = fixture("CLASSIC", "LAUNCH");
     let mut salted = c.input.clone();
@@ -523,10 +529,12 @@ fn pre_execution_token_address_is_proven_or_unknown() {
     let a = pending_token(
         &deployment,
         &recognize(&deployment, Some(c.to), &c.input, MAX),
+        None,
     );
     let b = pending_token(
         &deployment,
         &recognize(&deployment, Some(c.to), &salted, MAX),
+        None,
     );
     assert!(
         matches!((a, b), (PendingToken::Candidates(x), PendingToken::Candidates(y)) if x[0] != y[0] && x[1] != y[1])
@@ -536,7 +544,8 @@ fn pre_execution_token_address_is_proven_or_unknown() {
     assert_eq!(
         pending_token(
             &deployment,
-            &recognize(&deployment, Some(buy.to), &buy.input, MAX)
+            &recognize(&deployment, Some(buy.to), &buy.input, MAX),
+            None
         ),
         PendingToken::Unknown
     );
@@ -752,7 +761,7 @@ fn four_decoder_latency() {
     };
     let launch = |c: &Call| {
         let r = recognize(&deployment, Some(c.to), black_box(&c.input), MAX);
-        black_box(pending_token(&deployment, &r));
+        black_box(pending_token(&deployment, &r, None));
     };
     report(
         "recognizer (no decode)",

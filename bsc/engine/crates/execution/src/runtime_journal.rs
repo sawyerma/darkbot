@@ -1480,7 +1480,7 @@ mod tests {
     /// flow, or everything; anything else is refused at parse.
     #[test]
     fn the_capture_scope_keeps_what_it_names() {
-        let four = darkbot_bsc_trading::venues::fourmeme::deployment::bsc_mainnet_r12b_131568366();
+        let four = darkbot_bsc_trading::venues::fourmeme::deployment::bsc_mainnet_r12d_131608421();
         let calls = include_str!("../../trading/fixtures/fourmeme/freeze_20261026_calls.txt");
         let row: Vec<&str> = calls
             .lines()

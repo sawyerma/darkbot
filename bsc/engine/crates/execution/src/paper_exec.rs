@@ -59,6 +59,9 @@ use darkbot_bsc_trading::economics::flap::native_curve20::{
 use darkbot_bsc_trading::economics::four_classic::{
     AdmittedClassicBuy, QUALIFIED_CLASSIC_INPUTS_WEI, QualifiedClassicState, admit_classic_buy,
 };
+use darkbot_bsc_trading::economics::openfour::{
+    AdmittedOpenFourBuy, QUALIFIED_OPENFOUR_INPUTS_WEI, QualifiedOpenFourState, admit_openfour_buy,
+};
 use darkbot_bsc_trading::economics::policy::{BuyPolicy, ExitPolicy};
 use darkbot_bsc_trading::intent::{
     AdapterId, AdapterSet, ArmedFence, IntentLane, IntentState, Ticket,
@@ -78,10 +81,11 @@ use darkbot_bsc_trading::venues::flap::binding::{
 use darkbot_bsc_trading::venues::flap::deployment::ValidatedDeployment;
 use darkbot_bsc_trading::venues::flap::profile::{UnsupportedLaunch, classify_launch};
 use darkbot_bsc_trading::venues::flap::recognize::{Recognized, recognize};
-use darkbot_bsc_trading::venues::fourmeme::binding::ExpectedClassicBuy;
+use darkbot_bsc_trading::venues::fourmeme::binding::{ExpectedClassicBuy, ExpectedOpenFourBuy};
 use darkbot_bsc_trading::venues::fourmeme::deployment::ValidatedFourDeployment;
 use darkbot_bsc_trading::venues::fourmeme::profile::{
-    UnsupportedClassicLaunch, classify_classic_launch,
+    UnsupportedClassicLaunch, UnsupportedOpenFourLaunch, classify_classic_launch,
+    classify_openfour_launch,
 };
 use darkbot_bsc_trading::venues::fourmeme::recognize::{
     Recognized as FourRecognized, recognize as four_recognize,
@@ -165,6 +169,9 @@ pub struct ExecConfig {
     /// R12c: the Four Classic BUY of the C3 path (`BSC_EXEC_FOUR_*`); none:
     /// no Four arm, Four launches are not decoded by the path.
     pub four: Option<FourExecConfig>,
+    /// R12d: the OpenFour BUY of the C3 path (`BSC_EXEC_OPENFOUR_*`) on the
+    /// executed bonding preset; none: no OpenFour arm.
+    pub openfour: Option<FourExecConfig>,
     pub input_wei: u128,
     pub slippage_bps: u16,
     /// An exit's (the SELL's) slippage, its own limit (BSC3-069).
@@ -286,7 +293,14 @@ impl ExecConfig {
     /// The cross-key rules: an armed path must be able to admit a BUY.
     pub fn validate(&self) -> Result<(), String> {
         if let Some(four) = &self.four {
-            four.validate(self.gas_price_wei, self.session_cap_wei)?;
+            four.validate(FourVenue::Classic, self.gas_price_wei, self.session_cap_wei)?;
+        }
+        if let Some(openfour) = &self.openfour {
+            openfour.validate(
+                FourVenue::OpenFour,
+                self.gas_price_wei,
+                self.session_cap_wei,
+            )?;
         }
         if self.input_wei != u128::from(QUALIFIED_MAINNET_INPUT_WEI) {
             return Err(format!(
@@ -406,6 +420,9 @@ pub enum Refusal {
     /// R12c: a Four Classic launch outside the priced profile (counted as
     /// `PROFILE`).
     FourProfile(UnsupportedClassicLaunch),
+    /// R12d: an OpenFour launch outside the executed bonding preset's
+    /// profile (counted as `PROFILE`).
+    OpenFourProfile(UnsupportedOpenFourLaunch),
     /// C2 holds no coherent snapshot for this candidate, or no head.
     NoSnapshot,
     /// The fresh-launch state or the admission refused.
@@ -481,7 +498,7 @@ impl Refusal {
     pub fn name(self) -> &'static str {
         match self {
             Self::NotDecoded => "NOT_DECODED",
-            Self::Profile(_) | Self::FourProfile(_) => "PROFILE",
+            Self::Profile(_) | Self::FourProfile(_) | Self::OpenFourProfile(_) => "PROFILE",
             Self::NoSnapshot => "NO_SNAPSHOT",
             Self::Admission => "ADMISSION",
             Self::DuplicateToken => "DUPLICATE_TOKEN",
@@ -511,11 +528,45 @@ impl Refusal {
     }
 }
 
-/// R12c: the Four Classic BUY's operating values (`BSC_EXEC_FOUR_*`). The
-/// gas limit is the operator's bound, held to the frozen Classic BUY
-/// receipts (two, of the G0.1-era TokenManager2 implementation; no
-/// launch-block Classic BUY and none of the pinned implementation yet: the
-/// Four network cost is UNSUPPORTED).
+/// The Four.meme family a [`FourExecConfig`] is of: its keys and the
+/// inputs its economics are witnessed at by execution.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FourVenue {
+    Classic,
+    OpenFour,
+}
+
+impl FourVenue {
+    /// The configuration keys' prefix.
+    pub fn keys(self) -> &'static str {
+        match self {
+            Self::Classic => "BSC_EXEC_FOUR",
+            Self::OpenFour => "BSC_EXEC_OPENFOUR",
+        }
+    }
+
+    fn what(self) -> &'static str {
+        match self {
+            Self::Classic => "Four BUY",
+            Self::OpenFour => "OpenFour BUY",
+        }
+    }
+
+    fn qualified_inputs(self) -> &'static [u64] {
+        match self {
+            Self::Classic => &QUALIFIED_CLASSIC_INPUTS_WEI,
+            Self::OpenFour => &QUALIFIED_OPENFOUR_INPUTS_WEI,
+        }
+    }
+}
+
+/// R12c: a Four.meme BUY's operating values (`BSC_EXEC_FOUR_*`, R12d
+/// `BSC_EXEC_OPENFOUR_*`). The gas limit is the operator's bound, held to
+/// the frozen BUY receipts of its family (Classic: two, of the G0.1-era
+/// TokenManager2 implementation; OpenFour: two `buyByBudget`, above the
+/// executed `Core.buy` estimates of the fixture; no launch-block BUY of
+/// either and none of the pinned implementations: the Four network cost is
+/// UNSUPPORTED).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FourExecConfig {
     pub input_wei: u128,
@@ -524,13 +575,16 @@ pub struct FourExecConfig {
 }
 
 impl FourExecConfig {
-    fn validate(&self, gas_price_wei: u64, session_cap_wei: u128) -> Result<(), String> {
-        if !QUALIFIED_CLASSIC_INPUTS_WEI
-            .iter()
-            .any(|w| u128::from(*w) == self.input_wei)
-        {
+    fn validate(
+        &self,
+        venue: FourVenue,
+        gas_price_wei: u64,
+        session_cap_wei: u128,
+    ) -> Result<(), String> {
+        let (keys, qualified) = (venue.keys(), venue.qualified_inputs());
+        if !qualified.iter().any(|w| u128::from(*w) == self.input_wei) {
             return Err(format!(
-                "BSC_EXEC_FOUR_INPUT_WEI {} is none of the witnessed inputs {QUALIFIED_CLASSIC_INPUTS_WEI:?}",
+                "{keys}_INPUT_WEI {} is none of the witnessed inputs {qualified:?}",
                 self.input_wei
             ));
         }
@@ -539,7 +593,7 @@ impl FourExecConfig {
             self.input_wei,
             gas_price_wei,
             self.gas_limit,
-            ("BSC_EXEC_FOUR_INPUT_WEI", "Four BUY"),
+            (&format!("{keys}_INPUT_WEI"), venue.what()),
         )
     }
 
@@ -572,6 +626,7 @@ struct C3Admitted {
 enum C3Intent {
     Flap(AdmittedBuy),
     Four(AdmittedClassicBuy),
+    OpenFour(AdmittedOpenFourBuy),
 }
 
 /// A native value as signed (big-endian, no leading zero), in wei.
@@ -852,6 +907,8 @@ pub struct Executor<E: End> {
     deployment: ValidatedDeployment,
     /// R12c: the Four Classic arm (`arm_four`).
     four: Option<FourArm>,
+    /// R12d: the OpenFour arm (`arm_openfour`).
+    openfour: Option<FourArm>,
     terms: VenueBuyTerms,
     policy: BuyPolicy,
     config: ExecConfig,
@@ -1448,6 +1505,11 @@ pub struct Arming<'a> {
 pub struct PendingLaunch<'a> {
     pub hash: [u8; 32],
     pub raw: &'a [u8],
+    /// The verified signer (R12d: an OpenFour token's derivation names
+    /// it). Taken as given: the ingress recovered it from these signed
+    /// bytes (`geth_source::sender_of`, the WSS sources' verification), no
+    /// second recovery on the launch path.
+    pub from: [u8; 20],
     pub to: Option<[u8; 20]>,
     /// The native value as signed (big-endian bytes).
     pub value: &'a [u8],
@@ -1573,6 +1635,7 @@ impl<E: End> Executor<E> {
             end,
             deployment,
             four: None,
+            openfour: None,
             terms,
             policy,
             budget,
@@ -1609,10 +1672,35 @@ impl<E: End> Executor<E> {
     /// validated, with the configured `BSC_EXEC_FOUR_*` values; its launches
     /// then take the same lanes, caps and end as the Flap BUY.
     pub fn arm_four(&mut self, validated: ValidatedFourDeployment) -> Result<(), ArmError> {
-        let four = self
-            .config
-            .four
-            .ok_or_else(|| ArmError::Config("BSC_EXEC_FOUR_* is not configured".into()))?;
+        self.four = Some(self.four_arm(FourVenue::Classic, validated)?);
+        Ok(())
+    }
+
+    /// R12d: arms the OpenFour BUY on the deployment the drift probe
+    /// validated with its executed bonding preset, with the configured
+    /// `BSC_EXEC_OPENFOUR_*` values; its launches take the same lanes, caps
+    /// and end.
+    pub fn arm_openfour(&mut self, validated: ValidatedFourDeployment) -> Result<(), ArmError> {
+        if validated.openfour_bonding().is_none() {
+            return Err(ArmError::Config(
+                "the validated deployment pins no executed OpenFour preset".into(),
+            ));
+        }
+        self.openfour = Some(self.four_arm(FourVenue::OpenFour, validated)?);
+        Ok(())
+    }
+
+    fn four_arm(
+        &self,
+        venue: FourVenue,
+        validated: ValidatedFourDeployment,
+    ) -> Result<FourArm, ArmError> {
+        let keys = venue.keys();
+        let four = match venue {
+            FourVenue::Classic => self.config.four,
+            FourVenue::OpenFour => self.config.openfour,
+        }
+        .ok_or_else(|| ArmError::Config(format!("{keys}_* is not configured")))?;
         let policy = BuyPolicy::new(
             self.config.policy_generation,
             U256::from(four.input_wei),
@@ -1620,18 +1708,22 @@ impl<E: End> Executor<E> {
             self.config.gas_price_wei,
             four.gas_limit,
         )
-        .map_err(|e| ArmError::Config(format!("BSC_EXEC_FOUR_*: {e}")))?;
-        self.four = Some(FourArm {
+        .map_err(|e| ArmError::Config(format!("{keys}_*: {e}")))?;
+        Ok(FourArm {
             validated,
             policy,
             budget: four.budget(self.config.gas_price_wei),
-        });
-        Ok(())
+        })
     }
 
     /// Whether the Four Classic BUY is armed.
     pub fn four_armed(&self) -> bool {
         self.four.is_some()
+    }
+
+    /// R12d: whether the OpenFour BUY is armed.
+    pub fn openfour_armed(&self) -> bool {
+        self.openfour.is_some()
     }
 
     /// Disarms: the lanes go and the arm's fence is removed (a PAPER BUY
@@ -1683,13 +1775,19 @@ impl<E: End> Executor<E> {
         if !self.config.sender_paths.c3() {
             return Err(Refusal::PathOff);
         }
-        // R12c: a call to the armed TokenManager2 is a Four Classic launch.
+        // R12c: a call to the armed TokenManager2 is a Four Classic launch;
+        // R12d: one to the armed OpenFour Core an OpenFour launch.
         let four_target = self
             .four
             .as_ref()
             .map(|f| f.validated.deployment().token_manager2);
+        let openfour_target = self
+            .openfour
+            .as_ref()
+            .map(|f| f.validated.deployment().openfour_core);
         let admitted = match launch.to.map(Address::from) {
             Some(to) if Some(to) == four_target => self.admit_four(&launch, c2, clock)?,
+            Some(to) if Some(to) == openfour_target => self.admit_openfour(&launch, c2, clock)?,
             _ => self.admit_flap(&launch, c2, clock)?,
         };
         self.c3_send(admitted, &launch, c2, clock)
@@ -1782,6 +1880,58 @@ impl<E: End> Executor<E> {
         })
     }
 
+    /// R12d: the OpenFour BUY a pending `createToken` admits: the launch
+    /// classified on the probe-validated deployment's executed bonding
+    /// preset (its token derived from its verified sender), the state
+    /// directly after it and its creator BUY, the OpenFour policy.
+    fn admit_openfour(
+        &self,
+        launch: &PendingLaunch<'_>,
+        c2: &LaunchContext<'_>,
+        clock: &dyn Clock,
+    ) -> Result<C3Admitted, Refusal> {
+        let arm = self.openfour.as_ref().ok_or(Refusal::NotDecoded)?;
+        let FourRecognized::OpenFourLaunch(decoded) = four_recognize(
+            arm.validated.deployment(),
+            launch.to.map(Address::from),
+            launch.input,
+            self.config.max_calldata,
+        ) else {
+            return Err(Refusal::NotDecoded);
+        };
+        let decoded_ns = clock.now_ns();
+        let value = native_value(launch.value).ok_or(Refusal::NotDecoded)?;
+        let candidate = B256::from(launch.hash);
+        let classified = classify_openfour_launch(
+            &arm.validated,
+            &decoded,
+            Address::from(launch.from),
+            value,
+            candidate,
+        )
+        .map_err(Refusal::OpenFourProfile)?;
+        let snapshot = (c2.snapshot)(
+            candidate,
+            arm.policy.generation(),
+            arm.validated.codehash_generation(),
+        )
+        .ok_or(Refusal::NoSnapshot)?;
+        let head = c2.head.ok_or(Refusal::NoSnapshot)?;
+        // A pending launch: no trade of its token precedes it.
+        let state = QualifiedOpenFourState::fresh_launch(&classified, 0, snapshot)
+            .map_err(|_| Refusal::Admission)?;
+        let admitted = admit_openfour_buy(&state, &arm.policy).map_err(|_| Refusal::Admission)?;
+        Ok(C3Admitted {
+            token: admitted.token().into_array(),
+            intent: C3Intent::OpenFour(admitted),
+            budget: arm.budget,
+            decoded_ns,
+            admitted_ns: clock.now_ns(),
+            snapshot,
+            head,
+        })
+    }
+
     /// An admitted C3 BUY of either venue: the token's duplicate and
     /// conflict check, the caps, the arm's nonce, the lane, the signed
     /// intent and its plan to the end.
@@ -1844,6 +1994,7 @@ impl<E: End> Executor<E> {
         let sender = Address::from(self.end.address());
         let flap_expected;
         let four_expected;
+        let openfour_expected;
         let expected = match a.intent {
             C3Intent::Flap(admitted) => {
                 flap_expected = ExpectedBuy::from_admitted(
@@ -1873,6 +2024,21 @@ impl<E: End> Executor<E> {
                     .sign(self.end.signer(), &mut self.scratch, &mut self.raw)
                     .map_err(|_| Refusal::Build)?;
                 ExpectedTx::ClassicBuy(&four_expected)
+            }
+            C3Intent::OpenFour(admitted) => {
+                let arm = self.openfour.as_ref().ok_or(Refusal::Intent)?;
+                openfour_expected = ExpectedOpenFourBuy::from_admitted(
+                    &arm.validated,
+                    &admitted,
+                    &arm.policy,
+                    sender,
+                    ticket.nonce(),
+                )
+                .map_err(|_| Refusal::Intent)?;
+                openfour_expected
+                    .sign(self.end.signer(), &mut self.scratch, &mut self.raw)
+                    .map_err(|_| Refusal::Build)?;
+                ExpectedTx::OpenFourBuy(&openfour_expected)
             }
         };
         let signed_ns = clock.now_ns();

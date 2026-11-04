@@ -1,7 +1,8 @@
 //! The frozen Four.meme deployment on BSC mainnet: addresses, runtime
 //! fingerprints and the inputs of the token-address derivation.
 //!
-//! Current: [`bsc_mainnet_r12b_131568366`], the R12b refreeze at block
+//! Current: [`bsc_mainnet_r12d_131608421`] (R12d: the R12b deployment with
+//! the witnessed OpenFour bonding preset pinned), on [`bsc_mainnet_r12b_131568366`], the R12b refreeze at block
 //! 131568366 (`bsc/native/evidence/g01/four_freeze_20261104T052604Z/`,
 //! over the free archive endpoint, receipts of direct calls only):
 //! TokenManager2 runs implementation 0xa38d9d48 since the G0.1 freeze; the
@@ -41,6 +42,7 @@
 use alloy_primitives::{Address, B256, U256, address, b256, keccak256};
 
 use super::profile::VenueFee;
+use crate::economics::openfour::{OpenFourFee, charged};
 use crate::venues::flap::address::{create2_address, minimal_proxy_init_code};
 
 /// The two Four.meme surfaces (no shared protocol assumption between them).
@@ -100,6 +102,9 @@ pub struct FourDeployment {
     pub openfour_registry: Address,
     /// OpenFour Core (proxy): launch and trade calls, its events.
     pub openfour_core: Address,
+    /// OpenFour Tools (proxy, the registry's `openFourTool()`): the curve
+    /// liquidity snapshot a held token is read with (R12d).
+    pub openfour_tools: Address,
     pub openfour_core_implementation: Address,
     pub openfour_core_implementation_runtime_keccak256: B256,
     /// The OpenFour create deployer (proxy, CREATE2).
@@ -112,6 +117,70 @@ pub struct FourDeployment {
     /// implementation (`economics::four_classic`); a deployment without them
     /// decodes but classifies no launch.
     pub classic_economics: ClassicEconomics,
+    /// R12d: the OpenFour preset whose bonding economics are executed
+    /// (`economics::openfour`) with its modules as pinned; none: OpenFour
+    /// decodes but classifies no launch.
+    pub openfour_bonding: Option<OpenFourBondingPreset>,
+}
+
+/// One OpenFour module of a preset: the beacon its token's module proxies
+/// follow (`Registry.resolvePresetImplementations`) and the implementation
+/// behind it (`beacon.implementation()`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct OpenFourModule {
+    pub beacon: Address,
+    pub implementation: Address,
+    pub implementation_runtime_keccak256: B256,
+}
+
+/// The modules of a preset in the order the registry names them.
+pub const OPENFOUR_MODULES: [&str; 5] = ["token module", "vault", "curve", "trade", "migrate"];
+
+/// R12d: the OpenFour Core's fee router (`Core.feeRouter()`, an EIP-1967
+/// proxy) and the implementation behind it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct OpenFourFeeRouter {
+    pub router: Address,
+    pub implementation: Address,
+    pub implementation_runtime_keccak256: B256,
+}
+
+/// R12d: the curve quotes at which the fee router's preset-aware
+/// `previewDistribution(preset, quote, [], false, 0)` is probed: a total
+/// of 0 at 199 holds only while each fee floors on its own at 50 bps or
+/// less, 200 and 10^18 name their sum (the fee rates live in the router's
+/// storage, a preset override included, not in pinned code).
+pub const OPENFOUR_FEE_PROBE_QUOTES: [U256; 3] = [
+    U256::from_limbs([199, 0, 0, 0]),
+    U256::from_limbs([200, 0, 0, 0]),
+    U256::from_limbs([1_000_000_000_000_000_000, 0, 0, 0]),
+];
+
+/// R12d: a preset whose BUY and SELL were executed
+/// (`fixtures/fourmeme/openfour_parity_20261104.txt`): its token
+/// implementation's code and its modules, no custom data module, the fee
+/// router and the fee terms its trades were charged (OFFEE rows).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct OpenFourBondingPreset {
+    pub preset_id: U256,
+    pub token_implementation_runtime_keccak256: B256,
+    pub modules: [OpenFourModule; OPENFOUR_MODULES.len()],
+    pub fee_router: OpenFourFeeRouter,
+    pub fee: OpenFourFee,
+}
+
+/// The live chain's view of a pinned bonding preset.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ObservedOpenFourBonding {
+    /// `Registry.getPresetTokenImpl(preset)` and its code.
+    pub token_implementation: Address,
+    pub token_implementation_runtime_keccak256: B256,
+    pub modules: [OpenFourModule; OPENFOUR_MODULES.len()],
+    pub custom_data_module: Address,
+    pub fee_router: OpenFourFeeRouter,
+    /// `previewDistribution`'s total fee at each of
+    /// [`OPENFOUR_FEE_PROBE_QUOTES`].
+    pub fee_charged: [U256; OPENFOUR_FEE_PROBE_QUOTES.len()],
 }
 
 /// Whether a deployment's Classic economics are witnessed by execution.
@@ -128,6 +197,77 @@ pub enum ClassicEconomics {
 /// launches), each with a direct launch whose CREATE2 derivation
 /// reproduced against `getPresetTokenImpl` at block 129907738. Any other
 /// preset is `PendingToken::Unknown`.
+/// R12d: the presets frozen through the refreeze at block 131608421: the
+/// earlier ones and the preset of the witnessed bonding launch.
+const R12D_PRESETS: &[OpenFourPreset] = &[
+    MAINNET_PRESETS[0],
+    MAINNET_PRESETS[1],
+    MAINNET_PRESETS[2],
+    MAINNET_PRESETS[3],
+    OpenFourPreset {
+        preset_id: U256::from_limbs([1_778_027_615_724, 0, 0, 0]),
+        token_implementation: address!("f9bf955eb9f2c13b5834e335af795e3857a85e0d"),
+    },
+];
+
+/// R12d: the witnessed bonding preset (Registry
+/// `resolvePresetImplementations(1778027615724)` and each beacon's
+/// implementation at block 131608421).
+const R12D_BONDING: OpenFourBondingPreset = OpenFourBondingPreset {
+    preset_id: U256::from_limbs([1_778_027_615_724, 0, 0, 0]),
+    token_implementation_runtime_keccak256: b256!(
+        "7740eab75c52e4c2d18649e8dc71a91a928c8fe4bbd43e4a2bb9504ef7112538"
+    ),
+    modules: [
+        OpenFourModule {
+            beacon: address!("746ac66e72753e09945f5beee4f704d076701744"),
+            implementation: address!("94b1afe94c7f92ff64cf5a64edc6e3d710981e37"),
+            implementation_runtime_keccak256: b256!(
+                "a25281359d31a83d6a04576e4b0f4011b030add3edc11737f89ea0ebf79ee855"
+            ),
+        },
+        OpenFourModule {
+            beacon: address!("21a4ad8278f98509f3df3ab1bdc85a014f3f87fc"),
+            implementation: address!("9daf13acf2fa6c854bed55a7a2cf624a44892f4c"),
+            implementation_runtime_keccak256: b256!(
+                "c97b5d337513a1c8f7507053f441e3b6e802129d9fc143e7a7d833ecb76f3077"
+            ),
+        },
+        OpenFourModule {
+            beacon: address!("c51c864f8b4de51f13f39a0b32e5fbd50314fe88"),
+            implementation: address!("eacb4085088a84f7dfc9aebf8f0116a418f2600b"),
+            implementation_runtime_keccak256: b256!(
+                "04fede0062985aec8b9ed3efe6796c09563cc07fbe71299791b9a0c71b3e970a"
+            ),
+        },
+        OpenFourModule {
+            beacon: address!("38926d1e0487795abbd7ab29eb0a6bc698862e01"),
+            implementation: address!("020481fcc62530680242cb61f2323396cb8bbc55"),
+            implementation_runtime_keccak256: b256!(
+                "423708fe9df65a3138ef0bbe3883168a4378987e86819ef7aac4f94bd47714d5"
+            ),
+        },
+        OpenFourModule {
+            beacon: address!("7b18eeedbdb27fc8006019ca1489e9e1fa5dba14"),
+            implementation: address!("0f1b71c5061ec900b061500b0db9e02320df48ed"),
+            implementation_runtime_keccak256: b256!(
+                "3654b96214b6c27f0408271f5a15e3fdb03dd7febd9959716621e07644c4b6a3"
+            ),
+        },
+    ],
+    fee_router: OpenFourFeeRouter {
+        router: address!("7383b244b416db16aa9dd0ab7c296aa60255b9a2"),
+        implementation: address!("878f9a5dbfcdf9d61e6d61b71b5e710062d070d4"),
+        implementation_runtime_keccak256: b256!(
+            "b552167de677fa9000b964e97eeb2c09c8839b433869fb96dff7d308458b8de8"
+        ),
+    },
+    fee: OpenFourFee {
+        protocol_bps: 50,
+        dev_bps: 50,
+    },
+};
+
 const MAINNET_PRESETS: &[OpenFourPreset] = &[
     OpenFourPreset {
         preset_id: U256::from_limbs([1_778_027_615_723, 0, 0, 0]),
@@ -184,6 +324,7 @@ pub const fn bsc_mainnet_g01_129842711() -> FourDeployment {
         classic_args_len: 672,
         openfour_registry: address!("912cef0c3ae9ab6eb3ec87cab69371cfb317ab94"),
         openfour_core: address!("ebe7b6c1089d9f72ad07f34e36d898e44e5e27f3"),
+        openfour_tools: address!("97da82f56fef1a0b974587a48135fa9da2a4e905"),
         openfour_core_implementation: address!("02d714cb43d1544abe1ffc2405ec00b7235b7f26"),
         openfour_core_implementation_runtime_keccak256: b256!(
             "2e3109401d230c6d24ab3b1b28dda6fa9992afa4aed2f815724e6da65684c451"
@@ -197,6 +338,7 @@ pub const fn bsc_mainnet_g01_129842711() -> FourDeployment {
         ),
         openfour_presets: MAINNET_PRESETS,
         classic_economics: ClassicEconomics::DecodeOnly,
+        openfour_bonding: None,
     }
 }
 
@@ -213,6 +355,19 @@ pub const fn bsc_mainnet_r12b_131568366() -> FourDeployment {
         classic_economics: ClassicEconomics::Witnessed,
         fee_reference_token: address!("1b1955899341dbd9569c8537f639d642c2a9ffff"),
         ..bsc_mainnet_g01_129842711()
+    }
+}
+
+/// BSC mainnet as re-frozen by R12d at block 131608421: the R12b
+/// deployment with the preset of the one OpenFour launch of 20 000 blocks
+/// (its token derived from the launch calldata) and that preset's bonding
+/// modules pinned (`fixtures/fourmeme/openfour_parity_20261104.txt`: its
+/// BUY and SELL executed); the contracts' code as R12b froze it.
+pub const fn bsc_mainnet_r12d_131608421() -> FourDeployment {
+    FourDeployment {
+        openfour_presets: R12D_PRESETS,
+        openfour_bonding: Some(R12D_BONDING),
+        ..bsc_mainnet_r12b_131568366()
     }
 }
 
@@ -233,6 +388,9 @@ pub struct ObservedFour {
     /// `minTradingFee` (whether a rate is fixed per token at its creation is
     /// unwitnessed; the BUY's minAmount bounds any difference).
     pub venue_fee: VenueFee,
+    /// R12d: the pinned bonding preset as the registry resolves it (read
+    /// only for a deployment that pins one).
+    pub openfour_bonding: Option<ObservedOpenFourBonding>,
 }
 
 /// The first pin the live chain differs from.
@@ -247,6 +405,17 @@ pub enum FourDrift {
     CreateDeployerCode,
     /// A Classic pair's deployer or template code (its index).
     ClassicPair(usize),
+    /// R12d: the pinned bonding preset's token implementation or code, a
+    /// module (the index of [`OPENFOUR_MODULES`]: beacon, implementation or
+    /// code) or a custom data module; or the preset is not read.
+    OpenFourPresetToken,
+    OpenFourPresetModule(usize),
+    OpenFourPresetCustomData,
+    /// R12d: the Core's fee router, its implementation or code.
+    OpenFourFeeRouter,
+    /// R12d: the fee router charges the preset other than its pinned fee
+    /// terms at a probe quote.
+    OpenFourFees,
 }
 
 impl core::fmt::Display for FourDrift {
@@ -272,6 +441,19 @@ impl core::fmt::Display for FourDrift {
                 f.write_str("four deployment: OpenFour create deployer implementation code")
             }
             Self::ClassicPair(i) => write!(f, "four deployment: Classic pair {} code", i + 1),
+            Self::OpenFourPresetToken => {
+                f.write_str("four deployment: OpenFour preset token implementation")
+            }
+            Self::OpenFourPresetModule(i) => write!(
+                f,
+                "four deployment: OpenFour preset {}",
+                OPENFOUR_MODULES.get(*i).copied().unwrap_or("module")
+            ),
+            Self::OpenFourPresetCustomData => {
+                f.write_str("four deployment: OpenFour preset custom data module")
+            }
+            Self::OpenFourFeeRouter => f.write_str("four deployment: OpenFour fee router"),
+            Self::OpenFourFees => f.write_str("four deployment: OpenFour preset fee terms"),
         }
     }
 }
@@ -310,6 +492,13 @@ impl ValidatedFourDeployment {
     #[inline]
     pub fn classic_economics_witnessed(&self) -> bool {
         self.deployment.classic_economics == ClassicEconomics::Witnessed
+    }
+
+    /// R12d: the bonding preset whose OpenFour economics are witnessed by
+    /// execution, its modules matched by the observation.
+    #[inline]
+    pub fn openfour_bonding(&self) -> Option<&OpenFourBondingPreset> {
+        self.deployment.openfour_bonding.as_ref()
     }
 }
 
@@ -360,6 +549,39 @@ impl FourDeployment {
             if t.deployer_runtime_keccak256 != deployer || t.template_runtime_keccak256 != template
             {
                 out.push(FourDrift::ClassicPair(i));
+            }
+        }
+        if let Some(pinned) = &self.openfour_bonding {
+            let Some(seen) = &observed.openfour_bonding else {
+                out.push(FourDrift::OpenFourPresetToken);
+                return out;
+            };
+            let token = self
+                .openfour_template(pinned.preset_id)
+                .is_some_and(|t| t == seen.token_implementation);
+            if !token
+                || seen.token_implementation_runtime_keccak256
+                    != pinned.token_implementation_runtime_keccak256
+            {
+                out.push(FourDrift::OpenFourPresetToken);
+            }
+            for (i, (pin, live)) in pinned.modules.iter().zip(&seen.modules).enumerate() {
+                if pin != live {
+                    out.push(FourDrift::OpenFourPresetModule(i));
+                }
+            }
+            if seen.custom_data_module != Address::ZERO {
+                out.push(FourDrift::OpenFourPresetCustomData);
+            }
+            if seen.fee_router != pinned.fee_router {
+                out.push(FourDrift::OpenFourFeeRouter);
+            }
+            if OPENFOUR_FEE_PROBE_QUOTES
+                .iter()
+                .zip(&seen.fee_charged)
+                .any(|(q, total)| charged(&pinned.fee, *q).ok() != Some(*total))
+            {
+                out.push(FourDrift::OpenFourFees);
             }
         }
         out
@@ -422,16 +644,35 @@ impl FourDeployment {
             .map(|p| p.token_implementation)
     }
 
-    /// The OpenFour token of a launch of `preset_id` with `token_salt`, for
-    /// a preset with a frozen template; any other preset: `None`.
-    pub fn openfour_token(&self, preset_id: U256, token_salt: B256) -> Option<Address> {
-        self.openfour_template(preset_id).map(|template| {
-            create2_address(
-                self.openfour_create_deployer,
-                token_salt,
-                keccak256(minimal_proxy_init_code(template)),
-            )
-        })
+    /// The OpenFour token of a launch of `preset_id` with `token_salt` and
+    /// `request_id`, sent by `creator`: CREATE2 by the create deployer of a
+    /// clone of the preset's frozen template, salted with `token_salt` (the
+    /// v3 freeze's launches, 6/6) or, for a zero salt, with
+    /// `keccak256(abi.encode(request_id, preset_id, creator))` (R12d: the
+    /// witnessed bonding launch; both under the frozen Core implementation).
+    /// No frozen template, or a zero salt of an unknown creator: `None`.
+    pub fn openfour_token(
+        &self,
+        preset_id: U256,
+        token_salt: B256,
+        request_id: U256,
+        creator: Option<Address>,
+    ) -> Option<Address> {
+        let template = self.openfour_template(preset_id)?;
+        let salt = if token_salt == B256::ZERO {
+            let mut words = [0u8; 3 * 32];
+            words[..32].copy_from_slice(&request_id.to_be_bytes::<32>());
+            words[32..64].copy_from_slice(&preset_id.to_be_bytes::<32>());
+            words[64 + 12..].copy_from_slice(creator?.as_slice());
+            keccak256(words)
+        } else {
+            token_salt
+        };
+        Some(create2_address(
+            self.openfour_create_deployer,
+            salt,
+            keccak256(minimal_proxy_init_code(template)),
+        ))
     }
 }
 
@@ -458,6 +699,15 @@ pub(crate) mod testkit {
                 .classic_templates
                 .map(|t| (t.deployer_runtime_keccak256, t.template_runtime_keccak256)),
             venue_fee: crate::venues::fourmeme::profile::WITNESSED_VENUE_FEE,
+            openfour_bonding: d.openfour_bonding.map(|b| ObservedOpenFourBonding {
+                token_implementation: d.openfour_template(b.preset_id).unwrap_or(Address::ZERO),
+                token_implementation_runtime_keccak256: b.token_implementation_runtime_keccak256,
+                modules: b.modules,
+                custom_data_module: Address::ZERO,
+                fee_router: b.fee_router,
+                fee_charged: OPENFOUR_FEE_PROBE_QUOTES
+                    .map(|q| charged(&b.fee, q).unwrap_or(U256::MAX)),
+            }),
         }
     }
 }
@@ -465,6 +715,94 @@ pub(crate) mod testkit {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// R12d: the bonding pin is the fixture's witness: the preset token
+    /// implementation and its code (OFMODULE token), each module's beacon,
+    /// implementation and code in the registry's order (OFBEACON), the fee
+    /// router (OFFEEROUTER) and the fee terms whose charges the router's
+    /// preset-aware preview returned (OFFEE, every row, the probe quotes
+    /// among them); another split of the same 1 % is charged at 199.
+    #[test]
+    fn the_bonding_pin_is_the_fixtures_witness() {
+        const FIXTURE: &str =
+            include_str!("../../../fixtures/fourmeme/openfour_parity_20261104.txt");
+        let rows = |kind: &'static str| {
+            FIXTURE
+                .lines()
+                .map(|l| l.split(' ').collect::<Vec<_>>())
+                .filter(move |f| f[0] == kind)
+        };
+        let u = |s: &str| U256::from_str_radix(s, 10).unwrap();
+        let d = bsc_mainnet_r12d_131608421();
+        let b = d.openfour_bonding.unwrap();
+        let token = rows("OFMODULE").find(|f| f[2] == "token").unwrap();
+        assert_eq!(
+            (
+                d.openfour_template(b.preset_id),
+                b.token_implementation_runtime_keccak256
+            ),
+            (
+                Some(token[5].parse::<Address>().unwrap()),
+                token[6].parse::<B256>().unwrap()
+            )
+        );
+        for (m, role) in b
+            .modules
+            .iter()
+            .zip(["tokenModule", "vault", "curve", "trade", "migrate"])
+        {
+            let f = rows("OFBEACON").find(|f| f[2] == role).unwrap();
+            assert_eq!(
+                (
+                    m.beacon,
+                    m.implementation,
+                    m.implementation_runtime_keccak256
+                ),
+                (
+                    f[5].parse::<Address>().unwrap(),
+                    f[6].parse::<Address>().unwrap(),
+                    f[7].parse::<B256>().unwrap()
+                ),
+                "{role}"
+            );
+        }
+        assert_eq!(rows("OFFEEROUTER").count(), 2);
+        for f in rows("OFFEEROUTER") {
+            assert_eq!(
+                (
+                    b.fee_router,
+                    f[6].parse::<u16>().unwrap(),
+                    f[7].parse::<u16>().unwrap()
+                ),
+                (
+                    OpenFourFeeRouter {
+                        router: f[2].parse().unwrap(),
+                        implementation: f[3].parse().unwrap(),
+                        implementation_runtime_keccak256: f[4].parse().unwrap(),
+                    },
+                    b.fee.protocol_bps,
+                    b.fee.dev_bps
+                )
+            );
+        }
+        let mut quotes = Vec::new();
+        for f in rows("OFFEE") {
+            let (q, total) = (u(f[3]), u(f[4]));
+            assert_eq!(u(f[2]), b.preset_id);
+            assert_eq!(charged(&b.fee, q).unwrap(), total, "{f:?}");
+            assert_eq!((u(f[5]), u(f[6])), (q - total, U256::ZERO), "{f:?}");
+            quotes.push(q);
+        }
+        assert!(OPENFOUR_FEE_PROBE_QUOTES.iter().all(|q| quotes.contains(q)));
+        let other = OpenFourFee {
+            protocol_bps: 60,
+            dev_bps: 40,
+        };
+        assert_eq!(
+            charged(&other, OPENFOUR_FEE_PROBE_QUOTES[0]).unwrap(),
+            U256::ONE
+        );
+    }
 
     /// The init-code hashes and tokens of the freeze's derivation attempts.
     #[test]
@@ -490,13 +828,42 @@ mod tests {
         assert_eq!(
             d.openfour_token(
                 preset,
-                b256!("3ec074a27944090054e5c3a504cc382fbe9c716e6e9b09ec4fe3a8e1737a01e5")
+                b256!("3ec074a27944090054e5c3a504cc382fbe9c716e6e9b09ec4fe3a8e1737a01e5"),
+                U256::ZERO,
+                None,
             ),
             Some(address!("f76ad2f3d84ee09ee10ee1ef8c4d6dbb264effff"))
         );
         // A preset outside the frozen table (…732, none in use over the v3
         // window) has no template, so no token.
-        assert_eq!(d.openfour_token(preset - U256::from(1u8), B256::ZERO), None);
+        assert_eq!(
+            d.openfour_token(
+                preset - U256::from(1u8),
+                B256::repeat_byte(1),
+                U256::ZERO,
+                None
+            ),
+            None
+        );
+        // R12d: a zero salt is the request's (the witnessed bonding launch:
+        // request 0x628b928 of creator 0x5044…c06d named its token), and
+        // without its creator no token is named.
+        let r12d = bsc_mainnet_r12d_131608421();
+        let bonding = U256::from(1_778_027_615_724u64);
+        let creator = address!("504497437956dd580a9739e5a18ef080a9a3c06d");
+        let request = U256::from(0x0628_b928u64);
+        assert_eq!(
+            r12d.openfour_token(bonding, B256::ZERO, request, Some(creator)),
+            Some(address!("6a081154adc920c37669e7c92e9213ece898813c"))
+        );
+        assert_eq!(
+            r12d.openfour_token(bonding, B256::ZERO, request, None),
+            None
+        );
+        assert_eq!(
+            d.openfour_token(bonding, B256::ZERO, request, Some(creator)),
+            None
+        );
         assert_eq!(d.family_of(d.token_manager2), Some(Family::Classic));
         assert_eq!(d.family_of(d.openfour_core), Some(Family::OpenFour));
         assert_eq!(d.family_of(d.openfour_registry), None);

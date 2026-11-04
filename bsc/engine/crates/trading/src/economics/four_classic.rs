@@ -216,8 +216,11 @@ fn charged_bps(fee: &ClassicFee) -> Result<u16, ClassicQuoteError> {
     }
 }
 
-/// The curve a launch with `terms` starts with.
-pub fn launch_curve(terms: &LaunchTerms) -> Result<ClassicCurve, ClassicQuoteError> {
+/// The virtual reserves `(T, Q)` a launch with `terms` starts with: the
+/// token reserve `maxOffers + a` and the quote reserve `a · maxRaising /
+/// maxOffers`, `a` priced so the curve ends at 98 % of the raise per token
+/// (R12d: OpenFour's bonding curve starts at the same reserves).
+pub fn virtual_reserves(terms: &LaunchTerms) -> Result<(U256, U256), ClassicQuoteError> {
     let offers = terms.max_offers;
     let reserved = sub(terms.total_supply, offers).map_err(|_| ClassicQuoteError::InvalidState)?;
     if offers.is_zero() || reserved.is_zero() || terms.max_raising.is_zero() {
@@ -234,14 +237,18 @@ pub fn launch_curve(terms: &LaunchTerms) -> Result<ClassicCurve, ClassicQuoteErr
         hundred,
         scaled_offers - scaled_reserved,
     )?;
-    let t = add(offers, a)?;
-    let quote = mul_div_down(a, terms.max_raising, offers)?;
+    Ok((add(offers, a)?, mul_div_down(a, terms.max_raising, offers)?))
+}
+
+/// The curve a launch with `terms` starts with.
+pub fn launch_curve(terms: &LaunchTerms) -> Result<ClassicCurve, ClassicQuoteError> {
+    let (t, quote) = virtual_reserves(terms)?;
     let g = U256::from(GWEI);
     let k = mul(t / g, quote / g)?;
     let curve = ClassicCurve {
         k,
         t,
-        offers,
+        offers: terms.max_offers,
         sold: U256::ZERO,
     };
     checked(&curve)?;

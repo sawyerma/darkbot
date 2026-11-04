@@ -44,8 +44,9 @@ use crate::economics::policy::{BuyPolicy, ExitPolicy};
 use crate::signer::{Signer, SignerError, recover_legacy_sender};
 use crate::transactions::legacy::{LegacyDecodeError, LegacyTx, decode_signed, tx_hash};
 use crate::venues::fourmeme::binding::{
-    ExpectedClassicBuy, ExpectedClassicExit, verify_final_classic_approve,
-    verify_final_classic_buy, verify_final_classic_sell,
+    ExpectedClassicBuy, ExpectedClassicExit, ExpectedOpenFourBuy, ExpectedOpenFourExit,
+    verify_final_classic_approve, verify_final_classic_buy, verify_final_classic_sell,
+    verify_final_openfour_approve, verify_final_openfour_buy, verify_final_openfour_sell,
 };
 
 /// Reason an expectation cannot be formed.
@@ -681,6 +682,11 @@ pub enum ExpectedTx<'a> {
     /// R12c-3: a Four Classic exit's approval and SELL.
     ClassicApprove(&'a ExpectedClassicExit),
     ClassicSell(&'a ExpectedClassicExit),
+    /// R12d: an OpenFour BUY of an exact amount, an OpenFour exit's approval
+    /// and SELL.
+    OpenFourBuy(&'a ExpectedOpenFourBuy),
+    OpenFourApprove(&'a ExpectedOpenFourExit),
+    OpenFourSell(&'a ExpectedOpenFourExit),
 }
 
 impl<'a> From<&'a ExpectedBuy> for ExpectedTx<'a> {
@@ -703,6 +709,8 @@ impl ExpectedTx<'_> {
             Self::Burn(b) => b.chain_id,
             Self::ClassicBuy(b) => b.chain_id(),
             Self::ClassicApprove(e) | Self::ClassicSell(e) => e.chain_id(),
+            Self::OpenFourBuy(b) => b.chain_id(),
+            Self::OpenFourApprove(e) | Self::OpenFourSell(e) => e.chain_id(),
         }
     }
 
@@ -713,6 +721,8 @@ impl ExpectedTx<'_> {
             Self::Burn(b) => b.sender,
             Self::ClassicBuy(b) => b.sender(),
             Self::ClassicApprove(e) | Self::ClassicSell(e) => e.sender(),
+            Self::OpenFourBuy(b) => b.sender(),
+            Self::OpenFourApprove(e) | Self::OpenFourSell(e) => e.sender(),
         }
     }
 
@@ -726,6 +736,9 @@ impl ExpectedTx<'_> {
             Self::ClassicBuy(b) => b.nonce(),
             Self::ClassicApprove(e) => e.nonce(),
             Self::ClassicSell(e) => e.nonce() + 1,
+            Self::OpenFourBuy(b) => b.nonce(),
+            Self::OpenFourApprove(e) => e.nonce(),
+            Self::OpenFourSell(e) => e.nonce() + 1,
         }
     }
 
@@ -737,6 +750,8 @@ impl ExpectedTx<'_> {
             Self::Burn(_) => Address::ZERO,
             Self::ClassicBuy(b) => b.token(),
             Self::ClassicApprove(e) | Self::ClassicSell(e) => e.token(),
+            Self::OpenFourBuy(b) => b.token(),
+            Self::OpenFourApprove(e) | Self::OpenFourSell(e) => e.token(),
         }
     }
 
@@ -747,11 +762,14 @@ impl ExpectedTx<'_> {
             Self::Burn(b) => b.snapshot,
             Self::ClassicBuy(b) => b.snapshot(),
             Self::ClassicApprove(e) | Self::ClassicSell(e) => e.snapshot(),
+            Self::OpenFourBuy(b) => b.snapshot(),
+            Self::OpenFourApprove(e) | Self::OpenFourSell(e) => e.snapshot(),
         }
     }
 
     /// The venue contract the intent trades on (the Portal; TokenManager2
-    /// for a Four Classic BUY or exit; a burn: none, the zero address).
+    /// for a Four Classic BUY or exit, OpenFour Core for an OpenFour one; a
+    /// burn: none, the zero address).
     pub fn portal(&self) -> Address {
         match self {
             Self::Buy(b) => b.portal,
@@ -759,6 +777,8 @@ impl ExpectedTx<'_> {
             Self::Burn(_) => Address::ZERO,
             Self::ClassicBuy(b) => b.token_manager2(),
             Self::ClassicApprove(e) | Self::ClassicSell(e) => e.token_manager2(),
+            Self::OpenFourBuy(b) => b.core(),
+            Self::OpenFourApprove(e) | Self::OpenFourSell(e) => e.core(),
         }
     }
 
@@ -768,6 +788,8 @@ impl ExpectedTx<'_> {
         match self {
             Self::Buy(b) => b.input_amount,
             Self::ClassicBuy(b) => b.funds(),
+            Self::OpenFourBuy(b) => b.max_pay(),
+            Self::OpenFourApprove(_) | Self::OpenFourSell(_) => U256::ZERO,
             Self::Approve(_)
             | Self::Sell(_)
             | Self::Burn(_)
@@ -788,6 +810,11 @@ impl ExpectedTx<'_> {
                 U256::from(e.gas_price()) * U256::from(e.approve_gas_limit())
             }
             Self::ClassicSell(e) => U256::from(e.gas_price()) * U256::from(e.sell_gas_limit()),
+            Self::OpenFourBuy(b) => U256::from(b.gas_price()) * U256::from(b.gas_limit()),
+            Self::OpenFourApprove(e) => {
+                U256::from(e.gas_price()) * U256::from(e.approve_gas_limit())
+            }
+            Self::OpenFourSell(e) => U256::from(e.gas_price()) * U256::from(e.sell_gas_limit()),
         }
     }
 
@@ -808,6 +835,11 @@ impl ExpectedTx<'_> {
                 verify_final_classic_approve(raw_signed, e, current, scratch)
             }
             Self::ClassicSell(e) => verify_final_classic_sell(raw_signed, e, current, scratch),
+            Self::OpenFourBuy(b) => verify_final_openfour_buy(raw_signed, b, current, scratch),
+            Self::OpenFourApprove(e) => {
+                verify_final_openfour_approve(raw_signed, e, current, scratch)
+            }
+            Self::OpenFourSell(e) => verify_final_openfour_sell(raw_signed, e, current, scratch),
         }
     }
 }

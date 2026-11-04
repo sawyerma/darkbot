@@ -356,14 +356,20 @@ impl VenueId {
 }
 
 /// The owner's rule for a venue: SHADOW admits Flap launches to the C3
-/// PAPER path and Strategy C, Four.meme Classic launches to the C3 PAPER
-/// path (R12c); OpenFour has no path to admit to yet.
+/// PAPER path and Strategy C, Four.meme Classic (R12c) and OpenFour (R12d,
+/// its executed bonding preset) launches to the C3 PAPER path; a requested
+/// LIVE of a Four venue is blocked for its missing LIVE path, whatever the
+/// LIVE gate (as the LIVE view reads it).
 pub fn venue_effective(venue: VenueId, requested: Mode, live: LiveGate) -> Effective {
     match (venue, requested) {
+        (VenueId::FourClassic | VenueId::OpenFour, Mode::Live) => {
+            Effective::Blocked(FOUR_EXECUTION_PATH_MISSING)
+        }
         (_, Mode::Live) => live.blocked(),
-        // R12c: the Four.meme Classic BUY has its PAPER path (C3).
-        (VenueId::Flap | VenueId::FourClassic, Mode::Shadow) => Effective::Shadow,
-        (VenueId::OpenFour, Mode::Shadow) => Effective::Blocked(FOUR_EXECUTION_PATH_MISSING),
+        // R12c/R12d: the Four.meme BUYs have their PAPER path (C3).
+        (VenueId::Flap | VenueId::FourClassic | VenueId::OpenFour, Mode::Shadow) => {
+            Effective::Shadow
+        }
         (
             _,
             Mode::Off

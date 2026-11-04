@@ -762,11 +762,12 @@ fn a_replay_as_an_unchanged_source_is_not_the_request() {
     fs::remove_dir_all(dir).unwrap();
 }
 
-/// Plan v9 §2.3: Flap and (R12c) Four.meme Classic are admitted in
-/// SHADOW; OpenFour has no path to admit to, so its SHADOW is BLOCKED with
-/// that reason.
+/// Plan v9 §2.3: Flap, (R12c) Four.meme Classic and (R12d) OpenFour are
+/// admitted in SHADOW; a requested LIVE of a Four venue is stored BLOCKED
+/// for its missing LIVE path (the receipt the operator sees), the LIVE
+/// switch off or not.
 #[test]
-fn the_venues_are_switchable_and_openfour_has_no_path_yet() {
+fn the_venues_are_switchable_in_shadow() {
     let (dir, s) = session("venues", "boot-1");
     assert_eq!(
         Entity::parse("BSC_VENUE_FLAP"),
@@ -774,14 +775,10 @@ fn the_venues_are_switchable_and_openfour_has_no_path_yet() {
     );
     let r = s.request("v-1", VenueId::Flap, Mode::Shadow, 0, 1).unwrap();
     assert_eq!(r.effective, Effective::Shadow);
-    // R12c: Four Classic has its C3 PAPER path, OpenFour none.
+    // R12c/R12d: both Four venues have their C3 PAPER path.
     for (i, v, effective) in [
         (0, VenueId::FourClassic, Effective::Shadow),
-        (
-            1,
-            VenueId::OpenFour,
-            Effective::Blocked(FOUR_EXECUTION_PATH_MISSING),
-        ),
+        (1, VenueId::OpenFour, Effective::Shadow),
     ] {
         let r = s
             .request(&format!("v-four-{i}"), v, Mode::Shadow, 1 + i as u64, 2)
@@ -797,6 +794,24 @@ fn the_venues_are_switchable_and_openfour_has_no_path_yet() {
             generation: 3
         })
     );
+    for (i, v) in [VenueId::FourClassic, VenueId::OpenFour]
+        .into_iter()
+        .enumerate()
+    {
+        let r = s
+            .request(&format!("v-live-{i}"), v, Mode::Live, 3 + i as u64, 2)
+            .unwrap();
+        assert_eq!(
+            (r.outcome, r.effective),
+            ("APPLIED", Effective::Blocked(FOUR_EXECUTION_PATH_MISSING)),
+            "{v:?}"
+        );
+    }
+    // The Flap venue's LIVE is the LIVE gate's (the switch is off).
+    let r = s
+        .request("v-live-flap", VenueId::Flap, Mode::Live, 5, 2)
+        .unwrap();
+    assert_eq!(r.effective, Effective::Blocked(ECONOMIC_LIVE_DISABLED));
     fs::remove_dir_all(dir).unwrap();
 }
 

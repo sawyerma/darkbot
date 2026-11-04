@@ -25,7 +25,7 @@ use alloy_primitives::{Address, hex};
 use darkbot_bsc_trading::venues::flap::events::{
     PortalEvent, PortalEventKind, PortalLog, decode_portal_log,
 };
-use darkbot_bsc_trading::venues::fourmeme::deployment::bsc_mainnet_r12b_131568366;
+use darkbot_bsc_trading::venues::fourmeme::deployment::bsc_mainnet_r12d_131608421;
 use darkbot_bsc_trading::venues::fourmeme::events::{
     FourEvent, FourEventKind, FourLog, decode_four_log,
 };
@@ -99,9 +99,9 @@ pub struct BuyEvent {
 pub const FLAP_PORTAL: [u8; 20] = hex!("e2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0");
 /// The Four.meme Classic TokenManager2 (BSC): the decoder's frozen
 /// deployment's, not a second definition (BSC3-019).
-pub const FOUR_TOKEN_MANAGER2: [u8; 20] = bsc_mainnet_r12b_131568366().token_manager2.0.0;
+pub const FOUR_TOKEN_MANAGER2: [u8; 20] = bsc_mainnet_r12d_131608421().token_manager2.0.0;
 /// The Four.meme OpenFour Core (BSC), likewise.
-pub const OPENFOUR_CORE: [u8; 20] = bsc_mainnet_r12b_131568366().openfour_core.0.0;
+pub const OPENFOUR_CORE: [u8; 20] = bsc_mainnet_r12d_131608421().openfour_core.0.0;
 
 /// The venues, in no particular order; a log matches at most one.
 pub const LAUNCH_EVENTS: [LaunchEvent; 3] = [
@@ -170,11 +170,11 @@ impl ReceiptLaunch {
         tx: Result<&VerifiedTx, RejectReason>,
         max_launch_calldata: usize,
     ) -> CanonicalLaunch {
-        let four = bsc_mainnet_r12b_131568366();
+        let four = bsc_mainnet_r12d_131608421();
         let four_token = match (self.venue, tx) {
             (Venue::Flap, _) => FourToken::NotApplicable,
             (_, Err(_)) => FourToken::NotRecognized,
-            (_, Ok(t)) => match four_launch_token(&four, &t.raw, max_launch_calldata) {
+            (_, Ok(t)) => match four_launch_token(&four, &t.raw, t.from, max_launch_calldata) {
                 None => FourToken::NotRecognized,
                 Some(PendingToken::Unknown) => FourToken::Unknown,
                 Some(PendingToken::Derived(token)) => {
@@ -228,7 +228,7 @@ pub(super) fn reverted(
     objects: &[Result<ParsedTx, RejectReason>],
     max_launch_calldata: usize,
 ) -> Vec<(Venue, u64, [u8; 32])> {
-    let four = bsc_mainnet_r12b_131568366();
+    let four = bsc_mainnet_r12d_131608421();
     receipts
         .iter()
         .filter(|r| !r.succeeded)
@@ -537,7 +537,7 @@ fn flap_log(log: &Log) -> PortalLog<'_> {
 /// (`trading::venues::fourmeme`, the frozen deployment).
 fn four_log(log: &Log) -> FourLog<'_> {
     decode_four_log(
-        &bsc_mainnet_r12b_131568366(),
+        &bsc_mainnet_r12d_131608421(),
         Address::from(log.address),
         &log.topics,
         &log.data,

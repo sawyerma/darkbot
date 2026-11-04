@@ -600,3 +600,345 @@ fn the_exit_expectation_and_its_intent_kinds() {
         Ok(h)
     );
 }
+
+mod openfour {
+    //! R12d: the OpenFour BUY of an exact amount and its exit, from the
+    //! admission on the witnessed launch.
+    use super::*;
+    use crate::economics::openfour::{
+        QualifiedOpenFourState, admit_openfour_buy, quote_buy_amount,
+    };
+    use crate::venues::fourmeme::abi::encode_openfour_buy;
+    use crate::venues::fourmeme::deployment::bsc_mainnet_r12d_131608421;
+    use crate::venues::fourmeme::profile::classify_openfour_launch;
+    use crate::venues::fourmeme::recognize::{decode_openfour_buy, decode_openfour_create};
+
+    const OPENFOUR: &str =
+        include_str!("../../../../fixtures/fourmeme/openfour_parity_20261104.txt");
+
+    fn validated_r12d(generation: u64) -> ValidatedFourDeployment {
+        let d = bsc_mainnet_r12d_131608421();
+        d.validate(
+            &crate::venues::fourmeme::deployment::testkit::pinned_observation(&d),
+            generation,
+        )
+        .unwrap()
+    }
+
+    fn openfour_policy() -> BuyPolicy {
+        BuyPolicy::new(5, U256::from(FUNDS), 100, 100_000_000, 900_000).unwrap()
+    }
+
+    fn admitted_buy() -> AdmittedOpenFourBuy {
+        let f: Vec<&str> = OPENFOUR
+            .lines()
+            .find(|l| l.starts_with("OFLAUNCH "))
+            .unwrap()
+            .split(' ')
+            .collect();
+        let calldata = alloy_primitives::hex::decode(f[31]).unwrap();
+        let launch = decode_openfour_create(&calldata).unwrap();
+        let tx: B256 = f[2].parse().unwrap();
+        let creator: Address = f[6].parse().unwrap();
+        let value = U256::from_str_radix(f[7], 10).unwrap();
+        let c = classify_openfour_launch(&validated_r12d(1), &launch, creator, value, tx).unwrap();
+        let snapshot = SnapshotId {
+            canonical_block_hash: B256::repeat_byte(9),
+            ordered_state_cursor: 1,
+            pending_candidate: tx,
+            policy_generation: 5,
+            codehash_generation: 1,
+        };
+        let state = QualifiedOpenFourState::fresh_launch(&c, 0, snapshot).unwrap();
+        admit_openfour_buy(&state, &openfour_policy()).unwrap()
+    }
+
+    /// The production signer signs exactly the admitted BUY: Core.buy of
+    /// the exact amount with the input as maxPay and value; every bound
+    /// field is enforced at the send boundary.
+    #[test]
+    fn the_openfour_buy_is_signed_and_bound() {
+        let signer = Signer::from_secret_bytes(&[0x71; 32]).unwrap();
+        let a = admitted_buy();
+        let e = ExpectedOpenFourBuy::from_admitted(
+            &validated_r12d(1),
+            &a,
+            &openfour_policy(),
+            signer.address(),
+            4,
+        )
+        .unwrap();
+        let (mut scratch, mut raw) = (Vec::new(), Vec::new());
+        let h = e.sign(&signer, &mut scratch, &mut raw).unwrap();
+        assert_eq!(
+            verify_final_openfour_buy(&raw, &e, &e.snapshot(), &mut scratch),
+            Ok(h)
+        );
+        let signed = decode_signed(&raw).unwrap();
+        assert_eq!(
+            (
+                signed.tx.to,
+                signed.tx.value,
+                signed.tx.nonce,
+                signed.tx.gas_limit
+            ),
+            (
+                bsc_mainnet_r12d_131608421().openfour_core,
+                a.max_pay(),
+                4,
+                900_000
+            )
+        );
+        assert_eq!(signed.tx.input, a.calldata().unwrap().as_slice());
+        let call = decode_openfour_buy(signed.tx.input).unwrap();
+        assert_eq!(
+            (call.amount, call.max_pay_amount),
+            (a.amount(), a.max_pay())
+        );
+        let one = U256::from(1u8);
+        let cases: [(ExpectedOpenFourBuy, BindingError); 8] = [
+            (
+                ExpectedOpenFourBuy {
+                    sender: Address::repeat_byte(1),
+                    ..e
+                },
+                BindingError::WrongSender,
+            ),
+            (
+                ExpectedOpenFourBuy { nonce: 5, ..e },
+                BindingError::WrongNonce,
+            ),
+            (
+                ExpectedOpenFourBuy {
+                    core: Address::repeat_byte(2),
+                    ..e
+                },
+                BindingError::WrongPortal,
+            ),
+            (
+                ExpectedOpenFourBuy {
+                    gas_price: e.gas_price + 1,
+                    ..e
+                },
+                BindingError::WrongGasPrice,
+            ),
+            (
+                ExpectedOpenFourBuy {
+                    gas_limit: e.gas_limit + 1,
+                    ..e
+                },
+                BindingError::WrongGasLimit,
+            ),
+            (
+                ExpectedOpenFourBuy {
+                    max_pay: e.max_pay + one,
+                    ..e
+                },
+                BindingError::WrongValue,
+            ),
+            (
+                ExpectedOpenFourBuy {
+                    token: Address::repeat_byte(3),
+                    ..e
+                },
+                BindingError::WrongToken,
+            ),
+            (
+                ExpectedOpenFourBuy {
+                    amount: e.amount + one,
+                    ..e
+                },
+                BindingError::WrongInputAmount,
+            ),
+        ];
+        for (x, error) in cases {
+            assert_eq!(
+                verify_final_openfour_buy(&raw, &x, &x.snapshot(), &mut scratch),
+                Err(error)
+            );
+        }
+        // A maxPay in the calldata other than the value.
+        let input = encode_openfour_buy(e.token, e.amount, e.max_pay - one).unwrap();
+        let mut forged = Vec::new();
+        signer
+            .sign_legacy(
+                &LegacyTx {
+                    chain_id: e.chain_id,
+                    nonce: e.nonce,
+                    gas_price: e.gas_price,
+                    gas_limit: e.gas_limit,
+                    to: e.core,
+                    value: e.max_pay,
+                    input: &input,
+                },
+                &mut scratch,
+                &mut forged,
+            )
+            .unwrap();
+        assert_eq!(
+            verify_final_openfour_buy(&forged, &e, &e.snapshot(), &mut scratch),
+            Err(BindingError::WrongMinOutput)
+        );
+        let mut moved = e.snapshot();
+        moved.ordered_state_cursor += 1;
+        assert_eq!(
+            verify_final_openfour_buy(&raw, &e, &moved, &mut scratch),
+            Err(BindingError::StaleSnapshot)
+        );
+        // The expectation needs the admission's policy.
+        let other = BuyPolicy::new(5, U256::from(FUNDS), 200, 100_000_000, 900_000).unwrap();
+        assert_eq!(
+            ExpectedOpenFourBuy::from_admitted(&validated_r12d(1), &a, &other, signer.address(), 4),
+            Err(IntentError::PolicyMismatch)
+        );
+        assert_eq!(
+            ExpectedOpenFourBuy::from_admitted(
+                &validated_r12d(2),
+                &a,
+                &openfour_policy(),
+                signer.address(),
+                4
+            ),
+            Err(IntentError::GenerationMismatch)
+        );
+        let tx = ExpectedTx::OpenFourBuy(&e);
+        assert_eq!(
+            (tx.nonce(), tx.value_wei(), tx.portal(), tx.token()),
+            (4, a.max_pay(), e.core(), a.token())
+        );
+        assert_eq!(tx.verify_final(&raw, &e.snapshot(), &mut scratch), Ok(h));
+    }
+
+    /// The OpenFour exit: approve(Core, amount) on the token at `n`, then
+    /// Core.sell at `n + 1`, both bound field by field.
+    #[test]
+    fn the_openfour_exit_is_signed_and_bound() {
+        use crate::economics::openfour::{
+            OpenFourCurve, QualifiedOpenFourHolding, admit_openfour_sell,
+        };
+        use crate::economics::policy::ExitPolicy;
+        let signer = Signer::from_secret_bytes(&[0x72; 32]).unwrap();
+        let b = admitted_buy();
+        // The held state after the admitted BUY (its curve read at a block).
+        let mut read = crate::economics::openfour::tests::admission::holding_read("131608421");
+        let fresh =
+            crate::venues::fourmeme::profile::classify_openfour_holding(&validated_r12d(1), &read)
+                .unwrap();
+        let after = quote_buy_amount(&fresh.curve(), &fresh.fee(), b.amount())
+            .unwrap()
+            .after;
+        read.current_quote = after.quote_reserve;
+        read.current_token = after.token_reserve;
+        read.remaining = after.remaining;
+        let held =
+            crate::venues::fourmeme::profile::classify_openfour_holding(&validated_r12d(1), &read)
+                .unwrap();
+        let snapshot = SnapshotId {
+            canonical_block_hash: read.block_hash,
+            ordered_state_cursor: 2,
+            pending_candidate: B256::ZERO,
+            policy_generation: 5,
+            codehash_generation: 1,
+        };
+        let state = QualifiedOpenFourHolding::at(&held, snapshot).unwrap();
+        let policy = ExitPolicy::new(5, 300, 100_000_000, 120_000, 400_000).unwrap();
+        let s = admit_openfour_sell(&state, b.amount(), &policy).unwrap();
+        let _: OpenFourCurve = held.curve();
+        let e = ExpectedOpenFourExit::from_admitted(
+            &validated_r12d(1),
+            &s,
+            &policy,
+            signer.address(),
+            6,
+        )
+        .unwrap();
+        let (mut scratch, mut approve, mut sell) = (Vec::new(), Vec::new(), Vec::new());
+        let ha = e.sign_approve(&signer, &mut scratch, &mut approve).unwrap();
+        let hs = e.sign_sell(&signer, &mut scratch, &mut sell).unwrap();
+        let now = e.snapshot();
+        assert_eq!(
+            verify_final_openfour_approve(&approve, &e, &now, &mut scratch),
+            Ok(ha)
+        );
+        assert_eq!(
+            verify_final_openfour_sell(&sell, &e, &now, &mut scratch),
+            Ok(hs)
+        );
+        let a_tx = decode_signed(&approve).unwrap();
+        assert_eq!(
+            (a_tx.tx.to, a_tx.tx.nonce, a_tx.tx.value),
+            (s.token(), 6, U256::ZERO)
+        );
+        assert_eq!(
+            crate::venues::flap::abi::decode_approve(a_tx.tx.input).unwrap(),
+            (e.core(), s.amount())
+        );
+        let s_tx = decode_signed(&sell).unwrap();
+        assert_eq!(
+            (s_tx.tx.to, s_tx.tx.nonce, s_tx.tx.value),
+            (e.core(), 7, U256::ZERO)
+        );
+        assert_eq!(s_tx.tx.input, s.calldata().unwrap().as_slice());
+        let one = U256::from(1u8);
+        for (x, error) in [
+            (
+                ExpectedOpenFourExit {
+                    amount: e.amount + one,
+                    ..e
+                },
+                BindingError::WrongInputAmount,
+            ),
+            (
+                ExpectedOpenFourExit {
+                    token: Address::repeat_byte(3),
+                    ..e
+                },
+                BindingError::WrongToken,
+            ),
+            (
+                ExpectedOpenFourExit { nonce: 7, ..e },
+                BindingError::WrongNonce,
+            ),
+        ] {
+            assert_eq!(
+                verify_final_openfour_approve(&approve, &x, &now, &mut scratch),
+                Err(error)
+            );
+            assert_eq!(
+                verify_final_openfour_sell(&sell, &x, &now, &mut scratch),
+                Err(error)
+            );
+        }
+        let core = ExpectedOpenFourExit {
+            core: Address::repeat_byte(4),
+            ..e
+        };
+        assert_eq!(
+            verify_final_openfour_approve(&approve, &core, &now, &mut scratch),
+            Err(BindingError::WrongSpender)
+        );
+        assert_eq!(
+            verify_final_openfour_sell(&sell, &core, &now, &mut scratch),
+            Err(BindingError::WrongPortal)
+        );
+        let min = ExpectedOpenFourExit {
+            min_receive: e.min_receive + one,
+            ..e
+        };
+        assert_eq!(
+            verify_final_openfour_sell(&sell, &min, &now, &mut scratch),
+            Err(BindingError::WrongMinOutput)
+        );
+        let (ta, ts) = (
+            ExpectedTx::OpenFourApprove(&e),
+            ExpectedTx::OpenFourSell(&e),
+        );
+        assert_eq!((ta.nonce(), ts.nonce()), (6, 7));
+        assert_eq!((ta.value_wei(), ts.value_wei()), (U256::ZERO, U256::ZERO));
+        assert_eq!(ts.verify_final(&sell, &now, &mut scratch), Ok(hs));
+        assert!(ta.verify_final(&sell, &now, &mut scratch).is_err());
+        // The quote the minimum is the floor of.
+        let q = quote_buy_amount(&held.curve(), &held.fee(), U256::from(1_000u64)).unwrap();
+        assert!(q.pay > U256::ZERO);
+    }
+}

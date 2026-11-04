@@ -895,8 +895,8 @@ fn exec_state(r: &Record) -> String {
 /// without a chain (what the strategy and C3 do with an included launch
 /// needs a C2 snapshot: the mock-chain cases): the runtime mode, the
 /// venues and Strategy C decide what runs; C3 is wanted only under PAPER
-/// and arms nothing without the chain; Four Classic SHADOW is admitted (R12c: its
-/// C3 PAPER path), OpenFour stays blocked; a launch read from the
+/// and arms nothing without the chain; Four Classic and OpenFour SHADOW are
+/// admitted (R12c/R12d: their C3 PAPER path); a launch read from the
 /// mempool reaches no ledger; switching the runtime OFF ends the
 /// strategy's ledger and the run replays exactly.
 #[test]
@@ -943,16 +943,12 @@ fn the_runtime_mode_and_the_venues_decide_what_runs() {
     rt.request("BSC_EXEC", "OFF");
     let r = rt.until("C3 off", |r| exec_state(r) == "OFF");
     assert_eq!(strategy(&r), Some(0));
-    // B11–B13: Four Classic SHADOW is admitted (R12c: the C3 PAPER path;
-    // C3 stays off with EXEC OFF), OpenFour SHADOW is blocked; Flap is
-    // untouched.
-    let line = rt.request("BSC_VENUE_FOUR_CLASSIC", "SHADOW");
-    assert!(line.contains("effective=SHADOW"), "{line}");
-    let line = rt.request("BSC_VENUE_OPENFOUR", "SHADOW");
-    assert!(
-        line.contains("effective=BLOCKED block_reason=FOUR_EXECUTION_PATH_MISSING"),
-        "{line}"
-    );
+    // B11–B13: Four Classic and OpenFour SHADOW are admitted (R12c/R12d:
+    // the C3 PAPER path; C3 stays off with EXEC OFF); Flap is untouched.
+    for venue in ["BSC_VENUE_FOUR_CLASSIC", "BSC_VENUE_OPENFOUR"] {
+        let line = rt.request(venue, "SHADOW");
+        assert!(line.contains("effective=SHADOW"), "{line}");
+    }
     assert_eq!(strategy(&deliver(&rt)), Some(0));
     // B08: Flap OFF: the strategy's ledger ends, C3 stays off.
     rt.request("BSC_VENUE_FLAP", "OFF");

@@ -269,6 +269,7 @@ fn c3_paper_path_latency() {
         WITNESSED_MAINNET_TERMS,
         ExecConfig {
             four: None,
+            openfour: None,
             input_wei: 1_000_000_000_000_000,
             slippage_bps: 100,
             exit_slippage_bps: 100,
@@ -477,6 +478,7 @@ fn c3_paper_path_latency() {
                         PendingLaunch {
                             hash,
                             raw: record.payload,
+                            from: [0; 20],
                             to: target.to,
                             value: target.value,
                             input: target.data,

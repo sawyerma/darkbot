@@ -23,7 +23,7 @@ use darkbot_bsc_geth_ipc::protocol_v2::{
 };
 use darkbot_bsc_journal::RecordKind as JournalKind;
 use darkbot_bsc_journal::storage::run::RunReader;
-use darkbot_bsc_trading::venues::fourmeme::deployment::bsc_mainnet_r12b_131568366;
+use darkbot_bsc_trading::venues::fourmeme::deployment::bsc_mainnet_r12d_131608421;
 use darkbot_bsc_trading::venues::fourmeme::recognize::recognize;
 use std::fs;
 
@@ -63,11 +63,12 @@ fn fixtures() -> Vec<Fixture> {
 /// The decoder's result for the signed bytes `raw`, printed: the pending
 /// launch token and the recognized call.
 fn decision(raw: &[u8]) -> String {
-    let deployment = bsc_mainnet_r12b_131568366();
+    let deployment = bsc_mainnet_r12d_131608421();
     let target = decode_tx_target(raw).unwrap();
     format!(
         "{:?} {:?}",
-        four_launch_token(&deployment, raw, MAX_CALLDATA),
+        // The fixture launches carry their own salts: no sender needed.
+        four_launch_token(&deployment, raw, [0; 20], MAX_CALLDATA),
         recognize(
             &deployment,
             target.to.map(Address::from),
@@ -92,7 +93,7 @@ fn lane(lane_id: u16, class: LaneClassV2) -> LaneConfigV2 {
 fn fastlane_and_journal_bytes_decode_like_the_original() {
     let fixtures = fixtures();
     assert_eq!(fixtures.len(), 9);
-    let deployment = bsc_mainnet_r12b_131568366();
+    let deployment = bsc_mainnet_r12d_131608421();
     let mut originals = Vec::new();
     for f in &fixtures {
         // The signed bytes are the transaction (hash) and carry the input.
@@ -107,7 +108,7 @@ fn fastlane_and_journal_bytes_decode_like_the_original() {
         );
         // Launches name a pending token; BUYs do not.
         assert_eq!(
-            four_launch_token(&deployment, &f.raw, MAX_CALLDATA).is_some(),
+            four_launch_token(&deployment, &f.raw, [0; 20], MAX_CALLDATA).is_some(),
             f.label.contains("LAUNCH"),
             "{}",
             f.label

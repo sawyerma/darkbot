@@ -493,6 +493,8 @@ pub(crate) struct Gates {
     /// R12c: Four.meme Classic launches reach the C3 PAPER path only while
     /// that venue is effective SHADOW (its LIVE stays blocked).
     pub four_admitted: bool,
+    /// R12d: OpenFour launches likewise, while the OpenFour venue is.
+    pub openfour_admitted: bool,
     /// BSC_STRATEGY_C runs (SHADOW or LIVE) under a runtime mode of SHADOW,
     /// PAPER or LIVE; switched off, its ledger ends.
     pub strategy_on: bool,
@@ -509,17 +511,19 @@ pub(crate) fn gates(eff: impl Fn(crate::sources::Entity) -> Effective, exec: Eff
     let running = |e: Effective| matches!(e, Effective::Shadow | Effective::Live);
     let flap_admitted = running(eff(VenueId::Flap.into()));
     let four_admitted = running(eff(VenueId::FourClassic.into()));
+    let openfour_admitted = running(eff(VenueId::OpenFour.into()));
     let runtime_mode = eff(crate::sources::Entity::Runtime);
     Gates {
         flap_admitted,
         four_admitted,
+        openfour_admitted,
         strategy_on: flap_admitted
             && matches!(
                 runtime_mode,
                 Effective::Shadow | Effective::Paper | Effective::Live
             )
             && running(eff(ComponentId::StrategyC.into())),
-        c3_wanted: (flap_admitted || four_admitted)
+        c3_wanted: (flap_admitted || four_admitted || openfour_admitted)
             && runtime_mode == Effective::Paper
             && exec == Effective::Shadow,
         c2_on: running(eff(ComponentId::StateC2.into())),
@@ -533,30 +537,43 @@ impl Gates {
         match venue {
             Venue::Flap => self.flap_admitted,
             Venue::Four => self.four_admitted,
-            Venue::OpenFour => false,
+            Venue::OpenFour => self.openfour_admitted,
         }
     }
 }
 
+/// Which Four.meme BUYs the armed C3 path holds.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct FourArmed {
+    pub classic: bool,
+    /// R12d.
+    pub openfour: bool,
+}
+
 /// Whether a venue's sighting may reach the C3 PAPER path: admitted by the
 /// last reconcile's `gates`, and (R12c) a Four Classic one only while the
-/// path holds the Four Classic BUY (`four_armed`).
-fn c3_takes(venue: Venue, gates: Option<Gates>, four_armed: bool) -> bool {
-    gates.is_some_and(|g| g.c3_admits(venue)) && (venue != Venue::Four || four_armed)
+/// path holds the Four Classic BUY, (R12d) an OpenFour one only while it
+/// holds the OpenFour BUY (`armed`).
+fn c3_takes(venue: Venue, gates: Option<Gates>, armed: FourArmed) -> bool {
+    gates.is_some_and(|g| g.c3_admits(venue))
+        && match venue {
+            Venue::Flap => true,
+            Venue::Four => armed.classic,
+            Venue::OpenFour => armed.openfour,
+        }
 }
 
 /// Whether a verified sighting is a C2 pending candidate: every Flap
-/// launch; (R12c) a Four Classic one the C3 path may take (its BUY needs
-/// C2's snapshot of it).
+/// launch; (R12c/R12d) a Four one the C3 path may take (its BUY needs C2's
+/// snapshot of it).
 pub(crate) fn c2_candidate(
     decided: Option<Launch>,
     gates: Option<Gates>,
-    four_armed: bool,
+    armed: FourArmed,
 ) -> bool {
     decided.is_some_and(|l| match l.venue() {
         Venue::Flap => true,
-        Venue::Four => c3_takes(Venue::Four, gates, four_armed),
-        Venue::OpenFour => false,
+        venue @ (Venue::Four | Venue::OpenFour) => c3_takes(venue, gates, armed),
     })
 }
 
@@ -565,10 +582,10 @@ pub(crate) fn c2_candidate(
 pub(crate) fn c3_launch(
     decided: Option<Launch>,
     gates: Option<Gates>,
-    four_armed: bool,
+    armed: FourArmed,
 ) -> Option<[u8; 32]> {
     match decided {
-        Some(Launch::First { hash, venue, .. }) if c3_takes(venue, gates, four_armed) => Some(hash),
+        Some(Launch::First { hash, venue, .. }) if c3_takes(venue, gates, armed) => Some(hash),
         _ => None,
     }
 }
@@ -1295,6 +1312,7 @@ pub fn run(
                 let Gates {
                     flap_admitted: _,
                     four_admitted,
+                    openfour_admitted,
                     strategy_on,
                     c3_wanted,
                     c2_on,
@@ -1356,7 +1374,7 @@ pub fn run(
                         .as_ref()
                         // BSC3-036: the endpoint the follower follows now.
                         .map(|c| (c.endpoint_at(active_endpoint), &c.limits));
-                    x.set_four_wanted(four_admitted);
+                    x.set_four_wanted(four_admitted, openfour_admitted);
                     x.tick(wanted, owner.as_ref(), follower, started_ms);
                 }
                 if let Some(l) = live.as_mut() {
@@ -1533,8 +1551,12 @@ pub fn run(
             };
             let decided = core.observe(source, observation, at, wall.wall_us(at));
             // R12c: a Four Classic sighting goes to C2 and C3 only while the
-            // C3 path holds the Four Classic BUY.
-            let four_armed = exec.as_ref().is_some_and(ExecRuntime::four_armed);
+            // C3 path holds the Four Classic BUY; R12d: an OpenFour one
+            // while it holds the OpenFour BUY.
+            let four_armed = FourArmed {
+                classic: exec.as_ref().is_some_and(ExecRuntime::four_armed),
+                openfour: exec.as_ref().is_some_and(ExecRuntime::openfour_armed),
+            };
             if let (
                 Some(o),
                 Event::Full {
@@ -1550,7 +1572,7 @@ pub fn run(
             // verified full sighting from a granted source (never a
             // hash-only one: it carries no transaction); BSC3-075: also
             // when a source the grant does not name saw it first.
-            if let (Some(l), Some(o), Some((by, hash, first)), Event::Full { raw, .. }) = (
+            if let (Some(l), Some(o), Some((by, hash, first)), Event::Full { raw, from, .. }) = (
                 live.as_mut(),
                 owner.as_ref(),
                 live_sighting(decided),
@@ -1561,7 +1583,7 @@ pub fn run(
                     id: CLOCK_ID_MONOTONIC,
                     now: || clock.now_ns(),
                 };
-                if let Some(buy) = l.on_sighting(by, hash, first, raw, at, o, &now) {
+                if let Some(buy) = l.on_sighting(by, hash, *from, first, raw, at, o, &now) {
                     journal.record(
                         RecordKind::Runtime,
                         buy.times.sink_ns,
@@ -1581,13 +1603,14 @@ pub fn run(
             // C3: the first verified sighting of a C1-scope launch on an
             // admitted venue runs the production path to the PAPER sink
             // (when armed).
-            else if let (Some(x), Some(o), Some(hash), Event::Full { raw, .. }) = (
+            else if let (Some(x), Some(o), Some(hash), Event::Full { raw, from, .. }) = (
                 exec.as_mut(),
                 owner.as_ref(),
                 c3_launch(decided, last_gates, four_armed),
                 &event,
             ) && let Some(buy) = x.on_launch(
                 hash,
+                *from,
                 raw,
                 at,
                 o,
@@ -1828,7 +1851,7 @@ pub fn run(
         if let (Some(cc), Some(c)) = (canonical_config.as_ref(), canonical.as_mut()) {
             if let Some(job) = four_job.take_if(|j| j.is_finished()) {
                 let current =
-                    darkbot_bsc_trading::venues::fourmeme::deployment::bsc_mainnet_r12b_131568366();
+                    darkbot_bsc_trading::venues::fourmeme::deployment::bsc_mainnet_r12d_131608421();
                 let (code, block, verdict) = match job.join() {
                     Ok(Ok(o)) if current.validate(&o.observed, o.block_number).is_ok() => {
                         c.four_drift = false;
@@ -1866,7 +1889,7 @@ pub fn run(
                         crate::venue_probe::probe_four(
                             &endpoint,
                             &limits,
-                            &darkbot_bsc_trading::venues::fourmeme::deployment::bsc_mainnet_r12b_131568366(),
+                            &darkbot_bsc_trading::venues::fourmeme::deployment::bsc_mainnet_r12d_131608421(),
                         )
                     })
                     .map_err(|e| {

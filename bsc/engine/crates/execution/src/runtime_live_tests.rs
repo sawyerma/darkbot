@@ -636,11 +636,11 @@ fn the_live_path_arms_under_the_gate_and_ends_with_it() {
         },
     };
     assert!(
-        x.on_launch(SourceId::Drpc, hash, &raw, 10, &c2, &clock)
+        x.on_launch(SourceId::Drpc, hash, [0; 20], &raw, 10, &c2, &clock)
             .is_none()
     );
     let buy = x
-        .on_launch(SourceId::PublicNode, hash, &raw, 10, &c2, &clock)
+        .on_launch(SourceId::PublicNode, hash, [0; 20], &raw, 10, &c2, &clock)
         .unwrap();
     let request = requests.recv_timeout(Duration::from_secs(2)).unwrap();
     assert!(
@@ -710,7 +710,15 @@ fn the_live_path_arms_under_the_gate_and_ends_with_it() {
     )
     .unwrap()
     .used;
-    let second = x.on_launch(SourceId::PublicNode, hash_b, &raw_b, 20, &c2, &clock);
+    let second = x.on_launch(
+        SourceId::PublicNode,
+        hash_b,
+        [0; 20],
+        &raw_b,
+        20,
+        &c2,
+        &clock,
+    );
     assert!(second.is_none(), "{:?}", reason(&x));
     assert_eq!(
         buy_usage(
@@ -853,7 +861,7 @@ fn second_c3_launch(tag: &str, rearm: bool, lands: bool) {
     let (hash, raw, launcher) = launch();
     c2.pending(hash, launcher, 3, 0, 10);
     let buy = x
-        .on_launch(SourceId::PublicNode, hash, &raw, 10, &c2, &clock)
+        .on_launch(SourceId::PublicNode, hash, [0; 20], &raw, 10, &c2, &clock)
         .unwrap();
     assert!(requests.recv_timeout(Duration::from_secs(2)).is_ok());
     // A is included at the arm's nonce: C2 and the LIVE path see it
@@ -931,7 +939,15 @@ fn second_c3_launch(tag: &str, rearm: bool, lands: bool) {
     // cannot take (OFF).
     settle(&mut x, &c2);
     assert!(x.armed(), "{:?}", reason(&x));
-    let second = x.on_launch(SourceId::PublicNode, hash_b, &raw_b, 20, &c2, &clock);
+    let second = x.on_launch(
+        SourceId::PublicNode,
+        hash_b,
+        [0; 20],
+        &raw_b,
+        20,
+        &c2,
+        &clock,
+    );
     if rearm && lands {
         let second = second.expect("B goes after the renewed arm");
         assert!(requests.recv_timeout(Duration::from_secs(2)).is_ok());
@@ -2145,6 +2161,7 @@ fn a_release_lost_in_a_crash_is_recovered_and_blocks_the_next_arm() {
     let buy = launch_to(
         x.executor.as_mut().unwrap(),
         hash,
+        [0; 20],
         &raw,
         10,
         &c2,
@@ -2282,7 +2299,7 @@ fn a_disarm_with_an_unresolved_release_keeps_its_fence_and_blocks_the_next_arm()
         },
     };
     let buy = x
-        .on_launch(SourceId::PublicNode, hash, &raw, 10, &c2, &clock)
+        .on_launch(SourceId::PublicNode, hash, [0; 20], &raw, 10, &c2, &clock)
         .unwrap();
     r.requests.recv_timeout(Duration::from_secs(2)).unwrap();
     // Revoked with the BUY unresolved: the arm ends, its fence stays.
@@ -3527,7 +3544,7 @@ fn an_inclusion_that_left_the_chain_has_no_window() {
         },
     };
     let buy = x
-        .on_launch(SourceId::PublicNode, hash, &raw, 10, &c2, &clock)
+        .on_launch(SourceId::PublicNode, hash, [0; 20], &raw, 10, &c2, &clock)
         .unwrap();
     r.requests.recv_timeout(Duration::from_secs(2)).unwrap();
     let tx = CanonicalTx {
@@ -3988,8 +4005,16 @@ fn a_public_source_alone_triggers_no_c3_buy() {
     let (hash, raw, launcher) = launch();
     c2.pending(hash, launcher, 3, 0, 10);
     assert!(
-        x.on_launch(SourceId::PublicNode, hash, &raw, 10, &c2, &a_clock())
-            .is_none()
+        x.on_launch(
+            SourceId::PublicNode,
+            hash,
+            [0; 20],
+            &raw,
+            10,
+            &c2,
+            &a_clock()
+        )
+        .is_none()
     );
     assert!(refused_by(&x, "SOURCE_PUBLIC_ONLY"), "{:?}", reason(&x));
     x.shutdown();
@@ -3998,8 +4023,16 @@ fn a_public_source_alone_triggers_no_c3_buy() {
     settle(&mut x, &c2);
     assert!(leased(&x));
     assert!(
-        x.on_launch(SourceId::PublicNode, hash, &raw, 10, &c2, &a_clock())
-            .is_some()
+        x.on_launch(
+            SourceId::PublicNode,
+            hash,
+            [0; 20],
+            &raw,
+            10,
+            &c2,
+            &a_clock()
+        )
+        .is_some()
     );
     x.shutdown();
     r.clean();
@@ -4025,8 +4058,16 @@ fn a_non_public_source_unlocks_public_sightings_only_while_it_signals() {
     let (hash, raw, launcher) = launch();
     c2.pending(hash, launcher, 3, 0, 10);
     assert!(
-        x.on_launch(SourceId::PublicNode, hash, &raw, 10, &c2, &a_clock())
-            .is_none()
+        x.on_launch(
+            SourceId::PublicNode,
+            hash,
+            [0; 20],
+            &raw,
+            10,
+            &c2,
+            &a_clock()
+        )
+        .is_none()
     );
     assert!(refused_by(&x, "SOURCE_UNHEALTHY"), "{:?}", reason(&x));
     assert!(!refused_by(&x, "SOURCE_PUBLIC_ONLY"));
@@ -4778,7 +4819,7 @@ fn a_fact_the_end_cannot_write_ends_the_arm_and_is_recovered() {
         },
     };
     let buy = x
-        .on_launch(SourceId::PublicNode, hash, &raw, 10, &c2, &clock)
+        .on_launch(SourceId::PublicNode, hash, [0; 20], &raw, 10, &c2, &clock)
         .unwrap();
     r.requests.recv_timeout(Duration::from_secs(2)).unwrap();
     assert!(!x.armed());
@@ -5035,7 +5076,7 @@ fn a_buy_whose_trade_went_to_another_trader_acquired_nothing() {
     let (hash, raw, launcher) = launch();
     c2.pending(hash, launcher, 3, 0, 10);
     let buy = x
-        .on_launch(SourceId::PublicNode, hash, &raw, 10, &c2, &clock)
+        .on_launch(SourceId::PublicNode, hash, [0; 20], &raw, 10, &c2, &clock)
         .expect("the BUY");
     assert!(r.requests.recv_timeout(Duration::from_secs(2)).is_ok());
     let tx = |hash, index, sender, nonce| CanonicalTx {
@@ -5325,7 +5366,7 @@ fn a_c3_buy_needs_room_for_its_exit_in_the_strategy_cap() {
         },
     };
     assert!(
-        x.on_launch(SourceId::PublicNode, hash, &raw, 10, &c2, &clock)
+        x.on_launch(SourceId::PublicNode, hash, [0; 20], &raw, 10, &c2, &clock)
             .is_none()
     );
     assert!(r.requests.recv_timeout(Duration::from_millis(300)).is_err());
@@ -6115,7 +6156,7 @@ fn a_stalled_canonical_source_releases_nothing() {
     STALL_WALL_MS.store(NOW + 4_000, std::sync::atomic::Ordering::SeqCst);
     let (hash, raw, launcher) = launch();
     c2.pending(hash, launcher, 3, 0, 10);
-    let stalled = x.on_launch(SourceId::PublicNode, hash, &raw, 10, &c2, &clock);
+    let stalled = x.on_launch(SourceId::PublicNode, hash, [0; 20], &raw, 10, &c2, &clock);
     assert!(stalled.is_none());
     let refusals = record(&x);
     assert!(
@@ -6149,7 +6190,15 @@ fn a_stalled_canonical_source_releases_nothing() {
     let _ = c2.take_evidence();
     let (hash_b, raw_b, launcher_b) = crate::runtime::exec::tests::launch_n(1);
     c2.pending(hash_b, launcher_b, 4, 0, 20);
-    let fresh = x.on_launch(SourceId::PublicNode, hash_b, &raw_b, 20, &c2, &clock);
+    let fresh = x.on_launch(
+        SourceId::PublicNode,
+        hash_b,
+        [0; 20],
+        &raw_b,
+        20,
+        &c2,
+        &clock,
+    );
     assert!(fresh.is_some(), "{:?}", reason(&x));
     assert!(r.requests.recv_timeout(Duration::from_secs(2)).is_ok());
     assert_eq!(
@@ -6521,7 +6570,7 @@ fn a_live_buy_starts_within_its_deadline_on_the_real_clock() {
         let (hash, raw, launcher) = launch();
         let at = clock.now_ns();
         c2.pending(hash, launcher, 3, 0, at);
-        let buy = x.on_launch(SourceId::PublicNode, hash, &raw, at, &c2, &clock);
+        let buy = x.on_launch(SourceId::PublicNode, hash, [0; 20], &raw, at, &c2, &clock);
         let sent = buy.is_some() && r.requests.recv_timeout(Duration::from_secs(2)).is_ok();
         if !sent {
             missed.push(format!("{:?}", record(&x).texts(l::REFUSALS)));
@@ -6662,7 +6711,7 @@ fn a_c3_buy_after_an_owner_change_waits_for_its_lease_again() {
     let (hash, raw, launcher) = launch();
     c2.pending(hash, launcher, 3, 0, 10);
     assert!(
-        x.on_launch(SourceId::PublicNode, hash, &raw, 10, &c2, &clock)
+        x.on_launch(SourceId::PublicNode, hash, [0; 20], &raw, 10, &c2, &clock)
             .is_none()
     );
     let why = x.executor.as_ref().unwrap().end().last_refusal().unwrap();
@@ -6690,8 +6739,16 @@ fn a_c3_buy_after_an_owner_change_waits_for_its_lease_again() {
     let (hash_b, raw_b, launcher_b) = crate::runtime::exec::tests::launch_n(1);
     c2.pending(hash_b, launcher_b, 4, 0, 20);
     assert!(
-        x.on_launch(SourceId::PublicNode, hash_b, &raw_b, 20, &c2, &clock)
-            .is_some(),
+        x.on_launch(
+            SourceId::PublicNode,
+            hash_b,
+            [0; 20],
+            &raw_b,
+            20,
+            &c2,
+            &clock
+        )
+        .is_some(),
         "{:?}",
         x.executor.as_ref().unwrap().end().last_refusal()
     );
@@ -6938,7 +6995,7 @@ fn a_c3_buy_never_outlasts_its_lease() {
     let (hash, raw, launcher) = launch();
     c2.pending(hash, launcher, 3, 0, 10);
     assert!(
-        x.on_launch(SourceId::PublicNode, hash, &raw, 10, &c2, &clock)
+        x.on_launch(SourceId::PublicNode, hash, [0; 20], &raw, 10, &c2, &clock)
             .is_none()
     );
     let why = x.executor.as_ref().unwrap().end().last_refusal().unwrap();
@@ -7020,7 +7077,7 @@ fn a_lease_of_the_last_attempt_keeps_the_arm_and_buys() {
     let (hash, raw, launcher) = launch();
     c2.pending(hash, launcher, 3, 0, 10);
     assert!(
-        x.on_launch(SourceId::PublicNode, hash, &raw, 10, &c2, &clock)
+        x.on_launch(SourceId::PublicNode, hash, [0; 20], &raw, 10, &c2, &clock)
             .is_some(),
         "{:?}",
         x.executor.as_ref().unwrap().end().last_refusal()
@@ -7418,7 +7475,7 @@ fn a_c3_launch_is_refused_at_the_granted_loss() {
     let (hash, raw, launcher) = launch();
     c2.pending(hash, launcher, 3, 0, 10);
     assert!(
-        x.on_launch(SourceId::PublicNode, hash, &raw, 10, &c2, &clock)
+        x.on_launch(SourceId::PublicNode, hash, [0; 20], &raw, 10, &c2, &clock)
             .is_none()
     );
     assert!(r.requests.recv_timeout(Duration::from_millis(300)).is_err());
@@ -7456,7 +7513,7 @@ fn a_c3_launch_waits_for_the_second_source_too() {
     let (hash, raw, launcher) = launch();
     c2.pending(hash, launcher, 3, 0, 10);
     assert!(
-        x.on_launch(SourceId::PublicNode, hash, &raw, 10, &c2, &clock)
+        x.on_launch(SourceId::PublicNode, hash, [0; 20], &raw, 10, &c2, &clock)
             .is_none()
     );
     assert!(r.requests.recv_timeout(Duration::from_millis(300)).is_err());
@@ -7472,8 +7529,16 @@ fn a_c3_launch_waits_for_the_second_source_too() {
     let (hash_b, raw_b, launcher_b) = crate::runtime::exec::tests::launch_n(1);
     c2.pending(hash_b, launcher_b, 4, 0, 20);
     assert!(
-        x.on_launch(SourceId::PublicNode, hash_b, &raw_b, 20, &c2, &clock)
-            .is_some(),
+        x.on_launch(
+            SourceId::PublicNode,
+            hash_b,
+            [0; 20],
+            &raw_b,
+            20,
+            &c2,
+            &clock
+        )
+        .is_some(),
         "{:?}",
         record(&x).texts(l::REFUSALS)
     );
@@ -7769,7 +7834,7 @@ fn a_c3_buy_behind_another_traders_buy_stops_new_buys() {
     let (hash, raw, launcher) = launch();
     c2.pending(hash, launcher, 3, 0, 10);
     let buy = x
-        .on_launch(SourceId::PublicNode, hash, &raw, 10, &c2, &clock)
+        .on_launch(SourceId::PublicNode, hash, [0; 20], &raw, 10, &c2, &clock)
         .expect("the BUY");
     assert!(r.requests.recv_timeout(Duration::from_secs(2)).is_ok());
     let trader = [0x77; 20];
@@ -7877,7 +7942,7 @@ fn a_live_release_is_journaled_and_evaluated_as_its_attempt() {
     let (hash, raw, launcher) = launch();
     c2.pending(hash, launcher, 3, 0, 10);
     let buy = x
-        .on_launch(SourceId::PublicNode, hash, &raw, 10, &c2, &clock)
+        .on_launch(SourceId::PublicNode, hash, [0; 20], &raw, 10, &c2, &clock)
         .expect("the BUY");
     assert!(r.requests.recv_timeout(Duration::from_secs(2)).is_ok());
     let tx = |hash, index, sender, nonce| CanonicalTx {
@@ -9365,7 +9430,7 @@ fn a_granted_source_the_operator_holds_in_shadow_triggers_no_buy() {
             None,
         );
         let (by, h, first) = crate::runtime::live_sighting(decided)?;
-        x.on_sighting(by, h, first, raw, at, c2, &clock)
+        x.on_sighting(by, h, [0; 20], first, raw, at, c2, &clock)
     };
     let refused = |x: &LiveRuntime, name: &str| {
         record(x)
@@ -9408,11 +9473,11 @@ fn a_granted_source_the_operator_holds_in_shadow_triggers_no_buy() {
     let (hash, raw, launcher) = crate::runtime::exec::tests::launch_n(1);
     c2.pending(hash, launcher, 4, 0, 20);
     assert!(
-        x.on_launch(SourceId::Drpc, hash, &raw, 20, &c2, &clock)
+        x.on_launch(SourceId::Drpc, hash, [0; 20], &raw, 20, &c2, &clock)
             .is_none()
     );
     assert!(
-        x.on_later(SourceId::PublicNode, hash, &raw, 21, &c2, &clock)
+        x.on_later(SourceId::PublicNode, hash, [0; 20], &raw, 21, &c2, &clock)
             .is_none()
     );
     assert!(r.requests.recv_timeout(Duration::from_millis(200)).is_err());
@@ -9425,7 +9490,7 @@ fn a_granted_source_the_operator_holds_in_shadow_triggers_no_buy() {
     settle(&mut x, &c2);
     assert!(x.armed(), "{:?}", reason(&x));
     let buy = x
-        .on_later(SourceId::PublicNode, hash, &raw, 22, &c2, &clock)
+        .on_later(SourceId::PublicNode, hash, [0; 20], &raw, 22, &c2, &clock)
         .expect("the BUY");
     assert_eq!(buy.launch_hash, hash);
     assert!(r.requests.recv_timeout(Duration::from_secs(2)).is_ok());
@@ -9460,7 +9525,7 @@ fn a_source_outside_the_grant_seen_first_never_blocks_the_buy() {
     let mut sighted = |source: SourceId, x: &mut LiveRuntime, at: u64| {
         let decided = core.observe(source, Observation::Full { hash, raw: &raw }, at, None);
         let (by, h, first) = crate::runtime::live_sighting(decided)?;
-        x.on_sighting(by, h, first, &raw, at, &c2, &clock)
+        x.on_sighting(by, h, [0; 20], first, &raw, at, &c2, &clock)
     };
     let ungranted = |x: &LiveRuntime| {
         let r = record(x);
@@ -9737,7 +9802,7 @@ fn withdrawn_c3_buy(tag: &str, quarantined: bool) {
     let (hash, raw, launcher) = launch();
     c2.pending(hash, launcher, 3, 0, 10);
     assert!(
-        x.on_launch(SourceId::PublicNode, hash, &raw, 10, &c2, &clock)
+        x.on_launch(SourceId::PublicNode, hash, [0; 20], &raw, 10, &c2, &clock)
             .is_none()
     );
     LEASE_BOUND.with(|b| b.set(false));

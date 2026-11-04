@@ -42,9 +42,12 @@ use darkbot_bsc_trading::venues::flap::deployment::{
     FlapDeployment, ObservedDeployment, RuntimeSha256,
 };
 use darkbot_bsc_trading::venues::fourmeme::deployment::{
-    CLASSIC_TEMPLATES, FourDeployment, ObservedFour,
+    CLASSIC_TEMPLATES, FourDeployment, OPENFOUR_FEE_PROBE_QUOTES, OPENFOUR_MODULES, ObservedFour,
+    ObservedOpenFourBonding, OpenFourFeeRouter, OpenFourModule,
 };
-use darkbot_bsc_trading::venues::fourmeme::profile::{ClassicTokenRead, VenueFee};
+use darkbot_bsc_trading::venues::fourmeme::profile::{
+    ClassicTokenRead, OpenFourTokenRead, VenueFee,
+};
 
 /// `TokenManagerHelper3.getTokenInfo(address)`: 12 words, `tradingFeeRate`
 /// word 4, `minTradingFee` 5, `liquidityAdded` 11.
@@ -56,6 +59,39 @@ const TOKEN_INFOS: [u8; 4] = [0xe6, 0x84, 0x62, 0x6b];
 /// R12c-3: `TokenManager2._tokenInfoEx1s(address)`: 5 words (launchFee,
 /// pcFee, feeSetting, blockNumber, extraFee).
 const TOKEN_INFO_EX1S: [u8; 4] = [0x9f, 0x26, 0x63, 0x31];
+/// R12d: `OpenFourRegistry.resolvePresetImplementations(uint256)`: the
+/// preset (a dynamic tuple, its offset the first word) and its token,
+/// vault, curve, trade, migrate and custom data module addresses.
+const RESOLVE_PRESET_IMPLEMENTATIONS: [u8; 4] = [0x6c, 0x51, 0x2d, 0x72];
+/// R12d: `OpenFourRegistry.getPresetTokenImpl(uint256)`.
+const GET_PRESET_TOKEN_IMPL: [u8; 4] = [0x07, 0x63, 0x23, 0x08];
+/// R12d: an EIP-1967 beacon's `implementation()`.
+const BEACON_IMPLEMENTATION: [u8; 4] = [0x5c, 0x60, 0xda, 0x1b];
+/// R12d: `OpenFourCore.tokens(address)`: 20 static words (version,
+/// creator, presetId, token, the name and symbol offsets, maxSupply,
+/// saleAmount, raiseAmount, quoteAsset, vault, curve, trade, migrate and
+/// token module, customData, createBlock, exists, paused,
+/// antiSniperEnabled) and the two strings.
+const OPENFOUR_TOKENS: [u8; 4] = [0xe4, 0x86, 0x03, 0x39];
+const OPENFOUR_TOKENS_HEAD_WORDS: usize = 20;
+/// R12d: an OpenFour vault's `phase()`.
+const OPENFOUR_PHASE: [u8; 4] = [0xb1, 0xc9, 0xfe, 0x6e];
+/// R12d: `OpenFourTools.getCurveLiquiditySnapshot(address)`: available,
+/// initial quote and token liquidity, current quote and token liquidity,
+/// remainingForSale, totalRaised, lastPrice.
+const CURVE_LIQUIDITY_SNAPSHOT: [u8; 4] = [0x41, 0xc3, 0x3e, 0xff];
+/// R12d: `OpenFourCore.feeRouter()`.
+const FEE_ROUTER: [u8; 4] = [0xf2, 0x9e, 0xbf, 0x61];
+/// R12d: `OpenFourFeeRouter.previewDistribution(uint256 presetId, uint256
+/// curveQuote, (address,uint16)[] tradeFees, bool antiSniperEnabled,
+/// uint256 createBlock)`: total fee, net quote, anti-sniper fee.
+const PREVIEW_DISTRIBUTION: [u8; 4] = [0x01, 0xf1, 0x20, 0x2f];
+/// The EIP-1967 beacon slot, `keccak256("eip1967.proxy.beacon") - 1`.
+const EIP1967_BEACON_SLOT: [u8; 32] =
+    hex!("a3f0ad74e5423aebfd80d3ef4346578335a9a72aeaee59ff6cb3582b35133d50");
+/// The static head of `resolvePresetImplementations`: the tuple's offset
+/// and the six module addresses.
+const RESOLVED_PRESET_HEAD_WORDS: usize = 1 + OPENFOUR_MODULES.len() + 1;
 use serde_json::Value;
 
 use crate::chain_follower::http::Client;
@@ -159,6 +195,20 @@ pub enum ProbeRead {
     /// R12c: `Helper3.getTokenInfo` of the Four reference token (the fee
     /// terms).
     FourFeeTerms,
+    /// R12d: the pinned OpenFour bonding preset: the registry's modules and
+    /// token implementation, each module beacon's implementation.
+    FourPresetModules,
+    FourPresetTokenImpl,
+    FourPresetBeacon,
+    /// R12d: the Core's fee router and its preset-aware fee preview.
+    OpenFourFeeRouter,
+    OpenFourFeePreview,
+    /// R12d: a held OpenFour token's `Core.tokens`, its vault's phase, its
+    /// module proxies' beacons and its curve snapshot.
+    OpenFourToken,
+    OpenFourPhase,
+    OpenFourModuleBeacon,
+    OpenFourCurveSnapshot,
     /// R12c-3: a held Classic token's `_tokenInfos`, `_tokenInfoEx1s` and
     /// `Helper3.getTokenInfo`.
     FourTokenInfo,
@@ -682,7 +732,17 @@ where
         rate_bps,
         min_fee: U256::from_be_bytes(w[5]),
     };
+    let openfour_bonding = match &deployment.openfour_bonding {
+        Some(pinned) => Some(bonding_preset(
+            &mut wire,
+            &at,
+            (deployment.openfour_registry, deployment.openfour_core),
+            pinned.preset_id,
+        )?),
+        None => None,
+    };
     let observed = ObservedFour {
+        openfour_bonding,
         chain_id,
         token_manager2_implementation: tm2.0,
         token_manager2_implementation_runtime_keccak256: tm2.1,
@@ -790,6 +850,210 @@ where
             min_fee: U256::from_be_bytes(fee[5]),
         },
         liquidity_added,
+    })
+}
+
+/// R12d: what the registry resolves for `preset` at `at`: its token
+/// implementation and code, each module's beacon, the implementation behind
+/// it and that code, the custom data module.
+/// The calldata of `previewDistribution(preset, quote, [], false, 0)`: no
+/// trade fee tiers (an empty array after the five head words), no
+/// anti-sniper fee, no create block.
+fn fee_preview_call(preset: U256, quote: U256, out: &mut Vec<u8>) {
+    out.clear();
+    out.extend_from_slice(&PREVIEW_DISTRIBUTION);
+    out.extend_from_slice(&preset.to_be_bytes::<32>());
+    out.extend_from_slice(&quote.to_be_bytes::<32>());
+    out.extend_from_slice(&U256::from(5 * WORD).to_be_bytes::<32>());
+    out.extend_from_slice(&[0u8; 3 * WORD]);
+}
+
+fn bonding_preset<S, C>(
+    wire: &mut Wire<'_, S, C>,
+    at: &str,
+    (registry, core): (Address, Address),
+    preset: U256,
+) -> Result<ObservedOpenFourBonding, ProbeError>
+where
+    S: Read + Write,
+    C: FnMut(&AtomicBool) -> Result<S, DisconnectReason>,
+{
+    let mut calldata = Vec::with_capacity(4 + WORD);
+    let read = ProbeRead::FourPresetModules;
+    calldata.extend_from_slice(&RESOLVE_PRESET_IMPLEMENTATIONS);
+    calldata.extend_from_slice(&preset.to_be_bytes::<32>());
+    let answer = wire.call(at, read, registry, &calldata)?;
+    let head = answer
+        .get(..RESOLVED_PRESET_HEAD_WORDS * WORD)
+        .ok_or(abi(read)(AbiFault::Length))?;
+    let word = |i: usize| -> [u8; WORD] {
+        let mut w = [0u8; WORD];
+        w.copy_from_slice(&head[i * WORD..(i + 1) * WORD]);
+        w
+    };
+    // The preset tuple follows the static head.
+    if U256::from_be_bytes(word(0)) != U256::from(RESOLVED_PRESET_HEAD_WORDS * WORD) {
+        return Err(abi(read)(AbiFault::Length));
+    }
+    let mut modules = [OpenFourModule {
+        beacon: Address::ZERO,
+        implementation: Address::ZERO,
+        implementation_runtime_keccak256: B256::ZERO,
+    }; OPENFOUR_MODULES.len()];
+    for (i, m) in modules.iter_mut().enumerate() {
+        m.beacon = word_address(&word(1 + i)).map_err(abi(read))?;
+    }
+    let custom_data_module = word_address(&word(1 + OPENFOUR_MODULES.len())).map_err(abi(read))?;
+    for m in &mut modules {
+        let read = ProbeRead::FourPresetBeacon;
+        let [w] = abi_words::<1>(&wire.call(at, read, m.beacon, &BEACON_IMPLEMENTATION)?)
+            .map_err(abi(read))?;
+        m.implementation = word_address(&w).map_err(abi(read))?;
+        m.implementation_runtime_keccak256 = wire
+            .code(at, ProbeRead::FourCode, m.implementation)?
+            .keccak256;
+    }
+    let read = ProbeRead::FourPresetTokenImpl;
+    calldata.clear();
+    calldata.extend_from_slice(&GET_PRESET_TOKEN_IMPL);
+    calldata.extend_from_slice(&preset.to_be_bytes::<32>());
+    let [w] = abi_words::<1>(&wire.call(at, read, registry, &calldata)?).map_err(abi(read))?;
+    let token_implementation = word_address(&w).map_err(abi(read))?;
+    let token_implementation_runtime_keccak256 = wire
+        .code(at, ProbeRead::FourCode, token_implementation)?
+        .keccak256;
+    // The fee router the Core charges through, and what it charges the
+    // preset at each probe quote (its rates are storage, not code).
+    let read = ProbeRead::OpenFourFeeRouter;
+    let [w] = abi_words::<1>(&wire.call(at, read, core, &FEE_ROUTER)?).map_err(abi(read))?;
+    let router = word_address(&w).map_err(abi(read))?;
+    let read = ProbeRead::FourImplementationSlot;
+    let slot = wire.storage(at, read, router, &EIP1967_IMPLEMENTATION_SLOT)?;
+    let implementation = word_address(&slot).map_err(abi(read))?;
+    let fee_router = OpenFourFeeRouter {
+        router,
+        implementation,
+        implementation_runtime_keccak256: wire
+            .code(at, ProbeRead::FourCode, implementation)?
+            .keccak256,
+    };
+    let mut fee_charged = [U256::ZERO; OPENFOUR_FEE_PROBE_QUOTES.len()];
+    for (total, quote) in fee_charged.iter_mut().zip(OPENFOUR_FEE_PROBE_QUOTES) {
+        let read = ProbeRead::OpenFourFeePreview;
+        fee_preview_call(preset, quote, &mut calldata);
+        let [charged, _, _] = abi_words::<3>(&wire.call(at, read, fee_router.router, &calldata)?)
+            .map_err(abi(read))?;
+        *total = U256::from_be_bytes(charged);
+    }
+    Ok(ObservedOpenFourBonding {
+        token_implementation,
+        token_implementation_runtime_keccak256,
+        modules,
+        custom_data_module,
+        fee_router,
+        fee_charged,
+    })
+}
+
+/// R12d: a held OpenFour `token` as `deployment`'s Core, its vault, its
+/// module proxies and OpenFour Tools held it at the block `number` whose
+/// hash is `hash` (each read pinned to that hash; the block still the one
+/// at its height afterwards), read-only over `endpoint` as
+/// [`read_four_holding`] reads a Classic token.
+pub fn read_openfour_holding(
+    endpoint: &str,
+    limits: &FollowerLimits,
+    deployment: &FourDeployment,
+    token: Address,
+    number: u64,
+    hash: [u8; 32],
+) -> Result<OpenFourTokenRead, ProbeError> {
+    let t = Target::of(endpoint, limits)?;
+    let connect =
+        |stop: &AtomicBool| connect_tls(&t.endpoint, &t.tls, &t.bounds, stop, Instant::now());
+    let mut client = Client::new(connect, t.authority.clone(), t.path.clone(), limits);
+    openfour_holding_with(&mut client, deployment, token, number, hash)
+}
+
+/// [`read_openfour_holding`] over a connected client (plain TCP in the
+/// tests).
+fn openfour_holding_with<S, C>(
+    client: &mut Client<S, C>,
+    deployment: &FourDeployment,
+    token: Address,
+    number: u64,
+    hash: [u8; 32],
+) -> Result<OpenFourTokenRead, ProbeError>
+where
+    S: Read + Write,
+    C: FnMut(&AtomicBool) -> Result<S, DisconnectReason>,
+{
+    let mut wire = Wire {
+        client,
+        stop: AtomicBool::new(false),
+        id: 0,
+    };
+    let at = pinned(&hash);
+    let mut calldata = OPENFOUR_TOKENS.to_vec();
+    calldata.extend_from_slice(&address_word(token));
+    let read = ProbeRead::OpenFourToken;
+    let answer = wire.call(&at, read, deployment.openfour_core, &calldata)?;
+    let head = answer
+        .get(..OPENFOUR_TOKENS_HEAD_WORDS * WORD)
+        .ok_or(abi(read)(AbiFault::Length))?;
+    let w = |i: usize| -> [u8; WORD] {
+        let mut x = [0u8; WORD];
+        x.copy_from_slice(&head[i * WORD..(i + 1) * WORD]);
+        x
+    };
+    let fault = |f| abi(read)(f);
+    if word_address(&w(3)).map_err(fault)? != token {
+        return Err(ProbeError::UnknownToken(read));
+    }
+    let modules = [14, 10, 11, 12, 13].map(|i| word_address(&w(i)));
+    let mut module_beacons = [Address::ZERO; OPENFOUR_MODULES.len()];
+    for (slot, module) in module_beacons.iter_mut().zip(modules) {
+        let proxy = module.map_err(fault)?;
+        let read = ProbeRead::OpenFourModuleBeacon;
+        let beacon = wire.storage(&at, read, proxy, &EIP1967_BEACON_SLOT)?;
+        *slot = word_address(&beacon).map_err(abi(read))?;
+    }
+    let vault = word_address(&w(10)).map_err(fault)?;
+    let read_phase = ProbeRead::OpenFourPhase;
+    let [phase] = abi_words::<1>(&wire.call(&at, read_phase, vault, &OPENFOUR_PHASE)?)
+        .map_err(abi(read_phase))?;
+    let phase = word_u8(&phase).map_err(abi(read_phase))?;
+    let read_snap = ProbeRead::OpenFourCurveSnapshot;
+    let mut calldata = CURVE_LIQUIDITY_SNAPSHOT.to_vec();
+    calldata.extend_from_slice(&address_word(token));
+    let s = abi_words::<8>(&wire.call(&at, read_snap, deployment.openfour_tools, &calldata)?)
+        .map_err(abi(read_snap))?;
+    if !word_flag(&s[0]).map_err(abi(read_snap))? {
+        return Err(ProbeError::UnknownToken(read_snap));
+    }
+    if wire.block_hash(ProbeRead::BlockRecheck, number)? != hash {
+        return Err(ProbeError::Reorg { number });
+    }
+    Ok(OpenFourTokenRead {
+        token,
+        block_number: number,
+        block_hash: B256::from(hash),
+        preset_id: U256::from_be_bytes(w(2)),
+        max_supply: U256::from_be_bytes(w(6)),
+        sale_amount: U256::from_be_bytes(w(7)),
+        raise_amount: U256::from_be_bytes(w(8)),
+        quote_asset: word_address(&w(9)).map_err(fault)?,
+        exists: word_flag(&w(17)).map_err(fault)?,
+        paused: word_flag(&w(18)).map_err(fault)?,
+        anti_sniper_enabled: word_flag(&w(19)).map_err(fault)?,
+        custom_data: word_address(&w(15)).map_err(fault)?,
+        phase,
+        module_beacons,
+        initial_quote: U256::from_be_bytes(s[1]),
+        initial_token: U256::from_be_bytes(s[2]),
+        current_quote: U256::from_be_bytes(s[3]),
+        current_token: U256::from_be_bytes(s[4]),
+        remaining: U256::from_be_bytes(s[5]),
     })
 }
 
@@ -2045,12 +2309,33 @@ mod tests {
             (GET_TOKEN_INFO, "getTokenInfo(address)"),
             (TOKEN_INFOS, "_tokenInfos(address)"),
             (TOKEN_INFO_EX1S, "_tokenInfoEx1s(address)"),
+            (
+                RESOLVE_PRESET_IMPLEMENTATIONS,
+                "resolvePresetImplementations(uint256)",
+            ),
+            (GET_PRESET_TOKEN_IMPL, "getPresetTokenImpl(uint256)"),
+            (BEACON_IMPLEMENTATION, "implementation()"),
+            (OPENFOUR_TOKENS, "tokens(address)"),
+            (OPENFOUR_PHASE, "phase()"),
+            (FEE_ROUTER, "feeRouter()"),
+            (
+                PREVIEW_DISTRIBUTION,
+                "previewDistribution(uint256,uint256,(address,uint16)[],bool,uint256)",
+            ),
+            (
+                CURVE_LIQUIDITY_SNAPSHOT,
+                "getCurveLiquiditySnapshot(address)",
+            ),
         ] {
             assert_eq!(selector[..], keccak256(signature)[..4], "{signature}");
         }
         assert_eq!(
             U256::from_be_bytes(EIP1967_IMPLEMENTATION_SLOT) + U256::from(1u8),
             U256::from_be_bytes(keccak256("eip1967.proxy.implementation").0)
+        );
+        assert_eq!(
+            U256::from_be_bytes(EIP1967_BEACON_SLOT) + U256::from(1u8),
+            U256::from_be_bytes(keccak256("eip1967.proxy.beacon").0)
         );
         // The G0.2 archive witness of the fee-exemption entry the v5.24.0
         // BUY path read (`historical_state_decoded.json`
@@ -2066,8 +2351,8 @@ mod tests {
     /// The Four deployment whose fingerprints are those of the served codes,
     /// and a node serving it (the frozen addresses, test codes).
     fn served_four() -> (FourDeployment, Node) {
-        use darkbot_bsc_trading::venues::fourmeme::deployment::bsc_mainnet_r12b_131568366;
-        let real = bsc_mainnet_r12b_131568366();
+        use darkbot_bsc_trading::venues::fourmeme::deployment::bsc_mainnet_r12d_131608421;
+        let real = bsc_mainnet_r12d_131608421();
         let code = |n: u8| vec![0x60, 0x80, 0x60, 0x40, 0x10 + n];
         let mut d = real;
         d.token_manager2_implementation_runtime_keccak256 = keccak256(code(1));
@@ -2110,7 +2395,76 @@ mod tests {
         let mut calldata = GET_TOKEN_INFO.to_vec();
         calldata.extend_from_slice(&address_word(d.fee_reference_token));
         node.set_call(d.helper3, calldata, info);
+        // R12d: the pinned bonding preset as the registry resolves it, each
+        // beacon's implementation and the codes (test codes).
+        let mut bonding = d.openfour_bonding.unwrap();
+        bonding.token_implementation_runtime_keccak256 = keccak256(code(20));
+        let token_impl = d.openfour_template(bonding.preset_id).unwrap();
+        node.codes.push((token_impl, code(20)));
+        let mut head = u64_word(RESOLVED_PRESET_HEAD_WORDS as u64 * WORD as u64).to_vec();
+        for (i, m) in bonding.modules.iter_mut().enumerate() {
+            m.implementation_runtime_keccak256 = keccak256(code(21 + i as u8));
+            node.codes.push((m.implementation, code(21 + i as u8)));
+            node.set_call(
+                m.beacon,
+                BEACON_IMPLEMENTATION.to_vec(),
+                address_word(m.implementation).to_vec(),
+            );
+            head.extend_from_slice(&address_word(m.beacon));
+        }
+        head.extend_from_slice(&[0u8; WORD]);
+        head.extend_from_slice(&u64_word(bonding.preset_id.to::<u64>()));
+        let preset_call = |selector: [u8; 4]| {
+            let mut c = selector.to_vec();
+            c.extend_from_slice(&bonding.preset_id.to_be_bytes::<32>());
+            c
+        };
+        node.set_call(
+            d.openfour_registry,
+            preset_call(RESOLVE_PRESET_IMPLEMENTATIONS),
+            head,
+        );
+        node.set_call(
+            d.openfour_registry,
+            preset_call(GET_PRESET_TOKEN_IMPL),
+            address_word(token_impl).to_vec(),
+        );
+        // The Core's fee router, its implementation and its previews of
+        // the pinned fee terms.
+        bonding.fee_router.implementation_runtime_keccak256 = keccak256(code(30));
+        let router = bonding.fee_router;
+        node.set_call(
+            d.openfour_core,
+            FEE_ROUTER.to_vec(),
+            address_word(router.router).to_vec(),
+        );
+        node.storage.push((
+            router.router,
+            EIP1967_IMPLEMENTATION_SLOT,
+            address_word(router.implementation),
+        ));
+        node.codes.push((router.implementation, code(30)));
+        serve_fee_previews(&mut node, &bonding, bonding.fee);
+        d.openfour_bonding = Some(bonding);
         (d, node)
+    }
+
+    /// The fee router's previews of `fee` for the pinned preset.
+    fn serve_fee_previews(
+        node: &mut Node,
+        bonding: &darkbot_bsc_trading::venues::fourmeme::deployment::OpenFourBondingPreset,
+        fee: darkbot_bsc_trading::economics::openfour::OpenFourFee,
+    ) {
+        use darkbot_bsc_trading::economics::openfour::charged;
+        let mut call = Vec::new();
+        for q in OPENFOUR_FEE_PROBE_QUOTES {
+            fee_preview_call(bonding.preset_id, q, &mut call);
+            let total = charged(&fee, q).unwrap();
+            let mut answer = total.to_be_bytes::<32>().to_vec();
+            answer.extend_from_slice(&(q - total).to_be_bytes::<32>());
+            answer.extend_from_slice(&[0u8; WORD]);
+            node.set_call(bonding.fee_router.router, call.clone(), answer);
+        }
     }
 
     fn run_four(
@@ -2148,13 +2502,93 @@ mod tests {
             (100, U256::from(7u8))
         );
         let methods: Vec<&str> = seen.iter().map(|(m, _)| m.as_str()).collect();
+        // R12d: the fee router's implementation slot too.
         assert_eq!(
             methods.iter().filter(|m| **m == "eth_getStorageAt").count(),
-            3
+            3 + 1
         );
-        assert_eq!(methods.iter().filter(|m| **m == "eth_getCode").count(), 7);
-        assert_eq!(methods.iter().filter(|m| **m == "eth_call").count(), 1);
+        // R12d: the bonding preset's five implementations and token
+        // implementation and the fee router's, its registry and beacon
+        // calls, the Core's fee router and its three previews.
+        assert_eq!(
+            methods.iter().filter(|m| **m == "eth_getCode").count(),
+            7 + 6 + 1
+        );
+        assert_eq!(
+            methods.iter().filter(|m| **m == "eth_call").count(),
+            1 + 1 + 5 + 1 + 1 + OPENFOUR_FEE_PROBE_QUOTES.len()
+        );
         assert_eq!(methods.last(), Some(&"eth_getBlockByNumber"));
+        // A module's beacon upgraded, the token implementation's code
+        // changed, a custom data module set: each named.
+        let (_, mut node) = served_four();
+        let curve = d.openfour_bonding.unwrap().modules[2];
+        node.set_call(
+            curve.beacon,
+            BEACON_IMPLEMENTATION.to_vec(),
+            address_word(Address::repeat_byte(0x77)).to_vec(),
+        );
+        node.codes
+            .push((Address::repeat_byte(0x77), vec![0x60, 0x80, 0x77]));
+        let token_impl = d
+            .openfour_template(d.openfour_bonding.unwrap().preset_id)
+            .unwrap();
+        node.codes.retain(|(a, _)| *a != token_impl);
+        node.codes.push((token_impl, vec![0x60, 0x80, 0x78]));
+        let preset = d.openfour_bonding.unwrap().preset_id;
+        let mut call = RESOLVE_PRESET_IMPLEMENTATIONS.to_vec();
+        call.extend_from_slice(&preset.to_be_bytes::<32>());
+        let mut head = u64_word(RESOLVED_PRESET_HEAD_WORDS as u64 * WORD as u64).to_vec();
+        for m in d.openfour_bonding.unwrap().modules {
+            head.extend_from_slice(&address_word(m.beacon));
+        }
+        head.extend_from_slice(&address_word(Address::repeat_byte(0x79)));
+        node.set_call(d.openfour_registry, call.clone(), head);
+        let o = run_four(node, &d).0.unwrap();
+        assert_eq!(
+            d.drifts(&o.observed),
+            [
+                FourDrift::OpenFourPresetToken,
+                FourDrift::OpenFourPresetModule(2),
+                FourDrift::OpenFourPresetCustomData
+            ]
+        );
+        // The fee router upgraded, or the same 1 % split otherwise (a
+        // storage change, no code change): each named; the Classic terms
+        // and the preset's code untouched.
+        let (_, mut node) = served_four();
+        let router = d.openfour_bonding.unwrap().fee_router;
+        node.set_storage(
+            router.router,
+            EIP1967_IMPLEMENTATION_SLOT,
+            address_word(Address::repeat_byte(0x7a)),
+        );
+        node.codes
+            .push((Address::repeat_byte(0x7a), vec![0x60, 0x80, 0x7a]));
+        let o = run_four(node, &d).0.unwrap();
+        assert_eq!(d.drifts(&o.observed), [FourDrift::OpenFourFeeRouter]);
+        let (_, mut node) = served_four();
+        serve_fee_previews(
+            &mut node,
+            &d.openfour_bonding.unwrap(),
+            darkbot_bsc_trading::economics::openfour::OpenFourFee {
+                protocol_bps: 60,
+                dev_bps: 40,
+            },
+        );
+        let o = run_four(node, &d).0.unwrap();
+        assert_eq!(d.drifts(&o.observed), [FourDrift::OpenFourFees]);
+        assert!(d.validate(&o.observed, o.block_number).is_err());
+        // An answer whose tuple does not follow the head is refused.
+        let (_, mut node) = served_four();
+        node.set_call(d.openfour_registry, call, u64_word(0x20).repeat(7));
+        assert!(matches!(
+            run_four(node, &d).0,
+            Err(ProbeError::Abi {
+                read: ProbeRead::FourPresetModules,
+                ..
+            })
+        ));
         let (_, mut node) = served_four();
         let upgraded = Address::repeat_byte(0x99);
         node.set_storage(
@@ -2297,7 +2731,7 @@ mod tests {
     #[test]
     #[ignore = "network: read-only reads of one Four.meme token at BSC_FREE_ARCHIVE_RPC"]
     fn live_four_holding_is_the_fixtures_state() {
-        use darkbot_bsc_trading::venues::fourmeme::deployment::bsc_mainnet_r12b_131568366;
+        use darkbot_bsc_trading::venues::fourmeme::deployment::bsc_mainnet_r12d_131608421;
         use darkbot_bsc_trading::venues::fourmeme::profile::{
             CLASSIC_PROFILES, classify_classic_holding,
         };
@@ -2334,7 +2768,7 @@ mod tests {
         }
         .block_hash(ProbeRead::Block, number)
         .unwrap();
-        let d = bsc_mainnet_r12b_131568366();
+        let d = bsc_mainnet_r12d_131608421();
         let r = read_four_holding(&rpc, &limits, &d, token, number, hash).unwrap();
         println!("{r:?}");
         let u = |s: &str| U256::from_str_radix(s, 10).unwrap();
@@ -2358,6 +2792,179 @@ mod tests {
         assert_eq!(held.token(), token);
     }
 
+    /// R12d: a held OpenFour token is read at its pinned block (Core.tokens,
+    /// its vault's phase, its module proxies' beacons, the curve snapshot);
+    /// another token, a snapshot not available or a reorg refuse it.
+    #[test]
+    fn a_held_openfour_tokens_state_is_read_at_its_block() {
+        let (d, _) = served_four();
+        let token = Address::repeat_byte(0x6a);
+        let vault = Address::repeat_byte(0x18);
+        let modules = [0x3b, 0x18, 0x19, 0xd0, 0x82].map(Address::repeat_byte);
+        let call = |selector: [u8; 4]| {
+            let mut c = selector.to_vec();
+            c.extend_from_slice(&address_word(token));
+            c
+        };
+        let tokens = |base: Address| {
+            let mut out = Vec::new();
+            out.extend_from_slice(&u64_word(1));
+            out.extend_from_slice(&address_word(Address::repeat_byte(0x50)));
+            out.extend_from_slice(&u64_word(1_778_027_615_724));
+            out.extend_from_slice(&address_word(base));
+            out.extend_from_slice(&u64_word(640));
+            out.extend_from_slice(&u64_word(704));
+            for v in [11u64, 12, 13] {
+                out.extend_from_slice(&u64_word(v));
+            }
+            out.extend_from_slice(&address_word(Address::repeat_byte(0xbb)));
+            out.extend_from_slice(&address_word(vault));
+            for m in &modules[2..] {
+                out.extend_from_slice(&address_word(*m));
+            }
+            out.extend_from_slice(&address_word(modules[0]));
+            out.extend_from_slice(&address_word(Address::ZERO));
+            for v in [131_608_421u64, 1, 0, 0] {
+                out.extend_from_slice(&u64_word(v));
+            }
+            out.extend_from_slice(&[0u8; 2 * WORD]);
+            out
+        };
+        let node = |base: Address, available: u64| {
+            let mut n = Node::mainnet();
+            n.set_call(d.openfour_core, call(OPENFOUR_TOKENS), tokens(base));
+            for (i, m) in modules.iter().enumerate() {
+                n.set_storage(
+                    *m,
+                    EIP1967_BEACON_SLOT,
+                    address_word(Address::repeat_byte(0xc0 + i as u8)),
+                );
+            }
+            n.set_call(vault, OPENFOUR_PHASE.to_vec(), u64_word(1).to_vec());
+            n.set_call(
+                d.openfour_tools,
+                call(CURVE_LIQUIDITY_SNAPSHOT),
+                words(&[available, 21, 22, 23, 24, 25, 26, 27]),
+            );
+            n
+        };
+        let read = |n: Node| {
+            let server = serve(n);
+            let limits = limits();
+            let mut client = Client::new(
+                connector(server.addr, limits),
+                server.addr.to_string(),
+                "/rpc".to_owned(),
+                &limits,
+            );
+            let result = openfour_holding_with(&mut client, &d, token, HEAD, HASH);
+            drop(client);
+            server.done.store(true, Ordering::Release);
+            (result, server.handle.join().unwrap())
+        };
+        let (result, seen) = read(node(token, 1));
+        let r = result.unwrap();
+        assert_eq!(
+            (r.preset_id, r.max_supply, r.sale_amount, r.raise_amount),
+            (
+                U256::from(1_778_027_615_724u64),
+                U256::from(11u8),
+                U256::from(12u8),
+                U256::from(13u8)
+            )
+        );
+        assert_eq!(
+            (
+                r.quote_asset,
+                r.exists,
+                r.paused,
+                r.anti_sniper_enabled,
+                r.phase
+            ),
+            (Address::repeat_byte(0xbb), true, false, false, 1)
+        );
+        assert_eq!(
+            r.module_beacons,
+            [0xc0, 0xc1, 0xc2, 0xc3, 0xc4].map(Address::repeat_byte)
+        );
+        assert_eq!(
+            [
+                r.initial_quote,
+                r.initial_token,
+                r.current_quote,
+                r.current_token,
+                r.remaining
+            ],
+            [21u64, 22, 23, 24, 25].map(U256::from)
+        );
+        assert_eq!(
+            seen.last().map(|(m, _)| m.as_str()),
+            Some("eth_getBlockByNumber")
+        );
+        assert_eq!(
+            read(node(Address::repeat_byte(0x01), 1)).0,
+            Err(ProbeError::UnknownToken(ProbeRead::OpenFourToken))
+        );
+        assert_eq!(
+            read(node(token, 0)).0,
+            Err(ProbeError::UnknownToken(ProbeRead::OpenFourCurveSnapshot))
+        );
+        let mut moved = node(token, 1);
+        moved.hashes = [HASH, [0xe5; 32]];
+        moved.blocks_served = 1;
+        assert_eq!(read(moved).0, Err(ProbeError::Reorg { number: HEAD }));
+    }
+
+    /// R12d: the witnessed OpenFour token read on the free archive endpoint
+    /// 100 blocks after its launch is a priced holding (its preset's modules,
+    /// trading). Read-only; run it with `BSC_FREE_ARCHIVE_RPC=<the free
+    /// archive endpoint>`
+    /// `cargo test -p darkbot-bsc-execution --all-features --lib venue_probe::tests::live_openfour_holding -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "network: read-only reads of one OpenFour token at BSC_FREE_ARCHIVE_RPC"]
+    fn live_openfour_holding_is_priced() {
+        use darkbot_bsc_trading::venues::fourmeme::deployment::bsc_mainnet_r12d_131608421;
+        use darkbot_bsc_trading::venues::fourmeme::profile::classify_openfour_holding;
+        let rpc = std::env::var("BSC_FREE_ARCHIVE_RPC")
+            .expect("BSC_FREE_ARCHIVE_RPC names the free archive endpoint");
+        let limits = FollowerLimits {
+            request_timeout: Duration::from_secs(10),
+            max_response_bytes: 16 << 20,
+            connect_timeout: Duration::from_secs(5),
+            handshake_timeout: Duration::from_secs(10),
+            read_tick: Duration::from_millis(100),
+            ..limits()
+        };
+        let token = Address::new(hex!("6a081154adc920c37669e7c92e9213ece898813c"));
+        let number = 131_608_521;
+        let t = Target::of(&rpc, &limits).unwrap();
+        let connect =
+            |stop: &AtomicBool| connect_tls(&t.endpoint, &t.tls, &t.bounds, stop, Instant::now());
+        let mut client = Client::new(connect, t.authority.clone(), t.path.clone(), &limits);
+        let hash = Wire {
+            client: &mut client,
+            stop: AtomicBool::new(false),
+            id: 0,
+        }
+        .block_hash(ProbeRead::Block, number)
+        .unwrap();
+        let d = bsc_mainnet_r12d_131608421();
+        let r = read_openfour_holding(&rpc, &limits, &d, token, number, hash).unwrap();
+        println!("{r:?}");
+        let v = d
+            .validate(&probe_four(&rpc, &limits, &d).unwrap().observed, 1)
+            .unwrap();
+        let held = classify_openfour_holding(&v, &r).unwrap();
+        // The fixture's snapshot of that block.
+        assert_eq!(
+            (held.curve().quote_reserve, held.curve().token_reserve),
+            (
+                U256::from(8_417_384_887_940_719_083u64),
+                "786512574406498694938506869".parse::<U256>().unwrap()
+            )
+        );
+    }
+
     /// The live Four.meme deployment against the freeze. Read-only; prints
     /// what differs. Run it with `BSC_FREE_ARCHIVE_RPC=<the free archive
     /// endpoint>`
@@ -2367,7 +2974,7 @@ mod tests {
     fn live_four_deployment_is_the_frozen_one() {
         let rpc = std::env::var("BSC_FREE_ARCHIVE_RPC")
             .expect("BSC_FREE_ARCHIVE_RPC names the free archive endpoint");
-        use darkbot_bsc_trading::venues::fourmeme::deployment::bsc_mainnet_r12b_131568366;
+        use darkbot_bsc_trading::venues::fourmeme::deployment::bsc_mainnet_r12d_131608421;
         let limits = FollowerLimits {
             request_timeout: Duration::from_secs(10),
             max_response_bytes: 16 << 20,
@@ -2376,8 +2983,8 @@ mod tests {
             read_tick: Duration::from_millis(100),
             ..limits()
         };
-        let o = probe_four(&rpc, &limits, &bsc_mainnet_r12b_131568366()).unwrap();
-        let drifts = bsc_mainnet_r12b_131568366().drifts(&o.observed);
+        let o = probe_four(&rpc, &limits, &bsc_mainnet_r12d_131608421()).unwrap();
+        let drifts = bsc_mainnet_r12d_131608421().drifts(&o.observed);
         println!("four at block {}: drift {drifts:?}", o.block_number);
         assert!(drifts.is_empty());
     }

@@ -296,6 +296,18 @@ pub struct OpenFourBuyByBudget<'a> {
     pub proof: &'a [u8],
 }
 
+/// R12d: a decoded OpenFour `buy(address token, uint256 amount, uint256
+/// maxPayAmount, uint256 options, bytes proof)`: exactly `amount` tokens,
+/// paid at most `maxPayAmount` (executed, `economics::openfour`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct OpenFourBuyExact<'a> {
+    pub token: Address,
+    pub amount: U256,
+    pub max_pay_amount: U256,
+    pub options: U256,
+    pub proof: &'a [u8],
+}
+
 /// A decoded Classic `sellToken(address token, uint256 amount, uint256
 /// minFunds)`. Token and seller positions are checked against the
 /// `TokenSale` event; `amount` is the tokens sold (R12 parity), the
@@ -399,12 +411,17 @@ pub fn recognize<'a>(
     decoded.unwrap_or_else(|e| Recognized::Malformed(call, e))
 }
 
-/// The token of a recognized launch, where its derivation is proven.
-pub fn pending_token(deployment: &FourDeployment, recognized: &Recognized<'_>) -> PendingToken {
+/// The token of a recognized launch sent by `sender` (its verified signer,
+/// when known), where its derivation is proven.
+pub fn pending_token(
+    deployment: &FourDeployment,
+    recognized: &Recognized<'_>,
+    sender: Option<Address>,
+) -> PendingToken {
     match recognized {
         Recognized::ClassicLaunch(l) => PendingToken::Candidates(deployment.classic_tokens(l.salt)),
         Recognized::OpenFourLaunch(l) => deployment
-            .openfour_token(l.preset_id, l.init.token_salt)
+            .openfour_token(l.preset_id, l.init.token_salt, l.request_id, sender)
             .map_or(PendingToken::Unknown, PendingToken::Derived),
         _ => PendingToken::Unknown,
     }
@@ -522,6 +539,22 @@ pub fn decode_classic_sell_min_funds(input: &[u8]) -> Result<ClassicSell, AbiErr
         token: w.address(0)?,
         amount: w.u256(1)?,
         min_funds: w.u256(2)?,
+    })
+}
+
+/// R12d: decodes OpenFour `buy(address,uint256,uint256,uint256,bytes)`
+/// (the binding's check; `recognize` keeps it unsupported for others'
+/// calls).
+pub fn decode_openfour_buy(input: &[u8]) -> Result<OpenFourBuyExact<'_>, AbiError> {
+    let args = body(input, &FourCall::OpenFourBuy.selector())?;
+    let [proof] = tails(args, 5, [4])?;
+    let w = Words(args);
+    Ok(OpenFourBuyExact {
+        token: w.address(0)?,
+        amount: w.u256(1)?,
+        max_pay_amount: w.u256(2)?,
+        options: w.u256(3)?,
+        proof,
     })
 }
 

@@ -10,7 +10,7 @@ import { PlacedSection } from "./PlacedSection";
 /** What each switchable component does (its owner's rule shows in the effective mode). */
 const COMPONENT_HINTS: Record<string, string> = {
   BSC_STATE_C2: "C2 canonical/pending state owner; SHADOW observes only; LIVE only under the owner's LIVE gate, for a grant that names it (LIVE tab)",
-  BSC_EXEC: "C3 execution path; SHADOW runs it to the PAPER sink for Flap launches while BSC_VENUE_FLAP is SHADOW (PAPER identity, never sent); LIVE only under the owner's LIVE gate, for a grant that names it (LIVE tab)",
+  BSC_EXEC: "C3 execution path; SHADOW runs it to the PAPER sink for the launches of each venue that is SHADOW (Flap; Four.meme Classic and OpenFour with their BSC_EXEC_FOUR_* / BSC_EXEC_OPENFOUR_* set; PAPER identity, never sent); LIVE only under the owner's LIVE gate, for a grant that names it (LIVE tab)",
   BSC_STRATEGY_C: "Strategy C on canonical Flap events while BSC_VENUE_FLAP is SHADOW; SHADOW keeps a PAPER ledger (nothing signed or sent); LIVE decides the exits of every LIVE lot, only under the owner's LIVE gate (LIVE tab)",
 };
 import { useNativeRecords } from "./useNativeRecords";
@@ -21,7 +21,7 @@ import { SourceActions } from "../SourceActions";
 const VENUE_HINTS: Record<string, string> = {
   BSC_VENUE_FLAP: "SHADOW admits Flap launches to the C3 PAPER path and Strategy C (with BSC_EXEC / BSC_STRATEGY_C SHADOW); OFF admits none; LIVE only under the owner's LIVE gate, for a grant that names it (LIVE tab)",
   BSC_VENUE_FOUR_CLASSIC: "SHADOW admits Four.meme Classic launches to the C3 PAPER path (with BSC_EXEC SHADOW and BSC_EXEC_FOUR_* set: the pinned TokenManager2 and its fee terms probed, the witnessed Classic BUY economics); OFF admits none; no LIVE path yet (FOUR_EXECUTION_PATH_MISSING)",
-  BSC_VENUE_OPENFOUR: "Recognized and decoded (Phase E); no economics or execution path to admit to yet (FOUR_EXECUTION_PATH_MISSING); LIVE only under the owner's LIVE gate, for a grant that names it (LIVE tab)",
+  BSC_VENUE_OPENFOUR: "SHADOW admits OpenFour launches to the C3 PAPER path (with BSC_EXEC SHADOW and BSC_EXEC_OPENFOUR_* set: the pinned Core, its executed bonding preset and modules probed, the exact-amount BUY economics of that preset only); OFF admits none; no LIVE path yet (FOUR_EXECUTION_PATH_MISSING)",
 };
 
 /** Monitoring in the fixed §13 order: sources → venues → builder → G0.7 → G0.8 → chain → timing. */

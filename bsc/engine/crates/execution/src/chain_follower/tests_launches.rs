@@ -223,7 +223,7 @@ fn venue_topics_are_the_keccak_of_their_signatures() {
     // The table's Four.meme contracts are the decoder's frozen deployment,
     // its chain the follower's; the Flap Portal is the pinned LIVE
     // deployment's (BSC3-019).
-    let d = darkbot_bsc_trading::venues::fourmeme::deployment::bsc_mainnet_r12b_131568366();
+    let d = darkbot_bsc_trading::venues::fourmeme::deployment::bsc_mainnet_r12d_131608421();
     assert_eq!(
         (four.contract, openfour.contract),
         (d.token_manager2.into_array(), d.openfour_core.into_array())
