@@ -228,8 +228,13 @@ impl ReceiptSource {
 }
 
 /// Whether an answer is the endpoint's request-rate limit (JSON-RPC error
-/// 429, alone or in a batch): a refusal to answer, retried like a failed
-/// transport, never an answer.
+/// 429, alone or in a batch, as the free archive endpoint sends it with its
+/// HTTP 429): a refusal to answer, retried like a failed transport, never an
+/// answer. Another code (a provider's -32005) stays an answer: fail closed.
+/// The failure text of a request the endpoint's rate limit refused on every
+/// attempt: "error 429", what the callers' own rate-limit retries recognise.
+pub const RATE_LIMITED: &str = "JSON-RPC error 429: rate limited";
+
 fn rate_limited(bytes: &[u8]) -> bool {
     let code = |v: &Json| {
         v.get("error")
@@ -262,6 +267,93 @@ fn pace_wait(last: Option<Instant>, min_interval: Duration, now: Instant) -> Dur
     last.map_or(Duration::ZERO, |t| {
         (t + min_interval).saturating_duration_since(now)
     })
+}
+
+/// A transaction whose receipt is read: its hash and index in the block,
+/// and, from a full block, its sender and destination.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ReceiptTarget {
+    hash: B256,
+    index: u64,
+    from: Option<Address>,
+    to: Option<Option<Address>>,
+}
+
+/// The transactions whose receipts are read in the block answer `v` of
+/// `header`: every one of a hashes-only block (`only_to` none), or those of a
+/// full block sent to one of `only_to`.
+fn receipt_targets(
+    v: &Json,
+    header: &Header,
+    only_to: Option<&[Address]>,
+) -> Result<Vec<ReceiptTarget>, String> {
+    let Some(scanned) = only_to else {
+        return Ok(tx_hashes_of(v, header)?
+            .into_iter()
+            .zip(0u64..)
+            .map(|(hash, index)| ReceiptTarget {
+                hash,
+                index,
+                from: None,
+                to: None,
+            })
+            .collect());
+    };
+    let block = full_block_of(v).map_err(|e| format!("block {}: {e}", header.number))?;
+    if block.hash != header.hash || block.number != header.number {
+        return Err(format!(
+            "asked for block {} {}, got another",
+            header.number, header.hash
+        ));
+    }
+    block
+        .transactions
+        .iter()
+        .filter(|t| t.to.is_some_and(|to| scanned.contains(&to)))
+        .map(|t| {
+            Ok(ReceiptTarget {
+                hash: t.hash,
+                index: t
+                    .transaction_index
+                    .ok_or_else(|| format!("transaction {} has no index", t.hash))?,
+                from: Some(t.from),
+                to: Some(t.to),
+            })
+        })
+        .collect()
+}
+
+/// The receipts of one batch answer `v` for `targets`: each exactly its
+/// transaction's (hash, index, and sender and destination when known).
+fn receipts_of_batch(
+    v: &Json,
+    targets: &[ReceiptTarget],
+    header: &Header,
+) -> Result<Vec<Receipt>, String> {
+    batch_results("eth_getTransactionReceipt", v, targets.len())?
+        .iter()
+        .zip(targets)
+        .map(|(r, t)| {
+            if r.is_null() {
+                return Err(format!("receipt of {} unknown to the endpoint", t.hash));
+            }
+            let receipt = receipt_of(r)
+                .map_err(|e| format!("receipt of {} in block {}: {e}", t.hash, header.number))?;
+            if receipt.transaction_hash != t.hash {
+                return Err(format!("asked for the receipt of {}, got another", t.hash));
+            }
+            if receipt.transaction_index != t.index
+                || t.from.is_some_and(|f| f != receipt.from)
+                || t.to.is_some_and(|to| to != receipt.to)
+            {
+                return Err(format!(
+                    "the receipt of {} is not of its transaction in block {}",
+                    t.hash, header.number
+                ));
+            }
+            Ok(receipt)
+        })
+        .collect()
 }
 
 /// The transaction hashes of a hashes-only block, which must be the block of
@@ -695,7 +787,7 @@ impl Endpoint {
                 curl.env("PATH", path);
             }
             match rpc_wire::post(curl, &self.url, body, self.limits) {
-                Ok(bytes) if rate_limited(&bytes) => last = "rate limited (JSON-RPC 429)".into(),
+                Ok(bytes) if rate_limited(&bytes) => last = RATE_LIMITED.into(),
                 Ok(bytes) => return Ok(bytes),
                 Err(e) => last = e,
             }
@@ -849,55 +941,24 @@ impl Endpoint {
         if v.is_null() {
             return Err(format!("block {} unknown to the endpoint", header.hash));
         }
-        let hashes = match only_to {
-            None => tx_hashes_of(&v, header)?,
-            Some(scanned) => {
-                let block =
-                    full_block_of(&v).map_err(|e| format!("block {}: {e}", header.number))?;
-                if block.hash != header.hash || block.number != header.number {
-                    return Err(format!(
-                        "asked for block {} {}, got another",
-                        header.number, header.hash
-                    ));
-                }
-                block
-                    .transactions
-                    .iter()
-                    .filter(|t| t.to.is_some_and(|to| scanned.contains(&to)))
-                    .map(|t| t.hash)
-                    .collect()
-            }
-        };
-        let mut receipts = Vec::with_capacity(hashes.len());
-        for chunk in hashes.chunks(batch.max(1)) {
+        let targets = receipt_targets(&v, header, only_to)?;
+        let mut receipts = Vec::with_capacity(targets.len());
+        for chunk in targets.chunks(batch) {
             let requests: Vec<String> = chunk
                 .iter()
-                .enumerate()
-                .map(|(i, h)| {
+                .zip(0u64..)
+                .map(|(t, i)| {
                     body(
-                        i as u64,
+                        i,
                         "eth_getTransactionReceipt",
-                        &format!("[{}]", data(h.as_slice())),
+                        &format!("[{}]", data(t.hash.as_slice())),
                     )
                 })
                 .collect();
             let bytes = self.post(&format!("[{}]", requests.join(",")))?;
             let v: Json = serde_json::from_slice(&bytes)
                 .map_err(|e| format!("invalid eth_getTransactionReceipt batch: {e}"))?;
-            for (r, hash) in batch_results("eth_getTransactionReceipt", &v, chunk.len())?
-                .iter()
-                .zip(chunk)
-            {
-                if r.is_null() {
-                    return Err(format!("receipt of {hash} unknown to the endpoint"));
-                }
-                let receipt = receipt_of(r)
-                    .map_err(|e| format!("receipt of {hash} in block {}: {e}", header.number))?;
-                if receipt.transaction_hash != *hash {
-                    return Err(format!("asked for the receipt of {hash}, got another"));
-                }
-                receipts.push(receipt);
-            }
+            receipts.extend(receipts_of_batch(&v, chunk, header)?);
         }
         require_receipts_of(header, &receipts)?;
         Ok(receipts)
@@ -1503,6 +1564,80 @@ mod tests {
         ));
         assert!(!rate_limited(br#"{"jsonrpc":"2.0","id":1,"result":"0x1"}"#));
         assert!(!rate_limited(b"not json"));
+    }
+
+    fn tx_json(hash: &str, index: u64, to: &str) -> Json {
+        serde_json::from_str(&format!(
+            r#"{{"hash":"{}","blockHash":"{}","blockNumber":"0xb","transactionIndex":"0x{index:x}","from":"0x{}","to":"0x{}","input":"0x","value":"0x0"}}"#,
+            h(hash),
+            h("aa"),
+            "11".repeat(20),
+            to.repeat(20)
+        ))
+        .unwrap()
+    }
+
+    fn receipt_json(id: u64, hash: &str, index: u64, from: &str, to: &str) -> String {
+        format!(
+            r#"{{"jsonrpc":"2.0","id":{id},"result":{{"blockHash":"{}","blockNumber":"0xb","transactionIndex":"0x{index:x}","transactionHash":"{}","from":"0x{}","to":"0x{}","status":"0x1","logs":[]}}}}"#,
+            h("aa"),
+            h(hash),
+            from.repeat(20),
+            to.repeat(20)
+        )
+    }
+
+    /// R12b review M6/L1: the receipts read per transaction are exactly
+    /// those of the block's transactions (to a scanned contract, for direct
+    /// calls), each its own transaction's at its index, in any batch order.
+    #[test]
+    fn per_transaction_receipts_are_exactly_their_transactions() {
+        let header = header_of(&header_json(11, "aa")).unwrap();
+        let mut hashes_only = header_json(11, "aa");
+        hashes_only["transactions"] = serde_json::json!([h("01"), h("02")]);
+        let all = receipt_targets(&hashes_only, &header, None).unwrap();
+        assert_eq!(
+            (all[1].hash, all[1].index, all[1].from),
+            (B256::repeat_byte(2), 1, None)
+        );
+        let mut full = header_json(11, "aa");
+        full["transactions"] = serde_json::json!([tx_json("01", 0, "22"), tx_json("02", 1, "33")]);
+        let scanned = [Address::repeat_byte(0x33)];
+        let direct = receipt_targets(&full, &header, Some(&scanned)).unwrap();
+        assert_eq!(direct.len(), 1);
+        assert_eq!((direct[0].hash, direct[0].index), (B256::repeat_byte(2), 1));
+        // A full block of another height is refused.
+        let other = header_of(&header_json(12, "aa")).unwrap();
+        assert!(receipt_targets(&full, &other, Some(&scanned)).is_err());
+        let batch = |items: &[String]| -> Json {
+            serde_json::from_str(&format!("[{}]", items.join(","))).unwrap()
+        };
+        // Its receipt, answered in any order.
+        let ok = batch(&[receipt_json(0, "02", 1, "11", "33")]);
+        assert_eq!(receipts_of_batch(&ok, &direct, &header).unwrap().len(), 1);
+        let two = batch(&[
+            receipt_json(1, "02", 1, "11", "33"),
+            receipt_json(0, "01", 0, "11", "22"),
+        ]);
+        assert_eq!(
+            receipts_of_batch(&two, &all, &header).unwrap()[0].transaction_index,
+            0
+        );
+        for wrong in [
+            receipt_json(0, "03", 1, "11", "33"),
+            receipt_json(0, "02", 0, "11", "33"),
+            receipt_json(0, "02", 1, "44", "33"),
+            receipt_json(0, "02", 1, "11", "44"),
+        ] {
+            assert!(
+                receipts_of_batch(&batch(std::slice::from_ref(&wrong)), &direct, &header).is_err(),
+                "{wrong}"
+            );
+        }
+        // A receipt the endpoint does not know is named as such.
+        let unknown = batch(&[r#"{"jsonrpc":"2.0","id":0,"result":null}"#.to_string()]);
+        let e = receipts_of_batch(&unknown, &direct, &header).unwrap_err();
+        assert!(e.ends_with("unknown to the endpoint"), "{e}");
     }
 
     /// R12b: a paced endpoint starts a request no sooner than its interval

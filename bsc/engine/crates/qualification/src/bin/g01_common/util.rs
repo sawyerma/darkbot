@@ -13,8 +13,8 @@ pub mod net {
     pub const OUT_ROOT: &str = "bsc/native/evidence/g01";
     /// `--confirmations`: the reference block is this far below the head.
     pub const CONFIRMATIONS: u64 = 5;
-    /// `--header-batch`: headers per JSON-RPC batch (the public dataseed
-    /// answers 100).
+    /// `--header-batch`: headers per JSON-RPC batch (`eth_getBlockByNumber`,
+    /// hashes only; the free archive endpoint answers 100, R12b).
     pub const HEADER_BATCH: u64 = 100;
     /// `--rpc-connect-timeout-s`, `--rpc-max-time-s`, `--rpc-attempts`,
     /// `--rpc-retry-pause-ms`.

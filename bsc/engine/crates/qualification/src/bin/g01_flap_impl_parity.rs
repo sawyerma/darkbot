@@ -1501,6 +1501,8 @@ mod tests {
         });
         assert!(r.is_err());
         assert_eq!(n, 3);
+        // R12b review M1: the shared endpoint's exhausted rate limit too.
+        assert!(rate_limited(&format!("3 attempts: {}", edge::RATE_LIMITED)));
         n = 0;
         let r: Result<u8, String> = patient(quick, || {
             n += 1;

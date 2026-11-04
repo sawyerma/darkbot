@@ -87,8 +87,22 @@ mod defaults {
     /// `--rpc-min-interval-ms`: the least time between two requests (0: none).
     pub const RPC_MIN_INTERVAL_MS: u64 = 0;
     /// `--receipt-batch`: receipts per JSON-RPC batch with
-    /// `--receipts transactions`.
+    /// `--receipts transactions` or `direct-calls`, at most
+    /// `MAX_RECEIPT_BATCH`.
     pub const RECEIPT_BATCH: usize = 100;
+    pub const MAX_RECEIPT_BATCH: usize = 1000;
+}
+
+/// `--receipt-batch`, within `1..=MAX_RECEIPT_BATCH`.
+fn receipt_batch(args: &Args) -> Result<usize, String> {
+    let batch: usize = number(args, "receipt-batch", defaults::RECEIPT_BATCH)?;
+    if batch == 0 || batch > defaults::MAX_RECEIPT_BATCH {
+        return Err(format!(
+            "--receipt-batch: 1 to {}, not {batch}",
+            defaults::MAX_RECEIPT_BATCH
+        ));
+    }
+    Ok(batch)
 }
 
 fn usage() -> &'static str {
@@ -152,13 +166,22 @@ impl Config {
         if !args.positional.is_empty() {
             return Err(usage().into());
         }
+        // No default endpoint: the readiness configuration names the
+        // public dataseed, which this repository must not contact.
         let rpc_url = match args.opt("rpc")? {
             Some(url) => url.to_string(),
-            None => match std::env::var(defaults::RPC_CONFIG_KEY) {
-                Ok(url) if !url.is_empty() => url,
-                _ => rpc_from_config(Path::new(
-                    args.opt("rpc-config")?.unwrap_or(defaults::RPC_CONFIG),
-                ))?,
+            None => match (
+                std::env::var(defaults::RPC_CONFIG_KEY),
+                args.opt("rpc-config")?,
+            ) {
+                (Ok(url), _) if !url.is_empty() => url,
+                (_, Some(path)) => rpc_from_config(Path::new(path))?,
+                _ => {
+                    return Err(format!(
+                        "an endpoint is required: --rpc, --rpc-config or {}",
+                        defaults::RPC_CONFIG_KEY
+                    ));
+                }
             },
         };
         let no_sourcify = args.switch("no-sourcify")?;
@@ -208,12 +231,17 @@ impl Config {
                 defaults::RPC_MIN_INTERVAL_MS,
             )?),
             receipts: match args.opt("receipts")? {
+                None | Some("block") if args.opt("receipt-batch")?.is_some() => {
+                    return Err(
+                        "--receipt-batch needs --receipts transactions or direct-calls".into(),
+                    );
+                }
                 None | Some("block") => ReceiptSource::Block,
                 Some("transactions") => ReceiptSource::Transactions {
-                    batch: number(args, "receipt-batch", defaults::RECEIPT_BATCH)?,
+                    batch: receipt_batch(args)?,
                 },
                 Some("direct-calls") => ReceiptSource::DirectCalls {
-                    batch: number(args, "receipt-batch", defaults::RECEIPT_BATCH)?,
+                    batch: receipt_batch(args)?,
                 },
                 Some(other) => {
                     return Err(format!(
@@ -481,11 +509,21 @@ impl ScanOutcome {
         self.stopped_at.map_or(self.from, |b| b + 1)
     }
 
+    /// Whether the launch pass can name every preset in use: over the whole
+    /// window, without an error, from every receipt (receipts of direct
+    /// calls only cannot see a launch through another contract).
+    fn launch_pass_complete(&self) -> bool {
+        self.launch_pass.missed_from.is_none() && self.error.is_none() && !self.direct_calls_only
+    }
+
+    /// The stop reason; with receipts of direct calls only every count is
+    /// of those (a launch or trade through another contract is not seen).
     fn stop_reason(&self) -> &'static str {
-        if self.stopped_at.is_some() {
-            "RECEIPT_BUDGET_EXHAUSTED"
-        } else {
-            "WINDOW_COMPLETE"
+        match (self.stopped_at.is_some(), self.direct_calls_only) {
+            (true, false) => "RECEIPT_BUDGET_EXHAUSTED",
+            (false, false) => "WINDOW_COMPLETE",
+            (true, true) => "RECEIPT_BUDGET_EXHAUSTED_DIRECT_CALLS_ONLY",
+            (false, true) => "WINDOW_COMPLETE_DIRECT_CALLS_ONLY",
         }
     }
 
@@ -528,10 +566,11 @@ impl ScanOutcome {
             } else {
                 ""
             },
-            if p.missed_from.is_some() {
-                "RECEIPT_BUDGET_EXHAUSTED"
-            } else {
-                "WINDOW_COMPLETE"
+            match (p.missed_from.is_some(), self.direct_calls_only) {
+                (true, false) => "RECEIPT_BUDGET_EXHAUSTED",
+                (false, false) => "WINDOW_COMPLETE",
+                (true, true) => "RECEIPT_BUDGET_EXHAUSTED_DIRECT_CALLS_ONLY",
+                (false, true) => "WINDOW_COMPLETE_DIRECT_CALLS_ONLY",
             }
         )
     }
@@ -1586,13 +1625,13 @@ fn derive(family: Family, launches: &[FixtureView], obs: &Observed) -> Derivatio
                 reason: String::new(),
                 deployer: deployer.map(|c| c.address),
                 deployer_source: format!(
-                    "TABLE {CLASSIC_TOKEN_DEPLOYER}: runtime CREATE2 instruction {create2}, embeds the template {embeds}; second pair TABLE {CLASSIC_TOKEN_DEPLOYER_2} {:?}: CREATE2 {create2_2}, embeds its template {embeds_2}; TokenManager2 implementation creates contracts itself: {tm2_creates}",
-                    deployer_2.map(|c| addr(c.address))
+                    "TABLE {CLASSIC_TOKEN_DEPLOYER}: runtime CREATE2 instruction {create2}, embeds the template {embeds}; second pair TABLE {CLASSIC_TOKEN_DEPLOYER_2} {}: CREATE2 {create2_2}, embeds its template {embeds_2}; TokenManager2 implementation creates contracts itself: {tm2_creates}",
+                    deployer_2.map_or("none".to_string(), |c| addr(c.address))
                 ),
                 template: template.map(|c| c.address),
                 template_source: format!(
-                    "TABLE {CLASSIC_TOKEN_TEMPLATE} (immutable of the deployer runtime: {embeds}); second pair TABLE {CLASSIC_TOKEN_TEMPLATE_2} {:?}; a launch reproduces under the pair whose template its token clones",
-                    template_2.map(|c| addr(c.address))
+                    "TABLE {CLASSIC_TOKEN_TEMPLATE} (immutable of the deployer runtime: {embeds}); second pair TABLE {CLASSIC_TOKEN_TEMPLATE_2} {}; a launch reproduces under the pair whose template its token clones",
+                    template_2.map_or("none".to_string(), |c| addr(c.address))
                 ),
                 salt_location: abi::CLASSIC_SALT_LOCATION,
                 attempts: fixtures
@@ -1683,8 +1722,15 @@ fn derive(family: Family, launches: &[FixtureView], obs: &Observed) -> Derivatio
                 d.salt_location
             );
             if family == Family::Classic {
-                d.reason.push_str(
-                    "; scope: the template above only, other templates or the CREATE path stay UNKNOWN",
+                let second = d
+                    .attempts
+                    .iter()
+                    .filter(|a| a.detail.ends_with("(second pair)"))
+                    .count();
+                d.reason = format!(
+                    "{matched}/{n} canonical launches reproduce ({} under the first pair, {second} under the second): token = CREATE2(deployer, salt from {}, keccak256(EIP-1167 creation code of the template)); the salt is in the pending calldata, deployer and template are pre-execution state, but which of the two pairs a launch uses is not named before execution; scope: the two table pairs only, other templates or the CREATE path stay UNKNOWN",
+                    n - second,
+                    d.salt_location
                 );
             }
         } else if n == 0 {
@@ -2257,8 +2303,9 @@ impl FamilyEval<'_> {
             "sell_event".into(),
             proven(sell_event.is_some_and(FixtureView::passed)),
             format!(
-                "{}; SELL events seen in the fetched receipts: {}; layout from the published ABI, token and seller positions checked, amount semantics UNKNOWN (Phase G)",
+                "{}; SELL events seen in the fetched receipts{}: {}; layout from the published ABI, token and seller positions checked, amount semantics UNKNOWN (Phase G)",
                 self.sell_status(),
+                if self.scan.direct_calls_only { " (direct calls only)" } else { "" },
                 self.scan.sell_events[fi(self.family)]
             ),
         ));
@@ -2334,9 +2381,7 @@ impl FamilyEval<'_> {
                             .any(|a| a.tx == f.found.receipt.transaction_hash && a.matched)
                 })
             };
-            // Only a launch pass over the whole window can name every
-            // preset in use.
-            let complete = self.scan.launch_pass.missed_from.is_none() && self.scan.error.is_none();
+            let complete = self.scan.launch_pass_complete();
             out.push((
                 "presets_in_use".into(),
                 proven(complete && !presets.is_empty() && presets.keys().all(reproduced)),
@@ -3473,6 +3518,39 @@ mod tests {
         }
     }
 
+    /// R12b review M3: with receipts of direct calls only, every coverage
+    /// statement and stop reason says so.
+    #[test]
+    fn direct_call_receipts_are_named_in_every_coverage_statement() {
+        let mut scan = ScanOutcome {
+            from: 10,
+            search_to: 20,
+            ..ScanOutcome::default()
+        };
+        assert_eq!(scan.stop_reason(), "WINDOW_COMPLETE");
+        assert!(!scan.coverage().contains("direct calls"));
+        scan.direct_calls_only = true;
+        assert_eq!(scan.stop_reason(), "WINDOW_COMPLETE_DIRECT_CALLS_ONLY");
+        assert!(scan.coverage().contains(", direct calls only"));
+        let pass = scan.launch_coverage(5);
+        assert!(
+            pass.contains("(direct calls only)")
+                && pass.ends_with("WINDOW_COMPLETE_DIRECT_CALLS_ONLY"),
+            "{pass}"
+        );
+        scan.stopped_at = Some(15);
+        assert_eq!(
+            scan.stop_reason(),
+            "RECEIPT_BUDGET_EXHAUSTED_DIRECT_CALLS_ONLY"
+        );
+        // R12b review M2: a direct-calls pass never names every preset.
+        assert!(!scan.launch_pass_complete());
+        scan.direct_calls_only = false;
+        assert!(scan.launch_pass_complete());
+        scan.launch_pass.missed_from = Some(12);
+        assert!(!scan.launch_pass_complete());
+    }
+
     #[test]
     fn utc_stamps_are_civil_time() {
         assert_eq!(utc_stamp(0), "19700101T000000Z");
@@ -3487,10 +3565,13 @@ mod tests {
         assert!(ok.starts_with("https://"));
     }
 
-    /// The real freeze against the configured free endpoint (network).
+    /// The real freeze against the free archive endpoint named by
+    /// `BSC_FREE_ARCHIVE_RPC` (network).
     #[test]
     #[ignore = "live read-only BSC RPC and Sourcify"]
     fn live_freeze_against_the_free_rpc() {
+        let rpc = std::env::var("BSC_FREE_ARCHIVE_RPC")
+            .expect("BSC_FREE_ARCHIVE_RPC names the free archive endpoint");
         let out = std::env::temp_dir().join(format!("g01-four-freeze-live-{}", std::process::id()));
         let args = Args::parse([
             "--archive".to_string(),
@@ -3498,8 +3579,12 @@ mod tests {
                 .join(contracts::ARCHIVE_DEFAULT)
                 .display()
                 .to_string(),
-            "--rpc-config".into(),
-            repo_root().join(defaults::RPC_CONFIG).display().to_string(),
+            "--rpc".into(),
+            rpc,
+            "--rpc-min-interval-ms".into(),
+            "1000".into(),
+            "--receipts".into(),
+            "direct-calls".into(),
             "--out-root".into(),
             out.display().to_string(),
             "--scan-blocks".into(),

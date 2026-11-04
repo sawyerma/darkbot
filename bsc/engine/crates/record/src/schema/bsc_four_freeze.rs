@@ -519,7 +519,9 @@ pub mod four_freeze {
         /// was examined; older blocks of the window were not when the
         /// receipt budget ran out.
         pub const EXAMINED_FROM_BLOCK: u16 = 18;
-        /// `WINDOW_COMPLETE` or `RECEIPT_BUDGET_EXHAUSTED`.
+        /// `WINDOW_COMPLETE` or `RECEIPT_BUDGET_EXHAUSTED`, each with the
+        /// suffix `_DIRECT_CALLS_ONLY` when only the receipts of direct calls
+        /// were read (every count of the record is then of those).
         pub const STOP_REASON: u16 = 19;
         /// Blocks of the whole window whose bloom can hold any scanned
         /// event, fetched or not.
