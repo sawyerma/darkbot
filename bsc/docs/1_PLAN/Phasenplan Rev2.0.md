@@ -99,7 +99,7 @@ Der folgende Text ist als technische Ausgangsversion **wortgetreu** aus der bere
 ## 1. Zweck und Grenzen
 
 - Die Watch hält je Subjekt fest, ob die qualifizierten Voraussetzungen **jetzt** gelten. Gelten sie nicht, sperrt sie neue BUYs sofort.
-- Der native Owner (`sources.rs`) bleibt die einzige wirtschaftliche Autorität. Die Watch gibt nie frei, sendet nie und requalifiziert nie automatisch.
+- Der native Owner (`sources/`) bleibt die einzige wirtschaftliche Autorität. Die Watch gibt nie frei, sendet nie und requalifiziert nie automatisch.
 - Fail-closed: nie geprüft, veraltet, fehlgeschlagen, widersprüchlich, durch Reorg entwertet oder nicht speicherbar ist nie OK.
 - Kein I/O im BUY-Pfad. Chain-Abfragen und Simulationen laufen im Probe-Worker; der BUY-Pfad liest nur `GateCell`.
 - Jede sichtbare Zustandsänderung ist ein `WatchEvent`: im Journal gespeichert und im Frontend angezeigt.
@@ -190,7 +190,7 @@ Ein BUY braucht immer `Chain`, `Watch`, `Execution` und jedes Subjekt der Route 
 //! every source, venue and send adapter) this module holds whether the
 //! qualified prerequisites hold *now*. Decisions go only through a
 //! [`GateCell`] (the newest published state, bound to one head) and a typed
-//! [`BuyRoute`]; the native owner (`sources.rs`) stays the one economic
+//! [`BuyRoute`]; the native owner (`sources/`) stays the one economic
 //! authority. This module admits and sends nothing.
 //!
 //! No I/O on the BUY hot path: the follower, the ingress, the adapters and
@@ -1800,7 +1800,7 @@ mod tests {
    - Nach dem 063-Fix gelten Transaktionen von Admin-EOAs als relevant für die Signer-Wiederherstellung.
    - V5-Zähler im bestehenden `classify`-Pfad.
 7. **`runtime_live.rs`, Prüfstelle 1:** `BuyRoute::new(venue, Quelle, OK-Adapter ∩ Grant-Adapter)` → `gate_cell.allows_buy()`. Ohne Route: `Refusal::Watch`. Die `BuyClearance` wird bis zur Barriere mitgegeben.
-8. **`sources.rs`, Prüfstelle 2:**
+8. **`sources/`, Prüfstelle 2:**
    - `admit_live` prüft mit `gate_cell.allows_buy()` am neuesten Stand.
    - Neue `LIVE_CONDITIONS`-Zeile „WATCH“.
    - Die Deployment-Auswahl je Venue muss `watch.active_freeze(venue)` entsprechen, sonst ist das Venue nicht handelbar.

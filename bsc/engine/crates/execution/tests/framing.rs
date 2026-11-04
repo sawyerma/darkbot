@@ -629,8 +629,8 @@ fn neither_end_plans_or_frames_on_its_own() {
     let paper = include_str!("../src/paper_exec.rs");
     let paper = &paper[paper.find("impl End for PaperEnd").unwrap()..];
     let paper = &paper[..paper.find("\n}\n").unwrap()];
+    // Audit E 5.13: LiveEnd's tests are their own file; this one is production.
     let live = include_str!("../src/live_end.rs");
-    let live = &live[..live.find("#[cfg(test)]\npub(crate) mod tests").unwrap()];
     for (end, source) in [("PaperEnd", paper), ("LiveEnd", live)] {
         for own in [
             "PlanInputs {",

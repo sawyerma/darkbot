@@ -20,7 +20,7 @@ Pakete aus den Audits A–E (01.11.); fertig = Code + Tests + Review + Gate + CI
 | R12 | Four Classic/OpenFour Economics + Ausführung | EXTERNAL_BLOCKED: Quote-Formel unbewiesen (Implementierungen unverifiziert, Key nötig; bezeugte BUYs ohne native BNB/Slippage), Encoder ohne Quote = toter Code; `FOUR_EXECUTION_PATH_MISSING` bleibt | – |
 | R13 | FOREIGN_AUTO-Profile | EXTERNAL_BLOCKED: keine fremde Launch-Klasse mit bezeugtem Zustand (Creator-Buy, Nicht-BNB-Quote, Steuerdauer, Identitätsbindung); erst Zensus der 7-Tage-Kampagne → Klasse → freie RPC-Probe je Klasse | – |
 | R14 | fmt/clippy-CI, Läufe nach 03.11., Rebaseline, Gesamtabnahme | OFFEN | – |
-| E1–E11 | Audit E (Pflichtstatus unten) | TEILWEISE (E-A, E2–E10 fertig; Rest offen) | E-A `8a9584d9`…`f6156fa0` |
+| E1–E11 | Audit E (Pflichtstatus unten) | FERTIG (E-A, E1–E11; jede KEEP-Zeile begründet, E1-Rest 2.1/2.2/2.18 in R10a) | E-A `8a9584d9`…`f6156fa0` |
 
 **BSC-Gate je Paket** (technischer Nachweis, nicht REV.1.0-Status):
 
@@ -35,7 +35,7 @@ Pakete aus den Audits A–E (01.11.); fertig = Code + Tests + Review + Gate + CI
 | R3b-2a | GR3b2a5 (Workspace 1667/0/27, bsc_tools, Clippy, F0-VAR; 26 Mutanten RED; Review PASS nach 2 Runden) | GATE_OK | `b3523732` |
 | R3b-2b-1 | GR3b2b1c (Workspace 1669/0/27, bsc_tools, Clippy, F0-VAR; Gateway 61+18+4, Clippy, fmt; 21 Mutanten RED; Review PASS + Re-Check PASS) | GATE_OK | `4a1bae86` |
 | R3b-2b-2 | GR3b2b2 (Workspace 1669/0/27, bsc_tools, Clippy, F0-VAR) + gezielt nach Review-Fix (execution lib, Status, Gateway, vitest 155, test:bsc 9) | GATE_OK | dieser Commit |
-| R4–R11, E2–E10 | Messplan §2a.5 (T69–T89) | GATE_OK (Lastflakes nur mit grüner Wiederholung) | s. dort |
+| R4–R11, E2–E11 | Messplan §2a.5 (T69–T90) | GATE_OK (Lastflakes nur mit grüner Wiederholung) | s. dort |
 
 **Audit E — Pflichtstatus je Befund** (FIX / FIX+REPIN / FIX+REFREEZE / KEEP mit Grund; Abschluss = Commit):
 
@@ -79,7 +79,7 @@ Pakete aus den Audits A–E (01.11.); fertig = Code + Tests + Review + Gate + CI
 | 4.16 drei RLP-Decoder | FIX (C1-Freeze geprüft) | E9 | dieser Commit (ein Decoder `tx_encoding::rlp::take_item`, kanonisch; geth_ipc-Envelopes darauf, trading-Legacy schon; C1-Freeze `818525b1` historisch unverändert, `decode_tx_target` 42 ns vorher/nachher; Probe-Plan-Pin neu: Cargo.lock) |
 | 5.2–5.4, 5.6 Hotpath-Mehrfachdecode, Dedup-Reihenfolge, Polling vor BUY, lineare Suche | FIX (Latenz/Speicher vorher/nachher) | E5 | dieser Commit: 5.3 FIX (Doppelsichtung übernimmt die Klassifikation, 167 → 41 ns), 5.6 FIX (Karte + Ring mit Ankunftsnummer, schlimmster Fall 146,7 µs → 42 ns, Speicher an der Grenze 262144 bis ~42 MB statt 8 MB); 5.2 KEEP (Executor prüft gegen sein eigenes Deployment/Calldata-Limit, 166 ns = 0,24 % des Pfads), 5.4 KEEP (C2-Pending vor dem BUY: `snapshot_id` braucht den Kandidaten; Antworten vorher lesen gibt die Verbindung frei, eine Anfrage je Verbindung) |
 | 5.7, 5.8, 5.10–5.12 Testpfad-Module, test-only pub fns, Store-Reste, Konstanten, Doku | FIX | E2 | 5.10, 5.11 E-A `8a9584d9`; 5.7/5.8/5.12 dieser Commit (KEEP: `OwnLaunch::from_signed_legacy` einziger Konstruktor; geth_ipc-/Economics-gebundene → E10) |
-| 5.13 Gott-Module | FIX+REPIN | E11 | – |
+| 5.13 Gott-Module | FIX+REPIN | E11 | dieser Commit (Tests von 8 Modulen in eigene Dateien, `runtime_live.rs` 13,8k → 3,7k Zeilen; `sources.rs` → `sources/` nach Aufgaben (ids, reasons, grant, admission, store, mod); `runtime.rs` → `runtime_config.rs` + `runtime_canonical.rs`; reine Verschiebung, Wort-Token-Abgleich gegen HEAD ohne Verlust; Pins neu ausgerichtet) |
 
 ## Verbindliches Messregister (27.10.2026)
 

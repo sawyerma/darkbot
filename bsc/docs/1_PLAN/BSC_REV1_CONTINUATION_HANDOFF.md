@@ -260,7 +260,7 @@ Commit-Text: `git log -1 --format=%B 49bcd98f`, auch in `scratch/r3a/msgR3a.txt`
   - Block und Receipts über den Follower-Abruf (`eth_getBlockByNumber(n,true)` + `eth_getBlockReceipts`, `chain_follower/follow.rs`) und `launches::flap_events`.
   - Fakten INCLUDED/REVERTED mit `source=RECEIPT`.
   - Ohne Receipt und mit bestätigter Konto-Nonce > Tx-Nonce (C2-Nonce-Fakten, `runtime_state.rs`) → REPLACED mit `source=NONCE`.
-  - Begrenzt per Config (neue Schlüssel z. B. `BSC_CANONICAL_RECOVERY_READS_MAX`/`_RETRY_MS`), als Lese-Thread wie der Kurvenleser in R1 (`runtime.rs` `ask_lot_reads`).
+  - Begrenzt per Config (neue Schlüssel z. B. `BSC_CANONICAL_RECOVERY_READS_MAX`/`_RETRY_MS`), als Lese-Thread wie der Kurvenleser in R1 (`runtime_canonical.rs` `ask_lot_reads`).
   - Offen ist, wie das sauber an `on_canonical` andockt, ohne den laufenden Blockzustand (`self.block`, `seen`) zu stören: nur zwischen den Blöcken verarbeiten.
 - **Nonce-Burn gesperrt** (R3b-2a `b3523732`): `bsc_runtime live nonce-burn`, Default `BSC_EXEC_LIVE_NONCE_BURN=OFF`, nur bei Gate CLEAR plus Grant; 0-Wert-Self-Transfer → REPLACED; nur Loopback-Tests, **nie real senden**.
 - **Gateway/Frontend-Aktionen** für die R3-Befehle (Audit A: CLI + Gateway + `LiveActions.tsx`, CAS, gesperrt), zusammen mit R10: CLI-CAS, Gateway und darkbotctl R3b-2b-1 (dieser Commit); `LiveActions.tsx` R3b-2b-2 offen: zuerst `Ledger::version()` (= `count()`, quarantänierte Nummern eingeschlossen, nicht `facts().len()`) in `BscLiveState` projizieren (schema_id + BSC-Golden), `config_version` = Ledger-Version für Lot/Burn im Wire-Vertrag nennen.
@@ -284,7 +284,7 @@ Der Commit-Text von `1d29cec7` (`git log -1 --format=%B 1d29cec7`, Kopie `scratc
   - `Book.misplaced` = BTreeSet der Grant-Generationen mit einem PLACED ≠ FIRST, aus jedem PLACED-Fakt, auch später verwaisten.
   - **Halt:** `buy_refusal` prüft zuerst `LIVE_PLACEMENT_VIOLATED`; Exits laufen weiter; frei erst durch einen neuen Grant.
   - `Ledger::stamped()`.
-- **Auswerter** `execution/src/live_attempts.rs` (~4100 Zeilen): `bsc_runtime live attempts --rundir --state --config [--manifest] [--witness-dir]`.
+- **Auswerter** `execution/src/live_attempts.rs` (~2400 Zeilen, Tests in `live_attempts_tests.rs`): `bsc_runtime live attempts --rundir --state --config [--manifest] [--witness-dir]`.
   - Je geschriebenem LIVE-BUY ein Record `bsc-runtime/live-attempts/<tx>.dbrec` (`darkbot.bsc.live-attempt.v1`, record_type 71). Inhalt:
     - Zustand (DROPPED nach Fensterende = unaufgelöst/UNKNOWN), Inklusion, Tokens (nur aus dem eigenen Portal-BUY), Kosten, Platzierung
     - lokale Zeiten ingress→send, select→send, send→ACK (nur auf qualifizierter Sendezeit)
@@ -374,11 +374,11 @@ Ob in `wtEA` alle gemeinsamen Dateien korrekt neu erzeugt sind, ist UNVERIFIZIER
 - **BSC3-081:** Nur effektiv LIVE geschaltete Grant-Quellen lösen einen LIVE-BUY aus (`SOURCE_NOT_LIVE` gezählt).
 - **BSC3-082:** Offene Lots nach Restart, Gap oder Reorg:
   - Die Kurve wird blockgebunden gelesen (getTokenV8Safe, nftGate) und das Lot erneut gehalten, solange nicht überholt (journalisiert `k`).
-  - Bis dahin gilt EXIT_FIRST. Off-curve, unpriced oder unlesbar → gestrandet, kein neuer BUY (`runtime.rs` `LotDeciders`, `hold_read_lots`, `ask_lot_reads`, `refresh_lot_deciders`).
+  - Bis dahin gilt EXIT_FIRST. Off-curve, unpriced oder unlesbar → gestrandet, kein neuer BUY (`runtime_canonical.rs` `LotDeciders`, `hold_read_lots`, `ask_lot_reads`, `refresh_lot_deciders`).
 - **BSC3-083:** `live bound-inputs`; `bsc/tools/status_sync.py` kopiert genau die gebundenen Qualifikationsdateien in den Snapshot.
 - **BSC3-084:** `source init` legt nur an, `source reset` beim Stopp; `live idle`; Deploy verweigert bei aktivem LIVE ohne `--stop-live`.
 - **Vier LOW-Folgepunkte aus dem R1-Re-Check, alle in R2 `1d29cec7` umgesetzt und getestet:**
-  1. Überholte Lesung wird sofort erneut gefragt, kein Backoff (`runtime.rs hold_read_lots`, Zweig `Ok(_) if r.overtaken`; Mutant N7 RED).
+  1. Überholte Lesung wird sofort erneut gefragt, kein Backoff (`runtime_canonical.rs hold_read_lots`, Zweig `Ok(_) if r.overtaken`; Mutant N7 RED).
   2. Ein verweigerter Read strandet erst beim `BSC_CANONICAL_LOT_READ_REFUSED_MAX`-ten Mal in Folge (3; `refused_in_a_row`; Mutanten N8/N33 RED; Test `refused_answers_count_only_in_a_row`).
   3. `Engine::holds` verlangt `priced().is_ok()` (`trading/src/strategy/engine.rs`; Mutant N6 RED; Test `a_held_position_without_its_terms_is_not_held`).
   4. Creator-Sale, während ein Lot auf erneutes Halten wartet, bleibt erhalten und zählt beim Halten (Mutant N5 RED; Test `a_creator_sale_while_a_position_waits_to_be_held_again_still_counts`). Restrisiko ist nur noch, dass ein Verkauf die Lesung überholt; das wird erkannt und erneut gelesen.
@@ -458,7 +458,7 @@ Der Pfadpräfix für Rust ist `bsc/engine/crates/`. „UNVERIFIZIERT“ heißt: 
 1. **Quellen → Ingress:**
    - WSS-Adapter `execution/src/wss/` (u. a. `BSC_MAINNET_CHAIN_ID`), gestartet in `execution/src/runtime.rs` `spawn_adapter`.
    - Ein Kanal (`sync_channel`; per-source Queues sind R6).
-   - Quellen-Modi und Owner: `execution/src/sources.rs` (`Store`, `SourceId`, `Mode`, `Effective`, Gate `live_effective`/`live_clear`).
+   - Quellen-Modi und Owner: `execution/src/sources/` (`Store`, `SourceId`, `Mode`, `Effective`, Gate `live_effective`/`live_clear`).
    - Persistent: `bsc-sources/generations/*` (Owner-Generationen, CAS über Request-ID und `--expect-generation`).
    - Restart: `source reset` beim Stopp, `source init` legt nur an (R1).
 2. **Kanonische Validierung:**
@@ -473,7 +473,7 @@ Der Pfadpräfix für Rust ist `bsc/engine/crates/`. „UNVERIFIZIERT“ heißt: 
    - C3 (Launch-BUY) über `execution/src/runtime_exec.rs` (`launch_to`).
 3a. **Economics:** `trading/src/economics/` (`policy.rs`, `flap/native_curve20`; Slippage BUY/Exit getrennt per `BSC_EXEC_SLIPPAGE_BPS`/`BSC_EXEC_EXIT_SLIPPAGE_BPS`). Der Grant begrenzt Risiko und Gas (`GrantRisk`, `GrantLimits` in `sources.rs`).
 4. **Owner-Admission (Autorität):**
-   - `sources.rs` `Store::admit_live`, `lease_live` (BSC3-076), `return_leases`, neu `return_attempt` (R3a).
+   - `sources/store.rs` `Store::admit_live`, `lease_live` (BSC3-076), `return_leases`, neu `return_attempt` (R3a).
    - Persistent:
      - `buy-attempts/<UTC-Tag>/<slot>.dbrec` (record 64)
      - `buy-attempts-total/<slot>.dbrec` (65)
@@ -506,7 +506,7 @@ Evidence- und Record-Schemas: `record/src/schema/bsc_runtime.rs` (Liste `ALL`) u
 
 Deployment-/ABI-Pins: Flap-Deployment-Konstanten (KEEP, Audit 3.10), G0.7-Freeze (acceptance_guard, `g07_builder_probe` PROBE_SOURCES, economics BOUND_FILES), Pins in `bsc-fields.json`.
 
-Integrations-Tests (Auswahl, nachgewiesen grün im Gate): `execution/tests/live_e2e.rs`, `runtime_live.rs`-Tests (z. B. `a_live_release_is_journaled_and_evaluated_as_its_attempt`), `bsc_tools` (7 Tool-Tests), `frontend` `bsc.spec.ts`.
+Integrations-Tests (Auswahl, nachgewiesen grün im Gate): `execution/tests/live_e2e.rs`, `runtime_live_tests.rs` (z. B. `a_live_release_is_journaled_and_evaluated_as_its_attempt`), `bsc_tools` (7 Tool-Tests), `frontend` `bsc.spec.ts`.
 
 ---
 
