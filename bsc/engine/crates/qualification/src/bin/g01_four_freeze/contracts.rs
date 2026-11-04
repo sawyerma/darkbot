@@ -86,6 +86,8 @@ pub const TOKEN_MANAGER_V1: &str = "TokenManagerV1";
 pub const HELPER3: &str = "TokenManagerHelper3";
 pub const CLASSIC_TOKEN_DEPLOYER: &str = "ClassicTokenDeployer";
 pub const CLASSIC_TOKEN_TEMPLATE: &str = "ClassicTokenTemplate";
+pub const CLASSIC_TOKEN_DEPLOYER_2: &str = "ClassicTokenDeployer2";
+pub const CLASSIC_TOKEN_TEMPLATE_2: &str = "ClassicTokenTemplate2";
 pub const REGISTRY: &str = "OpenFourRegistry";
 pub const CORE: &str = "OpenFourCore";
 pub const TOOLS: &str = "OpenFourTools";
@@ -158,6 +160,31 @@ pub const CONTRACTS: &[ContractInput] = &[
         archived_code: None,
         archived_implementation_code: None,
         source: "observed 2026-10-26: EIP-1167 target of token 0xa89a24209a3ae8ba1ffb3f0567b69ef4765bffff",
+    },
+    // The second Classic (deployer, template) pair TokenManager2 launches
+    // with (Paket 8 review H1, tokens ending 4444): its launches reproduce
+    // under it, never under the first.
+    ContractInput {
+        family: Family::Classic,
+        role: CLASSIC_TOKEN_DEPLOYER_2,
+        resolution: Resolution::Table(address!("0xe8ce4e9175de23f97f853e19c522ef29cebf13e3")),
+        scope: Scope::DerivationInput,
+        proxy: false,
+        abi: None,
+        archived_code: None,
+        archived_implementation_code: None,
+        source: "observed 2026-10-27: the CREATE2 deployer of the witnessed launches of trading fixtures/fourmeme/classic_template2_20261027.txt",
+    },
+    ContractInput {
+        family: Family::Classic,
+        role: CLASSIC_TOKEN_TEMPLATE_2,
+        resolution: Resolution::Table(address!("0x46862924e2a229170ebd065e24a0da72af58a986")),
+        scope: Scope::DerivationInput,
+        proxy: false,
+        abi: None,
+        archived_code: None,
+        archived_implementation_code: None,
+        source: "observed 2026-10-27: EIP-1167 target of the tokens of trading fixtures/fourmeme/classic_template2_20261027.txt",
     },
     ContractInput {
         family: Family::OpenFour,

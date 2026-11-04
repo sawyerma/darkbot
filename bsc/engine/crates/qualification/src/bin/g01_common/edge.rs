@@ -14,7 +14,9 @@ use alloy_primitives::{Address, B256, Bloom, U256};
 use darkbot_bsc_execution::rpc_wire::{self, Limits};
 use serde_json::Value as Json;
 use std::collections::BTreeMap;
-use std::{env, io::Write, process::Command, process::Stdio, thread, time::Duration};
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
+use std::{env, io::Write, process::Command, process::Stdio, thread};
 
 pub const BSC_CHAIN_ID: u64 = 56;
 
@@ -190,12 +192,93 @@ pub fn require_tx_at(tx: &Tx, receipt: &Receipt) -> Result<(), String> {
 
 // ---- JSON-RPC -------------------------------------------------------------------
 
+/// Where a block's receipts come from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ReceiptSource {
+    /// `eth_getBlockReceipts(blockHash)`: one call per block.
+    Block,
+    /// `eth_getBlockByHash(blockHash, false)`, then `eth_getTransactionReceipt`
+    /// of every transaction in batches of `batch`: an endpoint without the
+    /// block method (the free archive endpoint refuses it).
+    Transactions { batch: usize },
+    /// `eth_getBlockByHash(blockHash, true)`, then `eth_getTransactionReceipt`
+    /// of each transaction to one of the scanned contracts only: the direct
+    /// calls (an endpoint whose request budget cannot carry every receipt).
+    DirectCalls { batch: usize },
+}
+
+impl ReceiptSource {
+    /// The calls, for the record's method text.
+    pub fn method(self) -> &'static str {
+        match self {
+            Self::Block => "eth_getBlockReceipts(blockHash)",
+            Self::Transactions { .. } => {
+                "eth_getBlockByHash(blockHash, false) THEN eth_getTransactionReceipt of each transaction"
+            }
+            Self::DirectCalls { .. } => {
+                "eth_getBlockByHash(blockHash, true) THEN eth_getTransactionReceipt of each direct call to a scanned contract (DIRECT_CALLS_ONLY)"
+            }
+        }
+    }
+
+    /// Whether the receipts are the direct calls only.
+    pub fn direct_calls_only(self) -> bool {
+        matches!(self, Self::DirectCalls { .. })
+    }
+}
+
+/// Whether an answer is the endpoint's request-rate limit (JSON-RPC error
+/// 429, alone or in a batch): a refusal to answer, retried like a failed
+/// transport, never an answer.
+fn rate_limited(bytes: &[u8]) -> bool {
+    let code = |v: &Json| {
+        v.get("error")
+            .and_then(|e| e.get("code"))
+            .and_then(Json::as_i64)
+    };
+    match serde_json::from_slice::<Json>(bytes) {
+        Ok(Json::Array(items)) => items.iter().any(|i| code(i) == Some(429)),
+        Ok(v) => code(&v) == Some(429),
+        Err(_) => false,
+    }
+}
+
 /// A read-only JSON-RPC endpoint and the bounds of every call.
 pub struct Endpoint {
     url: String,
     limits: Limits,
     attempts: u32,
     retry_pause: Duration,
+    /// The least time between two requests (zero: none): an endpoint's
+    /// request-rate limit.
+    min_interval: Duration,
+    last_request: Mutex<Option<Instant>>,
+    receipts: ReceiptSource,
+}
+
+/// How long a request must wait so that it starts `min_interval` after the
+/// previous one (`last`), at `now`.
+fn pace_wait(last: Option<Instant>, min_interval: Duration, now: Instant) -> Duration {
+    last.map_or(Duration::ZERO, |t| {
+        (t + min_interval).saturating_duration_since(now)
+    })
+}
+
+/// The transaction hashes of a hashes-only block, which must be the block of
+/// `header`.
+fn tx_hashes_of(v: &Json, header: &Header) -> Result<Vec<B256>, String> {
+    if req(v, "hash", b256_of)? != header.hash || req(v, "number", u64_of)? != header.number {
+        return Err(format!(
+            "asked for block {} {}, got another",
+            header.number, header.hash
+        ));
+    }
+    field(v, "transactions")?
+        .as_array()
+        .ok_or("transactions are not a list")?
+        .iter()
+        .map(|t| b256_of(t, "transaction hash"))
+        .collect()
 }
 
 fn quantity(n: u64) -> String {
@@ -573,7 +656,31 @@ impl Endpoint {
             limits,
             attempts: attempts.max(1),
             retry_pause,
+            min_interval: Duration::ZERO,
+            last_request: Mutex::new(None),
+            receipts: ReceiptSource::Block,
         }
+    }
+
+    /// At most one request per `min_interval`.
+    pub fn paced(mut self, min_interval: Duration) -> Self {
+        self.min_interval = min_interval;
+        self
+    }
+
+    /// Receipts from `receipts` instead of `eth_getBlockReceipts`.
+    pub fn with_receipts(mut self, receipts: ReceiptSource) -> Self {
+        self.receipts = receipts;
+        self
+    }
+
+    fn pace(&self) {
+        if self.min_interval.is_zero() {
+            return;
+        }
+        let mut last = self.last_request.lock().unwrap_or_else(|p| p.into_inner());
+        thread::sleep(pace_wait(*last, self.min_interval, Instant::now()));
+        *last = Some(Instant::now());
     }
 
     /// One POST, retried on transport failure only (a JSON-RPC answer,
@@ -581,12 +688,14 @@ impl Endpoint {
     fn post(&self, body: &str) -> Result<Vec<u8>, String> {
         let mut last = String::new();
         for attempt in 1..=self.attempts {
+            self.pace();
             let mut curl = Command::new("curl");
             curl.env_clear();
             if let Some(path) = env::var_os("PATH") {
                 curl.env("PATH", path);
             }
             match rpc_wire::post(curl, &self.url, body, self.limits) {
+                Ok(bytes) if rate_limited(&bytes) => last = "rate limited (JSON-RPC 429)".into(),
                 Ok(bytes) => return Ok(bytes),
                 Err(e) => last = e,
             }
@@ -630,22 +739,23 @@ impl Endpoint {
         Ok(header)
     }
 
-    /// The headers `from..=to` in one batch, each for exactly its height.
+    /// The headers `from..=to` in one batch (`eth_getBlockByNumber`, hashes
+    /// only: the standard method), each for exactly its height.
     pub fn headers(&self, from: u64, to: u64) -> Result<Vec<Header>, String> {
         let n = usize::try_from(to - from + 1).map_err(|_| "header range too large")?;
         let requests: Vec<String> = (0..n as u64)
             .map(|i| {
                 body(
                     i,
-                    "eth_getHeaderByNumber",
-                    &format!("[{}]", quantity(from + i)),
+                    "eth_getBlockByNumber",
+                    &format!("[{},false]", quantity(from + i)),
                 )
             })
             .collect();
         let bytes = self.post(&format!("[{}]", requests.join(",")))?;
         let v: Json = serde_json::from_slice(&bytes)
-            .map_err(|e| format!("invalid eth_getHeaderByNumber batch: {e}"))?;
-        batch_results("eth_getHeaderByNumber", &v, n)?
+            .map_err(|e| format!("invalid eth_getBlockByNumber batch: {e}"))?;
+        batch_results("eth_getBlockByNumber", &v, n)?
             .iter()
             .enumerate()
             .map(|(i, h)| {
@@ -696,8 +806,104 @@ impl Endpoint {
             .collect()
     }
 
-    /// Every receipt of exactly the block of `header` (by hash).
+    /// Every receipt of exactly the block of `header` (by hash), from the
+    /// endpoint's [`ReceiptSource`] (per transaction for either of its
+    /// per-transaction sources).
     pub fn block_receipts(&self, header: &Header) -> Result<Vec<Receipt>, String> {
+        match self.receipts {
+            ReceiptSource::Block => self.receipts_of_block(header),
+            ReceiptSource::Transactions { batch } | ReceiptSource::DirectCalls { batch } => {
+                self.receipts_per_transaction(header, None, batch)
+            }
+        }
+    }
+
+    /// The receipts a scan of `scanned` reads in the block of `header`:
+    /// with [`ReceiptSource::DirectCalls`] those of the transactions to one
+    /// of `scanned` only, else every receipt.
+    pub fn receipts_for(
+        &self,
+        header: &Header,
+        scanned: &[Address],
+    ) -> Result<Vec<Receipt>, String> {
+        match self.receipts {
+            ReceiptSource::DirectCalls { batch } => {
+                self.receipts_per_transaction(header, Some(scanned), batch)
+            }
+            _ => self.block_receipts(header),
+        }
+    }
+
+    /// The receipts of the block's transactions (`only_to`: those to one of
+    /// these contracts), in batches of `batch`.
+    fn receipts_per_transaction(
+        &self,
+        header: &Header,
+        only_to: Option<&[Address]>,
+        batch: usize,
+    ) -> Result<Vec<Receipt>, String> {
+        let v = self.value(
+            "eth_getBlockByHash",
+            &format!("[{},{}]", data(header.hash.as_slice()), only_to.is_some()),
+        )?;
+        if v.is_null() {
+            return Err(format!("block {} unknown to the endpoint", header.hash));
+        }
+        let hashes = match only_to {
+            None => tx_hashes_of(&v, header)?,
+            Some(scanned) => {
+                let block =
+                    full_block_of(&v).map_err(|e| format!("block {}: {e}", header.number))?;
+                if block.hash != header.hash || block.number != header.number {
+                    return Err(format!(
+                        "asked for block {} {}, got another",
+                        header.number, header.hash
+                    ));
+                }
+                block
+                    .transactions
+                    .iter()
+                    .filter(|t| t.to.is_some_and(|to| scanned.contains(&to)))
+                    .map(|t| t.hash)
+                    .collect()
+            }
+        };
+        let mut receipts = Vec::with_capacity(hashes.len());
+        for chunk in hashes.chunks(batch.max(1)) {
+            let requests: Vec<String> = chunk
+                .iter()
+                .enumerate()
+                .map(|(i, h)| {
+                    body(
+                        i as u64,
+                        "eth_getTransactionReceipt",
+                        &format!("[{}]", data(h.as_slice())),
+                    )
+                })
+                .collect();
+            let bytes = self.post(&format!("[{}]", requests.join(",")))?;
+            let v: Json = serde_json::from_slice(&bytes)
+                .map_err(|e| format!("invalid eth_getTransactionReceipt batch: {e}"))?;
+            for (r, hash) in batch_results("eth_getTransactionReceipt", &v, chunk.len())?
+                .iter()
+                .zip(chunk)
+            {
+                if r.is_null() {
+                    return Err(format!("receipt of {hash} unknown to the endpoint"));
+                }
+                let receipt = receipt_of(r)
+                    .map_err(|e| format!("receipt of {hash} in block {}: {e}", header.number))?;
+                if receipt.transaction_hash != *hash {
+                    return Err(format!("asked for the receipt of {hash}, got another"));
+                }
+                receipts.push(receipt);
+            }
+        }
+        require_receipts_of(header, &receipts)?;
+        Ok(receipts)
+    }
+
+    fn receipts_of_block(&self, header: &Header) -> Result<Vec<Receipt>, String> {
         let v = self.value(
             "eth_getBlockReceipts",
             &format!("[{}]", data(header.hash.as_slice())),
@@ -1258,6 +1464,59 @@ mod tests {
         .unwrap()
     }
 
+    /// R12b: a hashes-only block names its transactions, and only the
+    /// block asked for does.
+    #[test]
+    fn a_hashes_only_block_lists_its_transactions() {
+        let header = header_of(&header_json(11, "aa")).unwrap();
+        let mut block = header_json(11, "aa");
+        block["transactions"] = serde_json::json!([h("01"), h("02")]);
+        assert_eq!(
+            tx_hashes_of(&block, &header).unwrap(),
+            [B256::repeat_byte(1), B256::repeat_byte(2)]
+        );
+        let other = header_of(&header_json(12, "aa")).unwrap();
+        assert!(tx_hashes_of(&block, &other).is_err());
+        let mut full = block.clone();
+        full["transactions"] = serde_json::json!([{"hash": h("01")}]);
+        assert!(tx_hashes_of(&full, &header).is_err());
+        assert_eq!(
+            ReceiptSource::Transactions { batch: 1 }.method(),
+            "eth_getBlockByHash(blockHash, false) THEN eth_getTransactionReceipt of each transaction"
+        );
+        assert!(ReceiptSource::DirectCalls { batch: 1 }.direct_calls_only());
+        assert!(!ReceiptSource::Transactions { batch: 1 }.direct_calls_only());
+    }
+
+    /// R12b: an endpoint's rate limit, alone or inside a batch, is a refusal
+    /// to retry; any other JSON-RPC error is an answer.
+    #[test]
+    fn a_rate_limit_is_retried_and_an_error_answered() {
+        assert!(rate_limited(
+            br#"{"jsonrpc":"2.0","id":1,"error":{"code":429,"message":"cu"}}"#
+        ));
+        assert!(rate_limited(
+            br#"[{"jsonrpc":"2.0","id":0,"result":"0x1"},{"jsonrpc":"2.0","id":1,"error":{"code":429}}]"#
+        ));
+        assert!(!rate_limited(
+            br#"{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"x"}}"#
+        ));
+        assert!(!rate_limited(br#"{"jsonrpc":"2.0","id":1,"result":"0x1"}"#));
+        assert!(!rate_limited(b"not json"));
+    }
+
+    /// R12b: a paced endpoint starts a request no sooner than its interval
+    /// after the previous one.
+    #[test]
+    fn a_request_waits_out_the_interval() {
+        let t = Instant::now();
+        let ms = Duration::from_millis;
+        assert_eq!(pace_wait(None, ms(1000), t), Duration::ZERO);
+        assert_eq!(pace_wait(Some(t), ms(1000), t + ms(400)), ms(600));
+        assert_eq!(pace_wait(Some(t), ms(1000), t + ms(1500)), Duration::ZERO);
+        assert_eq!(pace_wait(Some(t), Duration::ZERO, t), Duration::ZERO);
+    }
+
     #[test]
     fn a_wrong_chain_is_refused() {
         assert!(require_bsc(56).is_ok());
@@ -1290,7 +1549,7 @@ mod tests {
             header_json(11, "bb")
         ))
         .unwrap();
-        assert!(batch_results("eth_getHeaderByNumber", &batch, 2).is_err());
+        assert!(batch_results("eth_getBlockByNumber", &batch, 2).is_err());
         // Receipts of another block are refused.
         let receipt = Receipt {
             block_number: 11,

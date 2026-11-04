@@ -14,7 +14,12 @@
 //! reference block by hash (EIP-1898); the reference block is pinned by
 //! number and hash and rechecked after the state reads. Free endpoints refuse
 //! `eth_getLogs`, so canonical fixtures come from a bounded header-bloom scan
-//! and `eth_getBlockReceipts` by block hash, parent-linked to the reference.
+//! and `eth_getBlockReceipts` by block hash (or, with `--receipts
+//! transactions`, each transaction's receipt: an endpoint without the block
+//! method; with `--receipts direct-calls` only the receipts of transactions
+//! to TokenManager2 or OpenFour Core, the record's counts then of direct
+//! calls only), parent-linked to the reference. `--rpc-min-interval-ms`
+//! keeps an endpoint's request-rate limit.
 //!
 //! Selectors, topics, code hashes and CREATE2 addresses are alloy's; they
 //! are cross-checked against the archived 2026-09-27 G0.1 inputs (published
@@ -47,14 +52,15 @@ use common::edge;
 use common::sourcify::{SourcifyObs, lookup_sourcify};
 use common::util::{bounded_text, number, rpc_from_config, utc_stamp};
 use contracts::{
-    CLASSIC_TOKEN_DEPLOYER, CLASSIC_TOKEN_TEMPLATE, CONTRACTS, CORE, CREATE_DEPLOYER,
-    ContractInput, Family, HELPER3, REGISTRY, Resolution, Scope, TOKEN_MANAGER2,
+    CLASSIC_TOKEN_DEPLOYER, CLASSIC_TOKEN_DEPLOYER_2, CLASSIC_TOKEN_TEMPLATE,
+    CLASSIC_TOKEN_TEMPLATE_2, CONTRACTS, CORE, CREATE_DEPLOYER, ContractInput, Family, HELPER3,
+    REGISTRY, Resolution, Scope, TOKEN_MANAGER2,
 };
 use darkbot_bsc_execution::rpc_wire::Limits;
 use darkbot_bsc_qualification::c1_common::{self, Args};
 use darkbot_bsc_record::schema::bsc_four_freeze::four_freeze as ff;
 use darkbot_bsc_record::{Draft, Value, decode, sha256};
-use edge::{CallOutcome, Endpoint, Header, Log, Pin, Receipt, Tx};
+use edge::{CallOutcome, Endpoint, Header, Log, Pin, Receipt, ReceiptSource, Tx};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -78,6 +84,11 @@ mod defaults {
     pub const LAUNCH_RECEIPT_BLOCK_BUDGET: u64 = 1000;
     /// `--probe-funds-wei`: the quote amount the read probes pass (0.001 BNB).
     pub const PROBE_FUNDS_WEI: u128 = 1_000_000_000_000_000;
+    /// `--rpc-min-interval-ms`: the least time between two requests (0: none).
+    pub const RPC_MIN_INTERVAL_MS: u64 = 0;
+    /// `--receipt-batch`: receipts per JSON-RPC batch with
+    /// `--receipts transactions`.
+    pub const RECEIPT_BATCH: usize = 100;
 }
 
 fn usage() -> &'static str {
@@ -86,6 +97,7 @@ fn usage() -> &'static str {
      [--receipt-block-budget <n>] [--launch-receipt-block-budget <n>] [--launch-fixtures <n>] \
      [--rpc-connect-timeout-s <s>] \
      [--rpc-max-time-s <s>] [--rpc-attempts <n>] [--rpc-retry-pause-ms <ms>] \
+     [--rpc-min-interval-ms <ms>] [--receipts block|transactions|direct-calls] [--receipt-batch <n>] \
      [--sourcify-base <url> | --no-sourcify] [--sourcify-max-bytes <n>] [--probe-funds-wei <n>]"
 }
 
@@ -104,6 +116,8 @@ struct Config {
     limits: Limits,
     attempts: u32,
     retry_pause: Duration,
+    min_interval: Duration,
+    receipts: ReceiptSource,
     sourcify: Option<String>,
     sourcify_max_bytes: u64,
     probe_funds: U256,
@@ -126,6 +140,9 @@ impl Config {
             "rpc-connect-timeout-s",
             "rpc-max-time-s",
             "rpc-attempts",
+            "rpc-min-interval-ms",
+            "receipts",
+            "receipt-batch",
             "rpc-retry-pause-ms",
             "sourcify-base",
             "no-sourcify",
@@ -185,6 +202,25 @@ impl Config {
                 "rpc-retry-pause-ms",
                 defaults::RETRY_PAUSE_MS,
             )?),
+            min_interval: Duration::from_millis(number(
+                args,
+                "rpc-min-interval-ms",
+                defaults::RPC_MIN_INTERVAL_MS,
+            )?),
+            receipts: match args.opt("receipts")? {
+                None | Some("block") => ReceiptSource::Block,
+                Some("transactions") => ReceiptSource::Transactions {
+                    batch: number(args, "receipt-batch", defaults::RECEIPT_BATCH)?,
+                },
+                Some("direct-calls") => ReceiptSource::DirectCalls {
+                    batch: number(args, "receipt-batch", defaults::RECEIPT_BATCH)?,
+                },
+                Some(other) => {
+                    return Err(format!(
+                        "--receipts: block, transactions or direct-calls, not {other}"
+                    ));
+                }
+            },
             sourcify,
             sourcify_max_bytes: number(args, "sourcify-max-bytes", defaults::SOURCIFY_MAX_BYTES)?,
             probe_funds: U256::from(number(args, "probe-funds-wei", defaults::PROBE_FUNDS_WEI)?),
@@ -411,6 +447,9 @@ struct LaunchPass {
 
 #[derive(Default)]
 struct ScanOutcome {
+    /// The receipts were those of the direct calls only
+    /// (`--receipts direct-calls`).
+    direct_calls_only: bool,
     from: u64,
     search_to: u64,
     headers: u64,
@@ -453,10 +492,15 @@ impl ScanOutcome {
     /// The main scan's examined range, as every statement scopes it.
     fn coverage(&self) -> String {
         let mut c = format!(
-            "blocks {}..={} ({} receipt blocks fetched",
+            "blocks {}..={} ({} receipt blocks fetched{}",
             self.examined_from(),
             self.search_to,
-            self.fetched
+            self.fetched,
+            if self.direct_calls_only {
+                ", direct calls only"
+            } else {
+                ""
+            }
         );
         if self.stopped_at.is_some() {
             c.push_str(&format!(
@@ -469,15 +513,21 @@ impl ScanOutcome {
         c
     }
 
-    /// The OpenFour launch pass: its range, candidates, fetches, stop.
+    /// The OpenFour launch pass: its range, candidates, fetches, stop, and
+    /// whether its receipts were the direct calls only.
     fn launch_coverage(&self, budget: u64) -> String {
         let p = &self.launch_pass;
         format!(
-            "OpenFour launch pass blocks {}..={}: {} bloom candidate blocks, {} receipt blocks fetched of budget {budget}, {}",
+            "OpenFour launch pass blocks {}..={}: {} bloom candidate blocks, {} receipt blocks fetched of budget {budget}{}, {}",
             p.missed_from.map_or(self.from, |b| b + 1),
             self.search_to,
             p.candidates,
             p.fetched,
+            if self.direct_calls_only {
+                " (direct calls only)"
+            } else {
+                ""
+            },
             if p.missed_from.is_some() {
                 "RECEIPT_BUDGET_EXHAUSTED"
             } else {
@@ -492,6 +542,7 @@ impl ScanOutcome {
 /// in their own pass over the whole window.
 fn scan(rpc: &Endpoint, cfg: &Config, headers: &[Header], targets: [Address; 2]) -> ScanOutcome {
     let mut out = ScanOutcome {
+        direct_calls_only: cfg.receipts.direct_calls_only(),
         from: headers.first().map_or(0, |h| h.number),
         search_to: headers.last().map_or(0, |h| h.number),
         headers: headers.len() as u64,
@@ -545,7 +596,7 @@ fn scan_into(
             out.launch_pass.missed_from.get_or_insert(header.number);
             continue;
         }
-        let receipts = rpc.block_receipts(header)?;
+        let receipts = rpc.receipts_for(header, &targets)?;
         out.launch_pass.fetched += 1;
         take_receipts(rpc, cfg, header, receipts, &launch, false, targets, out)?;
     }
@@ -585,7 +636,7 @@ fn scan_into(
             continue;
         }
         out.candidates += 1;
-        let receipts = rpc.block_receipts(header)?;
+        let receipts = rpc.receipts_for(header, &targets)?;
         out.fetched += 1;
         take_receipts(rpc, cfg, header, receipts, &wants, true, targets, out)?;
     }
@@ -1512,12 +1563,20 @@ fn derive(family: Family, launches: &[FixtureView], obs: &Observed) -> Derivatio
         Family::Classic => {
             let deployer = obs.contract(CLASSIC_TOKEN_DEPLOYER);
             let template = obs.contract(CLASSIC_TOKEN_TEMPLATE);
-            let scan = deployer.map(|c| CodeScan::new(&c.code));
-            let embeds = match (&scan, template) {
-                (Some(s), Some(t)) => s.embeds(t.address),
-                _ => false,
+            // Each pair's deployer runtime: a CREATE2 instruction and its
+            // template as an immutable.
+            let pair_checks = |d: Option<&ContractObs>, t: Option<&ContractObs>| {
+                let scan = d.map(|c| CodeScan::new(&c.code));
+                let embeds = match (&scan, t) {
+                    (Some(s), Some(t)) => s.embeds(t.address),
+                    _ => false,
+                };
+                (scan.as_ref().is_some_and(|s| s.create2), embeds)
             };
-            let create2 = scan.as_ref().is_some_and(|s| s.create2);
+            let (create2, embeds) = pair_checks(deployer, template);
+            let deployer_2 = obs.contract(CLASSIC_TOKEN_DEPLOYER_2);
+            let template_2 = obs.contract(CLASSIC_TOKEN_TEMPLATE_2);
+            let (create2_2, embeds_2) = pair_checks(deployer_2, template_2);
             let tm2_creates = obs
                 .contract(TOKEN_MANAGER2)
                 .map(|c| CodeScan::new(c.executing_code()))
@@ -1527,20 +1586,37 @@ fn derive(family: Family, launches: &[FixtureView], obs: &Observed) -> Derivatio
                 reason: String::new(),
                 deployer: deployer.map(|c| c.address),
                 deployer_source: format!(
-                    "TABLE {CLASSIC_TOKEN_DEPLOYER}: runtime CREATE2 instruction {create2}, embeds the template {embeds}; TokenManager2 implementation creates contracts itself: {tm2_creates}"
+                    "TABLE {CLASSIC_TOKEN_DEPLOYER}: runtime CREATE2 instruction {create2}, embeds the template {embeds}; second pair TABLE {CLASSIC_TOKEN_DEPLOYER_2} {:?}: CREATE2 {create2_2}, embeds its template {embeds_2}; TokenManager2 implementation creates contracts itself: {tm2_creates}",
+                    deployer_2.map(|c| addr(c.address))
                 ),
                 template: template.map(|c| c.address),
-                template_source: format!("TABLE {CLASSIC_TOKEN_TEMPLATE} (immutable of the deployer runtime: {embeds})"),
+                template_source: format!(
+                    "TABLE {CLASSIC_TOKEN_TEMPLATE} (immutable of the deployer runtime: {embeds}); second pair TABLE {CLASSIC_TOKEN_TEMPLATE_2} {:?}; a launch reproduces under the pair whose template its token clones",
+                    template_2.map(|c| addr(c.address))
+                ),
                 salt_location: abi::CLASSIC_SALT_LOCATION,
                 attempts: fixtures
                     .iter()
                     .map(|f| {
-                        attempt(
+                        let code = obs.token_codes.get(&f.token);
+                        let clones = code.and_then(|c| abi::eip1167_target(c));
+                        // The second pair only for a token that clones its template.
+                        let second = template_2.is_some_and(|t| clones == Some(t.address));
+                        let (d, t) = if second {
+                            (deployer_2, template_2)
+                        } else {
+                            (deployer, template)
+                        };
+                        let mut a = attempt(
                             f,
-                            deployer.map(|c| c.address),
-                            template.map(|c| c.address).ok_or_else(|| "no template".to_string()),
-                            obs.token_codes.get(&f.token),
-                        )
+                            d.map(|c| c.address),
+                            t.map(|c| c.address).ok_or_else(|| "no template".to_string()),
+                            code,
+                        );
+                        if second {
+                            a.detail.push_str(" (second pair)");
+                        }
+                        a
                     })
                     .collect(),
                 invalidated_by: vec![
@@ -1551,7 +1627,10 @@ fn derive(family: Family, launches: &[FixtureView], obs: &Observed) -> Derivatio
                     "createToken.args layout change (salt position)",
                 ],
             }
-            .with_gate(create2 && embeds, "the deployer runtime holds no CREATE2 instruction or not the template")
+            .with_gate(
+                create2 && embeds && create2_2 && embeds_2,
+                "a pair's deployer runtime holds no CREATE2 instruction or not its template",
+            )
         }
         Family::OpenFour => {
             let deployer = obs.contract(CREATE_DEPLOYER);
@@ -1719,6 +1798,8 @@ struct Common {
     timestamp: u64,
     pin_rechecked: bool,
     endpoint_host: String,
+    /// The calls a block's receipts come from.
+    receipts_method: &'static str,
     sourcify_host: Option<String>,
     tool_sha256: [u8; 32],
     git_head: Option<String>,
@@ -2641,7 +2722,7 @@ fn family_draft(
         use ff::scan as k;
         let s = eval.scan;
         let mut e = Draft::new(&k::V3);
-        e.set(k::METHOD, "HEADER_LOGSBLOOM(contract, topic0) THEN eth_getBlockReceipts(blockHash), NEWEST FIRST, until the receipt budget (examined_from_block, stop_reason); launch/BUY/SELL fixtures direct top-level calls only; OpenFour launches in a separate launch-only pass over the whole window on its own budget (launch_pass)")
+        e.set(k::METHOD, format!("HEADER_LOGSBLOOM(contract, topic0) THEN {}, NEWEST FIRST, until the receipt budget (examined_from_block, stop_reason); launch/BUY/SELL fixtures direct top-level calls only; OpenFour launches in a separate launch-only pass over the whole window on its own budget (launch_pass)", common.receipts_method).as_str())
             .set(k::FROM_BLOCK, s.from)
             .set(k::SEARCH_TO_BLOCK, s.search_to)
             .set(k::LINKED_TO_BLOCK, common.linked_to)
@@ -2721,7 +2802,9 @@ fn run(cfg: &Config) -> Result<Outcome, String> {
     // while it runs must not rename it (Phase E review pass 2).
     let git_head = c1_common::git_head(Path::new("."));
     let archive = Archive::load(&cfg.archive)?;
-    let rpc = Endpoint::new(&cfg.rpc_url, cfg.limits, cfg.attempts, cfg.retry_pause);
+    let rpc = Endpoint::new(&cfg.rpc_url, cfg.limits, cfg.attempts, cfg.retry_pause)
+        .paced(cfg.min_interval)
+        .with_receipts(cfg.receipts);
     let chain_id = rpc.chain_id()?;
     edge::require_bsc(chain_id)?;
 
@@ -2843,6 +2926,7 @@ fn run(cfg: &Config) -> Result<Outcome, String> {
         timestamp: reference_header.timestamp,
         pin_rechecked,
         endpoint_host: rpc.host(),
+        receipts_method: cfg.receipts.method(),
         sourcify_host: cfg.sourcify.as_deref().map(edge::host),
         tool_sha256: c1_common::own_sha256()?,
         git_head,
@@ -3086,6 +3170,38 @@ mod tests {
         assert_ne!(other, created.token);
     }
 
+    /// R12b: the second Classic pair of the table reproduces its witnessed
+    /// launches (trading `fixtures/fourmeme/classic_template2_20261027.txt`)
+    /// and the first pair does not.
+    #[test]
+    fn the_second_classic_pair_reproduces_its_launches() {
+        let text =
+            include_str!("../../../trading/fixtures/fourmeme/classic_template2_20261027.txt");
+        let mut n = 0;
+        for f in text
+            .lines()
+            .filter(|l| !l.starts_with('#') && !l.is_empty())
+            .map(|l| l.split(' ').collect::<Vec<_>>())
+        {
+            let salt: B256 = f[2].parse().unwrap();
+            let token: Address = f[3].parse().unwrap();
+            let (_, second) = abi::predict_clone(
+                contracts::table_address(CLASSIC_TOKEN_DEPLOYER_2),
+                salt,
+                contracts::table_address(CLASSIC_TOKEN_TEMPLATE_2),
+            );
+            let (_, first) = abi::predict_clone(
+                contracts::table_address(CLASSIC_TOKEN_DEPLOYER),
+                salt,
+                contracts::table_address(CLASSIC_TOKEN_TEMPLATE),
+            );
+            assert_eq!(second, token, "{}", f[0]);
+            assert_ne!(first, token);
+            n += 1;
+        }
+        assert_eq!(n, 2);
+    }
+
     /// Every frozen signature with an archived ABI is in it and re-hashes
     /// to alloy's value; every one in the archived web3_sha3 reference
     /// agrees with it.
@@ -3176,6 +3292,7 @@ mod tests {
             timestamp: 1,
             pin_rechecked: true,
             endpoint_host: "bsc-dataseed.bnbchain.org".into(),
+            receipts_method: ReceiptSource::Block.method(),
             sourcify_host: None,
             tool_sha256: [7; 32],
             git_head: None,
@@ -3276,6 +3393,7 @@ mod tests {
             timestamp: 1,
             pin_rechecked: true,
             endpoint_host: "bsc-dataseed.bnbchain.org".into(),
+            receipts_method: ReceiptSource::Block.method(),
             sourcify_host: None,
             tool_sha256: [7; 32],
             git_head: None,
