@@ -8,7 +8,9 @@ use alloy_primitives::{Address, B256, U256};
 
 use super::*;
 use crate::venues::fourmeme::abi::{AbiError, encode_buy_token_amap};
-use crate::venues::fourmeme::deployment::{bsc_mainnet_g01_129842711, bsc_mainnet_r12b_131568366};
+use crate::venues::fourmeme::deployment::{
+    ValidatedFourDeployment, bsc_mainnet_g01_129842711, bsc_mainnet_r12b_131568366,
+};
 use crate::venues::fourmeme::profile::{
     CLASSIC_PROFILES, UnsupportedClassicLaunch, VenueFee, WITNESSED_MAX_OFFERS,
     WITNESSED_VENUE_FEE, classify_classic_launch,
@@ -71,6 +73,7 @@ fn word(hex: &str) -> B256 {
 /// A launch row: tx, value, calldata, `K` and quote at the block, the
 /// receipt's purchase.
 struct Launch {
+    block: &'static str,
     tx: B256,
     value: U256,
     calldata: Vec<u8>,
@@ -87,6 +90,7 @@ fn launches() -> Vec<(Address, Launch)> {
             (
                 f[3].parse().unwrap(),
                 Launch {
+                    block: f[1],
                     tx: f[2].parse().unwrap(),
                     value: u(f[4]),
                     calldata: bytes(f[13]),
@@ -111,6 +115,16 @@ fn launch_block(token: &str) -> u64 {
             _ => None,
         })
         .unwrap()
+}
+
+/// The current deployment as its own pins validate it (generation 1).
+fn validated() -> ValidatedFourDeployment {
+    let d = bsc_mainnet_r12b_131568366();
+    d.validate(
+        &crate::venues::fourmeme::deployment::testkit::pinned_observation(&d),
+        1,
+    )
+    .unwrap()
 }
 
 fn decoded(l: &Launch) -> ClassicLaunch<'_> {
@@ -256,11 +270,10 @@ fn every_launch_curve_and_priced_creator_purchase_is_reproduced() {
 /// curve after it; every other word is refused.
 #[test]
 fn a_priced_launch_names_its_token_and_state_before_execution() {
-    let d = bsc_mainnet_r12b_131568366();
     let (mut priced_launches, mut refused) = (0, 0);
     for (token, l) in launches() {
         let launch = decoded(&l);
-        match classify_classic_launch(&d, &launch, l.value, &WITNESSED_VENUE_FEE, l.tx) {
+        match classify_classic_launch(&validated(), &launch, l.value, &WITNESSED_VENUE_FEE, l.tx) {
             Ok(c) => {
                 assert_eq!((c.token(), c.candidate()), (token, l.tx));
                 let [_, _, _, offers, _] = l.purchase.unwrap();
@@ -469,9 +482,22 @@ fn a_priced_launch_with_one_field_changed_is_refused() {
     };
     let classify = |input: &[u8], value: U256, venue: &VenueFee| {
         let launch = decode_classic_create(input, d.classic_args_len).unwrap();
-        classify_classic_launch(&d, &launch, value, venue, l.tx).map(|c| c.token())
+        classify_classic_launch(&validated(), &launch, value, venue, l.tx).map(|c| c.token())
     };
     assert!(classify(&l.calldata, l.value, &WITNESSED_VENUE_FEE).is_ok());
+    // The G0.1 deployment decodes the launch but has no executed economics.
+    let g01 = bsc_mainnet_g01_129842711();
+    let decode_only = g01
+        .validate(
+            &crate::venues::fourmeme::deployment::testkit::pinned_observation(&g01),
+            1,
+        )
+        .unwrap();
+    let launch = decode_classic_create(&l.calldata, g01.classic_args_len).unwrap();
+    assert_eq!(
+        classify_classic_launch(&decode_only, &launch, l.value, &WITNESSED_VENUE_FEE, l.tx),
+        Err(UnsupportedClassicLaunch::EconomicsNotWitnessed)
+    );
     let one = U256::from(1u8);
     for word in [6, 7, 11, 12, 13, 15] {
         assert_eq!(
@@ -570,4 +596,114 @@ fn decoded_template(f: &[&str]) -> B256 {
     let launch =
         decode_classic_create(&calldata, bsc_mainnet_r12b_131568366().classic_args_len).unwrap();
     launch.launch_args().unwrap().template
+}
+
+fn snapshot(candidate: B256) -> crate::chain_state::SnapshotId {
+    crate::chain_state::SnapshotId {
+        canonical_block_hash: B256::repeat_byte(9),
+        ordered_state_cursor: 1,
+        pending_candidate: candidate,
+        policy_generation: 5,
+        codehash_generation: 1,
+    }
+}
+
+fn policy(funds: U256, slippage_bps: u16) -> crate::economics::policy::BuyPolicy {
+    crate::economics::policy::BuyPolicy::new(5, funds, slippage_bps, 100_000_000, 400_000).unwrap()
+}
+
+/// R12c: from the launch calldata alone, the admitted BUY is the one the
+/// probe executed on the state directly after the launch (its tokens and
+/// wei to the unit); its minimum is below them, so it executes.
+#[test]
+fn the_admitted_launch_buy_is_the_executed_one() {
+    let mut n = 0;
+    for f in rows("PROBE") {
+        let token: Address = f[2].parse().unwrap();
+        let Some((_, l)) = launches()
+            .into_iter()
+            .find(|(t, l)| *t == token && l.block == f[1])
+        else {
+            continue;
+        };
+        let classified = classify_classic_launch(
+            &validated(),
+            &decoded(&l),
+            l.value,
+            &WITNESSED_VENUE_FEE,
+            l.tx,
+        )
+        .unwrap();
+        let state = QualifiedClassicState::fresh_launch(&classified, 0, snapshot(l.tx)).unwrap();
+        let admitted = admit_classic_buy(&state, &policy(u(f[10]), 500)).unwrap();
+        assert_eq!((admitted.token(), admitted.funds()), (token, u(f[10])));
+        assert_eq!(
+            (admitted.expected_tokens(), admitted.spent()),
+            (u(f[11]), u(f[12])),
+            "{f:?}"
+        );
+        // The minimum is the slippage floor of the quote, below its tokens.
+        assert_eq!(
+            admitted.min_tokens(),
+            crate::economics::slippage::min_output(u(f[11]), 500).unwrap()
+        );
+        assert!(admitted.min_tokens() > U256::ZERO && admitted.min_tokens() < u(f[11]));
+        assert_eq!(
+            admitted.calldata().unwrap(),
+            encode_buy_token_amap(token, u(f[10]), admitted.min_tokens()).unwrap()
+        );
+        n += 1;
+    }
+    assert_eq!(n, 6);
+}
+
+#[test]
+fn an_admission_outside_the_qualified_state_or_amount_is_refused() {
+    let (_, l) = launches()
+        .into_iter()
+        .find(|(_, l)| l.purchase.is_some() && l.quote == Address::ZERO)
+        .unwrap();
+    let classified = classify_classic_launch(
+        &validated(),
+        &decoded(&l),
+        l.value,
+        &WITNESSED_VENUE_FEE,
+        l.tx,
+    )
+    .unwrap();
+    let fresh = |trades: u64, s: crate::chain_state::SnapshotId| {
+        QualifiedClassicState::fresh_launch(&classified, trades, s)
+    };
+    let mut other = snapshot(l.tx);
+    other.codehash_generation = 2;
+    assert_eq!(
+        fresh(0, other),
+        Err(ClassicAdmissionError::GenerationMismatch)
+    );
+    assert_eq!(
+        fresh(0, snapshot(B256::repeat_byte(1))),
+        Err(ClassicAdmissionError::CandidateMismatch)
+    );
+    assert_eq!(
+        fresh(1, snapshot(l.tx)),
+        Err(ClassicAdmissionError::StateNotFresh)
+    );
+    let state = fresh(0, snapshot(l.tx)).unwrap();
+    let milli = U256::from(QUALIFIED_CLASSIC_INPUTS_WEI[0]);
+    let stale = crate::economics::policy::BuyPolicy::new(6, milli, 500, 1, 1).unwrap();
+    assert_eq!(
+        admit_classic_buy(&state, &stale),
+        Err(ClassicAdmissionError::PolicyGenerationMismatch)
+    );
+    // 1 BNB was probed on later states only, never on a fresh launch.
+    for funds in [
+        milli + U256::from(1u8),
+        U256::from(10u8).pow(U256::from(18u8)),
+    ] {
+        assert_eq!(
+            admit_classic_buy(&state, &policy(funds, 500)),
+            Err(ClassicAdmissionError::UnqualifiedAmount)
+        );
+    }
+    assert!(admit_classic_buy(&state, &policy(milli, 500)).is_ok());
 }

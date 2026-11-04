@@ -1769,8 +1769,10 @@ pub fn run(
         // token derivation UNKNOWN until a probe matches again.
         if let (Some(cc), Some(c)) = (canonical_config.as_ref(), canonical.as_mut()) {
             if let Some(job) = four_job.take_if(|j| j.is_finished()) {
+                let current =
+                    darkbot_bsc_trading::venues::fourmeme::deployment::bsc_mainnet_r12b_131568366();
                 let (code, block, verdict) = match job.join() {
-                    Ok(Ok(o)) if o.drift.is_empty() => {
+                    Ok(Ok(o)) if current.validate(&o.observed, o.block_number).is_ok() => {
                         c.four_drift = false;
                         (
                             1,
@@ -1781,11 +1783,12 @@ pub fn run(
                     Ok(Ok(o)) => {
                         c.four_drift = true;
                         let at = o.block_number;
-                        (
-                            2,
-                            at,
-                            format!("DRIFT at block {at}: {}", o.drift.join("; ")),
-                        )
+                        let drifts: Vec<String> = current
+                            .drifts(&o.observed)
+                            .iter()
+                            .map(ToString::to_string)
+                            .collect();
+                        (2, at, format!("DRIFT at block {at}: {}", drifts.join("; ")))
                     }
                     Ok(Err(e)) => (3, 0, format!("PROBE_FAILED: {e}")),
                     Err(_) => (3, 0, "PROBE_FAILED: the probe thread panicked".to_owned()),

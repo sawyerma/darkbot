@@ -43,6 +43,7 @@ use crate::economics::flap::{AdmittedBuy, AdmittedSell};
 use crate::economics::policy::{BuyPolicy, ExitPolicy};
 use crate::signer::{Signer, SignerError, recover_legacy_sender};
 use crate::transactions::legacy::{LegacyDecodeError, LegacyTx, decode_signed, tx_hash};
+use crate::venues::fourmeme::binding::{ExpectedClassicBuy, verify_final_classic_buy};
 
 /// Reason an expectation cannot be formed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -194,6 +195,8 @@ pub enum BuildError {
     WrongSigner,
     /// The expectation cannot be encoded (a zero amount).
     Calldata(AbiError),
+    /// The Four Classic BUY cannot be encoded (a zero amount).
+    FourCalldata(crate::venues::fourmeme::abi::AbiError),
     Sign(SignerError),
 }
 
@@ -202,6 +205,7 @@ impl core::fmt::Display for BuildError {
         match self {
             Self::WrongSigner => f.write_str("buy build: signer is not the expected sender"),
             Self::Calldata(e) => write!(f, "buy build: {e}"),
+            Self::FourCalldata(e) => write!(f, "buy build: {e}"),
             Self::Sign(e) => write!(f, "buy build: {e}"),
         }
     }
@@ -259,7 +263,8 @@ pub enum BindingError {
     WrongSender,
     /// Another nonce than the one reserved for this intent.
     WrongNonce,
-    /// The call does not target the Portal.
+    /// The call does not target the venue contract (the Portal;
+    /// TokenManager2 for a Four Classic BUY).
     WrongPortal,
     /// Gas price differs from the current gas policy.
     WrongGasPrice,
@@ -269,6 +274,8 @@ pub enum BindingError {
     WrongValue,
     /// The calldata is not a canonical native-input BUY.
     Calldata(AbiError),
+    /// The calldata is not a canonical Four Classic `buyTokenAMAP`.
+    FourCalldata(crate::venues::fourmeme::abi::AbiError),
     /// The calldata buys another token (or approves on another token
     /// contract, or sells another token).
     WrongToken,
@@ -291,11 +298,14 @@ impl core::fmt::Display for BindingError {
             Self::Signature(e) => write!(f, "buy binding: {e}"),
             Self::WrongSender => f.write_str("buy binding: signed by another sender"),
             Self::WrongNonce => f.write_str("buy binding: unexpected nonce"),
-            Self::WrongPortal => f.write_str("buy binding: call does not target the Portal"),
+            Self::WrongPortal => {
+                f.write_str("buy binding: call does not target the venue contract")
+            }
             Self::WrongGasPrice => f.write_str("buy binding: unexpected gas price"),
             Self::WrongGasLimit => f.write_str("buy binding: unexpected gas limit"),
             Self::WrongValue => f.write_str("buy binding: value differs from the input amount"),
             Self::Calldata(e) => write!(f, "buy binding: {e}"),
+            Self::FourCalldata(e) => write!(f, "buy binding: {e}"),
             Self::WrongToken => f.write_str("buy binding: calldata buys another token"),
             Self::WrongSpender => f.write_str("binding: the approval names another spender"),
             Self::WrongInputAmount => f.write_str("buy binding: unexpected input amount"),
@@ -663,11 +673,19 @@ pub enum ExpectedTx<'a> {
     Approve(&'a ExpectedExit),
     Sell(&'a ExpectedExit),
     Burn(&'a ExpectedBurn),
+    /// R12c: a Four Classic BUY (`venues::fourmeme::binding`).
+    ClassicBuy(&'a ExpectedClassicBuy),
 }
 
 impl<'a> From<&'a ExpectedBuy> for ExpectedTx<'a> {
     fn from(b: &'a ExpectedBuy) -> Self {
         Self::Buy(b)
+    }
+}
+
+impl<'a> From<&'a ExpectedClassicBuy> for ExpectedTx<'a> {
+    fn from(b: &'a ExpectedClassicBuy) -> Self {
+        Self::ClassicBuy(b)
     }
 }
 
@@ -677,6 +695,7 @@ impl ExpectedTx<'_> {
             Self::Buy(b) => b.chain_id,
             Self::Approve(e) | Self::Sell(e) => e.chain_id,
             Self::Burn(b) => b.chain_id,
+            Self::ClassicBuy(b) => b.chain_id(),
         }
     }
 
@@ -685,6 +704,7 @@ impl ExpectedTx<'_> {
             Self::Buy(b) => b.sender,
             Self::Approve(e) | Self::Sell(e) => e.sender,
             Self::Burn(b) => b.sender,
+            Self::ClassicBuy(b) => b.sender(),
         }
     }
 
@@ -695,6 +715,7 @@ impl ExpectedTx<'_> {
             Self::Approve(e) => e.nonce,
             Self::Sell(e) => e.nonce + 1,
             Self::Burn(b) => b.nonce,
+            Self::ClassicBuy(b) => b.nonce(),
         }
     }
 
@@ -704,6 +725,7 @@ impl ExpectedTx<'_> {
             Self::Buy(b) => b.token,
             Self::Approve(e) | Self::Sell(e) => e.token,
             Self::Burn(_) => Address::ZERO,
+            Self::ClassicBuy(b) => b.token(),
         }
     }
 
@@ -712,15 +734,18 @@ impl ExpectedTx<'_> {
             Self::Buy(b) => b.snapshot,
             Self::Approve(e) | Self::Sell(e) => e.snapshot,
             Self::Burn(b) => b.snapshot,
+            Self::ClassicBuy(b) => b.snapshot(),
         }
     }
 
-    /// The Portal the intent trades on (a burn: none, the zero address).
+    /// The venue contract the intent trades on (the Portal; TokenManager2
+    /// for a Four Classic BUY; a burn: none, the zero address).
     pub fn portal(&self) -> Address {
         match self {
             Self::Buy(b) => b.portal,
             Self::Approve(e) | Self::Sell(e) => e.portal,
             Self::Burn(_) => Address::ZERO,
+            Self::ClassicBuy(b) => b.token_manager2(),
         }
     }
 
@@ -729,6 +754,7 @@ impl ExpectedTx<'_> {
     pub fn value_wei(&self) -> U256 {
         match self {
             Self::Buy(b) => b.input_amount,
+            Self::ClassicBuy(b) => b.funds(),
             Self::Approve(_) | Self::Sell(_) | Self::Burn(_) => U256::ZERO,
         }
     }
@@ -740,6 +766,7 @@ impl ExpectedTx<'_> {
             Self::Approve(e) => U256::from(e.gas_price) * U256::from(e.approve_gas_limit),
             Self::Sell(e) => U256::from(e.gas_price) * U256::from(e.sell_gas_limit),
             Self::Burn(b) => b.max_gas_wei(),
+            Self::ClassicBuy(b) => U256::from(b.gas_price()) * U256::from(b.gas_limit()),
         }
     }
 
@@ -755,6 +782,7 @@ impl ExpectedTx<'_> {
             Self::Approve(e) => verify_final_approve(raw_signed, e, current, scratch),
             Self::Sell(e) => verify_final_sell(raw_signed, e, current, scratch),
             Self::Burn(b) => verify_final_burn(raw_signed, b, current, scratch),
+            Self::ClassicBuy(b) => verify_final_classic_buy(raw_signed, b, current, scratch),
         }
     }
 }

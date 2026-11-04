@@ -102,6 +102,19 @@ pub struct FourDeployment {
     pub openfour_create_deployer_implementation_runtime_keccak256: B256,
     /// The presets with a frozen token implementation.
     pub openfour_presets: &'static [OpenFourPreset],
+    /// Whether the Classic BUY rules were executed on this TokenManager2
+    /// implementation (`economics::four_classic`); a deployment without them
+    /// decodes but classifies no launch.
+    pub classic_economics: ClassicEconomics,
+}
+
+/// Whether a deployment's Classic economics are witnessed by execution.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ClassicEconomics {
+    /// Decode only: no BUY or SELL of a priced word was executed under it.
+    DecodeOnly,
+    /// The R12 probes executed the priced word's BUYs and SELLs under it.
+    Witnessed,
 }
 
 /// Every preset in use over the v3 freeze's whole window (OpenFour launch
@@ -175,6 +188,7 @@ pub const fn bsc_mainnet_g01_129842711() -> FourDeployment {
             "f74aebf96dab002196896168ad3dcf2e64a3f7aa028cc27f047f647eeb6e66bd"
         ),
         openfour_presets: MAINNET_PRESETS,
+        classic_economics: ClassicEconomics::DecodeOnly,
     }
 }
 
@@ -188,11 +202,165 @@ pub const fn bsc_mainnet_r12b_131568366() -> FourDeployment {
         token_manager2_implementation_runtime_keccak256: b256!(
             "8da2a695b0d2e9471ffbf04e1259f306a587857bb2e6f93798b74c3f8b875377"
         ),
+        classic_economics: ClassicEconomics::Witnessed,
         ..bsc_mainnet_g01_129842711()
     }
 }
 
+/// What the live chain shows of the pinned contracts at one block: the
+/// runtime's read-only probe (`venue_probe::probe_four`) reads it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ObservedFour {
+    pub chain_id: u64,
+    pub token_manager2_implementation: Address,
+    pub token_manager2_implementation_runtime_keccak256: B256,
+    pub openfour_core_implementation: Address,
+    pub openfour_core_implementation_runtime_keccak256: B256,
+    pub openfour_create_deployer_implementation: Address,
+    pub openfour_create_deployer_implementation_runtime_keccak256: B256,
+    /// Each Classic pair's deployer and template runtime keccak.
+    pub classic_runtime_keccak256: [(B256, B256); CLASSIC_TEMPLATES],
+}
+
+/// The first pin the live chain differs from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FourDrift {
+    ChainId,
+    TokenManager2Implementation,
+    TokenManager2Code,
+    OpenFourCoreImplementation,
+    OpenFourCoreCode,
+    CreateDeployerImplementation,
+    CreateDeployerCode,
+    /// A Classic pair's deployer or template code (its index).
+    ClassicPair(usize),
+}
+
+impl core::fmt::Display for FourDrift {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::ChainId => f.write_str("four deployment: another chain"),
+            Self::TokenManager2Implementation => {
+                f.write_str("four deployment: TokenManager2 implementation")
+            }
+            Self::TokenManager2Code => {
+                f.write_str("four deployment: TokenManager2 implementation code")
+            }
+            Self::OpenFourCoreImplementation => {
+                f.write_str("four deployment: OpenFour Core implementation")
+            }
+            Self::OpenFourCoreCode => {
+                f.write_str("four deployment: OpenFour Core implementation code")
+            }
+            Self::CreateDeployerImplementation => {
+                f.write_str("four deployment: OpenFour create deployer implementation")
+            }
+            Self::CreateDeployerCode => {
+                f.write_str("four deployment: OpenFour create deployer implementation code")
+            }
+            Self::ClassicPair(i) => write!(f, "four deployment: Classic pair {} code", i + 1),
+        }
+    }
+}
+
+impl std::error::Error for FourDrift {}
+
+/// The frozen deployment as matched by a live observation, under the code
+/// generation the owner of the state snapshot assigned to it. A later
+/// observation gets a new generation and invalidates everything bound to
+/// this one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ValidatedFourDeployment {
+    deployment: FourDeployment,
+    codehash_generation: u64,
+}
+
+impl ValidatedFourDeployment {
+    #[inline]
+    pub fn deployment(&self) -> &FourDeployment {
+        &self.deployment
+    }
+
+    #[inline]
+    pub fn codehash_generation(&self) -> u64 {
+        self.codehash_generation
+    }
+
+    /// Whether its Classic economics are witnessed by execution.
+    #[inline]
+    pub fn classic_economics_witnessed(&self) -> bool {
+        self.deployment.classic_economics == ClassicEconomics::Witnessed
+    }
+}
+
 impl FourDeployment {
+    /// Every pin `observed` differs from, in the order of [`FourDrift`].
+    pub fn drifts(&self, observed: &ObservedFour) -> Vec<FourDrift> {
+        let mut out: Vec<FourDrift> = [
+            (observed.chain_id == self.chain_id, FourDrift::ChainId),
+            (
+                observed.token_manager2_implementation == self.token_manager2_implementation,
+                FourDrift::TokenManager2Implementation,
+            ),
+            (
+                observed.token_manager2_implementation_runtime_keccak256
+                    == self.token_manager2_implementation_runtime_keccak256,
+                FourDrift::TokenManager2Code,
+            ),
+            (
+                observed.openfour_core_implementation == self.openfour_core_implementation,
+                FourDrift::OpenFourCoreImplementation,
+            ),
+            (
+                observed.openfour_core_implementation_runtime_keccak256
+                    == self.openfour_core_implementation_runtime_keccak256,
+                FourDrift::OpenFourCoreCode,
+            ),
+            (
+                observed.openfour_create_deployer_implementation
+                    == self.openfour_create_deployer_implementation,
+                FourDrift::CreateDeployerImplementation,
+            ),
+            (
+                observed.openfour_create_deployer_implementation_runtime_keccak256
+                    == self.openfour_create_deployer_implementation_runtime_keccak256,
+                FourDrift::CreateDeployerCode,
+            ),
+        ]
+        .into_iter()
+        .filter(|(ok, _)| !ok)
+        .map(|(_, drift)| drift)
+        .collect();
+        for (i, (t, (deployer, template))) in self
+            .classic_templates
+            .iter()
+            .zip(observed.classic_runtime_keccak256)
+            .enumerate()
+        {
+            if t.deployer_runtime_keccak256 != deployer || t.template_runtime_keccak256 != template
+            {
+                out.push(FourDrift::ClassicPair(i));
+            }
+        }
+        out
+    }
+
+    /// The deployment as `observed` matches it under `codehash_generation`
+    /// (a name of the observation); else the first drift.
+    pub fn validate(
+        &self,
+        observed: &ObservedFour,
+        codehash_generation: u64,
+    ) -> Result<ValidatedFourDeployment, FourDrift> {
+        if let Some(drift) = self.drifts(observed).first() {
+            return Err(*drift);
+        }
+        Ok(ValidatedFourDeployment {
+            deployment: *self,
+            codehash_generation,
+        })
+    }
+
     /// The contract of `family` that receives its calls and emits its events.
     pub const fn contract(&self, family: Family) -> Address {
         match family {
@@ -247,6 +415,32 @@ impl FourDeployment {
 }
 
 #[cfg(test)]
+pub(crate) mod testkit {
+    //! Observations for tests of dependent modules.
+
+    use super::*;
+
+    /// What an observation of exactly these pins shows.
+    pub fn pinned_observation(d: &FourDeployment) -> ObservedFour {
+        ObservedFour {
+            chain_id: d.chain_id,
+            token_manager2_implementation: d.token_manager2_implementation,
+            token_manager2_implementation_runtime_keccak256: d
+                .token_manager2_implementation_runtime_keccak256,
+            openfour_core_implementation: d.openfour_core_implementation,
+            openfour_core_implementation_runtime_keccak256: d
+                .openfour_core_implementation_runtime_keccak256,
+            openfour_create_deployer_implementation: d.openfour_create_deployer_implementation,
+            openfour_create_deployer_implementation_runtime_keccak256: d
+                .openfour_create_deployer_implementation_runtime_keccak256,
+            classic_runtime_keccak256: d
+                .classic_templates
+                .map(|t| (t.deployer_runtime_keccak256, t.template_runtime_keccak256)),
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -286,7 +480,8 @@ mod tests {
         assert_eq!(d.family_of(d.openfour_registry), None);
     }
 
-    /// R12b: the refreeze changes TokenManager2's implementation pin only
+    /// R12b: the refreeze changes TokenManager2's implementation pin (and
+    /// R12c its executed economics) only
     /// (the freeze at block 131568366 read every other pinned contract's
     /// code unchanged; presets other than …735 are carried over from v3).
     #[test]
@@ -305,9 +500,86 @@ mod tests {
                 token_manager2_implementation: g01.token_manager2_implementation,
                 token_manager2_implementation_runtime_keccak256: g01
                     .token_manager2_implementation_runtime_keccak256,
+                classic_economics: ClassicEconomics::DecodeOnly,
                 ..now
             },
             g01
+        );
+        assert_eq!(now.classic_economics, ClassicEconomics::Witnessed);
+    }
+
+    /// R12c: an observation validates only when every pin matches; each
+    /// changed field is named, the first is the validation's refusal.
+    #[test]
+    fn a_deployment_validates_only_against_its_own_pins() {
+        use testkit::pinned_observation;
+        let d = bsc_mainnet_r12b_131568366();
+        let pinned = pinned_observation(&d);
+        let v = d.validate(&pinned, 7).unwrap();
+        assert_eq!((v.codehash_generation(), *v.deployment()), (7, d));
+        assert!(v.classic_economics_witnessed());
+        let a = Address::repeat_byte(0xee);
+        let k = B256::repeat_byte(0xee);
+        type Change = fn(&mut ObservedFour, Address, B256);
+        let changes: [(Change, FourDrift); 10] = [
+            (|o, _, _| o.chain_id = 97, FourDrift::ChainId),
+            (
+                |o, a, _| o.token_manager2_implementation = a,
+                FourDrift::TokenManager2Implementation,
+            ),
+            (
+                |o, _, k| o.token_manager2_implementation_runtime_keccak256 = k,
+                FourDrift::TokenManager2Code,
+            ),
+            (
+                |o, a, _| o.openfour_core_implementation = a,
+                FourDrift::OpenFourCoreImplementation,
+            ),
+            (
+                |o, _, k| o.openfour_core_implementation_runtime_keccak256 = k,
+                FourDrift::OpenFourCoreCode,
+            ),
+            (
+                |o, a, _| o.openfour_create_deployer_implementation = a,
+                FourDrift::CreateDeployerImplementation,
+            ),
+            (
+                |o, _, k| o.openfour_create_deployer_implementation_runtime_keccak256 = k,
+                FourDrift::CreateDeployerCode,
+            ),
+            (
+                |o, _, k| o.classic_runtime_keccak256[0].0 = k,
+                FourDrift::ClassicPair(0),
+            ),
+            (
+                |o, _, k| o.classic_runtime_keccak256[0].1 = k,
+                FourDrift::ClassicPair(0),
+            ),
+            (
+                |o, _, k| o.classic_runtime_keccak256[1].0 = k,
+                FourDrift::ClassicPair(1),
+            ),
+        ];
+        for (change, drift) in changes {
+            let mut o = pinned;
+            change(&mut o, a, k);
+            assert_eq!((d.drifts(&o), d.validate(&o, 1)), (vec![drift], Err(drift)));
+        }
+        // The G0.1 pins against today's chain: the TokenManager2 drift; and
+        // a deployment without executed economics validates but is no
+        // witness.
+        let g01 = bsc_mainnet_g01_129842711();
+        assert_eq!(
+            g01.drifts(&pinned),
+            [
+                FourDrift::TokenManager2Implementation,
+                FourDrift::TokenManager2Code
+            ]
+        );
+        assert!(
+            !g01.validate(&pinned_observation(&g01), 1)
+                .unwrap()
+                .classic_economics_witnessed()
         );
     }
 

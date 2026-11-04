@@ -1,5 +1,6 @@
 //! Four Classic (TokenManager2) native-BNB curve: exact BUY and SELL
-//! arithmetic and the curve a launch starts with (R12).
+//! arithmetic, the curve a launch starts with (R12), and the admission of a
+//! BUY on the state directly after a classified launch.
 //!
 //! The implementations are not source-verified, so every rule here is an
 //! execution fact, not a reading of code
@@ -32,14 +33,30 @@
 //!   BUY inside the launch is a BUY of its `args` creator value (word 10).
 //!
 //! Every division floors but the BUY's new token reserve (rounded up).
-//! Pure functions, typed errors, no admission: they accept any terms and
-//! say nothing about whether a token, state or amount is qualified;
+//! The quotes are pure functions with typed errors: they accept any terms
+//! and say nothing about whether a token, state or amount is qualified;
 //! `venues::fourmeme::profile` gates what is priced.
+//!
+//! # Admission
+//!
+//! [`admit_classic_buy`] is the only producer of a sendable Classic BUY. It
+//! needs a [`QualifiedClassicState`]: a launch the profile classified on a
+//! validated deployment, the state directly after it (no trade of its token
+//! before the BUY), the snapshot's code generation and pending candidate.
+//! It admits only an amount the probes executed on such a state (0.001 and
+//! 0.1 BNB), under the policy of the snapshot's generation, with a strictly
+//! positive minimum (the slippage floor of the quote): TokenManager2
+//! accepts the BUY at its tokens and reverts one above.
 
-use alloy_primitives::U256;
+use alloy_primitives::{Address, U256};
 
 use super::arith::{ArithError, add, mul, mul_div_down, mul_div_up, sub};
 use super::fees::BPS_DENOMINATOR;
+use super::policy::BuyPolicy;
+use super::slippage::{SlippageError, min_output};
+use crate::chain_state::SnapshotId;
+use crate::venues::fourmeme::abi::{AbiError, BUY_TOKEN_AMAP_LEN, encode_buy_token_amap};
+use crate::venues::fourmeme::profile::ClassifiedClassicLaunch;
 
 /// Token amounts are whole gwei-units of the 18-decimal token (`1e9`).
 const GWEI: u64 = 1_000_000_000;
@@ -318,6 +335,180 @@ pub fn quote_sell(
             offers: add(curve.offers, amount)?,
             sold: curve.sold - amount,
         },
+    })
+}
+
+/// The BUY amounts admitted on a fresh launch: the funds the probes
+/// executed on the state directly after witnessed launches (the PROBE rows
+/// at their launch blocks), in wei.
+pub const QUALIFIED_CLASSIC_INPUTS_WEI: [u64; 2] = [1_000_000_000_000_000, 100_000_000_000_000_000];
+
+/// Why a Classic BUY is not admissible.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ClassicAdmissionError {
+    /// Classified under another code generation than the snapshot's.
+    GenerationMismatch,
+    /// The snapshot assumes another launch transaction.
+    CandidateMismatch,
+    /// The policy has another generation than the snapshot.
+    PolicyGenerationMismatch,
+    /// A trade of the token precedes the BUY.
+    StateNotFresh,
+    /// An amount no probe executed on a fresh launch.
+    UnqualifiedAmount,
+    Quote(ClassicQuoteError),
+    Slippage(SlippageError),
+}
+
+impl core::fmt::Display for ClassicAdmissionError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::GenerationMismatch => f.write_str("classic admission: code generation mismatch"),
+            Self::CandidateMismatch => f.write_str("classic admission: snapshot of another launch"),
+            Self::PolicyGenerationMismatch => {
+                f.write_str("classic admission: policy generation mismatch")
+            }
+            Self::StateNotFresh => f.write_str("classic admission: token state is not fresh"),
+            Self::UnqualifiedAmount => f.write_str("classic admission: amount not qualified"),
+            Self::Quote(e) => write!(f, "classic admission: {e}"),
+            Self::Slippage(e) => write!(f, "classic admission: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for ClassicAdmissionError {}
+
+/// The one qualified state of a Classic launch: directly after it, before
+/// any other trade of its token.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct QualifiedClassicState {
+    token: Address,
+    curve: ClassicCurve,
+    fee: ClassicFee,
+    snapshot: SnapshotId,
+}
+
+impl QualifiedClassicState {
+    /// Binds a classified launch to the state after it; `trades_since_launch`
+    /// counts the trades of its token ordered before the BUY in `snapshot`.
+    pub fn fresh_launch(
+        classified: &ClassifiedClassicLaunch,
+        trades_since_launch: u64,
+        snapshot: SnapshotId,
+    ) -> Result<Self, ClassicAdmissionError> {
+        if classified.codehash_generation() != snapshot.codehash_generation {
+            return Err(ClassicAdmissionError::GenerationMismatch);
+        }
+        if classified.candidate() != snapshot.pending_candidate {
+            return Err(ClassicAdmissionError::CandidateMismatch);
+        }
+        if trades_since_launch != 0 {
+            return Err(ClassicAdmissionError::StateNotFresh);
+        }
+        Ok(Self {
+            token: classified.token(),
+            curve: classified.curve(),
+            fee: classified.fee(),
+            snapshot,
+        })
+    }
+
+    #[inline]
+    pub fn token(&self) -> Address {
+        self.token
+    }
+
+    #[inline]
+    pub fn snapshot(&self) -> SnapshotId {
+        self.snapshot
+    }
+}
+
+/// A Classic BUY that passed admission: only [`admit_classic_buy`] creates
+/// one. Invariants: `funds > 0`, `0 < min_tokens <= expected_tokens`,
+/// `spent <= funds`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AdmittedClassicBuy {
+    token: Address,
+    funds: U256,
+    expected_tokens: U256,
+    min_tokens: U256,
+    spent: U256,
+    slippage_bps: u16,
+    snapshot: SnapshotId,
+}
+
+impl AdmittedClassicBuy {
+    #[inline]
+    pub fn token(&self) -> Address {
+        self.token
+    }
+
+    /// The BUY's `funds` and `msg.value`, in wei.
+    #[inline]
+    pub fn funds(&self) -> U256 {
+        self.funds
+    }
+
+    #[inline]
+    pub fn expected_tokens(&self) -> U256 {
+        self.expected_tokens
+    }
+
+    /// The `minAmount` bound into the calldata.
+    #[inline]
+    pub fn min_tokens(&self) -> U256 {
+        self.min_tokens
+    }
+
+    /// Wei the quote takes (cost, fee and tax); the rest is refunded.
+    #[inline]
+    pub fn spent(&self) -> U256 {
+        self.spent
+    }
+
+    #[inline]
+    pub fn slippage_bps(&self) -> u16 {
+        self.slippage_bps
+    }
+
+    #[inline]
+    pub fn snapshot(&self) -> SnapshotId {
+        self.snapshot
+    }
+
+    /// The calldata of the direct `buyTokenAMAP(token, funds, minAmount)`.
+    pub fn calldata(&self) -> Result<[u8; BUY_TOKEN_AMAP_LEN], AbiError> {
+        encode_buy_token_amap(self.token, self.funds, self.min_tokens)
+    }
+}
+
+/// Admits a Classic BUY in a qualified state under `policy`.
+pub fn admit_classic_buy(
+    state: &QualifiedClassicState,
+    policy: &BuyPolicy,
+) -> Result<AdmittedClassicBuy, ClassicAdmissionError> {
+    if policy.generation() != state.snapshot.policy_generation {
+        return Err(ClassicAdmissionError::PolicyGenerationMismatch);
+    }
+    let funds = policy.input_amount();
+    if !QUALIFIED_CLASSIC_INPUTS_WEI
+        .iter()
+        .any(|w| U256::from(*w) == funds)
+    {
+        return Err(ClassicAdmissionError::UnqualifiedAmount);
+    }
+    let quote = quote_buy(&state.curve, &state.fee, funds).map_err(ClassicAdmissionError::Quote)?;
+    let min_tokens =
+        min_output(quote.amount, policy.slippage_bps()).map_err(ClassicAdmissionError::Slippage)?;
+    Ok(AdmittedClassicBuy {
+        token: state.token,
+        funds,
+        expected_tokens: quote.amount,
+        min_tokens,
+        spent: quote.spent,
+        slippage_bps: policy.slippage_bps(),
+        snapshot: state.snapshot,
     })
 }
 

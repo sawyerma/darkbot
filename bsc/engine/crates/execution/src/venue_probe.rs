@@ -41,7 +41,9 @@ use darkbot_bsc_trading::economics::flap::native_curve20::VenueBuyTerms;
 use darkbot_bsc_trading::venues::flap::deployment::{
     FlapDeployment, ObservedDeployment, RuntimeSha256,
 };
-use darkbot_bsc_trading::venues::fourmeme::deployment::FourDeployment;
+use darkbot_bsc_trading::venues::fourmeme::deployment::{
+    CLASSIC_TEMPLATES, FourDeployment, ObservedFour,
+};
 use serde_json::Value;
 
 use crate::chain_follower::http::Client;
@@ -573,18 +575,18 @@ where
     })
 }
 
-/// The live Four.meme deployment against the frozen one at one canonical
-/// block (Phase E review L3, the drift guard): each frozen proxy's EIP-1967
-/// implementation and the keccak of every frozen runtime code. `drift`
-/// names every difference; empty, the live deployment is the frozen one.
-/// Limit (Paket 8 review L2): code identity only, not TokenManager2's
-/// template configuration; a further (deployer, template) pair under the
-/// same code shows only afterwards, as a canonical Four mismatch.
+/// The live Four.meme deployment at one canonical block (Phase E review L3,
+/// the drift guard): each frozen proxy's EIP-1967 implementation and its
+/// code's keccak, every Classic pair's code; `FourDeployment::validate`
+/// compares it with the pins (`drifts` names every difference). Limit
+/// (Paket 8 review L2): code identity only, not TokenManager2's template
+/// configuration; a further (deployer, template) pair under the same code
+/// shows only afterwards, as a canonical Four mismatch.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FourObservation {
     pub block_number: u64,
     pub block_hash: [u8; 32],
-    pub drift: Vec<String>,
+    pub observed: ObservedFour,
 }
 
 /// Observes the live Four.meme deployment read-only at one canonical block
@@ -625,56 +627,34 @@ where
     let block_number = wire.quantity(ProbeRead::BlockNumber, "eth_blockNumber", "[]")?;
     let block_hash = wire.block_hash(ProbeRead::Block, block_number)?;
     let at = pinned(&block_hash);
-    let mut drift = Vec::new();
-    // The proxies: their implementation, then its code.
-    for (name, proxy, frozen, keccak) in [
-        (
-            "TokenManager2",
-            deployment.token_manager2,
-            deployment.token_manager2_implementation,
-            deployment.token_manager2_implementation_runtime_keccak256,
-        ),
-        (
-            "OpenFour Core",
-            deployment.openfour_core,
-            deployment.openfour_core_implementation,
-            deployment.openfour_core_implementation_runtime_keccak256,
-        ),
-        (
-            "OpenFour create deployer",
-            deployment.openfour_create_deployer,
-            deployment.openfour_create_deployer_implementation,
-            deployment.openfour_create_deployer_implementation_runtime_keccak256,
-        ),
-    ] {
+    // The proxies: their live implementation, then its code (also when it
+    // is not the pinned one: the observation is the chain's, not a verdict).
+    let mut implementation = |proxy: Address| -> Result<(Address, B256), ProbeError> {
         let read = ProbeRead::FourImplementationSlot;
         let slot = wire.storage(&at, read, proxy, &EIP1967_IMPLEMENTATION_SLOT)?;
         let live = word_address(&slot).map_err(abi(read))?;
-        if live != frozen {
-            drift.push(format!("{name} implementation {live} (frozen {frozen})"));
-            continue;
-        }
-        let code = wire.code(&at, ProbeRead::FourCode, live)?;
-        if code.keccak256 != keccak {
-            drift.push(format!("{name} implementation code {}", code.keccak256));
-        }
-    }
+        Ok((live, wire.code(&at, ProbeRead::FourCode, live)?.keccak256))
+    };
+    let tm2 = implementation(deployment.token_manager2)?;
+    let core = implementation(deployment.openfour_core)?;
+    let create_deployer = implementation(deployment.openfour_create_deployer)?;
     // The Classic pairs: each deployer's and template's code.
-    for (i, t) in deployment.classic_templates.iter().enumerate() {
-        for (what, address, keccak) in [
-            ("deployer", t.deployer, t.deployer_runtime_keccak256),
-            ("template", t.template, t.template_runtime_keccak256),
-        ] {
-            let code = wire.code(&at, ProbeRead::FourCode, address)?;
-            if code.keccak256 != keccak {
-                drift.push(format!(
-                    "Classic pair {} {what} code {}",
-                    i + 1,
-                    code.keccak256
-                ));
-            }
-        }
+    let mut classic = [(B256::ZERO, B256::ZERO); CLASSIC_TEMPLATES];
+    for (slot, t) in classic.iter_mut().zip(&deployment.classic_templates) {
+        let deployer = wire.code(&at, ProbeRead::FourCode, t.deployer)?.keccak256;
+        let template = wire.code(&at, ProbeRead::FourCode, t.template)?.keccak256;
+        *slot = (deployer, template);
     }
+    let observed = ObservedFour {
+        chain_id,
+        token_manager2_implementation: tm2.0,
+        token_manager2_implementation_runtime_keccak256: tm2.1,
+        openfour_core_implementation: core.0,
+        openfour_core_implementation_runtime_keccak256: core.1,
+        openfour_create_deployer_implementation: create_deployer.0,
+        openfour_create_deployer_implementation_runtime_keccak256: create_deployer.1,
+        classic_runtime_keccak256: classic,
+    };
     if wire.block_hash(ProbeRead::BlockRecheck, block_number)? != block_hash {
         return Err(ProbeError::Reorg {
             number: block_number,
@@ -683,7 +663,7 @@ where
     Ok(FourObservation {
         block_number,
         block_hash,
-        drift,
+        observed,
     })
 }
 
@@ -2020,13 +2000,13 @@ mod tests {
     /// are each named; every read pinned to one block, rechecked at the end.
     #[test]
     fn the_four_drift_guard_names_every_difference() {
+        use darkbot_bsc_trading::venues::fourmeme::deployment::FourDrift;
         let (d, node) = served_four();
         let (result, seen) = run_four(node, &d);
         let o = result.unwrap();
-        assert_eq!(
-            (o.block_number, o.block_hash, o.drift.len()),
-            (HEAD, HASH, 0)
-        );
+        assert_eq!((o.block_number, o.block_hash), (HEAD, HASH));
+        assert_eq!(d.drifts(&o.observed), []);
+        assert!(d.validate(&o.observed, o.block_number).is_ok());
         let methods: Vec<&str> = seen.iter().map(|(m, _)| m.as_str()).collect();
         assert_eq!(
             methods.iter().filter(|m| **m == "eth_getStorageAt").count(),
@@ -2042,10 +2022,19 @@ mod tests {
             address_word(upgraded),
         );
         node.codes[6].1 = vec![0x60, 0x80, 0xff];
+        node.codes.push((upgraded, vec![0x60, 0x80, 0xaa]));
         let o = run_four(node, &d).0.unwrap();
-        assert_eq!(o.drift.len(), 2, "{:?}", o.drift);
-        assert!(o.drift[0].starts_with("TokenManager2 implementation"));
-        assert!(o.drift[1].starts_with("Classic pair 2 template code"));
+        // The upgraded implementation, its code and the changed template are
+        // named.
+        assert_eq!(o.observed.token_manager2_implementation, upgraded);
+        assert_eq!(
+            d.drifts(&o.observed),
+            [
+                FourDrift::TokenManager2Implementation,
+                FourDrift::TokenManager2Code,
+                FourDrift::ClassicPair(1)
+            ]
+        );
     }
 
     /// The live Four.meme deployment against the freeze. Read-only; prints
@@ -2067,16 +2056,20 @@ mod tests {
             ..limits()
         };
         let o = probe_four(&rpc, &limits, &bsc_mainnet_r12b_131568366()).unwrap();
-        println!("four at block {}: drift {:?}", o.block_number, o.drift);
-        assert!(o.drift.is_empty());
+        let drifts = bsc_mainnet_r12b_131568366().drifts(&o.observed);
+        println!("four at block {}: drift {drifts:?}", o.block_number);
+        assert!(drifts.is_empty());
     }
 
     /// The current deployment and venue terms on BSC Mainnet. Read-only;
-    /// prints what it saw. Run it with
+    /// prints what it saw. Run it with `BSC_FREE_ARCHIVE_RPC=<the free
+    /// archive endpoint>`
     /// `cargo test -p darkbot-bsc-execution --features runtime --lib venue_probe::tests::live -- --ignored --nocapture`.
     #[test]
-    #[ignore = "network: read-only probe of the Flap Portal at bsc-dataseed.bnbchain.org"]
-    fn live_dataseed_probe_of_the_current_deployment() {
+    #[ignore = "network: read-only probe of the Flap Portal at BSC_FREE_ARCHIVE_RPC"]
+    fn live_probe_of_the_current_deployment() {
+        let rpc = std::env::var("BSC_FREE_ARCHIVE_RPC")
+            .expect("BSC_FREE_ARCHIVE_RPC names the free archive endpoint");
         let limits = FollowerLimits {
             poll: Duration::from_millis(200),
             reorg_depth: 16,
@@ -2098,13 +2091,7 @@ mod tests {
         let entropy = format!("{:?}/{}", std::time::SystemTime::now(), std::process::id());
         let caller = Address::from_slice(&keccak256(entropy.as_bytes())[12..]);
         let deployment = bsc_mainnet_v5_27_2();
-        let observation = probe_flap(
-            "https://bsc-dataseed.bnbchain.org",
-            &limits,
-            &deployment,
-            caller,
-        )
-        .unwrap();
+        let observation = probe_flap(&rpc, &limits, &deployment, caller).unwrap();
         let o = &observation.observed;
         let code = |c: &CodeFingerprint| {
             format!(

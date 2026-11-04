@@ -43,6 +43,7 @@
 //! assumption.
 
 pub mod abi;
+pub mod binding;
 pub mod deployment;
 pub mod events;
 pub mod profile;

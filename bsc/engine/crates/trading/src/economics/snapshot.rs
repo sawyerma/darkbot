@@ -14,7 +14,7 @@
 use std::fmt::Write as _;
 
 /// The model version: raised with every semantic change of a rule here.
-pub const MODEL_VERSION: &str = "bsc-economics-5";
+pub const MODEL_VERSION: &str = "bsc-economics-6";
 
 /// The chain every scope belongs to.
 pub const CHAIN_ID: u64 = 56;
@@ -198,9 +198,16 @@ pub const SCOPES: &[Scope] = &[
     Scope {
         venue: "FOUR",
         surface: FOUR_CLASSIC,
-        path: "ADMITTED BUY, ROUND TRIP, NETWORK COST",
+        path: "ADMITTED BUY",
+        support: Support::Priced,
+        rule: "admit_classic_buy: a launch classified on a validated deployment (fourmeme::profile, FourDeployment::validate), the state directly after it, 0.001 or 0.1 BNB (buyTokenAMAP executed by probes on that state, tokens and wei to the unit), minAmount the slippage floor; signed and bound by fourmeme::binding",
+    },
+    Scope {
+        venue: "FOUR",
+        surface: FOUR_CLASSIC,
+        path: "ROUND TRIP, NETWORK COST",
         support: Support::Unsupported,
-        rule: "no admission, deployment validation or gas evidence of a Four call yet (R12 open)",
+        rule: "no gas evidence of a Four call and no runtime path yet (R12c open)",
     },
     Scope {
         venue: "OPENFOUR",
@@ -357,7 +364,8 @@ mod tests {
                 ("FLAP", "ROUND TRIP"),
                 ("FOUR", "BUY"),
                 ("FOUR", "SELL"),
-                ("FOUR", "LAUNCH CURVE, CREATOR BUY")
+                ("FOUR", "LAUNCH CURVE, CREATOR BUY"),
+                ("FOUR", "ADMITTED BUY")
             ]
         );
         assert!(
@@ -407,7 +415,7 @@ mod tests {
     fn the_manifest_binds_every_file() {
         let files: Vec<(&str, [u8; 32])> = BOUND_FILES.iter().map(|p| (*p, [0u8; 32])).collect();
         let a = manifest(&files);
-        assert!(a.starts_with("darkbot.bsc.economics-snapshot\nchain 56\nmodel bsc-economics-5\n"));
+        assert!(a.starts_with("darkbot.bsc.economics-snapshot\nchain 56\nmodel bsc-economics-6\n"));
         assert_eq!(a.matches("\nfile ").count(), BOUND_FILES.len());
         let mut other = files.clone();
         other[3].1[0] = 1;

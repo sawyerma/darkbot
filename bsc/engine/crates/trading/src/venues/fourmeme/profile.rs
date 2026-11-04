@@ -32,7 +32,7 @@
 
 use alloy_primitives::{Address, B256, U256, b256};
 
-use super::deployment::FourDeployment;
+use super::deployment::ValidatedFourDeployment;
 use super::recognize::ClassicLaunch;
 use crate::economics::four_classic::{
     ClassicBuyQuote, ClassicCurve, ClassicFee, ClassicQuoteError, LaunchTerms, launch_curve,
@@ -89,6 +89,8 @@ pub const WITNESSED_VENUE_FEE: VenueFee = VenueFee {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum UnsupportedClassicLaunch {
+    /// The deployment's Classic economics are not witnessed by execution.
+    EconomicsNotWitnessed,
     /// `args` is not the witnessed layout.
     Layout,
     /// A head word of `args` whose meaning no witness proves is not zero.
@@ -110,6 +112,9 @@ pub enum UnsupportedClassicLaunch {
 impl core::fmt::Display for UnsupportedClassicLaunch {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
+            Self::EconomicsNotWitnessed => {
+                f.write_str("classic launch: the deployment's economics are not witnessed")
+            }
             Self::Layout => f.write_str("classic launch: args layout not witnessed"),
             Self::UnknownArgument => f.write_str("classic launch: an unwitnessed argument is set"),
             Self::TotalSupply => f.write_str("classic launch: totalSupply"),
@@ -132,6 +137,7 @@ impl std::error::Error for UnsupportedClassicLaunch {}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ClassifiedClassicLaunch {
     candidate: B256,
+    codehash_generation: u64,
     token: Address,
     template: B256,
     curve: ClassicCurve,
@@ -144,6 +150,12 @@ impl ClassifiedClassicLaunch {
     #[inline]
     pub fn candidate(&self) -> B256 {
         self.candidate
+    }
+
+    /// The code generation of the deployment it was classified under.
+    #[inline]
+    pub fn codehash_generation(&self) -> u64 {
+        self.codehash_generation
     }
 
     #[inline]
@@ -175,15 +187,18 @@ impl ClassifiedClassicLaunch {
     }
 }
 
-/// Classifies `launch`, sent with `value` in transaction `candidate`, under
-/// the venue's fee terms `venue`.
+/// Classifies `launch`, sent with `value` in transaction `candidate`, on
+/// the validated `deployment` under the venue's fee terms `venue`.
 pub fn classify_classic_launch(
-    deployment: &FourDeployment,
+    validated: &ValidatedFourDeployment,
     launch: &ClassicLaunch<'_>,
     value: U256,
     venue: &VenueFee,
     candidate: B256,
 ) -> Result<ClassifiedClassicLaunch, UnsupportedClassicLaunch> {
+    if !validated.classic_economics_witnessed() {
+        return Err(UnsupportedClassicLaunch::EconomicsNotWitnessed);
+    }
     let args = launch
         .launch_args()
         .map_err(|_| UnsupportedClassicLaunch::Layout)?;
@@ -230,7 +245,8 @@ pub fn classify_classic_launch(
     };
     Ok(ClassifiedClassicLaunch {
         candidate,
-        token: deployment.classic_tokens(launch.salt)[profile.pair],
+        codehash_generation: validated.codehash_generation(),
+        token: validated.deployment().classic_tokens(launch.salt)[profile.pair],
         template: args.template,
         curve: creator_purchase.map_or(launched, |p| p.after),
         fee,

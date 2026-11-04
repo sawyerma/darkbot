@@ -911,7 +911,7 @@ impl End for LiveEnd {
             return self.refuse(Refusal::Owner, why);
         }
         let kind = match expected {
-            ExpectedTx::Buy(_) => LiveIntentKind::Buy,
+            ExpectedTx::Buy(_) | ExpectedTx::ClassicBuy(_) => LiveIntentKind::Buy,
             ExpectedTx::Approve(_) => LiveIntentKind::Approve,
             ExpectedTx::Sell(_) => LiveIntentKind::Sell,
             ExpectedTx::Burn(_) => LiveIntentKind::Burn,
