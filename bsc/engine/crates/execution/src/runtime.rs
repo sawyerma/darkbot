@@ -56,7 +56,7 @@ use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender, TrySendError, sync_channel};
+use std::sync::mpsc::{RecvTimeoutError, SyncSender, sync_channel};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
@@ -81,6 +81,92 @@ use canonical::*;
 use exec::{ExecRuntime, ExecSetup};
 use live::LiveRuntime;
 use state::{CheckpointWriter, StateConfig, StateOwner};
+
+/// REV.1.0 R6: the ingress queues, one bounded queue per source
+/// (`BSC_RUNTIME_QUEUE_EVENTS` events each; was one queue shared by all):
+/// a source's burst fills and drops only its own queue, never another
+/// source's events (a burst still delays the others: one consumer). The
+/// runtime takes the event received first among the queues' heads: receipt
+/// order (the shared queue kept enqueue order, after each source's parse),
+/// each source's own order kept.
+struct IngressQueues {
+    state: std::sync::Mutex<Queued>,
+    ready: std::sync::Condvar,
+    bound: usize,
+}
+
+struct Queued {
+    queues: [std::collections::VecDeque<(u64, Event)>; SourceId::ALL.len()],
+    /// The runtime waits for an event: a push wakes it (only then).
+    waiting: bool,
+}
+
+impl IngressQueues {
+    fn new(bound: usize) -> Arc<Self> {
+        Arc::new(Self {
+            state: std::sync::Mutex::new(Queued {
+                queues: std::array::from_fn(|_| std::collections::VecDeque::new()),
+                waiting: false,
+            }),
+            ready: std::sync::Condvar::new(),
+            bound,
+        })
+    }
+
+    /// Queues `event` of `source`, received at `at`; false when that
+    /// source's queue is full (the event is dropped).
+    fn push(&self, source: SourceId, at: u64, event: Event) -> bool {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let queue = &mut state.queues[source.index()];
+        if queue.len() >= self.bound {
+            return false;
+        }
+        queue.push_back((at, event));
+        let wake = state.waiting;
+        drop(state);
+        if wake {
+            self.ready.notify_one();
+        }
+        true
+    }
+
+    /// The event received first among the queues' heads, waiting at most
+    /// `wait` for one.
+    fn pop(&self, wait: Duration) -> Option<(SourceId, u64, Event)> {
+        let mut deadline = None;
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        loop {
+            let first = state
+                .queues
+                .iter()
+                .enumerate()
+                .filter_map(|(i, q)| q.front().map(|(at, _)| (*at, i)))
+                .min();
+            if let Some((_, i)) = first {
+                let (at, event) = state.queues[i].pop_front()?;
+                return Some((SourceId::ALL[i], at, event));
+            }
+            let deadline = *deadline.get_or_insert_with(|| Instant::now() + wait);
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return None;
+            }
+            state.waiting = true;
+            state = self
+                .ready
+                .wait_timeout(state, left)
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .0;
+            state.waiting = false;
+        }
+    }
+}
 
 /// One source event as it crosses from an adapter thread to the runtime.
 enum Event {
@@ -437,7 +523,7 @@ fn spawn_adapter(
     source: SourceId,
     url: String,
     limits: WssLimits,
-    tx: SyncSender<(SourceId, u64, Event)>,
+    queues: Arc<IngressQueues>,
     dropped: Arc<AtomicU64>,
     clock: Clock,
 ) -> Result<Adapter, String> {
@@ -467,9 +553,7 @@ fn spawn_adapter(
                         rate_limited: matches!(reason, DisconnectReason::RateLimited(_)),
                     },
                 };
-                if let Err(TrySendError::Full(_)) =
-                    tx.try_send((source, clock.ns_at(received), event))
-                {
+                if !queues.push(source, clock.ns_at(received), event) {
                     dropped.fetch_add(1, Ordering::Relaxed);
                 }
             };
@@ -490,7 +574,7 @@ fn spawn_adapter(
 /// thread, each event on the runtime's ingress queue as a WSS source's.
 fn spawn_geth_adapter(
     arena: crate::geth_source::GethArena,
-    tx: SyncSender<(SourceId, u64, Event)>,
+    queues: Arc<IngressQueues>,
     dropped: Arc<AtomicU64>,
     clock: Clock,
 ) -> Result<Adapter, String> {
@@ -521,8 +605,7 @@ fn spawn_geth_adapter(
                         rate_limited: false,
                     },
                 };
-                if let Err(TrySendError::Full(_)) = tx.try_send((source, clock.ns_at(read), event))
-                {
+                if !queues.push(source, clock.ns_at(read), event) {
                     dropped.fetch_add(1, Ordering::Relaxed);
                 }
             };
@@ -986,8 +1069,7 @@ pub fn run(
         .map(Path::to_path_buf)
         .unwrap_or_else(|_| journal.path().to_path_buf());
     let limits = config.wss;
-    let (tx, rx): (SyncSender<(SourceId, u64, Event)>, Receiver<_>) =
-        sync_channel(config.queue_events);
+    let ingress = IngressQueues::new(config.queue_events);
     let dropped: Vec<Arc<AtomicU64>> = SourceId::ALL
         .iter()
         .map(|_| Arc::new(AtomicU64::new(0)))
@@ -1284,7 +1366,7 @@ pub fn run(
                             // R6: the local geth over its arena.
                             (SourceId::Geth, Some(arena)) => spawn_geth_adapter(
                                 arena.clone(),
-                                tx.clone(),
+                                Arc::clone(&ingress),
                                 Arc::clone(&dropped[i]),
                                 clock,
                             )?,
@@ -1292,7 +1374,7 @@ pub fn run(
                                 source,
                                 url,
                                 limits,
-                                tx.clone(),
+                                Arc::clone(&ingress),
                                 Arc::clone(&dropped[i]),
                                 clock,
                             )?,
@@ -1357,10 +1439,8 @@ pub fn run(
             let wait = deadline
                 .saturating_duration_since(Instant::now())
                 .min(canonical_slice);
-            let (source, at, event) = match rx.recv_timeout(wait) {
-                Ok(e) => e,
-                Err(RecvTimeoutError::Timeout) => continue,
-                Err(RecvTimeoutError::Disconnected) => break,
+            let Some((source, at, event)) = ingress.pop(wait) else {
+                continue;
             };
             // R6 (T_queue): its wait between receipt and this dequeue.
             core.queued(source, clock.now_ns().saturating_sub(at));
@@ -1738,7 +1818,7 @@ pub fn run(
             }
         }
         if stopping && adapters.is_empty() {
-            drop(tx);
+            drop(ingress);
             // A clean stop disarms the PAPER path (its fence goes) and the
             // LIVE path (its key goes).
             if let Some(x) = exec.as_mut() {

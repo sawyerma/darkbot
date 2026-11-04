@@ -147,6 +147,8 @@ pub struct RuntimeConfig {
     /// REV.1.0 R6: the local geth's C1.4 arena, if this build has one
     /// (`BSC_INGRESS_GETH_*`).
     pub geth: Option<crate::geth_source::GethArena>,
+    /// The bound of each source's ingress queue and of the canonical and
+    /// confirmation queues (`BSC_RUNTIME_QUEUE_EVENTS`).
     pub queue_events: usize,
     pub dedup_hashes: usize,
     /// A connected source silent this long is DEGRADED.

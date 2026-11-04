@@ -2056,3 +2056,46 @@ fn an_idle_runtime_writes_its_status_and_stops_cleanly() {
     assert_eq!(journals.len(), 1);
     fs::remove_dir_all(&base).unwrap();
 }
+
+/// REV.1.0 R6: each source has its own bounded ingress queue: a burst of
+/// one source fills and drops only its own events, another source's still
+/// go in (one shared queue dropped them); the runtime takes the event
+/// received first among the heads, waits at most its bound for one, and a
+/// push from an adapter thread wakes it.
+#[test]
+fn a_burst_of_one_source_drops_only_its_own_events() {
+    let q = IngressQueues::new(2);
+    assert!(q.push(SourceId::PublicNode, 5, Event::Alive));
+    assert!(q.push(SourceId::PublicNode, 6, Event::Alive));
+    assert!(!q.push(SourceId::PublicNode, 7, Event::Alive));
+    assert!(q.push(SourceId::Drpc, 1, Event::Alive));
+    let order: Vec<(SourceId, u64)> = std::iter::from_fn(|| q.pop(Duration::ZERO))
+        .map(|(s, at, _)| (s, at))
+        .collect();
+    assert_eq!(
+        order,
+        [
+            (SourceId::Drpc, 1),
+            (SourceId::PublicNode, 5),
+            (SourceId::PublicNode, 6)
+        ]
+    );
+    let started = Instant::now();
+    assert!(q.pop(Duration::from_millis(20)).is_none());
+    assert!(started.elapsed() >= Duration::from_millis(20));
+    let adapter = Arc::clone(&q);
+    let pushed = thread::spawn(move || {
+        thread::sleep(Duration::from_millis(10));
+        adapter.push(SourceId::Geth, 9, Event::Alive)
+    });
+    // Woken by the push: back before its own bound (a lost wake-up returns
+    // the event only at the bound).
+    let bound = Duration::from_secs(30);
+    let waited = Instant::now();
+    assert_eq!(
+        q.pop(bound).map(|(s, at, _)| (s, at)),
+        Some((SourceId::Geth, 9))
+    );
+    assert!(waited.elapsed() < bound, "{:?}", waited.elapsed());
+    assert!(pushed.join().unwrap());
+}

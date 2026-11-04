@@ -457,7 +457,7 @@ Der Pfadpräfix für Rust ist `bsc/engine/crates/`. „UNVERIFIZIERT“ heißt: 
 
 1. **Quellen → Ingress:**
    - WSS-Adapter `execution/src/wss/` (u. a. `BSC_MAINNET_CHAIN_ID`), gestartet in `execution/src/runtime.rs` `spawn_adapter`.
-   - Ein Kanal (`sync_channel`; per-source Queues sind R6).
+   - Eine begrenzte Queue je Quelle (`IngressQueues` in `runtime.rs`, R6-Rest), Entnahme in Empfangsreihenfolge.
    - Quellen-Modi und Owner: `execution/src/sources/` (`Store`, `SourceId`, `Mode`, `Effective`, Gate `live_effective`/`live_clear`).
    - Persistent: `bsc-sources/generations/*` (Owner-Generationen, CAS über Request-ID und `--expect-generation`).
    - Restart: `source reset` beim Stopp, `source init` legt nur an (R1).
