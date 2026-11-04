@@ -51,9 +51,13 @@ use crate::submission::transport::{Clock, ConnectionState, Transport};
 use alloy_primitives::{Address, B256, U256};
 use darkbot_bsc_trading::chain_state::SnapshotId;
 use darkbot_bsc_trading::chain_state::canonical::{FinalityProof, InclusionProof, OrphanProof};
+use darkbot_bsc_trading::economics::flap::AdmittedBuy;
 use darkbot_bsc_trading::economics::flap::native_curve20::{
     CurveState, PricedToken, QUALIFIED_MAINNET_INPUT_WEI, QualifiedNativeState, VenueBuyTerms,
     admit_curve_buy, admit_curve_sell, admit_native_buy,
+};
+use darkbot_bsc_trading::economics::four_classic::{
+    AdmittedClassicBuy, QUALIFIED_CLASSIC_INPUTS_WEI, QualifiedClassicState, admit_classic_buy,
 };
 use darkbot_bsc_trading::economics::policy::{BuyPolicy, ExitPolicy};
 use darkbot_bsc_trading::intent::{
@@ -74,6 +78,14 @@ use darkbot_bsc_trading::venues::flap::binding::{
 use darkbot_bsc_trading::venues::flap::deployment::ValidatedDeployment;
 use darkbot_bsc_trading::venues::flap::profile::{UnsupportedLaunch, classify_launch};
 use darkbot_bsc_trading::venues::flap::recognize::{Recognized, recognize};
+use darkbot_bsc_trading::venues::fourmeme::binding::ExpectedClassicBuy;
+use darkbot_bsc_trading::venues::fourmeme::deployment::ValidatedFourDeployment;
+use darkbot_bsc_trading::venues::fourmeme::profile::{
+    UnsupportedClassicLaunch, classify_classic_launch,
+};
+use darkbot_bsc_trading::venues::fourmeme::recognize::{
+    Recognized as FourRecognized, recognize as four_recognize,
+};
 use std::collections::VecDeque;
 use std::fs;
 use std::io::{self, Write};
@@ -150,6 +162,9 @@ impl SenderPaths {
 /// The operating values of the PAPER path (`BSC_EXEC_*`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExecConfig {
+    /// R12c: the Four Classic BUY of the C3 path (`BSC_EXEC_FOUR_*`); none:
+    /// no Four arm, Four launches are not decoded by the path.
+    pub four: Option<FourExecConfig>,
     pub input_wei: u128,
     pub slippage_bps: u16,
     /// An exit's (the SELL's) slippage, its own limit (BSC3-069).
@@ -270,23 +285,22 @@ pub struct ExecConfig {
 impl ExecConfig {
     /// The cross-key rules: an armed path must be able to admit a BUY.
     pub fn validate(&self) -> Result<(), String> {
+        if let Some(four) = &self.four {
+            four.validate(self.gas_price_wei, self.session_cap_wei)?;
+        }
         if self.input_wei != u128::from(QUALIFIED_MAINNET_INPUT_WEI) {
             return Err(format!(
                 "BSC_EXEC_INPUT_WEI {} is not the witnessed input {QUALIFIED_MAINNET_INPUT_WEI}",
                 self.input_wei
             ));
         }
-        let gas = u128::from(self.gas_price_wei) * u128::from(self.gas_limit);
-        let one = self
-            .input_wei
-            .checked_add(gas)
-            .ok_or("BSC_EXEC_INPUT_WEI + gas overflows")?;
-        if self.session_cap_wei < one {
-            return Err(format!(
-                "BSC_EXEC_SESSION_CAP_WEI {} is below one BUY ({one})",
-                self.session_cap_wei
-            ));
-        }
+        cap_holds_one(
+            self.session_cap_wei,
+            self.input_wei,
+            self.gas_price_wei,
+            self.gas_limit,
+            ("BSC_EXEC_INPUT_WEI", "BUY"),
+        )?;
         if self.lanes == 0 {
             return Err("BSC_EXEC_LANES must be at least 1".into());
         }
@@ -334,19 +348,44 @@ impl ExecConfig {
         Ok(())
     }
 
-    /// One BUY's budget: the admitted input and the signed gas, nothing for
-    /// a launch (the original is a third party's) or a provider.
+    /// One Flap BUY's budget.
     fn budget(&self) -> BudgetEnvelope {
-        let gas = U256::from(self.gas_price_wei) * U256::from(self.gas_limit);
-        let input = U256::from(self.input_wei);
-        BudgetEnvelope {
-            max_buy_input_wei: input,
-            max_buy_gas_wei: gas,
-            max_own_launch_wei: U256::ZERO,
-            max_provider_payment_wei: U256::ZERO,
-            max_total_wei: input + gas,
-        }
+        one_buy_budget(self.input_wei, self.gas_price_wei, self.gas_limit)
     }
+}
+
+/// One BUY's budget: the admitted input and the signed gas, nothing for a
+/// launch (the original is a third party's) or a provider.
+fn one_buy_budget(input_wei: u128, gas_price_wei: u64, gas_limit: u64) -> BudgetEnvelope {
+    let gas = U256::from(gas_price_wei) * U256::from(gas_limit);
+    let input = U256::from(input_wei);
+    BudgetEnvelope {
+        max_buy_input_wei: input,
+        max_buy_gas_wei: gas,
+        max_own_launch_wei: U256::ZERO,
+        max_provider_payment_wei: U256::ZERO,
+        max_total_wei: input + gas,
+    }
+}
+
+/// The session cap holds one BUY of `input_wei` and its gas (`names`: the
+/// input's key and what the BUY is called).
+fn cap_holds_one(
+    session_cap_wei: u128,
+    input_wei: u128,
+    gas_price_wei: u64,
+    gas_limit: u64,
+    (input_key, what): (&str, &str),
+) -> Result<(), String> {
+    let one = input_wei
+        .checked_add(u128::from(gas_price_wei) * u128::from(gas_limit))
+        .ok_or_else(|| format!("{input_key} + gas overflows"))?;
+    if session_cap_wei < one {
+        return Err(format!(
+            "BSC_EXEC_SESSION_CAP_WEI {session_cap_wei} is below one {what} ({one})"
+        ));
+    }
+    Ok(())
 }
 
 /// The one adapter slot of a PAPER lane: the selected builder adapter,
@@ -364,6 +403,9 @@ pub enum Refusal {
     NotDecoded,
     /// The launch is not the qualified profile.
     Profile(UnsupportedLaunch),
+    /// R12c: a Four Classic launch outside the priced profile (counted as
+    /// `PROFILE`).
+    FourProfile(UnsupportedClassicLaunch),
     /// C2 holds no coherent snapshot for this candidate, or no head.
     NoSnapshot,
     /// The fresh-launch state or the admission refused.
@@ -439,7 +481,7 @@ impl Refusal {
     pub fn name(self) -> &'static str {
         match self {
             Self::NotDecoded => "NOT_DECODED",
-            Self::Profile(_) => "PROFILE",
+            Self::Profile(_) | Self::FourProfile(_) => "PROFILE",
             Self::NoSnapshot => "NO_SNAPSHOT",
             Self::Admission => "ADMISSION",
             Self::DuplicateToken => "DUPLICATE_TOKEN",
@@ -467,6 +509,74 @@ impl Refusal {
             Self::Unconfirmed => "UNCONFIRMED",
         }
     }
+}
+
+/// R12c: the Four Classic BUY's operating values (`BSC_EXEC_FOUR_*`). The
+/// gas limit is the operator's bound, held to the frozen Classic BUY
+/// receipts (two, of the G0.1-era TokenManager2 implementation; no
+/// launch-block Classic BUY and none of the pinned implementation yet: the
+/// Four network cost is UNSUPPORTED).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FourExecConfig {
+    pub input_wei: u128,
+    pub slippage_bps: u16,
+    pub gas_limit: u64,
+}
+
+impl FourExecConfig {
+    fn validate(&self, gas_price_wei: u64, session_cap_wei: u128) -> Result<(), String> {
+        if !QUALIFIED_CLASSIC_INPUTS_WEI
+            .iter()
+            .any(|w| u128::from(*w) == self.input_wei)
+        {
+            return Err(format!(
+                "BSC_EXEC_FOUR_INPUT_WEI {} is none of the witnessed inputs {QUALIFIED_CLASSIC_INPUTS_WEI:?}",
+                self.input_wei
+            ));
+        }
+        cap_holds_one(
+            session_cap_wei,
+            self.input_wei,
+            gas_price_wei,
+            self.gas_limit,
+            ("BSC_EXEC_FOUR_INPUT_WEI", "Four BUY"),
+        )
+    }
+
+    /// One Four BUY's budget.
+    fn budget(&self, gas_price_wei: u64) -> BudgetEnvelope {
+        one_buy_budget(self.input_wei, gas_price_wei, self.gas_limit)
+    }
+}
+
+/// The armed Four Classic BUY: the deployment the drift probe validated
+/// (its code generation, its fee terms), the policy and budget.
+#[derive(Clone, Copy, Debug)]
+struct FourArm {
+    validated: ValidatedFourDeployment,
+    policy: BuyPolicy,
+    budget: BudgetEnvelope,
+}
+
+/// A C3 BUY admitted on one venue, before the lane, signature and plan.
+struct C3Admitted {
+    intent: C3Intent,
+    token: [u8; 20],
+    budget: BudgetEnvelope,
+    decoded_ns: u64,
+    admitted_ns: u64,
+    snapshot: SnapshotId,
+    head: ChainHead,
+}
+
+enum C3Intent {
+    Flap(AdmittedBuy),
+    Four(AdmittedClassicBuy),
+}
+
+/// A native value as signed (big-endian, no leading zero), in wei.
+fn native_value(bytes: &[u8]) -> Option<U256> {
+    (bytes.len() <= 32 && bytes.first() != Some(&0)).then(|| U256::from_be_slice(bytes))
 }
 
 /// The local node's adapter slot of the PAPER table (Phase I): the single
@@ -740,6 +850,8 @@ struct OpenExits {
 pub struct Executor<E: End> {
     end: E,
     deployment: ValidatedDeployment,
+    /// R12c: the Four Classic arm (`arm_four`).
+    four: Option<FourArm>,
     terms: VenueBuyTerms,
     policy: BuyPolicy,
     config: ExecConfig,
@@ -1337,6 +1449,8 @@ pub struct PendingLaunch<'a> {
     pub hash: [u8; 32],
     pub raw: &'a [u8],
     pub to: Option<[u8; 20]>,
+    /// The native value as signed (big-endian bytes).
+    pub value: &'a [u8],
     pub input: &'a [u8],
     pub ingress_ns: u64,
 }
@@ -1458,6 +1572,7 @@ impl<E: End> Executor<E> {
         Ok(Executor {
             end,
             deployment,
+            four: None,
             terms,
             policy,
             budget,
@@ -1488,6 +1603,35 @@ impl<E: End> Executor<E> {
             evidence: EvidenceCounters::default(),
             config,
         })
+    }
+
+    /// R12c: arms the Four Classic BUY on the deployment the drift probe
+    /// validated, with the configured `BSC_EXEC_FOUR_*` values; its launches
+    /// then take the same lanes, caps and end as the Flap BUY.
+    pub fn arm_four(&mut self, validated: ValidatedFourDeployment) -> Result<(), ArmError> {
+        let four = self
+            .config
+            .four
+            .ok_or_else(|| ArmError::Config("BSC_EXEC_FOUR_* is not configured".into()))?;
+        let policy = BuyPolicy::new(
+            self.config.policy_generation,
+            U256::from(four.input_wei),
+            four.slippage_bps,
+            self.config.gas_price_wei,
+            four.gas_limit,
+        )
+        .map_err(|e| ArmError::Config(format!("BSC_EXEC_FOUR_*: {e}")))?;
+        self.four = Some(FourArm {
+            validated,
+            policy,
+            budget: four.budget(self.config.gas_price_wei),
+        });
+        Ok(())
+    }
+
+    /// Whether the Four Classic BUY is armed.
+    pub fn four_armed(&self) -> bool {
+        self.four.is_some()
     }
 
     /// Disarms: the lanes go and the arm's fence is removed (a PAPER BUY
@@ -1539,26 +1683,38 @@ impl<E: End> Executor<E> {
         if !self.config.sender_paths.c3() {
             return Err(Refusal::PathOff);
         }
-        let PendingLaunch {
-            hash,
-            raw: launch_raw,
-            to,
-            input,
-            ingress_ns,
-        } = launch;
+        // R12c: a call to the armed TokenManager2 is a Four Classic launch.
+        let four_target = self
+            .four
+            .as_ref()
+            .map(|f| f.validated.deployment().token_manager2);
+        let admitted = match launch.to.map(Address::from) {
+            Some(to) if Some(to) == four_target => self.admit_four(&launch, c2, clock)?,
+            _ => self.admit_flap(&launch, c2, clock)?,
+        };
+        self.c3_send(admitted, &launch, c2, clock)
+    }
+
+    /// The Flap BUY a pending `newTokenV6` launch admits.
+    fn admit_flap(
+        &self,
+        launch: &PendingLaunch<'_>,
+        c2: &LaunchContext<'_>,
+        clock: &dyn Clock,
+    ) -> Result<C3Admitted, Refusal> {
         let portal = self.deployment.deployment().portal;
-        let Recognized::LaunchV6(launch) = recognize(
+        let Recognized::LaunchV6(decoded) = recognize(
             portal,
-            to.map(Address::from),
-            input,
+            launch.to.map(Address::from),
+            launch.input,
             self.config.max_calldata,
         ) else {
             return Err(Refusal::NotDecoded);
         };
         let decoded_ns = clock.now_ns();
-        let candidate = B256::from(hash);
+        let candidate = B256::from(launch.hash);
         let classified =
-            classify_launch(&self.deployment, candidate, &launch).map_err(Refusal::Profile)?;
+            classify_launch(&self.deployment, candidate, &decoded).map_err(Refusal::Profile)?;
         let snapshot = (c2.snapshot)(
             candidate,
             self.policy.generation(),
@@ -1570,8 +1726,73 @@ impl<E: End> Executor<E> {
         let state = QualifiedNativeState::fresh_launch(&classified, &self.terms, 0, snapshot)
             .map_err(|_| Refusal::Admission)?;
         let admitted = admit_native_buy(&state, &self.policy).map_err(|_| Refusal::Admission)?;
-        let admitted_ns = clock.now_ns();
-        let token = admitted.token().into_array();
+        Ok(C3Admitted {
+            token: admitted.token().into_array(),
+            intent: C3Intent::Flap(admitted),
+            budget: self.budget,
+            decoded_ns,
+            admitted_ns: clock.now_ns(),
+            snapshot,
+            head,
+        })
+    }
+
+    /// R12c: the Four Classic BUY a pending `createToken` admits: the
+    /// launch classified on the probe-validated deployment, the state
+    /// directly after it, the Four policy.
+    fn admit_four(
+        &self,
+        launch: &PendingLaunch<'_>,
+        c2: &LaunchContext<'_>,
+        clock: &dyn Clock,
+    ) -> Result<C3Admitted, Refusal> {
+        let four = self.four.as_ref().ok_or(Refusal::NotDecoded)?;
+        let FourRecognized::ClassicLaunch(decoded) = four_recognize(
+            four.validated.deployment(),
+            launch.to.map(Address::from),
+            launch.input,
+            self.config.max_calldata,
+        ) else {
+            return Err(Refusal::NotDecoded);
+        };
+        let decoded_ns = clock.now_ns();
+        let value = native_value(launch.value).ok_or(Refusal::NotDecoded)?;
+        let candidate = B256::from(launch.hash);
+        let classified = classify_classic_launch(&four.validated, &decoded, value, candidate)
+            .map_err(Refusal::FourProfile)?;
+        let snapshot = (c2.snapshot)(
+            candidate,
+            four.policy.generation(),
+            four.validated.codehash_generation(),
+        )
+        .ok_or(Refusal::NoSnapshot)?;
+        let head = c2.head.ok_or(Refusal::NoSnapshot)?;
+        // A pending launch: no trade of its token precedes it.
+        let state = QualifiedClassicState::fresh_launch(&classified, 0, snapshot)
+            .map_err(|_| Refusal::Admission)?;
+        let admitted = admit_classic_buy(&state, &four.policy).map_err(|_| Refusal::Admission)?;
+        Ok(C3Admitted {
+            token: admitted.token().into_array(),
+            intent: C3Intent::Four(admitted),
+            budget: four.budget,
+            decoded_ns,
+            admitted_ns: clock.now_ns(),
+            snapshot,
+            head,
+        })
+    }
+
+    /// An admitted C3 BUY of either venue: the token's duplicate and
+    /// conflict check, the caps, the arm's nonce, the lane, the signed
+    /// intent and its plan to the end.
+    fn c3_send(
+        &mut self,
+        a: C3Admitted,
+        launch: &PendingLaunch<'_>,
+        c2: &LaunchContext<'_>,
+        clock: &dyn Clock,
+    ) -> Result<ExecBuy<E::Handoff>, Refusal> {
+        let (hash, token) = (launch.hash, a.token);
         if self.holds(&token) {
             // R6: another launch transaction of a token bought on its own
             // launch is a CONFLICT, not the same launch seen again.
@@ -1586,7 +1807,7 @@ impl<E: End> Executor<E> {
                 },
             );
         }
-        let exposure = self.budget.max_total_wei;
+        let exposure = a.budget.max_total_wei;
         if self.spent_wei + exposure > U256::from(self.config.session_cap_wei) {
             return Err(Refusal::SessionCap);
         }
@@ -1613,23 +1834,47 @@ impl<E: End> Executor<E> {
         };
         // The lane is consumed by this attempt, whatever happens next.
         self.used += 1;
-        let ticket = lane.reserve(admitted.token()).map_err(|_| Refusal::Lane)?;
+        let ticket = lane
+            .reserve(Address::from(token))
+            .map_err(|_| Refusal::Lane)?;
         // The token is taken at the reservation, as the production lane
         // burns it there: a replacement launch of it is refused.
         self.bought.push(token);
         self.bought_on.push((token, hash));
         let sender = Address::from(self.end.address());
-        let expected = ExpectedBuy::from_admitted(
-            &self.deployment,
-            &admitted,
-            &self.policy,
-            sender,
-            ticket.nonce(),
-        )
-        .map_err(|_| Refusal::Intent)?;
-        expected
-            .sign(self.end.signer(), &mut self.scratch, &mut self.raw)
-            .map_err(|_| Refusal::Build)?;
+        let flap_expected;
+        let four_expected;
+        let expected = match a.intent {
+            C3Intent::Flap(admitted) => {
+                flap_expected = ExpectedBuy::from_admitted(
+                    &self.deployment,
+                    &admitted,
+                    &self.policy,
+                    sender,
+                    ticket.nonce(),
+                )
+                .map_err(|_| Refusal::Intent)?;
+                flap_expected
+                    .sign(self.end.signer(), &mut self.scratch, &mut self.raw)
+                    .map_err(|_| Refusal::Build)?;
+                ExpectedTx::Buy(&flap_expected)
+            }
+            C3Intent::Four(admitted) => {
+                let four = self.four.as_ref().ok_or(Refusal::Intent)?;
+                four_expected = ExpectedClassicBuy::from_admitted(
+                    &four.validated,
+                    &admitted,
+                    &four.policy,
+                    sender,
+                    ticket.nonce(),
+                )
+                .map_err(|_| Refusal::Intent)?;
+                four_expected
+                    .sign(self.end.signer(), &mut self.scratch, &mut self.raw)
+                    .map_err(|_| Refusal::Build)?;
+                ExpectedTx::ClassicBuy(&four_expected)
+            }
+        };
         let signed_ns = clock.now_ns();
         let (handoff, prepared_ns, planned_ns, (admitted, disclosed)) = to_end(
             Parts {
@@ -1640,14 +1885,14 @@ impl<E: End> Executor<E> {
             },
             ticket,
             &self.raw,
-            ExpectedTx::Buy(&expected),
-            &self.budget,
+            expected,
+            &a.budget,
             exits,
-            &snapshot,
-            head,
+            &a.snapshot,
+            a.head,
             clock,
-            ingress_ns,
-            Submission::LaunchBundle(launch_raw),
+            launch.ingress_ns,
+            Submission::LaunchBundle(launch.raw),
             None,
         );
         // The exposure is the session's once the economic admission was
@@ -1662,9 +1907,9 @@ impl<E: End> Executor<E> {
             token,
             handoff,
             times: StageTimes {
-                ingress_ns,
-                decoded_ns,
-                admitted_ns,
+                ingress_ns: launch.ingress_ns,
+                decoded_ns: a.decoded_ns,
+                admitted_ns: a.admitted_ns,
                 signed_ns,
                 prepared_ns,
                 planned_ns,

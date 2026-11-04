@@ -121,8 +121,8 @@ impl LiveAdapter {
     }
 }
 
-/// The venues a LIVE grant can name: Flap alone (Four has no execution path,
-/// `FOUR_EXECUTION_PATH_MISSING`). Audit E 4.9: the projection's list.
+/// The venues a LIVE grant can name: Flap alone (Four has no LIVE execution
+/// path, `FOUR_EXECUTION_PATH_MISSING`). Audit E 4.9: the projection's list.
 pub const LIVE_VENUES: [VenueId; 1] = [VenueId::Flap];
 
 /// The operator's LIVE grant (plan 28.10., `0a647175`): the one economic

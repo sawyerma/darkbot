@@ -96,38 +96,46 @@ pub fn exec_gas_covered(config: &RuntimeConfig) -> Result<(), String> {
 
 /// BSC3-079: each configured gas limit at least the largest gas used of
 /// its class in `gas`: the BUY's of a BUY (any, and one in its token's
-/// launch block, the C3 path's shape), the SELL's and the APPROVE's.
+/// launch block, the C3 path's shape), the SELL's and the APPROVE's; R12c:
+/// a configured Four Classic BUY's of the Classic BUYs.
 pub fn gas_limits_cover(
     exec: &crate::paper_exec::ExecConfig,
     gas: &darkbot_bsc_trading::economics::network::GasEvidence,
 ) -> Result<(), String> {
     use darkbot_bsc_trading::economics::network::{Action, PathClass, Venue};
-    let largest = |action| {
-        gas.class(PathClass {
-            venue: Venue::Flap,
-            action,
-        })
-        .map_or(0, |c| c.gas_used_max)
+    let largest = |venue, action| {
+        gas.class(PathClass { venue, action })
+            .map_or(0, |c| c.gas_used_max)
     };
-    for (name, limit, actions) in [
+    let buys = &[Action::Buy, Action::BuyInLaunchBlock][..];
+    let four = exec.four.map(|f| {
         (
-            "BSC_EXEC_GAS_LIMIT",
-            exec.gas_limit,
-            &[Action::Buy, Action::BuyInLaunchBlock][..],
-        ),
+            "BSC_EXEC_FOUR_GAS_LIMIT",
+            f.gas_limit,
+            Venue::FourClassic,
+            buys,
+        )
+    });
+    for (name, limit, venue, actions) in [
+        ("BSC_EXEC_GAS_LIMIT", exec.gas_limit, Venue::Flap, buys),
         (
             "BSC_EXEC_SELL_GAS_LIMIT",
             exec.sell_gas_limit,
+            Venue::Flap,
             &[Action::Sell][..],
         ),
         (
             "BSC_EXEC_APPROVE_GAS_LIMIT",
             exec.approve_gas_limit,
+            Venue::Flap,
             &[Action::Approve][..],
         ),
-    ] {
+    ]
+    .into_iter()
+    .chain(four)
+    {
         for action in actions {
-            let most = largest(*action);
+            let most = largest(venue, *action);
             if limit < most {
                 return Err(format!(
                     "{name} {limit} is below the largest {action:?} gas {most} of the frozen evidence"
@@ -350,6 +358,12 @@ impl RuntimeConfig {
             values.remove(crate::sources::OwnerLimits::KEEP_GENERATIONS),
         )?;
         let sender_paths = values.remove("BSC_EXEC_SENDER_PATHS");
+        // R12c: the Four Classic BUY of the C3 path, all three or none.
+        let four_keys = [
+            values.remove("BSC_EXEC_FOUR_INPUT_WEI"),
+            values.remove("BSC_EXEC_FOUR_SLIPPAGE_BPS"),
+            values.remove("BSC_EXEC_FOUR_GAS_LIMIT"),
+        ];
         let exit_slippage = values.remove("BSC_EXEC_EXIT_SLIPPAGE_BPS");
         let operator_exit = values.remove("BSC_EXEC_LIVE_OPERATOR_EXIT");
         let nonce_burn = values.remove("BSC_EXEC_LIVE_NONCE_BURN");
@@ -585,6 +599,9 @@ impl RuntimeConfig {
                         "BSC_EXEC_LIVE_PRESENCE_ANCHOR needs BSC_EXEC_PAPER_IDENTITY".into(),
                     );
                 }
+                if four_keys.iter().any(Option::is_some) {
+                    return Err("BSC_EXEC_FOUR_* needs BSC_EXEC_PAPER_IDENTITY".into());
+                }
                 None
             }
             Some(_) if canonical.is_none() => {
@@ -610,6 +627,34 @@ impl RuntimeConfig {
                     )
                     .map_err(|e| e.replace("BSC_STATE_WATCHED", "BSC_EXEC_REFUSED_ACCOUNTS"))?)?,
                     exec: ExecConfig {
+                        four: match four_keys {
+                            [None, None, None] => None,
+                            [Some(input), Some(slippage), Some(gas)] => {
+                                Some(crate::paper_exec::FourExecConfig {
+                                    input_wei: u128::from(bounded(
+                                        "BSC_EXEC_FOUR_INPUT_WEI",
+                                        input,
+                                        1,
+                                        u64::MAX,
+                                    )?),
+                                    slippage_bps: bounded(
+                                        "BSC_EXEC_FOUR_SLIPPAGE_BPS",
+                                        slippage,
+                                        0,
+                                        9_999,
+                                    )? as u16,
+                                    gas_limit: bounded(
+                                        "BSC_EXEC_FOUR_GAS_LIMIT",
+                                        gas,
+                                        21_000,
+                                        100_000_000,
+                                    )?,
+                                })
+                            }
+                            _ => {
+                                return Err("BSC_EXEC_FOUR_INPUT_WEI, BSC_EXEC_FOUR_SLIPPAGE_BPS and BSC_EXEC_FOUR_GAS_LIMIT go together".into());
+                            }
+                        },
                         input_wei: u128::from(take("BSC_EXEC_INPUT_WEI", 1, u64::MAX)?),
                         slippage_bps,
                         exit_slippage_bps,

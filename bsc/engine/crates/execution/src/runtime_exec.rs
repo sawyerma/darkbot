@@ -6,7 +6,10 @@
 //! 2. when the component is SHADOW and the C2 owner runs, the live Flap
 //!    deployment and venue terms are probed read-only on a helper thread,
 //!    pinned to one block (never assumed): a drift, other terms or a funded
-//!    PAPER sender stop here, visibly;
+//!    PAPER sender stop here, visibly; (R12c) with the Four Classic venue
+//!    admitted and `BSC_EXEC_FOUR_*` set, the Four.meme deployment and fee
+//!    terms too, and the executor arms the Four Classic BUY beside the Flap
+//!    one (a change of that scope starts the path over);
 //! 3. once C2 knows the PAPER sender's next nonce exactly (zero: the
 //!    identity never sends), the executor arms its fenced lanes;
 //! 4. every C1-scope launch then runs the production path to the PAPER
@@ -28,7 +31,7 @@ use crate::paper_exec::{
 };
 use crate::runtime::state::StateOwner;
 use crate::submission::transport::Clock;
-use crate::venue_probe::{VenueObservation, probe_flap};
+use crate::venue_probe::{FourObservation, VenueObservation, probe_flap, probe_four};
 use alloy_primitives::{Address, U256};
 use darkbot_bsc_geth_ipc::ingress::decode_tx_target;
 use darkbot_bsc_record::Draft;
@@ -39,6 +42,10 @@ use darkbot_bsc_trading::economics::flap::native_curve20::{
 use darkbot_bsc_trading::venues::flap::deployment::{
     FlapDeployment, ValidatedDeployment, bsc_mainnet_v5_27_2,
 };
+use darkbot_bsc_trading::venues::fourmeme::deployment::{
+    FourDeployment, ValidatedFourDeployment, bsc_mainnet_r12b_131568366,
+};
+use darkbot_bsc_trading::venues::fourmeme::profile::WITNESSED_VENUE_FEE;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, TryRecvError, channel};
 use std::thread;
@@ -108,6 +115,58 @@ pub(crate) fn live_probe(
     probe_flap(endpoint, limits, deployment, caller).map_err(|e| e.to_string())
 }
 
+/// One read-only probe of the live Four.meme deployment and its fee terms
+/// (`venue_probe::probe_four` in production), when the Four Classic BUY is
+/// configured (`BSC_EXEC_FOUR_*`).
+pub type FourProber = fn(&str, &FollowerLimits, &FourDeployment) -> Result<FourObservation, String>;
+
+pub(crate) fn live_four_probe(
+    endpoint: &str,
+    limits: &FollowerLimits,
+    deployment: &FourDeployment,
+) -> Result<FourObservation, String> {
+    probe_four(endpoint, limits, deployment).map_err(|e| e.to_string())
+}
+
+/// One probe round: the Flap path, and the Four Classic arm when it is
+/// configured (probed only after the Flap probe succeeded).
+struct Probed {
+    flap: Result<VenueObservation, String>,
+    four: Option<Result<FourObservation, String>>,
+}
+
+/// What a probe round validated: the Flap path, and the Four Classic arm
+/// when it is configured.
+#[derive(Clone, Copy)]
+struct Validated {
+    flap: ValidatedDeployment,
+    terms: VenueBuyTerms,
+    four: Option<ValidatedFourDeployment>,
+}
+
+/// The Four Classic arm's deployment, validated against the refrozen pin at
+/// `generation` (the Flap path's): a drift, decode-only economics or other
+/// fee terms end the path as the Flap ones do.
+fn validate_four(f: &FourObservation, generation: u64) -> Result<ValidatedFourDeployment, Phase> {
+    let seen = format!(
+        "observed TokenManager2 implementation {} at block {}",
+        f.observed.token_manager2_implementation, f.block_number
+    );
+    let v = bsc_mainnet_r12b_131568366()
+        .validate(&f.observed, generation)
+        .map_err(|e| Phase::DeploymentDrift(format!("{e}: {seen}")))?;
+    if !v.classic_economics_witnessed() {
+        return Err(Phase::EconomicsUnqualified(format!(
+            "four: {seen} is decode-only"
+        )));
+    }
+    // The fee terms it is armed on are the witnessed ones, at every probe.
+    if v.venue_fee() != WITNESSED_VENUE_FEE {
+        return Err(Phase::TermsDrift(format!("four: {:?}", v.venue_fee())));
+    }
+    Ok(v)
+}
+
 /// Where the PAPER path stands.
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Phase {
@@ -151,9 +210,9 @@ pub struct ExecRuntime {
     sender: Option<[u8; 20]>,
     identity_error: Option<String>,
     phase: Phase,
-    probe: Option<Receiver<Result<VenueObservation, String>>>,
+    probe: Option<Receiver<Probed>>,
     observation: Option<VenueObservation>,
-    validated: Option<(ValidatedDeployment, VenueBuyTerms)>,
+    validated: Option<Validated>,
     executor: Option<PaperExecutor>,
     /// Code generations issued by successful first probes.
     codehash_generation: u64,
@@ -168,16 +227,28 @@ pub struct ExecRuntime {
     reprobe_failed: u32,
     last_probe_error: Option<String>,
     prober: Prober,
+    four_prober: FourProber,
+    /// Whether the probes and the arm include the Four Classic BUY: its
+    /// venue admitted and `BSC_EXEC_FOUR_*` configured.
+    four_scope: bool,
+    /// The Four Classic venue is admitted without `BSC_EXEC_FOUR_*`.
+    four_unconfigured: bool,
 }
 
 impl ExecRuntime {
     /// At process start: loads the PAPER identity (outside the repository,
     /// owner-only, never a refused account) to learn its address.
     pub fn new(setup: ExecSetup, repo_root: &Path, fence_dir: PathBuf) -> Self {
-        Self::with_prober(setup, repo_root, fence_dir, live_probe)
+        Self::with_prober(setup, repo_root, fence_dir, live_probe, live_four_probe)
     }
 
-    fn with_prober(setup: ExecSetup, repo_root: &Path, fence_dir: PathBuf, prober: Prober) -> Self {
+    fn with_prober(
+        setup: ExecSetup,
+        repo_root: &Path,
+        fence_dir: PathBuf,
+        prober: Prober,
+        four_prober: FourProber,
+    ) -> Self {
         let loaded = PaperIdentity::load(&setup.identity_path, repo_root, &setup.refused_accounts);
         let (sender, identity_error) = match loaded {
             Ok(identity) => (Some(identity.address()), None),
@@ -202,7 +273,33 @@ impl ExecRuntime {
             reprobe_failed: 0,
             last_probe_error: None,
             prober,
+            four_prober,
+            four_scope: false,
+            four_unconfigured: false,
         }
+    }
+
+    /// R12c: whether the Four Classic venue is admitted now (the reconcile's
+    /// gates, before [`ExecRuntime::tick`]). A change of what the path
+    /// includes ends it as switching it off does; the next tick probes and
+    /// arms it again with (or without) the Four Classic BUY.
+    pub fn set_four_wanted(&mut self, wanted: bool) {
+        let scope = wanted && self.setup.exec.four.is_some();
+        self.four_unconfigured = wanted && self.setup.exec.four.is_none();
+        if scope != self.four_scope {
+            self.four_scope = scope;
+            self.probe = None;
+            self.observation = None;
+            self.last_probe = None;
+            self.stop(Phase::Off);
+        }
+    }
+
+    /// Whether the armed path holds the Four Classic BUY.
+    pub fn four_armed(&self) -> bool {
+        self.executor
+            .as_ref()
+            .is_some_and(PaperExecutor::four_armed)
     }
 
     /// The PAPER sender, when its identity loaded.
@@ -236,15 +333,20 @@ impl ExecRuntime {
         let endpoint = endpoint.to_string();
         let limits = *limits;
         let prober = self.prober;
+        let four_prober = self.four_scope.then_some(self.four_prober);
         let spawned = thread::Builder::new()
             .name("bsc-exec-probe".into())
             .spawn(move || {
-                let _ = tx.send(prober(
+                let flap = prober(
                     &endpoint,
                     &limits,
                     &bsc_mainnet_v5_27_2(),
                     Address::from(sender),
-                ));
+                );
+                let four = four_prober
+                    .filter(|_| flap.is_ok())
+                    .map(|p| p(&endpoint, &limits, &bsc_mainnet_r12b_131568366()));
+                let _ = tx.send(Probed { flap, four });
             });
         match spawned {
             Ok(_) => {
@@ -256,20 +358,25 @@ impl ExecRuntime {
         }
     }
 
-    /// The outcome of one probe: a refusal ends the path (armed or not);
-    /// a matching observation validates it, or keeps it armed.
-    fn observed(&mut self, result: Result<VenueObservation, String>) {
-        let observation = match result {
-            Ok(o) => o,
-            // An armed path tolerates a bounded run of failed re-probes.
-            Err(e)
-                if self.executor.is_some() && self.reprobe_failed < self.setup.reprobe_failures =>
-            {
-                self.reprobe_failed += 1;
-                self.last_probe_error = Some(e);
-                return;
-            }
-            Err(e) => return self.stop(Phase::ProbeFailed(e)),
+    /// A probe round that failed: an armed path tolerates a bounded run of
+    /// them; otherwise the path ends.
+    fn probe_failed(&mut self, error: String) {
+        if self.executor.is_some() && self.reprobe_failed < self.setup.reprobe_failures {
+            self.reprobe_failed += 1;
+            self.last_probe_error = Some(error);
+            return;
+        }
+        self.stop(Phase::ProbeFailed(error))
+    }
+
+    /// The outcome of one probe round: a refusal of either venue ends the
+    /// path (armed or not); matching observations validate it, or keep it
+    /// armed.
+    fn observed(&mut self, probed: Probed) {
+        let (observation, four) = match (probed.flap, probed.four.transpose()) {
+            (Ok(o), Ok(four)) => (o, four),
+            (Err(e), _) => return self.probe_failed(e),
+            (Ok(_), Err(e)) => return self.probe_failed(format!("four: {e}")),
         };
         self.reprobe_failed = 0;
         self.last_probe_error = None;
@@ -295,11 +402,19 @@ impl ExecRuntime {
             }
             Ok(_) if balance != U256::ZERO => self.stop(Phase::Funded(format!("{balance} wei"))),
             Ok(v) => {
-                // An armed path stays on its validated deployment (the same
-                // fingerprints); a first probe validates it.
+                let four = match four.map(|f| validate_four(&f, generation)).transpose() {
+                    Ok(four) => four,
+                    Err(phase) => return self.stop(phase),
+                };
+                // An armed path stays on its validated deployments (the
+                // same fingerprints); a first probe validates them.
                 if self.executor.is_none() {
                     self.codehash_generation = generation;
-                    self.validated = Some((v, terms));
+                    self.validated = Some(Validated {
+                        flap: v,
+                        terms,
+                        four,
+                    });
                 }
             }
         }
@@ -367,7 +482,12 @@ impl ExecRuntime {
             }
             return;
         }
-        let Some((deployment, terms)) = self.validated else {
+        let Some(Validated {
+            flap: deployment,
+            terms,
+            four,
+        }) = self.validated
+        else {
             self.spawn_probe(endpoint, limits, sender);
             if !self.phase.terminal() {
                 self.phase = Phase::Probing;
@@ -410,6 +530,20 @@ impl ExecRuntime {
             .map_err(|e| e.to_string())
         });
         self.arms += 1;
+        // The Four Classic arm joins the armed executor; when it cannot,
+        // the whole path stays unarmed (its fence goes).
+        let armed = match (armed, four) {
+            (Ok(mut executor), Some(v)) => match executor.arm_four(v) {
+                Ok(()) => Ok(executor),
+                Err(e) => {
+                    if executor.disarm().is_err() {
+                        self.disarm_errors += 1;
+                    }
+                    Err(format!("four: {e}"))
+                }
+            },
+            (armed, _) => armed,
+        };
         match armed {
             Ok(executor) => {
                 self.executor = Some(executor);
@@ -477,12 +611,21 @@ impl ExecRuntime {
             Phase::WaitingNonce => ("WAITING_NONCE", None),
             Phase::ArmFailed(r) => ("ARM_FAILED", Some(r.clone())),
             Phase::Armed => {
-                let failing = self.last_probe_error.as_ref().map(|e| {
-                    format!(
-                        "re-probe failed {}/{} in a row: {e}",
-                        self.reprobe_failed, self.setup.reprobe_failures
-                    )
-                });
+                let failing = self
+                    .last_probe_error
+                    .as_ref()
+                    .map(|e| {
+                        format!(
+                            "re-probe failed {}/{} in a row: {e}",
+                            self.reprobe_failed, self.setup.reprobe_failures
+                        )
+                    })
+                    .or_else(|| {
+                        self.four_unconfigured.then(|| {
+                            "BSC_VENUE_FOUR_CLASSIC is SHADOW without BSC_EXEC_FOUR_*: no Four BUY"
+                                .to_string()
+                        })
+                    });
                 match self.executor.as_ref().map(PaperExecutor::exhausted) {
                     // Every lane used, or no room for one more BUY under the
                     // session cap.
@@ -614,6 +757,7 @@ pub fn launch_to<E: End>(
                 hash,
                 raw,
                 to: target.to,
+                value: target.value,
                 input: target.data,
                 ingress_ns,
             },
@@ -742,6 +886,7 @@ pub(crate) mod tests {
             owner: crate::sources::tests::shipped_limits(),
             refused_accounts: Vec::new(),
             exec: ExecConfig {
+                four: None,
                 input_wei: 1_000_000_000_000_000,
                 slippage_bps: 100,
                 exit_slippage_bps: 100,
@@ -886,6 +1031,128 @@ pub(crate) mod tests {
         _: Address,
     ) -> Result<VenueObservation, String> {
         Ok(observation("v5.28.0", Address::repeat_byte(0x7e)))
+    }
+
+    /// The Four Classic probe of a path without `BSC_EXEC_FOUR_*`: never
+    /// called.
+    fn no_four(_: &str, _: &FollowerLimits, _: &FourDeployment) -> Result<FourObservation, String> {
+        unreachable!("the Four Classic arm is not configured")
+    }
+
+    /// R12c: what a probe of exactly the pins of `d` (and the witnessed fee
+    /// terms) observes.
+    pub(crate) fn four_observation(d: &FourDeployment) -> FourObservation {
+        use darkbot_bsc_trading::venues::fourmeme::deployment::ObservedFour;
+        FourObservation {
+            block_number: HEAD,
+            block_hash: [0xb1; 32],
+            observed: ObservedFour {
+                chain_id: d.chain_id,
+                token_manager2_implementation: d.token_manager2_implementation,
+                token_manager2_implementation_runtime_keccak256: d
+                    .token_manager2_implementation_runtime_keccak256,
+                openfour_core_implementation: d.openfour_core_implementation,
+                openfour_core_implementation_runtime_keccak256: d
+                    .openfour_core_implementation_runtime_keccak256,
+                openfour_create_deployer_implementation: d.openfour_create_deployer_implementation,
+                openfour_create_deployer_implementation_runtime_keccak256: d
+                    .openfour_create_deployer_implementation_runtime_keccak256,
+                classic_runtime_keccak256: d
+                    .classic_templates
+                    .map(|t| (t.deployer_runtime_keccak256, t.template_runtime_keccak256)),
+                venue_fee: darkbot_bsc_trading::venues::fourmeme::profile::WITNESSED_VENUE_FEE,
+            },
+        }
+    }
+
+    fn four_witnessed(
+        _: &str,
+        _: &FollowerLimits,
+        d: &FourDeployment,
+    ) -> Result<FourObservation, String> {
+        Ok(four_observation(d))
+    }
+
+    /// TokenManager2 upgraded beyond the refrozen pin.
+    fn four_upgraded(
+        _: &str,
+        _: &FollowerLimits,
+        d: &FourDeployment,
+    ) -> Result<FourObservation, String> {
+        let mut o = four_observation(d);
+        o.observed.token_manager2_implementation = Address::repeat_byte(0x7f);
+        Ok(o)
+    }
+
+    fn four_unreachable(
+        _: &str,
+        _: &FollowerLimits,
+        _: &FourDeployment,
+    ) -> Result<FourObservation, String> {
+        Err("four node unreachable".into())
+    }
+
+    /// The venue's fee rate changed on the pinned code.
+    fn four_fee_changed(
+        _: &str,
+        _: &FollowerLimits,
+        d: &FourDeployment,
+    ) -> Result<FourObservation, String> {
+        let mut o = four_observation(d);
+        o.observed.venue_fee.rate_bps += 1;
+        Ok(o)
+    }
+
+    /// The Four Classic BUY of the shipped configuration's shape.
+    pub(crate) fn four_config() -> crate::paper_exec::FourExecConfig {
+        crate::paper_exec::FourExecConfig {
+            input_wei: 1_000_000_000_000_000,
+            slippage_bps: 100,
+            gas_limit: 1_000_000,
+        }
+    }
+
+    /// R12c: the first launch of the R12 fixture whose template the
+    /// witnessed economics price: its creator value and calldata, signed
+    /// by a third party (nonce `nonce`) to the pinned TokenManager2.
+    pub(crate) fn four_launch(nonce: u64) -> ([u8; 32], Vec<u8>, [u8; 20]) {
+        use darkbot_bsc_trading::venues::fourmeme::profile::classify_classic_launch;
+        use darkbot_bsc_trading::venues::fourmeme::recognize::decode_classic_create;
+        const FIXTURE: &str =
+            include_str!("../../trading/fixtures/fourmeme/classic_parity_20261104.txt");
+        let d = bsc_mainnet_r12b_131568366();
+        let v = d.validate(&four_observation(&d).observed, 1).unwrap();
+        let (input, value) = FIXTURE
+            .lines()
+            .filter(|l| l.starts_with("LAUNCH "))
+            .map(|l| l.split(' ').collect::<Vec<_>>())
+            .find_map(|f| {
+                let input = alloy_primitives::hex::decode(f[13]).unwrap();
+                let value = U256::from_str_radix(f[4], 10).unwrap();
+                let launch = decode_classic_create(&input, d.classic_args_len).unwrap();
+                classify_classic_launch(&v, &launch, value, B256::ZERO)
+                    .is_ok()
+                    .then_some((input, value))
+            })
+            .expect("the fixture has priced launches");
+        let launcher = Signer::from_secret_bytes(&[0x4f; 32]).unwrap();
+        let (mut scratch, mut raw) = (Vec::new(), Vec::new());
+        launcher
+            .sign_legacy(
+                &LegacyTx {
+                    chain_id: 56,
+                    nonce,
+                    gas_price: 1_000_000_000,
+                    gas_limit: 2_500_000,
+                    to: d.token_manager2,
+                    value,
+                    input: &input,
+                },
+                &mut scratch,
+                &mut raw,
+            )
+            .unwrap();
+        (keccak256(&raw).0, raw, launcher.address().into_array())
     }
 
     fn unreachable(
@@ -1037,6 +1304,7 @@ pub(crate) mod tests {
             repo,
             dir.join("fences"),
             witnessed,
+            no_four,
         );
         let sender = x.sender().unwrap();
         let mut owner = owner(&dir, sender);
@@ -1162,6 +1430,7 @@ pub(crate) mod tests {
             repo,
             fences.clone(),
             witnessed,
+            no_four,
         );
         let sender = x.sender().unwrap();
         let mut owner = owner(&dir, sender);
@@ -1262,6 +1531,313 @@ pub(crate) mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
+    /// R12c: with `BSC_EXEC_FOUR_*` the arm probes the Four.meme deployment
+    /// too and validates it against the refrozen pin; a priced Classic
+    /// launch then runs the production path to the PAPER sink as the
+    /// admitted BUY (TokenManager2, funds as value, buyTokenAMAP of the
+    /// admission's token and minimum); a re-probe that finds TokenManager2
+    /// upgraded disarms visibly.
+    #[test]
+    fn a_four_classic_launch_reaches_the_sink_on_the_validated_four_arm() {
+        use darkbot_bsc_trading::economics::four_classic::{
+            QualifiedClassicState, admit_classic_buy,
+        };
+        use darkbot_bsc_trading::economics::policy::BuyPolicy;
+        use darkbot_bsc_trading::transactions::legacy::decode_signed;
+        use darkbot_bsc_trading::venues::fourmeme::profile::classify_classic_launch;
+        use darkbot_bsc_trading::venues::fourmeme::recognize::{
+            decode_classic_buy_amap, decode_classic_create,
+        };
+        let dir = std::env::temp_dir().join(format!("bsc-exec-four-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let repo = Path::new("/nonexistent-repo");
+        let key = dir.join("id/paper.key");
+        PaperIdentity::create(&key, repo).unwrap();
+        let fences = dir.join("fences");
+        let mut s = setup(key, Duration::from_secs(3_600));
+        s.exec.four = Some(four_config());
+        // The Flap BUY's own slippage: the Four BUY takes its own policy.
+        s.exec.slippage_bps = 500;
+        let mut x = ExecRuntime::with_prober(s, repo, fences.clone(), witnessed, four_witnessed);
+        x.set_four_wanted(true);
+        let sender = x.sender().unwrap();
+        let mut owner = owner(&dir, sender);
+        owner.canonical(&CanonicalEvent::Block {
+            number: HEAD,
+            hash: [0xb1; 32],
+            parent_hash: [0xb0; 32],
+            timestamp_s: 1_793_000_000,
+            timestamp_ms: 1_793_000_000_000,
+            observed: Instant::now(),
+            observed_unix_ms: None,
+            txs: Vec::new(),
+        });
+        owner.canonical(&CanonicalEvent::NonceFact {
+            sender,
+            next_nonce: 0,
+            block_number: HEAD,
+            block_hash: [0xb1; 32],
+        });
+        settle(&mut x, &owner, "https://probe.invalid");
+        assert_eq!(state(&x), ("ARMED".to_owned(), None));
+        assert!(x.four_armed());
+
+        let (hash, raw, launcher) = four_launch(7);
+        owner.pending(hash, launcher, 7, 0, 10);
+        let now = Cell::new(10u64);
+        let clock = FnClock {
+            id: 1,
+            now: || {
+                now.set(now.get() + 3);
+                now.get()
+            },
+        };
+        let buy = x.on_launch(hash, &raw, 10, &owner, &clock).unwrap();
+        assert_eq!(buy.launch_hash, hash);
+        // The admission, independently: the launch's token and minimum.
+        let d = bsc_mainnet_r12b_131568366();
+        let v = d.validate(&four_observation(&d).observed, 1).unwrap();
+        let target = decode_tx_target(&raw).unwrap();
+        let launch = decode_classic_create(target.data, d.classic_args_len).unwrap();
+        let value = U256::from_be_slice(target.value);
+        let classified = classify_classic_launch(&v, &launch, value, B256::from(hash)).unwrap();
+        let snapshot = owner.snapshot(B256::from(hash), 1, 1).unwrap();
+        let state0 = QualifiedClassicState::fresh_launch(&classified, 0, snapshot).unwrap();
+        let policy = BuyPolicy::new(
+            1,
+            U256::from(four_config().input_wei),
+            100,
+            50_000_000,
+            1_000_000,
+        )
+        .unwrap();
+        let admitted = admit_classic_buy(&state0, &policy).unwrap();
+        assert_eq!(buy.token, admitted.token().into_array());
+        let signed = decode_signed(&buy.raw).unwrap();
+        assert_eq!(signed.tx.to, d.token_manager2);
+        assert_eq!(signed.tx.value, U256::from(four_config().input_wei));
+        assert_eq!(signed.tx.gas_limit, 1_000_000);
+        assert_eq!(signed.tx.gas_price, 50_000_000);
+        assert_eq!(signed.tx.nonce, 0);
+        let call = decode_classic_buy_amap(signed.tx.input).unwrap();
+        assert_eq!(
+            (call.token, call.funds, call.min_amount),
+            (admitted.token(), admitted.funds(), admitted.min_tokens())
+        );
+        assert!(call.min_amount > U256::ZERO);
+        let r = record(&x);
+        assert_eq!(
+            (r.u64(e::LAUNCHES).unwrap(), r.u64(e::HANDOFFS).unwrap()),
+            (1, 1)
+        );
+
+        // A failed Four re-probe is a failed probe round: tolerated once,
+        // visibly.
+        x.four_prober = four_unreachable;
+        x.last_probe = None;
+        let lim = limits();
+        for _ in 0..400 {
+            x.tick(true, Some(&owner), Some(("https://probe.invalid", &lim)), 7);
+            if state(&x).1.is_some() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let (s, reason) = state(&x);
+        assert_eq!(s, "EXHAUSTED");
+        let failing = "re-probe failed 1/1 in a row: four: four node unreachable";
+        assert!(
+            reason.as_deref().is_some_and(|r| r.contains(failing)),
+            "{reason:?}"
+        );
+        assert!(x.four_armed());
+        // TokenManager2 upgraded: the next re-probe disarms the whole path.
+        x.four_prober = four_upgraded;
+        x.last_probe = None;
+        for _ in 0..400 {
+            x.tick(true, Some(&owner), Some(("https://probe.invalid", &lim)), 7);
+            if state(&x).0 == "DEPLOYMENT_DRIFT" {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let (s, reason) = state(&x);
+        assert_eq!(s, "DEPLOYMENT_DRIFT");
+        let reason = reason.unwrap();
+        assert!(reason.contains("four deployment"), "{reason}");
+        assert!(
+            reason.contains(&format!("{}", Address::repeat_byte(0x7f))),
+            "{reason}"
+        );
+        assert_eq!(std::fs::read_dir(&fences).unwrap().count(), 0);
+        x.shutdown();
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// R12c: a first probe that cannot read the Four.meme deployment, or
+    /// finds it drifted, arms nothing: the whole path stops visibly (the
+    /// Flap probe alone succeeded).
+    #[test]
+    fn a_four_probe_failure_or_drift_arms_nothing() {
+        for (n, (four, state_want, reason_has)) in [
+            (
+                four_unreachable as FourProber,
+                "PROBE_FAILED",
+                "four: four node unreachable",
+            ),
+            (
+                four_upgraded as FourProber,
+                "DEPLOYMENT_DRIFT",
+                "four deployment",
+            ),
+            (
+                four_fee_changed as FourProber,
+                "TERMS_DRIFT",
+                "four: VenueFee",
+            ),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let dir =
+                std::env::temp_dir().join(format!("bsc-exec-four-fail-{n}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            let repo = Path::new("/nonexistent-repo");
+            let key = dir.join("id/paper.key");
+            PaperIdentity::create(&key, repo).unwrap();
+            let mut s = setup(key, Duration::from_secs(3_600));
+            s.exec.four = Some(four_config());
+            let mut x = ExecRuntime::with_prober(s, repo, dir.join("fences"), witnessed, four);
+            x.set_four_wanted(true);
+            let owner = owner(&dir, x.sender().unwrap());
+            settle(&mut x, &owner, "https://probe.invalid");
+            let (s, reason) = state(&x);
+            assert_eq!(s, state_want);
+            let reason = reason.unwrap();
+            assert!(reason.contains(reason_has), "{reason}");
+            assert!(x.validated.is_none() && x.executor.is_none());
+            assert!(!dir.join("fences").exists());
+            std::fs::remove_dir_all(&dir).unwrap();
+        }
+    }
+
+    /// An owner on which the path arms: a canonical head and the PAPER
+    /// sender's nonce fact (zero).
+    fn armable_owner(dir: &Path, sender: [u8; 20]) -> StateOwner {
+        let mut owner = owner(dir, sender);
+        owner.canonical(&CanonicalEvent::Block {
+            number: HEAD,
+            hash: [0xb1; 32],
+            parent_hash: [0xb0; 32],
+            timestamp_s: 1_793_000_000,
+            timestamp_ms: 1_793_000_000_000,
+            observed: Instant::now(),
+            observed_unix_ms: None,
+            txs: Vec::new(),
+        });
+        owner.canonical(&CanonicalEvent::NonceFact {
+            sender,
+            next_nonce: 0,
+            block_number: HEAD,
+            block_hash: [0xb1; 32],
+        });
+        owner
+    }
+
+    /// R12c review M2: the Four Classic BUY is probed and armed only while
+    /// its venue is admitted; a change of that scope starts the path over
+    /// (fence removed, armed again with or without it). Admitted without
+    /// `BSC_EXEC_FOUR_*`, the armed path says so.
+    #[test]
+    fn the_four_arm_follows_its_venue() {
+        let dir = std::env::temp_dir().join(format!("bsc-exec-four-scope-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let repo = Path::new("/nonexistent-repo");
+        let key = dir.join("id/paper.key");
+        PaperIdentity::create(&key, repo).unwrap();
+        let fences = dir.join("fences");
+        let mut s = setup(key.clone(), Duration::from_secs(3_600));
+        s.exec.four = Some(four_config());
+        // Not admitted: the Four probe never runs (it would end the probe
+        // thread), the Flap path arms alone.
+        let mut x = ExecRuntime::with_prober(s, repo, fences.clone(), witnessed, no_four);
+        let owner = armable_owner(&dir, x.sender().unwrap());
+        x.set_four_wanted(false);
+        settle(&mut x, &owner, "https://probe.invalid");
+        assert_eq!(state(&x), ("ARMED".to_owned(), None));
+        assert!(!x.four_armed());
+        let first = std::fs::read_dir(&fences)
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path();
+        // Admitted: the path starts over and arms with it.
+        x.four_prober = four_witnessed;
+        x.set_four_wanted(true);
+        assert_eq!(state(&x).0, "OFF");
+        assert!(!first.exists());
+        settle(&mut x, &owner, "https://probe.invalid");
+        assert_eq!(state(&x), ("ARMED".to_owned(), None));
+        assert!(x.four_armed());
+        // The same scope again changes nothing.
+        x.set_four_wanted(true);
+        assert!(x.four_armed());
+        // Switched off: armed without it again.
+        x.four_prober = no_four;
+        x.set_four_wanted(false);
+        settle(&mut x, &owner, "https://probe.invalid");
+        assert_eq!(state(&x), ("ARMED".to_owned(), None));
+        assert!(!x.four_armed());
+        assert_eq!(std::fs::read_dir(&fences).unwrap().count(), 1);
+        x.shutdown();
+
+        // Admitted without BSC_EXEC_FOUR_*: armed for Flap, visibly no Four.
+        let mut x = ExecRuntime::with_prober(
+            setup(key, Duration::from_secs(3_600)),
+            repo,
+            fences.clone(),
+            witnessed,
+            no_four,
+        );
+        x.set_four_wanted(true);
+        settle(&mut x, &owner, "https://probe.invalid");
+        let (s, reason) = state(&x);
+        assert_eq!(s, "ARMED");
+        assert!(reason.unwrap().contains("without BSC_EXEC_FOUR_*"));
+        assert!(!x.four_armed());
+        x.shutdown();
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// R12c review L7: a Four Classic BUY the policy refuses at the arm (a
+    /// zero gas limit) leaves nothing armed: ARM_FAILED, the fence gone.
+    #[test]
+    fn a_four_arm_that_fails_disarms_the_path() {
+        let dir = std::env::temp_dir().join(format!("bsc-exec-four-arm-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let repo = Path::new("/nonexistent-repo");
+        let key = dir.join("id/paper.key");
+        PaperIdentity::create(&key, repo).unwrap();
+        let fences = dir.join("fences");
+        let mut s = setup(key, Duration::from_secs(3_600));
+        s.exec.four = Some(crate::paper_exec::FourExecConfig {
+            gas_limit: 0,
+            ..four_config()
+        });
+        let mut x = ExecRuntime::with_prober(s, repo, fences.clone(), witnessed, four_witnessed);
+        x.set_four_wanted(true);
+        let owner = armable_owner(&dir, x.sender().unwrap());
+        settle(&mut x, &owner, "https://probe.invalid");
+        let (s, reason) = state(&x);
+        assert_eq!(s, "ARM_FAILED");
+        assert!(reason.unwrap().starts_with("four: "));
+        assert!(x.executor.is_none());
+        assert_eq!(std::fs::read_dir(&fences).unwrap().count(), 0);
+        assert_eq!(record(&x).u64(e::DISARM_ERRORS).unwrap(), 0);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
     /// Gate review L2: a PAPER identity whose nonce was consumed has sent
     /// transactions; it is refused, never armed.
     #[test]
@@ -1276,6 +1852,7 @@ pub(crate) mod tests {
             repo,
             dir.join("fences"),
             witnessed,
+            no_four,
         );
         let sender = x.sender().unwrap();
         let mut owner = owner(&dir, sender);
@@ -1345,6 +1922,7 @@ pub(crate) mod tests {
             repo,
             dir.join("fences"),
             witnessed,
+            no_four,
         );
         let sender = x.sender().unwrap();
         let mut owner = owner(&dir, sender);

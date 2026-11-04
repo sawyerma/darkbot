@@ -490,11 +490,14 @@ pub(crate) struct Gates {
     /// Flap launches reach the C3 PAPER path and Strategy C only while the
     /// Flap venue is effective SHADOW (or LIVE).
     pub flap_admitted: bool,
+    /// R12c: Four.meme Classic launches reach the C3 PAPER path only while
+    /// that venue is effective SHADOW (its LIVE stays blocked).
+    pub four_admitted: bool,
     /// BSC_STRATEGY_C runs (SHADOW or LIVE) under a runtime mode of SHADOW,
     /// PAPER or LIVE; switched off, its ledger ends.
     pub strategy_on: bool,
-    /// The C3 PAPER path: runtime mode PAPER and BSC_EXEC SHADOW (its own
-    /// effective mode, as the owner stores it).
+    /// The C3 PAPER path: a venue admitted, runtime mode PAPER and
+    /// BSC_EXEC SHADOW (its own effective mode, as the owner stores it).
     pub c3_wanted: bool,
     /// The C2 chain-state owner.
     pub c2_on: bool,
@@ -505,17 +508,68 @@ pub(crate) struct Gates {
 pub(crate) fn gates(eff: impl Fn(crate::sources::Entity) -> Effective, exec: Effective) -> Gates {
     let running = |e: Effective| matches!(e, Effective::Shadow | Effective::Live);
     let flap_admitted = running(eff(VenueId::Flap.into()));
+    let four_admitted = running(eff(VenueId::FourClassic.into()));
     let runtime_mode = eff(crate::sources::Entity::Runtime);
     Gates {
         flap_admitted,
+        four_admitted,
         strategy_on: flap_admitted
             && matches!(
                 runtime_mode,
                 Effective::Shadow | Effective::Paper | Effective::Live
             )
             && running(eff(ComponentId::StrategyC.into())),
-        c3_wanted: flap_admitted && runtime_mode == Effective::Paper && exec == Effective::Shadow,
+        c3_wanted: (flap_admitted || four_admitted)
+            && runtime_mode == Effective::Paper
+            && exec == Effective::Shadow,
         c2_on: running(eff(ComponentId::StateC2.into())),
+    }
+}
+
+impl Gates {
+    /// Whether a first sighting on `venue` goes to the C3 PAPER path: its
+    /// venue admitted.
+    pub(crate) fn c3_admits(&self, venue: Venue) -> bool {
+        match venue {
+            Venue::Flap => self.flap_admitted,
+            Venue::Four => self.four_admitted,
+            Venue::OpenFour => false,
+        }
+    }
+}
+
+/// Whether a venue's sighting may reach the C3 PAPER path: admitted by the
+/// last reconcile's `gates`, and (R12c) a Four Classic one only while the
+/// path holds the Four Classic BUY (`four_armed`).
+fn c3_takes(venue: Venue, gates: Option<Gates>, four_armed: bool) -> bool {
+    gates.is_some_and(|g| g.c3_admits(venue)) && (venue != Venue::Four || four_armed)
+}
+
+/// Whether a verified sighting is a C2 pending candidate: every Flap
+/// launch; (R12c) a Four Classic one the C3 path may take (its BUY needs
+/// C2's snapshot of it).
+pub(crate) fn c2_candidate(
+    decided: Option<Launch>,
+    gates: Option<Gates>,
+    four_armed: bool,
+) -> bool {
+    decided.is_some_and(|l| match l.venue() {
+        Venue::Flap => true,
+        Venue::Four => c3_takes(Venue::Four, gates, four_armed),
+        Venue::OpenFour => false,
+    })
+}
+
+/// The launch a decision hands to the C3 PAPER path: a first verified
+/// sighting the path may take.
+pub(crate) fn c3_launch(
+    decided: Option<Launch>,
+    gates: Option<Gates>,
+    four_armed: bool,
+) -> Option<[u8; 32]> {
+    match decided {
+        Some(Launch::First { hash, venue, .. }) if c3_takes(venue, gates, four_armed) => Some(hash),
+        _ => None,
     }
 }
 
@@ -1193,6 +1247,8 @@ pub fn run(
     let mut stop_journaled = false;
     // Which sources run this pass (the reconcile sets it; LIVE included).
     let mut source_on = SourceId::ALL.map(|s| generation.source(s).effective == Effective::Shadow);
+    // The last reconcile's gates (none before the first: nothing admitted).
+    let mut last_gates: Option<Gates> = None;
     loop {
         let stopping = stop_file.exists();
         // One fresh monotonic/wall pair per pass for the sightings' wall time.
@@ -1234,12 +1290,15 @@ pub fn run(
                 let exits = live.as_ref().is_some_and(|l| l.holds_positions());
                 let eff = |e: crate::sources::Entity| live_view.effective(&generation, e, exits);
                 let running = |e: Effective| matches!(e, Effective::Shadow | Effective::Live);
+                let reconciled = gates(eff, generation.component(ComponentId::ExecC3).effective);
+                last_gates = Some(reconciled);
                 let Gates {
                     flap_admitted: _,
+                    four_admitted,
                     strategy_on,
                     c3_wanted,
                     c2_on,
-                } = gates(eff, generation.component(ComponentId::ExecC3).effective);
+                } = reconciled;
                 for source in SourceId::ALL {
                     source_on[index(source)] = running(eff(source.into()));
                 }
@@ -1297,6 +1356,7 @@ pub fn run(
                         .as_ref()
                         // BSC3-036: the endpoint the follower follows now.
                         .map(|c| (c.endpoint_at(active_endpoint), &c.limits));
+                    x.set_four_wanted(four_admitted);
                     x.tick(wanted, owner.as_ref(), follower, started_ms);
                 }
                 if let Some(l) = live.as_mut() {
@@ -1472,13 +1532,16 @@ pub fn run(
                 }
             };
             let decided = core.observe(source, observation, at, wall.wall_us(at));
+            // R12c: a Four Classic sighting goes to C2 and C3 only while the
+            // C3 path holds the Four Classic BUY.
+            let four_armed = exec.as_ref().is_some_and(ExecRuntime::four_armed);
             if let (
                 Some(o),
                 Event::Full {
                     hash, from, nonce, ..
                 },
             ) = (owner.as_mut(), &event)
-                && (decided.is_some_and(|l| l.venue() == Venue::Flap) || o.watches(from))
+                && (c2_candidate(decided, last_gates, four_armed) || o.watches(from))
             {
                 // Source lanes are indexed as in `SourceId::ALL` (five).
                 o.pending(*hash, *from, *nonce, index(source) as u8, at);
@@ -1515,29 +1578,24 @@ pub fn run(
                     );
                 }
             }
-            // C3: the first verified sighting of a C1-scope launch runs the
-            // production path to the PAPER sink (when armed).
-            else if let (
-                Some(x),
-                Some(o),
-                Some(Launch::First {
-                    hash,
-                    venue: Venue::Flap,
-                    ..
-                }),
-                Event::Full { raw, .. },
-            ) = (exec.as_mut(), owner.as_ref(), decided, &event)
-                && let Some(buy) = x.on_launch(
-                    hash,
-                    raw,
-                    at,
-                    o,
-                    &FnClock {
-                        id: CLOCK_ID_MONOTONIC,
-                        now: || clock.now_ns(),
-                    },
-                )
-            {
+            // C3: the first verified sighting of a C1-scope launch on an
+            // admitted venue runs the production path to the PAPER sink
+            // (when armed).
+            else if let (Some(x), Some(o), Some(hash), Event::Full { raw, .. }) = (
+                exec.as_mut(),
+                owner.as_ref(),
+                c3_launch(decided, last_gates, four_armed),
+                &event,
+            ) && let Some(buy) = x.on_launch(
+                hash,
+                raw,
+                at,
+                o,
+                &FnClock {
+                    id: CLOCK_ID_MONOTONIC,
+                    now: || clock.now_ns(),
+                },
+            ) {
                 journal.record(
                     RecordKind::Runtime,
                     buy.times.sink_ns,

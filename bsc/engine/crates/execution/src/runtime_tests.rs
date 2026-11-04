@@ -485,6 +485,119 @@ fn the_runtime_mode_bounds_the_components_as_the_plan_says() {
     }
 }
 
+/// R12c: Four.meme Classic SHADOW admits its first sightings to the C3
+/// PAPER path, alone or beside Flap (C3 is then wanted under PAPER and
+/// EXEC SHADOW), never to Strategy C; a blocked Four request admits
+/// nothing, and OpenFour is never admitted.
+#[test]
+fn four_classic_shadow_admits_its_launches_to_c3_only() {
+    use crate::canonical_join::Venue;
+    use crate::sources::Entity;
+    use Effective::{Blocked, Off, Paper, Shadow};
+    let run = |flap, four, runtime, exec| {
+        gates(
+            |e| match e {
+                Entity::Runtime => runtime,
+                Entity::Venue(VenueId::Flap) => flap,
+                Entity::Venue(VenueId::FourClassic) => four,
+                // Never effective SHADOW (venue_effective): still never
+                // admitted.
+                Entity::Venue(VenueId::OpenFour) => Shadow,
+                Entity::Component(
+                    ComponentId::StateC2 | ComponentId::StrategyC | ComponentId::ExecC3,
+                ) => Shadow,
+                _ => Off,
+            },
+            exec,
+        )
+    };
+    let blocked = Blocked("FOUR_EXECUTION_PATH_MISSING");
+    // (flap, four, runtime, exec) -> (C3 wanted, strategy, admits Flap,
+    // admits Four)
+    for (flap, four, runtime, exec, want) in [
+        (Off, Shadow, Paper, Shadow, (true, false, false, true)),
+        (Shadow, Shadow, Paper, Shadow, (true, true, true, true)),
+        (Shadow, Off, Paper, Shadow, (true, true, true, false)),
+        (Off, Shadow, Shadow, Shadow, (false, false, false, true)),
+        (Off, Shadow, Paper, Off, (false, false, false, true)),
+        (Off, blocked, Paper, Shadow, (false, false, false, false)),
+        (Off, Off, Paper, Shadow, (false, false, false, false)),
+    ] {
+        let g = run(flap, four, runtime, exec);
+        assert_eq!(
+            (
+                g.c3_wanted,
+                g.strategy_on,
+                g.c3_admits(Venue::Flap),
+                g.c3_admits(Venue::Four)
+            ),
+            want,
+            "{flap:?} {four:?} {runtime:?} {exec:?}"
+        );
+        assert!(!g.c3_admits(Venue::OpenFour));
+    }
+    // The run loop's two decisions on a verified sighting: C2's pending
+    // candidate and the C3 hand-off (a first sighting only).
+    use crate::ingress::Launch;
+    let sighting = |first: bool, venue| match first {
+        true => Some(Launch::First {
+            hash: [7; 32],
+            source: SourceId::PublicNode,
+            at_ns: 1,
+            venue,
+        }),
+        false => Some(Launch::Later {
+            hash: [7; 32],
+            source: SourceId::PublicNode,
+            lag_ns: 1,
+            venue,
+        }),
+    };
+    // A Four Classic sighting only while the path holds the Four BUY
+    // (`four_armed`); Flap's never depends on it.
+    let four_only = Some(run(Off, Shadow, Paper, Shadow));
+    let flap_only = Some(run(Shadow, Off, Paper, Shadow));
+    for (decided, gates, four_armed, candidate, c3) in [
+        (
+            sighting(true, Venue::Four),
+            four_only,
+            true,
+            true,
+            Some([7; 32]),
+        ),
+        (sighting(true, Venue::Four), four_only, false, false, None),
+        (sighting(true, Venue::Four), flap_only, true, false, None),
+        (sighting(true, Venue::Four), None, true, false, None),
+        (sighting(false, Venue::Four), four_only, true, true, None),
+        (sighting(true, Venue::Flap), four_only, true, true, None),
+        (
+            sighting(true, Venue::Flap),
+            flap_only,
+            false,
+            true,
+            Some([7; 32]),
+        ),
+        (sighting(true, Venue::Flap), None, false, true, None),
+        (
+            sighting(true, Venue::OpenFour),
+            four_only,
+            true,
+            false,
+            None,
+        ),
+        (None, four_only, true, false, None),
+    ] {
+        assert_eq!(
+            (
+                crate::runtime::c2_candidate(decided, gates, four_armed),
+                crate::runtime::c3_launch(decided, gates, four_armed)
+            ),
+            (candidate, c3),
+            "{decided:?} {four_armed}"
+        );
+    }
+}
+
 /// BSC3-079: the configured gas limits cover the frozen evidence the
 /// configuration names; one below a class's largest gas (a BUY in its
 /// token's launch block included) refuses the start.
@@ -514,6 +627,33 @@ fn the_gas_limits_cover_the_frozen_evidence() {
         let e = gas_limits_cover(&exec, &over).unwrap_err();
         assert!(e.contains(&format!("{action:?} gas {}", limit + 1)), "{e}");
     }
+    // R12c: the Four Classic BUY's limit covers the frozen Classic BUYs,
+    // and is held to them.
+    let four = exec.four.unwrap();
+    let classic = |action| PathClass {
+        venue: Venue::FourClassic,
+        action,
+    };
+    assert!(gas.class(classic(Action::Buy)).unwrap().gas_used_max <= four.gas_limit);
+    for action in [Action::Buy, Action::BuyInLaunchBlock] {
+        let mut over = GasEvidence::default();
+        over.add(classic(action), four.gas_limit + 1).unwrap();
+        let e = gas_limits_cover(&exec, &over).unwrap_err();
+        assert!(
+            e.contains(&format!(
+                "BSC_EXEC_FOUR_GAS_LIMIT {} is below the largest {action:?} gas {}",
+                four.gas_limit,
+                four.gas_limit + 1
+            )),
+            "{e}"
+        );
+    }
+    // Without the Four Classic BUY its evidence binds nothing.
+    let mut flap_only = exec.clone();
+    flap_only.four = None;
+    let mut over = GasEvidence::default();
+    over.add(classic(Action::Buy), u64::MAX).unwrap();
+    gas_limits_cover(&flap_only, &over).unwrap();
 }
 
 /// BSC3-079 review: the start's check reads the build's frozen evidence,
@@ -733,6 +873,63 @@ fn the_config_is_strict() {
         ))
         .is_err()
     );
+    // R12c: the Four Classic BUY never without the path.
+    assert!(
+        RuntimeConfig::parse(&format!("{without}BSC_EXEC_FOUR_INPUT_WEI=1\n"))
+            .unwrap_err()
+            .contains("BSC_EXEC_FOUR_* needs BSC_EXEC_PAPER_IDENTITY")
+    );
+    // R12c: the shipped Four Classic BUY; its three keys go together, each
+    // within its bounds, its input a witnessed one, under the session cap.
+    let four = c.exec.as_ref().unwrap().exec.four.unwrap();
+    assert_eq!(
+        (four.input_wei, four.slippage_bps, four.gas_limit),
+        (1_000_000_000_000_000, 100, 1_000_000)
+    );
+    let unset: String = CONFIG
+        .lines()
+        .filter(|l| !l.starts_with("BSC_EXEC_FOUR_"))
+        .map(|l| format!("{l}\n"))
+        .collect();
+    assert_eq!(
+        RuntimeConfig::parse(&unset)
+            .unwrap()
+            .exec
+            .unwrap()
+            .exec
+            .four,
+        None
+    );
+    for (from, to, why) in [
+        (
+            "BSC_EXEC_FOUR_GAS_LIMIT=1000000\n",
+            "",
+            "BSC_EXEC_FOUR_INPUT_WEI, BSC_EXEC_FOUR_SLIPPAGE_BPS and BSC_EXEC_FOUR_GAS_LIMIT go together",
+        ),
+        (
+            "BSC_EXEC_FOUR_SLIPPAGE_BPS=100\n",
+            "BSC_EXEC_FOUR_SLIPPAGE_BPS=10000\n",
+            "BSC_EXEC_FOUR_SLIPPAGE_BPS",
+        ),
+        (
+            "BSC_EXEC_FOUR_GAS_LIMIT=1000000\n",
+            "BSC_EXEC_FOUR_GAS_LIMIT=20999\n",
+            "BSC_EXEC_FOUR_GAS_LIMIT",
+        ),
+        (
+            "BSC_EXEC_FOUR_INPUT_WEI=1000000000000000\n",
+            "BSC_EXEC_FOUR_INPUT_WEI=2000000000000000\n",
+            "is none of the witnessed inputs",
+        ),
+        (
+            "BSC_EXEC_SESSION_CAP_WEI=1150000000000000\n",
+            "BSC_EXEC_SESSION_CAP_WEI=1049999999999999\n",
+            "is below one Four BUY (1050000000000000)",
+        ),
+    ] {
+        let e = RuntimeConfig::parse(&CONFIG.replace(from, to)).unwrap_err();
+        assert!(e.contains(why), "{to}: {e}");
+    }
     let exec = c.exec.as_ref().unwrap();
     assert!(
         exec.identity_path

@@ -20,7 +20,7 @@ import { SourceActions } from "../SourceActions";
 /** What each venue's mode does at the native owner (plan v9 §2.3). */
 const VENUE_HINTS: Record<string, string> = {
   BSC_VENUE_FLAP: "SHADOW admits Flap launches to the C3 PAPER path and Strategy C (with BSC_EXEC / BSC_STRATEGY_C SHADOW); OFF admits none; LIVE only under the owner's LIVE gate, for a grant that names it (LIVE tab)",
-  BSC_VENUE_FOUR_CLASSIC: "Recognized and decoded (Phase E); no economics or execution path to admit to yet (FOUR_EXECUTION_PATH_MISSING); LIVE only under the owner's LIVE gate, for a grant that names it (LIVE tab)",
+  BSC_VENUE_FOUR_CLASSIC: "SHADOW admits Four.meme Classic launches to the C3 PAPER path (with BSC_EXEC SHADOW and BSC_EXEC_FOUR_* set: the pinned TokenManager2 and its fee terms probed, the witnessed Classic BUY economics); OFF admits none; no LIVE path yet (FOUR_EXECUTION_PATH_MISSING)",
   BSC_VENUE_OPENFOUR: "Recognized and decoded (Phase E); no economics or execution path to admit to yet (FOUR_EXECUTION_PATH_MISSING); LIVE only under the owner's LIVE gate, for a grant that names it (LIVE tab)",
 };
 

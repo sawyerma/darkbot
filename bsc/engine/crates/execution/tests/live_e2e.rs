@@ -747,6 +747,7 @@ fn exec_setup() -> ExecSetup {
         owner: darkbot_bsc_execution::sources::OwnerLimits::of_config(SHIPPED).unwrap(),
         refused_accounts: Vec::new(),
         exec: ExecConfig {
+            four: None,
             input_wei: u128::from(INPUT),
             slippage_bps: 100,
             exit_slippage_bps: 100,

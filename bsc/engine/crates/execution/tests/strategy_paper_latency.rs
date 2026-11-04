@@ -164,6 +164,7 @@ fn strategy_paper_path_latency() {
         validated,
         WITNESSED_MAINNET_TERMS,
         ExecConfig {
+            four: None,
             input_wei: 1_000_000_000_000_000,
             slippage_bps: 100,
             exit_slippage_bps: 100,

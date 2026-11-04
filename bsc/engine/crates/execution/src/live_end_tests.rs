@@ -401,6 +401,7 @@ fn live_intents_leave_through_the_release_only_as_the_owner_admits_them() {
         hash,
         raw: &raw,
         to: Some(portal),
+        value: &[],
         input: &input,
         ingress_ns: 100,
     };
@@ -655,6 +656,7 @@ fn one_sender_releases_one_nonce_after_the_other() {
         hash,
         raw: &raw,
         to: Some(portal),
+        value: &[],
         input: &input,
         ingress_ns: 100,
     };
@@ -787,6 +789,7 @@ fn a_late_intent_takes_no_attempt_and_a_miss_after_its_admission_counts() {
         hash,
         raw: &raw,
         to: Some(portal),
+        value: &[],
         input: &input,
         ingress_ns: 100,
     };
@@ -820,6 +823,7 @@ fn a_late_intent_takes_no_attempt_and_a_miss_after_its_admission_counts() {
         hash: hash_b,
         raw: &raw_b,
         to: Some(portal),
+        value: &[],
         input: &input_b,
         ingress_ns: 100,
     };
@@ -923,6 +927,7 @@ fn a_buy_late_after_its_lease_was_taken_withdraws_both() {
         hash,
         raw: &raw,
         to: Some(portal),
+        value: &[],
         input: &input,
         ingress_ns: 100,
     };
@@ -1037,6 +1042,7 @@ fn a_buy_whose_fact_is_not_written_keeps_its_lease_unresolved() {
         hash,
         raw: &raw,
         to: Some(portal),
+        value: &[],
         input: &input,
         ingress_ns: 100,
     };
@@ -1076,6 +1082,7 @@ fn a_token_is_bought_once_by_one_sender() {
         hash,
         raw: &raw,
         to: Some(portal),
+        value: &[],
         input: &input,
         ingress_ns: 100,
     };
@@ -1129,6 +1136,7 @@ fn a_providers_answer_is_read_bound_and_recorded_apart_from_the_chain() {
             hash,
             raw: &raw,
             to: Some(portal),
+            value: &[],
             input: &input,
             ingress_ns: 100,
         };
@@ -1245,6 +1253,7 @@ fn an_end_whose_fact_was_not_written_hands_nothing_more_over() {
         hash,
         raw: &raw,
         to: Some(portal),
+        value: &[],
         input: &input,
         ingress_ns: 100,
     };

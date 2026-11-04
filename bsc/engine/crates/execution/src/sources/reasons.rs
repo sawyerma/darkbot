@@ -12,9 +12,10 @@ pub const ECONOMIC_LIVE_DISABLED: &str = "ECONOMIC_LIVE_DISABLED";
 /// LIVE acquisition (G0.8) and source (G0.4) conditions.
 pub const C2_OPERATIONAL_NOT_AUTHORIZED: &str = "C2_OPERATIONAL_NOT_AUTHORIZED";
 pub const SOURCE_ACCESS_UNQUALIFIED: &str = "SOURCE_ACCESS_UNQUALIFIED";
-/// Four.meme Classic and OpenFour are recognized and decoded (Phase E), but
-/// no economics or execution path exists for them (G/C3 after the G0.1
-/// Four contract freeze): there is nothing to evaluate in SHADOW.
+/// OpenFour is recognized and decoded (Phase E), but no economics or
+/// execution path exists for it: there is nothing to evaluate in SHADOW.
+/// Four.meme Classic has its PAPER path (R12c) but no LIVE path yet: its
+/// requested LIVE stays blocked for this reason.
 pub const FOUR_EXECUTION_PATH_MISSING: &str = "FOUR_EXECUTION_PATH_MISSING";
 /// A switch ENABLED in an earlier boot session: every restart disables it.
 pub const RESET_BY_RESTART: &str = "RESET_BY_RESTART";

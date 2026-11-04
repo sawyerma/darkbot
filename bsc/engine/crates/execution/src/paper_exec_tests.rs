@@ -41,6 +41,7 @@ pub(crate) fn config(lanes: usize, buys: u128) -> ExecConfig {
     let gas_limit = 300_000;
     let one = 1_000_000_000_000_000 + u128::from(gas_price_wei) * u128::from(gas_limit);
     ExecConfig {
+        four: None,
         // The amount covered by witnessed evidence.
         input_wei: 1_000_000_000_000_000,
         slippage_bps: 500,
@@ -233,6 +234,7 @@ fn a_signed_launch_reaches_the_sink_through_plan_frame_and_dispatch() {
                 hash,
                 raw: &raw,
                 to: Some(portal),
+                value: &[],
                 input: &input,
                 ingress_ns: 100,
             },
@@ -274,6 +276,88 @@ fn a_signed_launch_reaches_the_sink_through_plan_frame_and_dispatch() {
     fs::remove_dir_all(&d).unwrap();
 }
 
+/// R12c: a Four.meme Classic launch on the C3 path. Without the Four arm
+/// it is NOT_DECODED; armed, a call value other than the launch's creator
+/// value is no witnessed profile (PROFILE), a value that is no canonical
+/// amount NOT_DECODED; the priced launch reaches the sink as its admitted
+/// BUY (TokenManager2, the input as value, buyTokenAMAP of the launch's
+/// token) in the 48Club bundle with the launch; the same launch again is a
+/// duplicate.
+#[test]
+fn a_four_classic_launch_takes_the_four_arm_or_is_refused_at_its_stage() {
+    use crate::runtime::exec::tests::{four_config, four_launch, four_observation};
+    use darkbot_bsc_geth_ipc::ingress::decode_tx_target;
+    use darkbot_bsc_trading::venues::fourmeme::deployment::bsc_mainnet_r12b_131568366;
+    use darkbot_bsc_trading::venues::fourmeme::profile::UnsupportedClassicLaunch;
+    use darkbot_bsc_trading::venues::fourmeme::recognize::decode_classic_buy_amap;
+    let mut cfg = config(4, 4);
+    cfg.four = Some(four_config());
+    let (mut exec, d) = armed("four", cfg);
+    let (hash, raw, _) = four_launch(9);
+    let target = decode_tx_target(&raw).unwrap();
+    let on = |e: &mut PaperExecutor, value: &[u8]| {
+        e.on_launch(
+            PendingLaunch {
+                hash,
+                raw: &raw,
+                to: target.to,
+                value,
+                input: target.data,
+                ingress_ns: 100,
+            },
+            &c2(Some(HEAD)),
+            &clock(100, 1),
+        )
+    };
+    assert_eq!(on(&mut exec, target.value).err(), Some(Refusal::NotDecoded));
+    let four = bsc_mainnet_r12b_131568366();
+    exec.arm_four(
+        four.validate(&four_observation(&four).observed, CODEHASH_GENERATION)
+            .unwrap(),
+    )
+    .unwrap();
+    assert!(exec.four_armed());
+    let other = (U256::from_be_slice(target.value) + U256::from(1)).to_be_bytes_trimmed_vec();
+    assert_eq!(
+        on(&mut exec, &other).err(),
+        Some(Refusal::FourProfile(UnsupportedClassicLaunch::CreatorValue))
+    );
+    let padded = [&[0u8][..], target.value].concat();
+    assert_eq!(on(&mut exec, &padded).err(), Some(Refusal::NotDecoded));
+    let buy = on(&mut exec, target.value).unwrap();
+    let signed = decode_signed(&buy.raw).unwrap();
+    assert_eq!(signed.tx.to, four.token_manager2);
+    assert_eq!(signed.tx.value, U256::from(1_000_000_000_000_000u64));
+    assert_eq!(signed.tx.gas_limit, four_config().gas_limit);
+    let call = decode_classic_buy_amap(signed.tx.input).unwrap();
+    assert_eq!(call.token.into_array(), buy.token);
+    assert_eq!(call.funds, signed.tx.value);
+    assert!(call.min_amount > U256::ZERO);
+    // The request carries the launch and the BUY.
+    assert!(buy.handoff.raw_len > 2 * (raw.len() + buy.raw.len()));
+    assert_eq!(
+        on(&mut exec, target.value).err(),
+        Some(Refusal::DuplicateToken)
+    );
+    let c = exec.counters();
+    assert_eq!(
+        (
+            c.handoffs,
+            c.refused("NOT_DECODED"),
+            c.refused("PROFILE"),
+            c.refused("DUPLICATE_TOKEN")
+        ),
+        (1, 2, 1, 1)
+    );
+    // The Four BUY's exposure: its input and its gas.
+    assert_eq!(
+        exec.spent_wei(),
+        U256::from(1_000_000_000_000_000u64 + 1_000_000_000 * four_config().gas_limit)
+    );
+    exec.disarm().unwrap();
+    fs::remove_dir_all(&d).unwrap();
+}
+
 /// Gate review M1: the pool keeps one session exposure and one BUY per
 /// token, as one production session does (before: every lane its own
 /// cap and dedup, so a second BUY of the same token reached the sink).
@@ -291,6 +375,7 @@ fn the_pool_keeps_one_session_cap_and_one_buy_per_token() {
                 hash: h,
                 raw: r,
                 to: Some(portal),
+                value: &[],
                 input: i,
                 ingress_ns: 100,
             },
@@ -333,6 +418,7 @@ fn refusals_are_counted_at_their_stage() {
                 hash,
                 raw: &raw,
                 to: Some([7; 20]),
+                value: &[],
                 input: &input,
                 ingress_ns: 100
             },
@@ -351,6 +437,7 @@ fn refusals_are_counted_at_their_stage() {
                 hash,
                 raw: &raw,
                 to: Some(portal),
+                value: &[],
                 input: &foreign,
                 ingress_ns: 100
             },
@@ -371,6 +458,7 @@ fn refusals_are_counted_at_their_stage() {
                 hash,
                 raw: &raw,
                 to: Some(portal),
+                value: &[],
                 input: &input,
                 ingress_ns: 100
             },
@@ -385,6 +473,7 @@ fn refusals_are_counted_at_their_stage() {
                 hash,
                 raw: &raw,
                 to: Some(portal),
+                value: &[],
                 input: &input,
                 ingress_ns: 100
             },
@@ -402,6 +491,7 @@ fn refusals_are_counted_at_their_stage() {
                 hash,
                 raw: &other_raw,
                 to: Some(portal),
+                value: &[],
                 input: &input,
                 ingress_ns: 100
             },
@@ -419,6 +509,7 @@ fn refusals_are_counted_at_their_stage() {
                 hash: h2,
                 raw: &r2,
                 to: Some(portal),
+                value: &[],
                 input: &i2,
                 ingress_ns: 100
             },
@@ -435,6 +526,7 @@ fn refusals_are_counted_at_their_stage() {
                 hash: h3,
                 raw: &r3,
                 to: Some(portal),
+                value: &[],
                 input: &i3,
                 ingress_ns: 100
             },
@@ -1051,6 +1143,7 @@ fn c3_and_the_strategy_share_one_nonce_sequence() {
                 hash,
                 raw: &raw,
                 to: Some(portal),
+                value: &[],
                 input: &call,
                 ingress_ns: 100,
             },
@@ -1131,6 +1224,7 @@ fn a_path_left_out_does_not_take_the_sender() {
         hash,
         raw: &raw,
         to: Some(portal),
+        value: &[],
         input: &call,
         ingress_ns: 100,
     };
@@ -1400,6 +1494,7 @@ fn the_one_path_reaches_any_end() {
         hash,
         raw: &raw,
         to: Some(portal),
+        value: &[],
         input: &input,
         ingress_ns: 100,
     };

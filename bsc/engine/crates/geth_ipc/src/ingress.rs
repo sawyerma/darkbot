@@ -305,6 +305,9 @@ pub struct TxTargetV2<'a> {
     pub tx_type: Option<u8>,
     /// `None` for a contract creation.
     pub to: Option<[u8; 20]>,
+    /// The native value as its RLP string bytes (big-endian, as signed;
+    /// R12c: a Four Classic launch's creator value).
+    pub value: &'a [u8],
     pub data: &'a [u8],
 }
 
@@ -512,10 +515,12 @@ pub fn decode_tx_target(raw: &[u8]) -> Result<TxTargetV2<'_>, EnvelopeErrorV2> {
         Some(_) => (outer.payload, 5, 7),
     };
     let to = rlp_field(fields, to_index)?;
+    // The value sits between the destination and the calldata in every type.
+    let value = rlp_field(fields, to_index + 1)?;
     let data = rlp_field(fields, data_index)?;
-    if to.list || data.list {
+    if to.list || value.list || data.list {
         return Err(EnvelopeErrorV2::Malformed(
-            "envelope: list where destination or calldata was expected",
+            "envelope: list where destination, value or calldata was expected",
         ));
     }
     let to = match to.payload.len() {
@@ -534,6 +539,7 @@ pub fn decode_tx_target(raw: &[u8]) -> Result<TxTargetV2<'_>, EnvelopeErrorV2> {
     Ok(TxTargetV2 {
         tx_type,
         to,
+        value: value.payload,
         data: data.payload,
     })
 }
@@ -1010,6 +1016,16 @@ mod tests {
         data: &[u8],
         blob_wrapper: bool,
     ) -> Vec<u8> {
+        valued_envelope(tx_type, to, 0, data, blob_wrapper)
+    }
+
+    fn valued_envelope(
+        tx_type: Option<u8>,
+        to: Option<[u8; 20]>,
+        value: u64,
+        data: &[u8],
+        blob_wrapper: bool,
+    ) -> Vec<u8> {
         let mut fields = Vec::new();
         if tx_type.is_some() {
             fields.push(rlp_uint(56)); // chain id
@@ -1024,7 +1040,7 @@ mod tests {
         }
         fields.push(rlp_uint(21_000)); // gas
         fields.push(rlp_bytes(to.as_ref().map_or(&[][..], |a| &a[..])));
-        fields.push(rlp_uint(0)); // value
+        fields.push(rlp_uint(value));
         fields.push(rlp_bytes(data));
         if tx_type.is_some() {
             fields.push(rlp_list(&[])); // access list
@@ -1237,6 +1253,45 @@ mod tests {
                 "{tx_type:?} wrapper={wrapper}"
             );
         }
+        // R12c: the value of every type, as its signed big-endian bytes.
+        for (tx_type, wrapper) in [
+            (None, false),
+            (Some(1), false),
+            (Some(2), false),
+            (Some(3), false),
+            (Some(3), true),
+            (Some(4), false),
+        ] {
+            let raw = valued_envelope(tx_type, Some(PORTAL), 1_780_000_000_000, &launch, wrapper);
+            let target = decode_tx_target(&raw).unwrap();
+            assert_eq!(
+                (target.value, target.data),
+                (&1_780_000_000_000u64.to_be_bytes()[2..], &launch[..]),
+                "{tx_type:?}"
+            );
+        }
+        assert!(
+            decode_tx_target(&envelope(None, Some(PORTAL), &launch, false))
+                .unwrap()
+                .value
+                .is_empty()
+        );
+        // A list where the value belongs is no transaction.
+        let listed = rlp_list(&[
+            rlp_uint(7),
+            rlp_uint(1_000_000_000),
+            rlp_uint(21_000),
+            rlp_bytes(&PORTAL),
+            rlp_list(&[rlp_uint(1)]),
+            rlp_bytes(&launch),
+            rlp_uint(1),
+            rlp_bytes(&[0x11; 32]),
+            rlp_bytes(&[0x22; 32]),
+        ]);
+        assert!(matches!(
+            decode_tx_target(&listed),
+            Err(EnvelopeErrorV2::Malformed(m)) if m.contains("value")
+        ));
         let creation = envelope(Some(2), None, &launch, false);
         assert_eq!(decode_tx_target(&creation).unwrap().to, None);
         let one_byte = envelope(None, Some(PORTAL), &[0x05], false);
