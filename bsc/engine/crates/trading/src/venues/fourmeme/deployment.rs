@@ -40,6 +40,7 @@
 
 use alloy_primitives::{Address, B256, U256, address, b256, keccak256};
 
+use super::profile::VenueFee;
 use crate::venues::flap::address::{create2_address, minimal_proxy_init_code};
 
 /// The two Four.meme surfaces (no shared protocol assumption between them).
@@ -80,6 +81,11 @@ pub struct FourDeployment {
     pub chain_id: u64,
     /// Classic TokenManager2 (proxy): launch and trade calls, its events.
     pub token_manager2: Address,
+    /// TokenManagerHelper3: its `getTokenInfo` names the venue's fee terms.
+    pub helper3: Address,
+    /// A token of TokenManager2 whose `getTokenInfo` the probe reads for
+    /// the fee terms before a launch's token exists.
+    pub fee_reference_token: Address,
     pub token_manager2_implementation: Address,
     pub token_manager2_implementation_runtime_keccak256: B256,
     /// The Classic (deployer, template) pairs: the G0.1 freeze's first,
@@ -147,6 +153,8 @@ pub const fn bsc_mainnet_g01_129842711() -> FourDeployment {
     FourDeployment {
         chain_id: 56,
         token_manager2: address!("5c952063c7fc8610ffdb798152d69f0b9550762b"),
+        helper3: address!("f251f83e40a78868fcfa3fa4599dad6494e46034"),
+        fee_reference_token: address!("a89a24209a3ae8ba1ffb3f0567b69ef4765bffff"),
         token_manager2_implementation: address!("f32ee25a7a94f5858692b90815493bda9f992eee"),
         token_manager2_implementation_runtime_keccak256: b256!(
             "07eb30d004f7e1b214a2b5c9704e2c7866648b65d1ffeb0c38fd54b5512f030e"
@@ -203,6 +211,7 @@ pub const fn bsc_mainnet_r12b_131568366() -> FourDeployment {
             "8da2a695b0d2e9471ffbf04e1259f306a587857bb2e6f93798b74c3f8b875377"
         ),
         classic_economics: ClassicEconomics::Witnessed,
+        fee_reference_token: address!("1b1955899341dbd9569c8537f639d642c2a9ffff"),
         ..bsc_mainnet_g01_129842711()
     }
 }
@@ -220,6 +229,10 @@ pub struct ObservedFour {
     pub openfour_create_deployer_implementation_runtime_keccak256: B256,
     /// Each Classic pair's deployer and template runtime keccak.
     pub classic_runtime_keccak256: [(B256, B256); CLASSIC_TEMPLATES],
+    /// `Helper3.getTokenInfo(fee_reference_token)`: `tradingFeeRate`,
+    /// `minTradingFee` (whether a rate is fixed per token at its creation is
+    /// unwitnessed; the BUY's minAmount bounds any difference).
+    pub venue_fee: VenueFee,
 }
 
 /// The first pin the live chain differs from.
@@ -273,6 +286,7 @@ impl std::error::Error for FourDrift {}
 pub struct ValidatedFourDeployment {
     deployment: FourDeployment,
     codehash_generation: u64,
+    venue_fee: VenueFee,
 }
 
 impl ValidatedFourDeployment {
@@ -284,6 +298,12 @@ impl ValidatedFourDeployment {
     #[inline]
     pub fn codehash_generation(&self) -> u64 {
         self.codehash_generation
+    }
+
+    /// The venue's fee terms the matching observation read.
+    #[inline]
+    pub fn venue_fee(&self) -> VenueFee {
+        self.venue_fee
     }
 
     /// Whether its Classic economics are witnessed by execution.
@@ -358,6 +378,7 @@ impl FourDeployment {
         Ok(ValidatedFourDeployment {
             deployment: *self,
             codehash_generation,
+            venue_fee: observed.venue_fee,
         })
     }
 
@@ -436,6 +457,7 @@ pub(crate) mod testkit {
             classic_runtime_keccak256: d
                 .classic_templates
                 .map(|t| (t.deployer_runtime_keccak256, t.template_runtime_keccak256)),
+            venue_fee: crate::venues::fourmeme::profile::WITNESSED_VENUE_FEE,
         }
     }
 }
@@ -481,7 +503,8 @@ mod tests {
     }
 
     /// R12b: the refreeze changes TokenManager2's implementation pin (and
-    /// R12c its executed economics) only
+    /// R12c its executed economics and a fee reference token of its own era)
+    /// only
     /// (the freeze at block 131568366 read every other pinned contract's
     /// code unchanged; presets other than …735 are carried over from v3).
     #[test]
@@ -501,6 +524,7 @@ mod tests {
                 token_manager2_implementation_runtime_keccak256: g01
                     .token_manager2_implementation_runtime_keccak256,
                 classic_economics: ClassicEconomics::DecodeOnly,
+                fee_reference_token: g01.fee_reference_token,
                 ..now
             },
             g01
@@ -518,6 +542,10 @@ mod tests {
         let v = d.validate(&pinned, 7).unwrap();
         assert_eq!((v.codehash_generation(), *v.deployment()), (7, d));
         assert!(v.classic_economics_witnessed());
+        // The fee terms are an observation the validation carries, no pin.
+        let mut fee = pinned;
+        fee.venue_fee.rate_bps = 250;
+        assert_eq!(d.validate(&fee, 7).unwrap().venue_fee().rate_bps, 250);
         let a = Address::repeat_byte(0xee);
         let k = B256::repeat_byte(0xee);
         type Change = fn(&mut ObservedFour, Address, B256);

@@ -6,7 +6,7 @@ use crate::economics::four_classic::{QualifiedClassicState, admit_classic_buy};
 use crate::venues::flap::binding::ExpectedTx;
 use crate::venues::fourmeme::abi::AbiError;
 use crate::venues::fourmeme::deployment::bsc_mainnet_r12b_131568366;
-use crate::venues::fourmeme::profile::{WITNESSED_VENUE_FEE, classify_classic_launch};
+use crate::venues::fourmeme::profile::classify_classic_launch;
 use crate::venues::fourmeme::recognize::decode_classic_create;
 
 const FIXTURE: &str = include_str!("../../../../fixtures/fourmeme/classic_parity_20261104.txt");
@@ -44,7 +44,7 @@ fn admitted() -> AdmittedClassicBuy {
         let launch = decode_classic_create(&calldata, v.deployment().classic_args_len).unwrap();
         let tx: B256 = f[2].parse().unwrap();
         let value = U256::from_str_radix(f[4], 10).unwrap();
-        let Ok(c) = classify_classic_launch(&v, &launch, value, &WITNESSED_VENUE_FEE, tx) else {
+        let Ok(c) = classify_classic_launch(&v, &launch, value, tx) else {
             continue;
         };
         let snapshot = SnapshotId {

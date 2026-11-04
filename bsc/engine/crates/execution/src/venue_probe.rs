@@ -44,6 +44,10 @@ use darkbot_bsc_trading::venues::flap::deployment::{
 use darkbot_bsc_trading::venues::fourmeme::deployment::{
     CLASSIC_TEMPLATES, FourDeployment, ObservedFour,
 };
+use darkbot_bsc_trading::venues::fourmeme::profile::VenueFee;
+
+/// `TokenManagerHelper3.getTokenInfo(address)`.
+const GET_TOKEN_INFO: [u8; 4] = [0x1f, 0x69, 0x56, 0x5f];
 use serde_json::Value;
 
 use crate::chain_follower::http::Client;
@@ -144,6 +148,9 @@ pub enum ProbeRead {
     NftGate,
     /// REV.1.0 R5: the Portal's `quoteExactInput` of a migrated lot's SELL.
     DexQuote,
+    /// R12c: `Helper3.getTokenInfo` of the Four reference token (the fee
+    /// terms).
+    FourFeeTerms,
 }
 
 /// How a well-formed hex answer violates its ABI or storage type.
@@ -645,6 +652,19 @@ where
         let template = wire.code(&at, ProbeRead::FourCode, t.template)?.keccak256;
         *slot = (deployer, template);
     }
+    // The fee terms: Helper3.getTokenInfo(reference token), words 4 and 5.
+    let read = ProbeRead::FourFeeTerms;
+    let mut calldata = Vec::with_capacity(4 + WORD);
+    calldata.extend_from_slice(&GET_TOKEN_INFO);
+    calldata.extend_from_slice(&address_word(deployment.fee_reference_token));
+    let info = wire.call(&at, read, deployment.helper3, &calldata)?;
+    let w = abi_words::<12>(&info).map_err(abi(read))?;
+    let rate_bps =
+        u16::try_from(U256::from_be_bytes(w[4])).map_err(|_| abi(read)(AbiFault::Range))?;
+    let venue_fee = VenueFee {
+        rate_bps,
+        min_fee: U256::from_be_bytes(w[5]),
+    };
     let observed = ObservedFour {
         chain_id,
         token_manager2_implementation: tm2.0,
@@ -654,6 +674,7 @@ where
         openfour_create_deployer_implementation: create_deployer.0,
         openfour_create_deployer_implementation_runtime_keccak256: create_deployer.1,
         classic_runtime_keccak256: classic,
+        venue_fee,
     };
     if wire.block_hash(ProbeRead::BlockRecheck, block_number)? != block_hash {
         return Err(ProbeError::Reorg {
@@ -1974,6 +1995,13 @@ mod tests {
             )
         })
         .to_vec();
+        // Helper3.getTokenInfo of the reference token: rate 100, minimum 7.
+        let mut info = vec![0u8; 12 * WORD];
+        info[5 * WORD - 1] = 100;
+        info[6 * WORD - 1] = 7;
+        let mut calldata = GET_TOKEN_INFO.to_vec();
+        calldata.extend_from_slice(&address_word(d.fee_reference_token));
+        node.set_call(d.helper3, calldata, info);
         (d, node)
     }
 
@@ -2006,13 +2034,18 @@ mod tests {
         let o = result.unwrap();
         assert_eq!((o.block_number, o.block_hash), (HEAD, HASH));
         assert_eq!(d.drifts(&o.observed), []);
-        assert!(d.validate(&o.observed, o.block_number).is_ok());
+        let v = d.validate(&o.observed, o.block_number).unwrap();
+        assert_eq!(
+            (v.venue_fee().rate_bps, v.venue_fee().min_fee),
+            (100, U256::from(7u8))
+        );
         let methods: Vec<&str> = seen.iter().map(|(m, _)| m.as_str()).collect();
         assert_eq!(
             methods.iter().filter(|m| **m == "eth_getStorageAt").count(),
             3
         );
         assert_eq!(methods.iter().filter(|m| **m == "eth_getCode").count(), 7);
+        assert_eq!(methods.iter().filter(|m| **m == "eth_call").count(), 1);
         assert_eq!(methods.last(), Some(&"eth_getBlockByNumber"));
         let (_, mut node) = served_four();
         let upgraded = Address::repeat_byte(0x99);

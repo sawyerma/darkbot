@@ -273,7 +273,7 @@ fn a_priced_launch_names_its_token_and_state_before_execution() {
     let (mut priced_launches, mut refused) = (0, 0);
     for (token, l) in launches() {
         let launch = decoded(&l);
-        match classify_classic_launch(&validated(), &launch, l.value, &WITNESSED_VENUE_FEE, l.tx) {
+        match classify_classic_launch(&validated(), &launch, l.value, l.tx) {
             Ok(c) => {
                 assert_eq!((c.token(), c.candidate()), (token, l.tx));
                 let [_, _, _, offers, _] = l.purchase.unwrap();
@@ -480,9 +480,13 @@ fn a_priced_launch_with_one_field_changed_is_refused() {
         input[at..at + 32].copy_from_slice(&value.to_be_bytes::<32>());
         input
     };
+    // The fee terms come with the validated observation.
     let classify = |input: &[u8], value: U256, venue: &VenueFee| {
         let launch = decode_classic_create(input, d.classic_args_len).unwrap();
-        classify_classic_launch(&validated(), &launch, value, venue, l.tx).map(|c| c.token())
+        let mut observed = crate::venues::fourmeme::deployment::testkit::pinned_observation(&d);
+        observed.venue_fee = *venue;
+        let v = d.validate(&observed, 1).unwrap();
+        classify_classic_launch(&v, &launch, value, l.tx).map(|c| c.token())
     };
     assert!(classify(&l.calldata, l.value, &WITNESSED_VENUE_FEE).is_ok());
     // The G0.1 deployment decodes the launch but has no executed economics.
@@ -495,7 +499,7 @@ fn a_priced_launch_with_one_field_changed_is_refused() {
         .unwrap();
     let launch = decode_classic_create(&l.calldata, g01.classic_args_len).unwrap();
     assert_eq!(
-        classify_classic_launch(&decode_only, &launch, l.value, &WITNESSED_VENUE_FEE, l.tx),
+        classify_classic_launch(&decode_only, &launch, l.value, l.tx),
         Err(UnsupportedClassicLaunch::EconomicsNotWitnessed)
     );
     let one = U256::from(1u8);
@@ -626,14 +630,8 @@ fn the_admitted_launch_buy_is_the_executed_one() {
         else {
             continue;
         };
-        let classified = classify_classic_launch(
-            &validated(),
-            &decoded(&l),
-            l.value,
-            &WITNESSED_VENUE_FEE,
-            l.tx,
-        )
-        .unwrap();
+        let classified =
+            classify_classic_launch(&validated(), &decoded(&l), l.value, l.tx).unwrap();
         let state = QualifiedClassicState::fresh_launch(&classified, 0, snapshot(l.tx)).unwrap();
         let admitted = admit_classic_buy(&state, &policy(u(f[10]), 500)).unwrap();
         assert_eq!((admitted.token(), admitted.funds()), (token, u(f[10])));
@@ -663,14 +661,7 @@ fn an_admission_outside_the_qualified_state_or_amount_is_refused() {
         .into_iter()
         .find(|(_, l)| l.purchase.is_some() && l.quote == Address::ZERO)
         .unwrap();
-    let classified = classify_classic_launch(
-        &validated(),
-        &decoded(&l),
-        l.value,
-        &WITNESSED_VENUE_FEE,
-        l.tx,
-    )
-    .unwrap();
+    let classified = classify_classic_launch(&validated(), &decoded(&l), l.value, l.tx).unwrap();
     let fresh = |trades: u64, s: crate::chain_state::SnapshotId| {
         QualifiedClassicState::fresh_launch(&classified, trades, s)
     };

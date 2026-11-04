@@ -27,8 +27,9 @@
 //! `K` and `T` only.
 //!
 //! The venue's fee terms are TokenManager2's, the same for every witnessed
-//! token: the caller reads them before the launch exists, from an existing
-//! token at its snapshot's block (`Helper3.getTokenInfo`).
+//! token: the drift probe reads them before the launch exists
+//! (`Helper3.getTokenInfo` of the deployment's reference token), and the
+//! validated deployment carries them.
 
 use alloy_primitives::{Address, B256, U256, b256};
 
@@ -188,14 +189,14 @@ impl ClassifiedClassicLaunch {
 }
 
 /// Classifies `launch`, sent with `value` in transaction `candidate`, on
-/// the validated `deployment` under the venue's fee terms `venue`.
+/// the validated `deployment` under the fee terms it observed.
 pub fn classify_classic_launch(
     validated: &ValidatedFourDeployment,
     launch: &ClassicLaunch<'_>,
     value: U256,
-    venue: &VenueFee,
     candidate: B256,
 ) -> Result<ClassifiedClassicLaunch, UnsupportedClassicLaunch> {
+    let venue = validated.venue_fee();
     if !validated.classic_economics_witnessed() {
         return Err(UnsupportedClassicLaunch::EconomicsNotWitnessed);
     }
@@ -221,7 +222,7 @@ pub fn classify_classic_launch(
     if !profile.creator_values.contains(&args.creator_value) {
         return Err(UnsupportedClassicLaunch::UnwitnessedCreatorValue);
     }
-    if *venue != WITNESSED_VENUE_FEE {
+    if venue != WITNESSED_VENUE_FEE {
         return Err(UnsupportedClassicLaunch::FeeTerms);
     }
     let fee = ClassicFee {
