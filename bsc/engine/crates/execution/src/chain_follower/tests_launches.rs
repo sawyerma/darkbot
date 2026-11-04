@@ -44,7 +44,7 @@ use super::follow::receipts_match;
 use super::jsonrpc::{BlockHead, FullBlock, Receipt, parse_block, parse_receipts};
 use super::launches::{
     FLAP_PORTAL, FOUR_TOKEN_MANAGER2, LAUNCH_EVENTS, OPENFOUR_CORE, ReceiptLaunch, detect,
-    verify_object,
+    four_events, verify_object,
 };
 use super::{CanonicalLaunch, Field, FourToken, RequestError, Venue};
 
@@ -475,6 +475,277 @@ fn a_classic_launch_of_the_second_pair_matches() {
     let verified = verify_object(&parsed).unwrap();
     let l = launch.with_transaction(Ok(&verified), 16_384);
     assert_eq!(l.four_token, FourToken::Mismatch);
+}
+
+/// R12d's witnessed OpenFour launch with its creator's BUY (tx 0xeec0545c…,
+/// block 131608421, index 148; `eth_getTransactionReceipt` of the free
+/// archive endpoint bsc-mainnet.public.blastapi.io, fetched 2026-11-04,
+/// wrapped as the one receipt of a `result` array for `parse_receipts`):
+/// the parity fixture's OFLAUNCH row.
+const OPENFOUR_BUY_RECEIPT: &str =
+    include_str!("../../tests/fixtures/chain/receipt_131608421_148.json");
+
+/// R12 SC4: the creator's BUY inside a Four.meme launch is a venue-tagged
+/// curve trade of the launch's token by its creator with the curve's state
+/// after it (the remaining sale is the 8e26 offered less the tokens bought,
+/// the raised quote that BUY's curve quote); an OpenFour launch's vault
+/// enters its trading phase (0 to 1); the launch logs are no trades.
+#[test]
+fn four_launches_report_the_creators_buy_with_the_state_after_it() {
+    use super::CanonicalEvent;
+    use alloy_primitives::U256;
+    let sale = U256::from(800_000_000u64) * U256::from(10u64).pow(U256::from(18u8));
+    let w = U256::from_be_bytes;
+    // Classic: the launch block, through detect.
+    let (head, rs) = load(FOUR_BLOCK, FOUR_RECEIPTS, 129_781_119);
+    let launches = detect(&head, &rs);
+    let events = four_events(&head, &rs);
+    assert!(!events.is_empty());
+    for e in &events {
+        let CanonicalEvent::FourTrade(t) = e else {
+            panic!("{e:?}");
+        };
+        let launch = launches.iter().find(|l| l.tx_index == t.tx_index).unwrap();
+        assert_eq!(
+            (t.venue, t.sell, Some(t.token), Some(t.trader), t.tx_hash),
+            (
+                Venue::Four,
+                false,
+                launch.token,
+                launch.creator,
+                launch.tx_hash
+            )
+        );
+        assert_eq!(
+            (w(t.remaining), w(t.raised)),
+            (sale - w(t.amount), w(t.quote))
+        );
+    }
+    // OpenFour: the witnessed launch's receipt, its values the fixture's.
+    let row: Vec<&str> =
+        include_str!("../../../trading/fixtures/fourmeme/openfour_parity_20261104.txt")
+            .lines()
+            .find(|l| l.starts_with("OFLAUNCH "))
+            .unwrap()
+            .split(' ')
+            .collect();
+    let u = |s: &str| U256::from_str_radix(s, 10).unwrap();
+    let rs = parse_receipts(OPENFOUR_BUY_RECEIPT.as_bytes(), 1)
+        .unwrap()
+        .unwrap();
+    let events = four_events(&head, &rs);
+    let [
+        CanonicalEvent::FourPhase {
+            token: phased,
+            from: 0,
+            to: 1,
+            ..
+        },
+        CanonicalEvent::FourTrade(t),
+    ] = events.as_slice()
+    else {
+        panic!("{events:?}");
+    };
+    let token: [u8; 20] = hex::decode(&row[4][2..]).unwrap().try_into().unwrap();
+    let creator: [u8; 20] = hex::decode(&row[6][2..]).unwrap().try_into().unwrap();
+    assert_eq!(
+        (
+            t.venue, t.sell, *phased, t.token, t.trader, t.origin, t.tx_index
+        ),
+        (Venue::OpenFour, false, token, token, creator, creator, 148)
+    );
+    assert_eq!(
+        (w(t.amount), w(t.quote), w(t.raised), w(t.remaining)),
+        (u(row[20]), u(row[21]), u(row[29]), u(row[30]))
+    );
+    assert_eq!(
+        (w(t.remaining), w(t.raised)),
+        (sale - w(t.amount), w(t.quote))
+    );
+}
+
+/// R12 SC4: the follower's one block conversion reports a Four launch
+/// block's curve trades after its launches, before the block completes.
+#[test]
+fn a_four_blocks_curve_trades_follow_its_launches() {
+    use super::CanonicalEvent;
+    use super::follow::{FirstHeld, block_events};
+    let (_, rs) = load(FOUR_BLOCK, FOUR_RECEIPTS, 129_781_119);
+    let events = block_events(
+        full(FOUR_BLOCK, 129_781_119),
+        &rs,
+        FirstHeld::now(),
+        16_384,
+        &mut |_, _| Ok(()),
+    )
+    .unwrap();
+    let kinds: Vec<&str> = events
+        .iter()
+        .map(|e| match e {
+            CanonicalEvent::Block { .. } => "block",
+            CanonicalEvent::Launch(_) => "launch",
+            CanonicalEvent::FourTrade(_) => "trade",
+            CanonicalEvent::BlockComplete { .. } => "complete",
+            other => panic!("{other:?}"),
+        })
+        .collect();
+    let trades = kinds.iter().filter(|k| **k == "trade").count();
+    assert!(trades > 0);
+    let first_trade = kinds.iter().position(|k| *k == "trade").unwrap();
+    assert!(kinds[..first_trade].contains(&"launch"));
+    assert_eq!(kinds.last(), Some(&"complete"));
+    assert_eq!(
+        kinds[kinds.len() - 1 - trades..kinds.len() - 1],
+        vec!["trade"; trades][..]
+    );
+}
+
+/// R12 SC4: a SELL of either venue is a SELL, and each canonical word is its
+/// event word: the raised quote apart from the trade's quote once they
+/// differ (a later trade's), on both venues.
+#[test]
+fn four_trades_carry_their_side_and_their_own_words() {
+    use super::CanonicalEvent;
+    use alloy_primitives::U256;
+    use darkbot_bsc_trading::venues::fourmeme::events::FourEventKind;
+    let trade_of = |head: &BlockHead, rs: &[Receipt]| {
+        four_events(head, rs)
+            .into_iter()
+            .find_map(|e| match e {
+                CanonicalEvent::FourTrade(t) => Some(t),
+                _ => None,
+            })
+            .unwrap()
+    };
+    let word = |data: &mut [u8], i: usize, v: U256| {
+        data[i * 32..(i + 1) * 32].copy_from_slice(&v.to_be_bytes::<32>());
+    };
+    let raised = U256::from(123_456_789u64);
+    // Classic: TokenSale's topic; `funds` is data word 7.
+    let (head, mut rs) = load(FOUR_BLOCK, FOUR_RECEIPTS, 129_781_119);
+    let buy = trade_of(&head, &rs);
+    let purchase = FourEventKind::TokenPurchase.topic0();
+    let (r, l) = rs
+        .iter()
+        .enumerate()
+        .find_map(|(r, rc)| {
+            rc.logs
+                .iter()
+                .position(|l| {
+                    l.address == FOUR_TOKEN_MANAGER2 && l.topics.first() == Some(&purchase)
+                })
+                .map(|l| (r, l))
+        })
+        .unwrap();
+    rs[r].logs[l].topics[0] = FourEventKind::TokenSale.topic0();
+    word(&mut rs[r].logs[l].data, 7, raised);
+    let sell = trade_of(&head, &rs);
+    assert_eq!(
+        (
+            sell.venue,
+            sell.sell,
+            sell.amount,
+            sell.quote,
+            sell.remaining
+        ),
+        (Venue::Four, true, buy.amount, buy.quote, buy.remaining)
+    );
+    assert_eq!(U256::from_be_bytes(sell.raised), raised);
+    // OpenFour: `isBuy` is data word 0, `totalRaised` word 13.
+    let mut rs = parse_receipts(OPENFOUR_BUY_RECEIPT.as_bytes(), 1)
+        .unwrap()
+        .unwrap();
+    let buy = trade_of(&head, &rs);
+    let executed = FourEventKind::TradeExecuted.topic0();
+    let l = rs[0]
+        .logs
+        .iter()
+        .position(|l| l.address == OPENFOUR_CORE && l.topics.first() == Some(&executed))
+        .unwrap();
+    word(&mut rs[0].logs[l].data, 0, U256::ZERO);
+    word(&mut rs[0].logs[l].data, 13, raised);
+    let sell = trade_of(&head, &rs);
+    assert_eq!(
+        (
+            sell.venue,
+            sell.sell,
+            sell.amount,
+            sell.quote,
+            sell.remaining
+        ),
+        (Venue::OpenFour, true, buy.amount, buy.quote, buy.remaining)
+    );
+    assert_eq!(U256::from_be_bytes(sell.raised), raised);
+}
+
+/// R12 SC4: a broken or unwitnessed curve-path log of OpenFour Core is
+/// reported, not skipped; a failed receipt and another contract's logs are
+/// not read; a broken launch log is detect's.
+#[test]
+fn four_curve_logs_the_decoder_refuses_are_reported() {
+    use super::CanonicalEvent;
+    use darkbot_bsc_trading::venues::fourmeme::events::FourEventKind;
+    let (head, _) = load(OPENFOUR_BLOCK, OPENFOUR_RECEIPTS, 129_842_141);
+    let rs = parse_receipts(OPENFOUR_BUY_RECEIPT.as_bytes(), 1)
+        .unwrap()
+        .unwrap();
+    let at = |kind: FourEventKind| {
+        rs[0]
+            .logs
+            .iter()
+            .position(|l| l.address == OPENFOUR_CORE && l.topics.first() == Some(&kind.topic0()))
+            .unwrap()
+    };
+    let (trade, created) = (
+        at(FourEventKind::TradeExecuted),
+        at(FourEventKind::TokenCreated),
+    );
+    let gaps = |rs: &[Receipt]| {
+        four_events(&head, rs)
+            .iter()
+            .filter(|e| matches!(e, CanonicalEvent::FourTradeUndecodable { .. }))
+            .count()
+    };
+    assert_eq!(gaps(&rs), 0);
+    // A broken layout, an unwitnessed graduation topic: reported.
+    let mut broken = rs.clone();
+    broken[0].logs[trade].data.truncate(64);
+    assert_eq!(gaps(&broken), 1);
+    let mut graduation = rs.clone();
+    graduation[0].logs[trade].topics[0] = FourEventKind::MigrateExecuted.topic0();
+    assert_eq!(gaps(&graduation), 1);
+    // A failed receipt, another contract: nothing.
+    let mut failed = rs.clone();
+    failed[0].succeeded = false;
+    assert!(four_events(&head, &failed).is_empty());
+    let mut foreign = rs.clone();
+    for log in &mut foreign[0].logs {
+        if log.address == OPENFOUR_CORE {
+            log.address = FLAP_PORTAL;
+        }
+    }
+    assert!(four_events(&head, &foreign).is_empty());
+    // A broken launch log is no curve event.
+    let mut launch = rs.clone();
+    launch[0].logs[created].data.truncate(64);
+    assert_eq!(gaps(&launch), 0);
+    // Sent through another account: the trader is the event's, the origin
+    // the transaction's sender.
+    let trade_of = |rs: &[Receipt]| {
+        four_events(&head, rs)
+            .into_iter()
+            .find_map(|e| match e {
+                CanonicalEvent::FourTrade(t) => Some(t),
+                _ => None,
+            })
+            .unwrap()
+    };
+    let direct = trade_of(&rs);
+    let mut routed = rs.clone();
+    routed[0].from = [0x99; 20];
+    let via = trade_of(&routed);
+    assert_eq!((via.trader, via.origin), (direct.trader, [0x99; 20]));
+    assert_ne!(direct.trader, [0x99; 20]);
 }
 
 #[test]

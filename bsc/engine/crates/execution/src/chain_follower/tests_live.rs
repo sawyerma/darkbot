@@ -126,6 +126,9 @@ fn live_dataseed_follows_consecutive_canonical_blocks() {
         | CanonicalEvent::FlapTerm(_)
         | CanonicalEvent::FlapMigrated { .. }
         | CanonicalEvent::FlapTradeUndecodable { .. }
+        | CanonicalEvent::FourTrade(_)
+        | CanonicalEvent::FourPhase { .. }
+        | CanonicalEvent::FourTradeUndecodable { .. }
         | CanonicalEvent::BlockComplete { .. }
         | CanonicalEvent::Failover { .. } => {}
         CanonicalEvent::Fault(fault) => faults.push(fault),

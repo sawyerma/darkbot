@@ -627,6 +627,7 @@ pub(super) fn block_events(
     }
     let reverted = launches::reverted(receipts, &objects, max_launch_calldata);
     let flap = launches::flap_events(&head, receipts);
+    let four = launches::four_events(&head, receipts);
     let txs = head
         .txs
         .iter()
@@ -641,7 +642,8 @@ pub(super) fn block_events(
             cost: receipt.cost,
         })
         .collect();
-    let mut events = Vec::with_capacity(2 + launches.len() + reverted.len() + flap.len());
+    let mut events =
+        Vec::with_capacity(2 + launches.len() + reverted.len() + flap.len() + four.len());
     events.push(CanonicalEvent::Block {
         number: header.number,
         hash: header.hash,
@@ -663,6 +665,7 @@ pub(super) fn block_events(
         }
     }));
     events.extend(flap);
+    events.extend(four);
     events.push(CanonicalEvent::BlockComplete {
         number: header.number,
         hash: header.hash,

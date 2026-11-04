@@ -852,6 +852,98 @@ pub fn flap_trade_of(p: &[u8]) -> Option<crate::chain_follower::CanonicalTrade> 
     })
 }
 
+/// R12 SC4: a Four.meme curve trade: `Z | venue u8 | sell u8 | block u64 |
+/// block_hash [32] | tx_index u64 | tx_hash [32] | log_index u64 |
+/// origin [20] | token [20] | trader [20] | amount [32] | quote [32] |
+/// remaining [32] | raised [32]` (the venue byte of the launch records).
+pub fn four_trade_payload(t: &crate::chain_follower::CanonicalFourTrade) -> Vec<u8> {
+    let mut out = Vec::with_capacity(FOUR_TRADE_LEN);
+    out.push(b'Z');
+    out.push(venue_byte(t.venue));
+    out.push(u8::from(t.sell));
+    out.extend_from_slice(&t.block_number.to_le_bytes());
+    out.extend_from_slice(&t.block_hash);
+    out.extend_from_slice(&t.tx_index.to_le_bytes());
+    out.extend_from_slice(&t.tx_hash);
+    out.extend_from_slice(&t.log_index.to_le_bytes());
+    out.extend_from_slice(&t.origin);
+    out.extend_from_slice(&t.token);
+    out.extend_from_slice(&t.trader);
+    out.extend_from_slice(&t.amount);
+    out.extend_from_slice(&t.quote);
+    out.extend_from_slice(&t.remaining);
+    out.extend_from_slice(&t.raised);
+    out
+}
+
+/// The length of a `Z` record.
+pub const FOUR_TRADE_LEN: usize = 279;
+
+/// A `Z` record back; `None` for any other bytes (a Flap venue byte
+/// included).
+pub fn four_trade_of(p: &[u8]) -> Option<crate::chain_follower::CanonicalFourTrade> {
+    if p.len() != FOUR_TRADE_LEN || p[0] != b'Z' || p[2] > 1 {
+        return None;
+    }
+    let venue = venue_of_byte(p[1]).filter(|v| *v != Venue::Flap)?;
+    let at = |from: usize, n: usize| p.get(from..from + n);
+    let u64_at = |from: usize| Some(u64::from_le_bytes(at(from, 8)?.try_into().ok()?));
+    let a20 = |from: usize| -> Option<[u8; 20]> { at(from, 20)?.try_into().ok() };
+    let a32 = |from: usize| -> Option<[u8; 32]> { at(from, 32)?.try_into().ok() };
+    Some(crate::chain_follower::CanonicalFourTrade {
+        venue,
+        sell: p[2] == 1,
+        block_number: u64_at(3)?,
+        block_hash: a32(11)?,
+        tx_index: u64_at(43)?,
+        tx_hash: a32(51)?,
+        log_index: u64_at(83)?,
+        origin: a20(91)?,
+        token: a20(111)?,
+        trader: a20(131)?,
+        amount: a32(151)?,
+        quote: a32(183)?,
+        remaining: a32(215)?,
+        raised: a32(247)?,
+    })
+}
+
+/// R12 SC4: an OpenFour `PhaseTransition`: `y | block u64 | block_hash
+/// [32] | tx_index u64 | log_index u64 | token [20] | from u8 | to u8`.
+pub fn four_phase_payload(
+    block: u64,
+    block_hash: &[u8; 32],
+    (tx_index, log_index): (u64, u64),
+    token: &[u8; 20],
+    (from, to): (u8, u8),
+) -> Vec<u8> {
+    let mut out = Vec::with_capacity(79);
+    out.push(b'y');
+    out.extend_from_slice(&block.to_le_bytes());
+    out.extend_from_slice(block_hash);
+    out.extend_from_slice(&tx_index.to_le_bytes());
+    out.extend_from_slice(&log_index.to_le_bytes());
+    out.extend_from_slice(token);
+    out.push(from);
+    out.push(to);
+    out
+}
+
+/// R12 SC4: a Four.meme curve-path log the decoder refused or does not
+/// decode: `z | block u64 | block_hash [32] | tx_index u64 | log_index
+/// u64`; that block's Four events are incomplete (the Flap ones are not
+/// concerned).
+pub fn four_trade_gap_payload(
+    block: u64,
+    block_hash: &[u8; 32],
+    tx_index: u64,
+    log_index: u64,
+) -> Vec<u8> {
+    let mut out = trade_gap_payload(block, block_hash, tx_index, log_index);
+    out[0] = b'z';
+    out
+}
+
 /// A Portal token term (Phase H): `F | kind u8 | block u64 |
 /// block_hash [32] | tx_index u64 | log_index u64 | token [20] |
 /// value [96]` — kind 1 version (last byte of word 0), 2 quote token
@@ -1475,6 +1567,57 @@ fn write_durable(path: &Path, bytes: &[u8]) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
+
+    /// R12 SC4: a Four trade record reads back to the trade, its venue
+    /// and side included; a Flap venue byte, another side byte, another
+    /// length or tag is no Four trade; the phase and refused-log records
+    /// have their fixed layouts.
+    #[test]
+    fn the_four_curve_records_read_back() {
+        use crate::canonical_join::Venue;
+        use crate::chain_follower::CanonicalFourTrade;
+        for (venue, sell) in [(Venue::Four, false), (Venue::OpenFour, true)] {
+            let t = CanonicalFourTrade {
+                venue,
+                block_number: 131_608_421,
+                block_hash: [0xb1; 32],
+                tx_index: 148,
+                tx_hash: [0xee; 32],
+                log_index: 7,
+                origin: [0x50; 20],
+                sell,
+                token: [0x6a; 20],
+                trader: [0x51; 20],
+                amount: [1; 32],
+                quote: [2; 32],
+                remaining: [3; 32],
+                raised: [4; 32],
+            };
+            let p = super::four_trade_payload(&t);
+            assert_eq!(p.len(), super::FOUR_TRADE_LEN);
+            assert_eq!(super::four_trade_of(&p), Some(t));
+            let mut flap = p.clone();
+            flap[1] = 1;
+            let mut side = p.clone();
+            side[2] = 2;
+            let mut tag = p.clone();
+            tag[0] = b'T';
+            for bad in [flap, side, tag, p[..p.len() - 1].to_vec()] {
+                assert_eq!(super::four_trade_of(&bad), None);
+            }
+        }
+        let phase = super::four_phase_payload(9, &[0xb1; 32], (3, 4), &[0x6a; 20], (1, 2));
+        assert_eq!(
+            (phase.len(), phase[0], &phase[77..]),
+            (79, b'y', &[1u8, 2][..])
+        );
+        let gap = super::four_trade_gap_payload(9, &[0xb1; 32], 3, 4);
+        assert_eq!(gap[0], b'z');
+        assert_eq!(
+            gap[1..],
+            super::trade_gap_payload(9, &[0xb1; 32], 3, 4)[1..]
+        );
+    }
 
     /// The pending capture scope: nothing besides launches, the venue
     /// flow, or everything; anything else is refused at parse.

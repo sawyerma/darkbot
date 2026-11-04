@@ -21,7 +21,7 @@
 //!
 //! Every topic is recomputed from its signature in the tests.
 
-use alloy_primitives::{Address, hex};
+use alloy_primitives::{Address, U256, hex};
 use darkbot_bsc_trading::venues::flap::events::{
     PortalEvent, PortalEventKind, PortalLog, decode_portal_log,
 };
@@ -32,7 +32,9 @@ use darkbot_bsc_trading::venues::fourmeme::events::{
 use darkbot_bsc_trading::venues::fourmeme::recognize::PendingToken;
 
 use super::jsonrpc::{BlockHead, Log, Receipt};
-use super::{CanonicalEvent, CanonicalLaunch, CanonicalTerm, CanonicalTrade, FlapTerm};
+use super::{
+    CanonicalEvent, CanonicalFourTrade, CanonicalLaunch, CanonicalTerm, CanonicalTrade, FlapTerm,
+};
 use crate::ingress::{four_launch_token, is_flap_launch};
 use crate::wss::{BSC_MAINNET_CHAIN_ID, ParsedTx, RejectReason, VerifiedTx, verify_parsed};
 
@@ -517,6 +519,92 @@ pub(super) fn flap_events(block: &BlockHead, receipts: &[Receipt]) -> Vec<Canoni
                     },
                 ),
                 _ => refused,
+            });
+        }
+    }
+    out
+}
+
+/// R12 SC4: the Four.meme curve trades and OpenFour phase transitions of the
+/// block's successful receipts, in receipt and log order; a TokenManager2
+/// or OpenFour Core log on the curve's path the decoder refuses or does not
+/// decode (an unwitnessed graduation or stop) is reported, not skipped
+/// silently. Launches are [`detect`]'s; a topic of another kind (unknown to
+/// the decoder) is no curve event.
+pub(super) fn four_events(block: &BlockHead, receipts: &[Receipt]) -> Vec<CanonicalEvent> {
+    let (number, hash) = (block.header.number, block.header.hash);
+    let mut out = Vec::new();
+    for receipt in receipts.iter().filter(|r| r.succeeded) {
+        for log in receipt
+            .logs
+            .iter()
+            .filter(|l| l.address == FOUR_TOKEN_MANAGER2 || l.address == OPENFOUR_CORE)
+        {
+            let refused = CanonicalEvent::FourTradeUndecodable {
+                block_number: number,
+                block_hash: hash,
+                tx_index: receipt.tx_index,
+                log_index: log.log_index,
+            };
+            let trade = |venue, sell, token: Address, trader: Address, words: [U256; 4]| {
+                CanonicalEvent::FourTrade(CanonicalFourTrade {
+                    venue,
+                    block_number: number,
+                    block_hash: hash,
+                    tx_index: receipt.tx_index,
+                    tx_hash: receipt.tx_hash,
+                    log_index: log.log_index,
+                    origin: receipt.from,
+                    sell,
+                    token: token.into_array(),
+                    trader: trader.into_array(),
+                    amount: words[0].to_be_bytes(),
+                    quote: words[1].to_be_bytes(),
+                    remaining: words[2].to_be_bytes(),
+                    raised: words[3].to_be_bytes(),
+                })
+            };
+            out.push(match four_log(log) {
+                FourLog::Event(FourEvent::TokenPurchase(t) | FourEvent::TokenSale(t)) => trade(
+                    Venue::Four,
+                    log.topics.first() == Some(&FourEventKind::TokenSale.topic0()),
+                    t.token,
+                    t.account,
+                    [t.amount, t.cost, t.offers, t.funds],
+                ),
+                FourLog::Event(
+                    e @ (FourEvent::TradeExecutedBuy(t) | FourEvent::TradeExecutedSell(t)),
+                ) => trade(
+                    Venue::OpenFour,
+                    matches!(e, FourEvent::TradeExecutedSell(_)),
+                    t.token,
+                    t.trader,
+                    [
+                        t.token_amount,
+                        t.curve_quote_amount,
+                        t.remaining_for_sale,
+                        t.total_raised,
+                    ],
+                ),
+                FourLog::Event(FourEvent::PhaseTransition {
+                    token, from, to, ..
+                }) => CanonicalEvent::FourPhase {
+                    block_number: number,
+                    block_hash: hash,
+                    tx_index: receipt.tx_index,
+                    log_index: log.log_index,
+                    token: token.into_array(),
+                    from,
+                    to,
+                },
+                // Launches are detect's.
+                FourLog::Event(FourEvent::TokenCreate(_) | FourEvent::TokenCreated(_)) => continue,
+                // A refused launch log is detect's (its token unknown).
+                FourLog::Malformed(kind, _) | FourLog::Unsupported(kind) => match kind {
+                    FourEventKind::TokenCreate | FourEventKind::TokenCreated => continue,
+                    _ => refused,
+                },
+                FourLog::NotFour | FourLog::Unrecognized(..) => continue,
             });
         }
     }

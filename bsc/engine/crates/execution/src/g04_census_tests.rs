@@ -1633,6 +1633,73 @@ fn flap_trades_and_trade_gaps_are_counted() {
     fs::remove_dir_all(&dir).unwrap();
 }
 
+/// R12 SC4: the Four.meme curve records are parsed without touching the
+/// Flap market counts or the window's observable time; a damaged one is
+/// unparsed.
+#[test]
+fn four_curve_records_are_parsed_and_damaged_ones_counted() {
+    let dir = std::env::temp_dir().join(format!("bsc-g04-four-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    let trade =
+        crate::runtime_journal::four_trade_payload(&crate::chain_follower::CanonicalFourTrade {
+            venue: Venue::OpenFour,
+            block_number: 10,
+            block_hash: [10; 32],
+            tx_index: 2,
+            tx_hash: [2; 32],
+            log_index: 7,
+            origin: [3; 20],
+            sell: false,
+            token: [4; 20],
+            trader: [5; 20],
+            amount: [6; 32],
+            quote: [7; 32],
+            remaining: [8; 32],
+            raised: [9; 32],
+        });
+    let phase = crate::runtime_journal::four_phase_payload(10, &[10; 32], (2, 6), &[4; 20], (0, 1));
+    let gap = crate::runtime_journal::four_trade_gap_payload(10, &[10; 32], 3, 9);
+    let records = |extra: Vec<Vec<u8>>| {
+        let mut r = vec![(
+            RecordKind::Canonical,
+            1,
+            window_payload(b'H', 10, &[10; 32]),
+        )];
+        r.extend(extra.into_iter().map(|p| (RecordKind::Canonical, 2, p)));
+        r.push((
+            RecordKind::Canonical,
+            5,
+            window_payload(b'E', 10, &[10; 32]),
+        ));
+        r.push((RecordKind::Runtime, 6, EXIT_PAYLOAD.to_vec()));
+        r
+    };
+    write(
+        &dir,
+        1_000,
+        &records(vec![trade.clone(), phase.clone(), gap.clone()]),
+    );
+    let c = census(&dir, 4096, None).unwrap();
+    let w = &c.windows[0];
+    assert_eq!((w.flap_trades, w.trade_gaps, w.unparsed_records), (0, 0, 0));
+    fs::remove_dir_all(&dir).unwrap();
+    let mut flap_venue = trade.clone();
+    flap_venue[1] = 1;
+    write(
+        &dir,
+        1_000,
+        &records(vec![
+            flap_venue,
+            trade[..trade.len() - 1].to_vec(),
+            phase[..78].to_vec(),
+            gap[..56].to_vec(),
+        ]),
+    );
+    let c = census(&dir, 4096, None).unwrap();
+    assert_eq!(c.windows[0].unparsed_records, 4);
+    fs::remove_dir_all(&dir).unwrap();
+}
+
 #[test]
 fn percentiles_need_their_sample_count() {
     let v: Vec<u64> = (1..=100).collect();

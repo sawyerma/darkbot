@@ -344,6 +344,30 @@ pub enum CanonicalEvent {
         tx_index: u64,
         log_index: u64,
     },
+    /// R12 SC4: a Four.meme curve trade of the block just reported, in
+    /// receipt and log order after its launches.
+    FourTrade(CanonicalFourTrade),
+    /// R12 SC4: an OpenFour `PhaseTransition` of a token (the meaning of the
+    /// phase numbers beyond the vault's trading phase is not inferred).
+    FourPhase {
+        block_number: u64,
+        block_hash: [u8; 32],
+        tx_index: u64,
+        log_index: u64,
+        token: [u8; 20],
+        from: u8,
+        to: u8,
+    },
+    /// R12 SC4: a TokenManager2 or OpenFour Core log of a successful
+    /// receipt on the curve's path that the production decoder refuses or
+    /// does not decode (a known layout broken, or an unwitnessed
+    /// graduation or stop): that block's Four events are not complete.
+    FourTradeUndecodable {
+        block_number: u64,
+        block_hash: [u8; 32],
+        tx_index: u64,
+        log_index: u64,
+    },
     /// A step failed; the follower waits its backoff and tries again.
     Fault(FollowerFault),
     /// BSC3-036: after `failed_steps` consecutive failed steps on endpoint
@@ -416,6 +440,37 @@ pub struct CanonicalTrade {
     pub fee: [u8; 32],
     /// The price after the trade, as the Portal reports it.
     pub post_price: [u8; 32],
+}
+
+/// R12 SC4: one Four.meme curve trade of a successful receipt (Classic
+/// `TokenPurchase`/`TokenSale`, OpenFour `TradeExecuted`), with its position,
+/// the transaction's sender and the curve state the venue reports after it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CanonicalFourTrade {
+    /// [`Venue::Four`] (Classic) or [`Venue::OpenFour`].
+    pub venue: Venue,
+    pub block_number: u64,
+    pub block_hash: [u8; 32],
+    pub tx_index: u64,
+    pub tx_hash: [u8; 32],
+    pub log_index: u64,
+    /// The transaction's sender.
+    pub origin: [u8; 20],
+    pub sell: bool,
+    pub token: [u8; 20],
+    /// The event's trader (Classic `account`, OpenFour `trader`).
+    pub trader: [u8; 20],
+    /// Tokens bought or sold.
+    pub amount: [u8; 32],
+    /// The trade's curve quote (Classic `cost`, OpenFour
+    /// `curveQuoteAmount`).
+    pub quote: [u8; 32],
+    /// The tokens the curve still offers after it (Classic `offers`,
+    /// OpenFour `remainingForSale`).
+    pub remaining: [u8; 32],
+    /// The quote the curve raised in total after it (Classic `funds`,
+    /// OpenFour `totalRaised`).
+    pub raised: [u8; 32],
 }
 
 /// One launch in a canonical block.

@@ -865,6 +865,19 @@ fn describe(event: &CanonicalEvent, names: &BTreeMap<[u8; 32], String>) -> Strin
         CanonicalEvent::FlapTradeUndecodable { block_number, .. } => {
             format!("undecodable trade {block_number}")
         }
+        CanonicalEvent::FourTrade(t) => format!(
+            "four trade {:?} {} {} sell {}",
+            t.venue, t.block_number, t.log_index, t.sell
+        ),
+        CanonicalEvent::FourPhase {
+            block_number,
+            from,
+            to,
+            ..
+        } => format!("four phase {block_number} {from}->{to}"),
+        CanonicalEvent::FourTradeUndecodable { block_number, .. } => {
+            format!("undecodable four {block_number}")
+        }
         CanonicalEvent::FlapTerm(t) => {
             format!("term {} {} {:?}", t.block_number, t.log_index, t.term)
         }

@@ -758,6 +758,13 @@ fn replay(
             }
             (RecordKind::Canonical, Some(b'F'))
                 if crate::runtime_journal::flap_term_of(p).is_some() => {}
+            // R12 SC4: the Four.meme curve records (a trade, a phase, a
+            // refused log) are no Flap market events: parsed, not counted;
+            // damaged ones are unparsed.
+            (RecordKind::Canonical, Some(b'Z'))
+                if crate::runtime_journal::four_trade_of(p).is_some() => {}
+            (RecordKind::Canonical, Some(b'y')) if p.len() == 79 => {}
+            (RecordKind::Canonical, Some(b'z')) if p.len() == 57 => {}
             (RecordKind::Canonical, Some(b'M')) if p.len() == 77 => {}
             // Phase H: the strategy's blocks, Flap launches and resyncs.
             (RecordKind::Canonical, Some(b'B'))

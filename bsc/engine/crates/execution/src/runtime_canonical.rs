@@ -1351,6 +1351,61 @@ impl Canonical {
                     journal,
                 );
             }
+            // R12 SC4: the Four.meme curve events of the window, for the
+            // strategy and its replay (the catch-up's are not journaled:
+            // each Four trade carries the curve's state after it).
+            CanonicalEvent::FourTrade(_)
+            | CanonicalEvent::FourPhase { .. }
+            | CanonicalEvent::FourTradeUndecodable { .. }
+                if !self.first_journaled => {}
+            CanonicalEvent::FourTrade(t) => {
+                self.put(
+                    RecordKind::Canonical,
+                    at,
+                    crate::runtime_journal::four_trade_payload(&t),
+                    journal,
+                );
+            }
+            CanonicalEvent::FourPhase {
+                block_number,
+                block_hash,
+                tx_index,
+                log_index,
+                token,
+                from,
+                to,
+            } => {
+                self.put(
+                    RecordKind::Canonical,
+                    at,
+                    crate::runtime_journal::four_phase_payload(
+                        block_number,
+                        &block_hash,
+                        (tx_index, log_index),
+                        &token,
+                        (from, to),
+                    ),
+                    journal,
+                );
+            }
+            CanonicalEvent::FourTradeUndecodable {
+                block_number,
+                block_hash,
+                tx_index,
+                log_index,
+            } => {
+                self.put(
+                    RecordKind::Canonical,
+                    at,
+                    crate::runtime_journal::four_trade_gap_payload(
+                        block_number,
+                        &block_hash,
+                        tx_index,
+                        log_index,
+                    ),
+                    journal,
+                );
+            }
             CanonicalEvent::RevertedLaunch { .. } if !self.first_journaled => {}
             CanonicalEvent::RevertedLaunch {
                 venue,

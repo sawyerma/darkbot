@@ -347,6 +347,9 @@ impl StateOwner {
             | CanonicalEvent::FlapTerm(_)
             | CanonicalEvent::FlapMigrated { .. }
             | CanonicalEvent::FlapTradeUndecodable { .. }
+            | CanonicalEvent::FourTrade(_)
+            | CanonicalEvent::FourPhase { .. }
+            | CanonicalEvent::FourTradeUndecodable { .. }
             | CanonicalEvent::BlockComplete { .. }
             | CanonicalEvent::Fault(_)
             // BSC3-036: the next endpoint's blocks are proven against the

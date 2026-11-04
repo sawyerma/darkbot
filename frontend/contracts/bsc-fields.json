@@ -5690,7 +5690,7 @@
       "sensitivity": "public",
       "provenance": "the runtime status record (darkbot.bsc.runtime-status canonical.confirm_state); BSC3-056; REV.1.0 R10",
       "quality": "NATIVE_LIVE_STATE",
-      "source_sha": "debbe819c36f65b7d4dea67a9539c50e1415c0cd854c51f364098dcfe61ce675",
+      "source_sha": "c5d90dc24f1d070a0b33388fc1a937e5ed9ddba745501596fb6cd89170654df7",
       "required_gate": "NATIVE_LIVE_GATE_VIEW_NOT_A_PERMISSION",
       "topic_or_command": "bsc.live.state",
       "test": "status::tests the_live_tab_shows_the_exit_deciders_the_recovery_and_the_quarantine + live.test.ts + bsc.spec.ts",

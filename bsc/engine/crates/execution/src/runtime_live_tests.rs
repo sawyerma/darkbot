@@ -9098,6 +9098,113 @@ fn refused_answers_count_only_in_a_row() {
     assert_eq!(c.lot.refused_in_a_row([0xE5; 20], true), 1, "per lot");
 }
 
+/// R12 SC4: the window's Four.meme curve events are canonical records (a
+/// trade `Z` that reads back, a phase `y`, a refused log `z`); the
+/// catch-up's are not journaled (each Four trade carries the curve's state
+/// after it).
+#[test]
+fn the_windows_four_curve_events_are_journaled_and_the_catch_ups_not() {
+    use crate::canonical_join::Venue;
+    use crate::chain_follower::CanonicalFourTrade;
+    use crate::runtime::{Canonical, Clock, RuntimeConfig, apply_canonical, journal_max_payload};
+    use crate::runtime_journal::{JournalSetup, RuntimeJournal, four_trade_of};
+    use darkbot_bsc_journal::RecordKind;
+    use darkbot_bsc_journal::storage::run::RunReader;
+    let config =
+        RuntimeConfig::parse(include_str!("../../../../config/ingress.public.env")).unwrap();
+    let now = darkbot_bsc_record::observed_now().unwrap();
+    let trade = CanonicalFourTrade {
+        venue: Venue::OpenFour,
+        block_number: HEAD,
+        block_hash: [HEAD as u8; 32],
+        tx_index: 3,
+        tx_hash: [0x3b; 32],
+        log_index: 2,
+        origin: [0x77; 20],
+        sell: true,
+        token: [0xAA; 20],
+        trader: [0x77; 20],
+        amount: [1; 32],
+        quote: [2; 32],
+        remaining: [3; 32],
+        raised: [4; 32],
+    };
+    for (tag, window_from_ms, journaled) in [
+        ("window", now - 1_000, true),
+        ("catchup", now + 1_000, false),
+    ] {
+        let mut c = Canonical::new(&config.canonical.clone().unwrap(), window_from_ms);
+        let base =
+            std::env::temp_dir().join(format!("bsc-runtime-four-{tag}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        let mut journal = RuntimeJournal::open(
+            &base,
+            1,
+            1,
+            JournalSetup::whole(64, journal_max_payload(&config)),
+        )
+        .unwrap();
+        for event in [
+            CanonicalEvent::Block {
+                number: HEAD,
+                hash: [HEAD as u8; 32],
+                parent_hash: [(HEAD - 1) as u8; 32],
+                timestamp_s: now / 1_000,
+                timestamp_ms: now,
+                txs: Vec::new(),
+                observed: Instant::now(),
+                observed_unix_ms: Some(now),
+            },
+            CanonicalEvent::FourPhase {
+                block_number: HEAD,
+                block_hash: [HEAD as u8; 32],
+                tx_index: 3,
+                log_index: 1,
+                token: [0xAA; 20],
+                from: 0,
+                to: 1,
+            },
+            CanonicalEvent::FourTrade(trade),
+            CanonicalEvent::FourTradeUndecodable {
+                block_number: HEAD,
+                block_hash: [HEAD as u8; 32],
+                tx_index: 4,
+                log_index: 1,
+            },
+        ] {
+            apply_canonical(
+                &mut c,
+                &mut None,
+                &mut None,
+                &mut None,
+                &mut journal,
+                Clock(Instant::now()),
+                1,
+                event,
+            );
+        }
+        journal.finish().unwrap();
+        let run = fs::read_dir(&base).unwrap().next().unwrap().unwrap().path();
+        let mut reader = RunReader::open(&run, journal_max_payload(&config)).unwrap();
+        let mut four = Vec::new();
+        while let Some(r) = reader.next_record().unwrap() {
+            if let Some(tag @ (b'Z' | b'y' | b'z')) = r.payload.first().copied() {
+                assert_eq!(r.kind, RecordKind::Canonical);
+                four.push((tag, r.payload.to_vec()));
+            }
+        }
+        if journaled {
+            let tags: Vec<u8> = four.iter().map(|(t, _)| *t).collect();
+            assert_eq!(tags, [b'y', b'Z', b'z']);
+            assert_eq!(four_trade_of(&four[1].1), Some(trade));
+            assert_eq!((four[0].1.len(), four[2].1.len()), (79, 57));
+        } else {
+            assert!(four.is_empty(), "{tag}");
+        }
+        fs::remove_dir_all(&base).unwrap();
+    }
+}
+
 /// REV.1.0 R2 review P2: the blocks and launches the follower catches
 /// up on before a run's window are journaled as runtime records (no
 /// G0.4 count reads them): the LIVE campaign's chain while no run was
