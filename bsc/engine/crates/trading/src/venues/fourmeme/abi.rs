@@ -1,7 +1,8 @@
 //! Canonical ABI reading for the Four.meme calls and events: borrowed
 //! words, no allocation, fail closed. A value is accepted only in the one
 //! canonical encoding (minimal offsets in order, zero padding, nothing
-//! after the last member).
+//! after the last member). One encoder: the Classic BUY
+//! [`encode_buy_token_amap`].
 
 use alloy_primitives::{Address, B256, U256};
 
@@ -26,6 +27,10 @@ pub enum AbiError {
     /// A layout no frozen fixture witnessed (another argument length or
     /// head): unsupported, never guessed.
     UnwitnessedLayout,
+    /// The encoder was given zero funds.
+    ZeroFunds,
+    /// The encoder was given a zero minimum amount (no slippage bound).
+    ZeroMinAmount,
 }
 
 impl core::fmt::Display for AbiError {
@@ -38,6 +43,8 @@ impl core::fmt::Display for AbiError {
             Self::NonCanonical => "four abi: non-canonical encoding",
             Self::ValueOutOfRange => "four abi: value outside its type",
             Self::UnwitnessedLayout => "four abi: layout not witnessed by the freeze",
+            Self::ZeroFunds => "four abi: zero funds",
+            Self::ZeroMinAmount => "four abi: zero minimum amount",
         })
     }
 }
@@ -167,4 +174,31 @@ fn dynamic(region: &[u8], offset: usize) -> Result<(&[u8], usize), AbiError> {
 /// The arguments of a call after its selector, checked against `selector`.
 pub(crate) fn body<'a>(input: &'a [u8], selector: &[u8; 4]) -> Result<&'a [u8], AbiError> {
     input.strip_prefix(selector).ok_or(AbiError::WrongSelector)
+}
+
+/// Exact size of a Classic `buyTokenAMAP(address,uint256,uint256)` call.
+pub const BUY_TOKEN_AMAP_LEN: usize = 4 + 3 * WORD;
+
+/// The calldata of Classic `buyTokenAMAP(token, funds, minAmount)`, sent
+/// to TokenManager2 with `msg.value = funds`: the BUY of the witnessed
+/// launch-block buyers and the one [`super::recognize::decode_classic_buy_amap`]
+/// decodes. TokenManager2 reverts below `minAmount` tokens and refunds what
+/// the curve does not take. Zero amounts are refused.
+pub fn encode_buy_token_amap(
+    token: Address,
+    funds: U256,
+    min_amount: U256,
+) -> Result<[u8; BUY_TOKEN_AMAP_LEN], AbiError> {
+    if funds.is_zero() {
+        return Err(AbiError::ZeroFunds);
+    }
+    if min_amount.is_zero() {
+        return Err(AbiError::ZeroMinAmount);
+    }
+    let mut out = [0u8; BUY_TOKEN_AMAP_LEN];
+    out[..4].copy_from_slice(&super::recognize::FourCall::ClassicBuyTokenAmap.selector());
+    out[4 + 12..4 + WORD].copy_from_slice(token.as_slice());
+    out[4 + WORD..4 + 2 * WORD].copy_from_slice(&funds.to_be_bytes::<32>());
+    out[4 + 2 * WORD..].copy_from_slice(&min_amount.to_be_bytes::<32>());
+    Ok(out)
 }

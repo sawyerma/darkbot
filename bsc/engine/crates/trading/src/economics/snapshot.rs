@@ -14,7 +14,7 @@
 use std::fmt::Write as _;
 
 /// The model version: raised with every semantic change of a rule here.
-pub const MODEL_VERSION: &str = "bsc-economics-4";
+pub const MODEL_VERSION: &str = "bsc-economics-5";
 
 /// The chain every scope belongs to.
 pub const CHAIN_ID: u64 = 56;
@@ -51,6 +51,8 @@ pub struct Scope {
 }
 
 const FLAP_V6: &str = "Portal 0xe2ce6ab80874fa9fa2aae65d277dd6b8e65c9de0 v5.27.2; token version 6, curve 20, native BNB quote";
+
+const FOUR_CLASSIC: &str = "TokenManager2 0x5c952063c7fc8610ffdb798152d69f0b9550762b, implementation 0xa38d9d48 (the curve rules also under 0xf32ee25a); native BNB quote, tradingFeeRate 100, minTradingFee 0, a template word of fourmeme::profile with its tax, on the curve";
 
 pub const SCOPES: &[Scope] = &[
     Scope {
@@ -160,10 +162,45 @@ pub const SCOPES: &[Scope] = &[
     },
     Scope {
         venue: "FOUR",
-        surface: "TokenManager2 0x5c952063c7fc8610ffdb798152d69f0b9550762b (implementation 0xf32ee25a)",
+        surface: FOUR_CLASSIC,
+        path: "BUY",
+        support: Support::Priced,
+        rule: "four_classic::quote_buy: budget floor(funds*1e4/(1e4+rate+tax)), tokens floor_gwei(T-ceil(K*1e18/(y+budget))) with y=floor(K*1e18/T), cost floor(K*1e18/(T-tokens))-y, fee floor(cost*rate/1e4), tax floor(cost*tax/1e4), the rest refunded; buyTokenAMAP executed by eth_call probes on mainnet state up to 461245 blocks after the launch (tokens, wei spent, minAmount accepted at the tokens and refused one above) and the launch receipts' creator purchases; executed direct trades of a BSC-USD-quote token (paid by approval) for the curve and fee; Helper3.tryBuy is the untaxed curve (fixtures/fourmeme/classic_parity_20261104.txt)",
+    },
+    Scope {
+        venue: "FOUR",
+        surface: FOUR_CLASSIC,
+        path: "SELL",
+        support: Support::Priced,
+        rule: "four_classic::quote_sell: gross y-floor(K*1e18/(T+tokens)), less fee floor(gross*rate/1e4) and tax floor(gross*tax/1e4); sellToken executed by the probes; executed direct sales for the curve and fee; Helper3.trySell is the untaxed curve (fixtures/fourmeme/classic_parity_20261104.txt)",
+    },
+    Scope {
+        venue: "FOUR",
+        surface: FOUR_CLASSIC,
+        path: "LAUNCH CURVE, CREATOR BUY",
+        support: Support::Priced,
+        rule: "four_classic::launch_curve from createToken totalSupply, maxOffers and maxRaising (every witnessed launch's K, every quote); the creator BUY a BUY of the args creator value with the word's tax, for a template word of fourmeme::profile and its witnessed creator values (their receipts' TokenPurchase to the wei, fixtures/fourmeme/classic_parity_20261104.txt)",
+    },
+    Scope {
+        venue: "FOUR",
+        surface: "TokenManager2; a template word outside fourmeme::profile (another quote asset, AntiSniper feeSetting, an unmeasured tax), minTradingFee above 0, an unwitnessed launch argument",
         path: "BUY, SELL",
         support: Support::Unsupported,
-        rule: "the implementation source is unverified and no helper/eth_call parity is established; the Phase E decoder names amounts without economic meaning",
+        rule: "classify_classic_launch refuses the launch with the field; the quote refuses a minimum fee (UnwitnessedMinFee); no witness of the AntiSniper fee schedule or a non-BNB quote path",
+    },
+    Scope {
+        venue: "FOUR",
+        surface: FOUR_CLASSIC,
+        path: "GRADUATION",
+        support: Support::Unsupported,
+        rule: "a BUY taking every remaining offer is refused (ReachesMaxOffers): the helper caps it and the liquidity add is not modeled",
+    },
+    Scope {
+        venue: "FOUR",
+        surface: FOUR_CLASSIC,
+        path: "ADMITTED BUY, ROUND TRIP, NETWORK COST",
+        support: Support::Unsupported,
+        rule: "no admission, deployment validation or gas evidence of a Four call yet (R12 open)",
     },
     Scope {
         venue: "OPENFOUR",
@@ -185,7 +222,7 @@ pub const SCOPES: &[Scope] = &[
 pub const POLICIES: &[(&str, &str)] = &[
     (
         "rounding",
-        "integer base units, U256 with overflow errors; every division names its direction (fees floor, curve virtual reserve ceil, minOutput floor)",
+        "integer base units, U256 with overflow errors; every division names its direction (fees floor, minOutput floor; Flap: curve virtual reserve ceil; Four Classic: virtual quote reserve floor, the BUY's new token reserve ceil, tokens gwei-floored)",
     ),
     (
         "freshness",
@@ -222,6 +259,7 @@ pub const BOUND_FILES: &[&str] = &[
     "bsc/engine/crates/trading/src/economics/flap/mod.rs",
     "bsc/engine/crates/trading/src/economics/flap/native_curve20.rs",
     "bsc/engine/crates/trading/src/economics/flap/position.rs",
+    "bsc/engine/crates/trading/src/economics/four_classic.rs",
     "bsc/engine/crates/trading/src/economics/network.rs",
     "bsc/engine/crates/trading/src/economics/policy.rs",
     "bsc/engine/crates/trading/src/economics/slippage.rs",
@@ -229,6 +267,10 @@ pub const BOUND_FILES: &[&str] = &[
     "bsc/engine/crates/trading/src/venues/flap/abi.rs",
     "bsc/engine/crates/trading/src/venues/flap/deployment.rs",
     "bsc/engine/crates/trading/src/venues/flap/profile.rs",
+    "bsc/engine/crates/trading/src/venues/fourmeme/abi.rs",
+    "bsc/engine/crates/trading/src/venues/fourmeme/deployment.rs",
+    "bsc/engine/crates/trading/src/venues/fourmeme/profile.rs",
+    "bsc/engine/crates/trading/src/venues/fourmeme/recognize.rs",
     "bsc/native/evidence/gas/flap_gas_20261031.txt",
     "bsc/native/evidence/gas/flap_gas_20261031_w130100000.txt",
     "bsc/native/evidence/gas/flap_gas_20261031_w130500000.txt",
@@ -241,6 +283,7 @@ pub const BOUND_FILES: &[&str] = &[
     "bsc/engine/crates/trading/fixtures/flap/quote_parity_g02_v2.txt",
     "bsc/engine/crates/trading/fixtures/flap/quote_parity_g02_v3.txt",
     "bsc/engine/crates/trading/fixtures/flap/quote_parity_g02_v4.txt",
+    "bsc/engine/crates/trading/fixtures/fourmeme/classic_parity_20261104.txt",
 ];
 
 /// The economics sources not bound, each with its reason (Phase G gate M4:
@@ -253,6 +296,10 @@ pub const EXCLUDED_FILES: &[(&str, &str)] = &[
     (
         "bsc/engine/crates/trading/src/economics/network/tests.rs",
         "tests of network.rs against its bound fixture",
+    ),
+    (
+        "bsc/engine/crates/trading/src/economics/four_classic/tests.rs",
+        "tests of four_classic.rs against its bound fixture",
     ),
 ];
 
@@ -290,9 +337,10 @@ mod tests {
     use super::*;
 
     /// Every observed surface states its support; the priced ones are the
-    /// version-6 Flap quotes only, and nothing of Four is priced.
+    /// version-6 Flap quotes and the Four Classic curve (not yet admitted),
+    /// nothing of OpenFour.
     #[test]
-    fn the_scope_is_explicit_and_four_is_not_priced() {
+    fn the_scope_is_explicit_and_openfour_is_not_priced() {
         let priced: Vec<_> = SCOPES
             .iter()
             .filter(|s| s.support == Support::Priced)
@@ -306,17 +354,18 @@ mod tests {
                 ("FLAP", "ADMITTED BUY"),
                 ("FLAP", "CURVE BUY (Strategy C)"),
                 ("FLAP", "CURVE SELL (Strategy C exit)"),
-                ("FLAP", "ROUND TRIP")
+                ("FLAP", "ROUND TRIP"),
+                ("FOUR", "BUY"),
+                ("FOUR", "SELL"),
+                ("FOUR", "LAUNCH CURVE, CREATOR BUY")
             ]
         );
-        for venue in ["FOUR", "OPENFOUR"] {
-            assert!(
-                SCOPES
-                    .iter()
-                    .filter(|s| s.venue == venue)
-                    .all(|s| s.support == Support::Unsupported)
-            );
-        }
+        assert!(
+            SCOPES
+                .iter()
+                .filter(|s| s.venue == "OPENFOUR")
+                .all(|s| s.support == Support::Unsupported)
+        );
         assert!(SCOPES.iter().all(|s| !s.rule.is_empty()));
     }
 
@@ -358,7 +407,7 @@ mod tests {
     fn the_manifest_binds_every_file() {
         let files: Vec<(&str, [u8; 32])> = BOUND_FILES.iter().map(|p| (*p, [0u8; 32])).collect();
         let a = manifest(&files);
-        assert!(a.starts_with("darkbot.bsc.economics-snapshot\nchain 56\nmodel bsc-economics-4\n"));
+        assert!(a.starts_with("darkbot.bsc.economics-snapshot\nchain 56\nmodel bsc-economics-5\n"));
         assert_eq!(a.matches("\nfile ").count(), BOUND_FILES.len());
         let mut other = files.clone();
         other[3].1[0] = 1;

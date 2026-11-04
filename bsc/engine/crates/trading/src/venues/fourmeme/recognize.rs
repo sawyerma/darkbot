@@ -167,13 +167,66 @@ impl FourCall {
 /// A decoded Classic `createToken(bytes args, bytes signature)`. `args` is
 /// one ABI tuple (its word 0 is the tuple offset 0x20); the freeze proves
 /// its head fields 0 (`requestId`, equal to the event's) and 1 (the CREATE2
-/// salt). Every other field of `args` is UNKNOWN and kept raw.
+/// salt), the R12 parity the fields of [`ClassicLaunchArgs`]. Every other
+/// field of `args` is UNKNOWN and kept raw.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ClassicLaunch<'a> {
     pub request_id: U256,
     pub salt: B256,
     pub args: &'a [u8],
     pub signature: &'a [u8],
+}
+
+/// Head words of the Classic `args` tuple whose meaning no witness proves
+/// (zero in every launch of `fixtures/fourmeme/classic_parity_20261104.txt`).
+pub const CLASSIC_UNKNOWN_ARG_WORDS: [usize; 6] = [6, 7, 11, 12, 13, 15];
+
+/// The name and symbol offsets of the witnessed `args` layout (a 16-word
+/// head, a name of at most 32 bytes).
+const CLASSIC_NAME_OFFSET: usize = 16 * WORD;
+const CLASSIC_SYMBOL_OFFSET: usize = 18 * WORD;
+
+/// The `args` head fields the R12 witness proves (tuple words; the launch
+/// receipts' `_tokenInfos` and creator purchase reproduce them,
+/// `fixtures/fourmeme/classic_parity_20261104.txt`): 4 `totalSupply`,
+/// 5 `maxOffers`, 8 the template word (stored as `_tokenInfos.template`),
+/// 9 `maxRaising`, 10 the creator's BUY value (the call's `msg.value` up
+/// to 1.78e12 wei, 1.01 times it in the witnessed launches of 1e15 and
+/// more), 14 a timestamp; 2 and 3 the name and symbol offsets of the
+/// witnessed layout; [`CLASSIC_UNKNOWN_ARG_WORDS`] kept raw.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ClassicLaunchArgs {
+    pub total_supply: U256,
+    pub max_offers: U256,
+    pub template: B256,
+    pub max_raising: U256,
+    pub creator_value: U256,
+    pub timestamp: U256,
+    pub unknown: [B256; CLASSIC_UNKNOWN_ARG_WORDS.len()],
+}
+
+impl ClassicLaunch<'_> {
+    /// The proven fields of `args` (its length was checked at decode); the
+    /// name and symbol must sit where the witnessed layout has them.
+    pub fn launch_args(&self) -> Result<ClassicLaunchArgs, AbiError> {
+        let head = Words(tuple(self.args)?);
+        if head.usize(2)? != CLASSIC_NAME_OFFSET || head.usize(3)? != CLASSIC_SYMBOL_OFFSET {
+            return Err(AbiError::UnwitnessedLayout);
+        }
+        let mut unknown = [B256::ZERO; CLASSIC_UNKNOWN_ARG_WORDS.len()];
+        for (slot, index) in unknown.iter_mut().zip(CLASSIC_UNKNOWN_ARG_WORDS) {
+            *slot = head.b256(index)?;
+        }
+        Ok(ClassicLaunchArgs {
+            total_supply: head.u256(4)?,
+            max_offers: head.u256(5)?,
+            template: head.b256(8)?,
+            max_raising: head.u256(9)?,
+            creator_value: head.u256(10)?,
+            timestamp: head.u256(14)?,
+            unknown,
+        })
+    }
 }
 
 /// OpenFour `TokenInitParams` (published `OpenFourTools` ABI), checked
@@ -221,7 +274,9 @@ const INIT_HEAD_WORDS: usize = 14;
 
 /// A decoded Classic `buyTokenAMAP(address token, uint256 funds, uint256
 /// minAmount)`. Token and buyer positions are checked against the event;
-/// the amount semantics are UNKNOWN (Phase G).
+/// `funds` is the budget the curve quote spends from (fee included, the
+/// native quote's `msg.value`), `minAmount` the fewest tokens accepted
+/// (R12 parity, `fixtures/fourmeme/classic_parity_20261104.txt`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ClassicBuyAmap {
     pub token: Address,
@@ -243,7 +298,8 @@ pub struct OpenFourBuyByBudget<'a> {
 
 /// A decoded Classic `sellToken(address token, uint256 amount, uint256
 /// minFunds)`. Token and seller positions are checked against the
-/// `TokenSale` event; the amount semantics are UNKNOWN (Phase G).
+/// `TokenSale` event; `amount` is the tokens sold (R12 parity), the
+/// semantics of `minFunds` are UNKNOWN.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ClassicSell {
     pub token: Address,

@@ -27,8 +27,12 @@
 //! The verified (source-matched) ABI of both implementations is UNKNOWN:
 //! they are not on Sourcify and BscScan needs a key. Field names come from
 //! the published ABIs (four-meme-community docs); the positions the freeze
-//! checked against events are facts, the economic meaning of every amount
-//! is UNKNOWN until Phase G. No mode (TaxToken, X, AntiSniper) is inferred.
+//! checked against events are facts. The Classic curve's amounts are
+//! proven by execution (`economics::four_classic`, [`profile`]: executed
+//! BUYs and SELLs, launch receipts and direct trades to the wei; the
+//! venue's quote helper omits a token's tax); OpenFour's economic meaning
+//! is UNKNOWN. No mode (TaxToken, X, AntiSniper) is inferred: a template
+//! word is priced only as witnessed.
 //!
 //! This is the single Four.meme decoder of capture (the canonical follower),
 //! replay (decoded from the same bytes) and any later PAPER/LIVE path. It
@@ -40,6 +44,7 @@
 pub mod abi;
 pub mod deployment;
 pub mod events;
+pub mod profile;
 pub mod recognize;
 
 #[cfg(test)]
