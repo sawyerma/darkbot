@@ -43,7 +43,10 @@ use crate::economics::flap::{AdmittedBuy, AdmittedSell};
 use crate::economics::policy::{BuyPolicy, ExitPolicy};
 use crate::signer::{Signer, SignerError, recover_legacy_sender};
 use crate::transactions::legacy::{LegacyDecodeError, LegacyTx, decode_signed, tx_hash};
-use crate::venues::fourmeme::binding::{ExpectedClassicBuy, verify_final_classic_buy};
+use crate::venues::fourmeme::binding::{
+    ExpectedClassicBuy, ExpectedClassicExit, verify_final_classic_approve,
+    verify_final_classic_buy, verify_final_classic_sell,
+};
 
 /// Reason an expectation cannot be formed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -675,6 +678,9 @@ pub enum ExpectedTx<'a> {
     Burn(&'a ExpectedBurn),
     /// R12c: a Four Classic BUY (`venues::fourmeme::binding`).
     ClassicBuy(&'a ExpectedClassicBuy),
+    /// R12c-3: a Four Classic exit's approval and SELL.
+    ClassicApprove(&'a ExpectedClassicExit),
+    ClassicSell(&'a ExpectedClassicExit),
 }
 
 impl<'a> From<&'a ExpectedBuy> for ExpectedTx<'a> {
@@ -696,6 +702,7 @@ impl ExpectedTx<'_> {
             Self::Approve(e) | Self::Sell(e) => e.chain_id,
             Self::Burn(b) => b.chain_id,
             Self::ClassicBuy(b) => b.chain_id(),
+            Self::ClassicApprove(e) | Self::ClassicSell(e) => e.chain_id(),
         }
     }
 
@@ -705,6 +712,7 @@ impl ExpectedTx<'_> {
             Self::Approve(e) | Self::Sell(e) => e.sender,
             Self::Burn(b) => b.sender,
             Self::ClassicBuy(b) => b.sender(),
+            Self::ClassicApprove(e) | Self::ClassicSell(e) => e.sender(),
         }
     }
 
@@ -716,6 +724,8 @@ impl ExpectedTx<'_> {
             Self::Sell(e) => e.nonce + 1,
             Self::Burn(b) => b.nonce,
             Self::ClassicBuy(b) => b.nonce(),
+            Self::ClassicApprove(e) => e.nonce(),
+            Self::ClassicSell(e) => e.nonce() + 1,
         }
     }
 
@@ -726,6 +736,7 @@ impl ExpectedTx<'_> {
             Self::Approve(e) | Self::Sell(e) => e.token,
             Self::Burn(_) => Address::ZERO,
             Self::ClassicBuy(b) => b.token(),
+            Self::ClassicApprove(e) | Self::ClassicSell(e) => e.token(),
         }
     }
 
@@ -735,17 +746,19 @@ impl ExpectedTx<'_> {
             Self::Approve(e) | Self::Sell(e) => e.snapshot,
             Self::Burn(b) => b.snapshot,
             Self::ClassicBuy(b) => b.snapshot(),
+            Self::ClassicApprove(e) | Self::ClassicSell(e) => e.snapshot(),
         }
     }
 
     /// The venue contract the intent trades on (the Portal; TokenManager2
-    /// for a Four Classic BUY; a burn: none, the zero address).
+    /// for a Four Classic BUY or exit; a burn: none, the zero address).
     pub fn portal(&self) -> Address {
         match self {
             Self::Buy(b) => b.portal,
             Self::Approve(e) | Self::Sell(e) => e.portal,
             Self::Burn(_) => Address::ZERO,
             Self::ClassicBuy(b) => b.token_manager2(),
+            Self::ClassicApprove(e) | Self::ClassicSell(e) => e.token_manager2(),
         }
     }
 
@@ -755,7 +768,11 @@ impl ExpectedTx<'_> {
         match self {
             Self::Buy(b) => b.input_amount,
             Self::ClassicBuy(b) => b.funds(),
-            Self::Approve(_) | Self::Sell(_) | Self::Burn(_) => U256::ZERO,
+            Self::Approve(_)
+            | Self::Sell(_)
+            | Self::Burn(_)
+            | Self::ClassicApprove(_)
+            | Self::ClassicSell(_) => U256::ZERO,
         }
     }
 
@@ -767,6 +784,10 @@ impl ExpectedTx<'_> {
             Self::Sell(e) => U256::from(e.gas_price) * U256::from(e.sell_gas_limit),
             Self::Burn(b) => b.max_gas_wei(),
             Self::ClassicBuy(b) => U256::from(b.gas_price()) * U256::from(b.gas_limit()),
+            Self::ClassicApprove(e) => {
+                U256::from(e.gas_price()) * U256::from(e.approve_gas_limit())
+            }
+            Self::ClassicSell(e) => U256::from(e.gas_price()) * U256::from(e.sell_gas_limit()),
         }
     }
 
@@ -783,6 +804,10 @@ impl ExpectedTx<'_> {
             Self::Sell(e) => verify_final_sell(raw_signed, e, current, scratch),
             Self::Burn(b) => verify_final_burn(raw_signed, b, current, scratch),
             Self::ClassicBuy(b) => verify_final_classic_buy(raw_signed, b, current, scratch),
+            Self::ClassicApprove(e) => {
+                verify_final_classic_approve(raw_signed, e, current, scratch)
+            }
+            Self::ClassicSell(e) => verify_final_classic_sell(raw_signed, e, current, scratch),
         }
     }
 }

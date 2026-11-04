@@ -30,6 +30,12 @@
 //! token: the drift probe reads them before the launch exists
 //! (`Helper3.getTokenInfo` of the deployment's reference token), and the
 //! validated deployment carries them.
+//!
+//! R12c-3: a held token's state, read at one block
+//! ([`ClassicTokenRead`]), is priced by the same table for its SELL
+//! ([`classify_classic_holding`]): native, a priced word, the witnessed
+//! supply, offers, `feeSetting`, `extraFee` and its own fee terms, within
+//! its word's witnessed tax age, and only while it trades on its curve.
 
 use alloy_primitives::{Address, B256, U256, b256};
 
@@ -252,5 +258,189 @@ pub fn classify_classic_launch(
         curve: creator_purchase.map_or(launched, |p| p.after),
         fee,
         creator_purchase,
+    })
+}
+
+/// A held Classic token as read at one canonical block (R12c-3): its
+/// `TokenManager2._tokenInfos` and `_tokenInfoEx1s` words and its
+/// `Helper3.getTokenInfo` fee terms, all at `block_hash`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ClassicTokenRead {
+    pub token: Address,
+    pub block_number: u64,
+    pub block_hash: B256,
+    pub quote: Address,
+    pub template: B256,
+    pub total_supply: U256,
+    pub max_offers: U256,
+    pub offers: U256,
+    pub k: U256,
+    pub t: U256,
+    /// `_tokenInfos.status`: zero while the token trades on its curve.
+    pub status: U256,
+    /// `_tokenInfoEx1s.feeSetting`.
+    pub fee_setting: U256,
+    /// `_tokenInfoEx1s.extraFee` (zero on every witnessed token).
+    pub extra_fee: U256,
+    /// `_tokenInfoEx1s.blockNumber`: the token's launch block.
+    pub launch_block: u64,
+    /// `Helper3.getTokenInfo(token)`: its fee terms and whether its
+    /// liquidity was added (it left the curve).
+    pub venue_fee: VenueFee,
+    pub liquidity_added: bool,
+}
+
+/// Why a held Classic token's state is not priced (the first deviating
+/// field).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UnsupportedClassicHolding {
+    /// The deployment's Classic economics are not witnessed by execution.
+    EconomicsNotWitnessed,
+    /// Not quoted in native BNB.
+    Quote,
+    /// The template word is not in [`CLASSIC_PROFILES`].
+    Template,
+    TotalSupply,
+    MaxOffers,
+    /// A `feeSetting` other than the witnessed zero.
+    FeeSetting,
+    /// An `extraFee` other than the witnessed zero.
+    ExtraFee,
+    /// It left its curve (a status or its liquidity added).
+    OffCurve,
+    /// Read before its launch, or its SELL may land later after it than its
+    /// word's tax is witnessed.
+    TaxUnwitnessed,
+    /// Its fee terms (or the deployment's) differ from [`WITNESSED_VENUE_FEE`].
+    FeeTerms,
+    /// More offers than `maxOffers`.
+    Curve,
+}
+
+impl core::fmt::Display for UnsupportedClassicHolding {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(match self {
+            Self::EconomicsNotWitnessed => {
+                "classic holding: the deployment's economics are not witnessed"
+            }
+            Self::Quote => "classic holding: not quoted in native BNB",
+            Self::Template => "classic holding: template word not priced",
+            Self::TotalSupply => "classic holding: totalSupply",
+            Self::MaxOffers => "classic holding: maxOffers",
+            Self::FeeSetting => "classic holding: feeSetting not witnessed",
+            Self::ExtraFee => "classic holding: extraFee not witnessed",
+            Self::OffCurve => "classic holding: the token left its curve",
+            Self::TaxUnwitnessed => "classic holding: tax not witnessed at this age",
+            Self::FeeTerms => "classic holding: fee terms not witnessed",
+            Self::Curve => "classic holding: offers above maxOffers",
+        })
+    }
+}
+
+impl std::error::Error for UnsupportedClassicHolding {}
+
+/// A held token whose state at one block is priced: its curve and terms,
+/// bound to the deployment's code generation and the block read.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ClassifiedClassicHolding {
+    codehash_generation: u64,
+    token: Address,
+    block_hash: B256,
+    curve: ClassicCurve,
+    fee: ClassicFee,
+}
+
+impl ClassifiedClassicHolding {
+    #[inline]
+    pub fn codehash_generation(&self) -> u64 {
+        self.codehash_generation
+    }
+
+    #[inline]
+    pub fn token(&self) -> Address {
+        self.token
+    }
+
+    /// The block the state was read at.
+    #[inline]
+    pub fn block_hash(&self) -> B256 {
+        self.block_hash
+    }
+
+    #[inline]
+    pub fn curve(&self) -> ClassicCurve {
+        self.curve
+    }
+
+    #[inline]
+    pub fn fee(&self) -> ClassicFee {
+        self.fee
+    }
+}
+
+/// Classifies a held token's state `read` on the validated `deployment`
+/// for a SELL that lands at most `valid_blocks` after the read: priced only
+/// as the launches are (native, a priced word, the witnessed supply,
+/// offers, `feeSetting` and fee terms, its tax witnessed up to the last
+/// block it may land in) and while it trades on its curve.
+pub fn classify_classic_holding(
+    validated: &ValidatedFourDeployment,
+    read: &ClassicTokenRead,
+    valid_blocks: u64,
+) -> Result<ClassifiedClassicHolding, UnsupportedClassicHolding> {
+    if !validated.classic_economics_witnessed() {
+        return Err(UnsupportedClassicHolding::EconomicsNotWitnessed);
+    }
+    if read.quote != Address::ZERO {
+        return Err(UnsupportedClassicHolding::Quote);
+    }
+    let profile = CLASSIC_PROFILES
+        .iter()
+        .find(|p| p.template == read.template)
+        .ok_or(UnsupportedClassicHolding::Template)?;
+    if read.total_supply != WITNESSED_TOTAL_SUPPLY {
+        return Err(UnsupportedClassicHolding::TotalSupply);
+    }
+    if read.max_offers != WITNESSED_MAX_OFFERS {
+        return Err(UnsupportedClassicHolding::MaxOffers);
+    }
+    if !read.fee_setting.is_zero() {
+        return Err(UnsupportedClassicHolding::FeeSetting);
+    }
+    if !read.extra_fee.is_zero() {
+        return Err(UnsupportedClassicHolding::ExtraFee);
+    }
+    if !read.status.is_zero() || read.liquidity_added {
+        return Err(UnsupportedClassicHolding::OffCurve);
+    }
+    let age = read
+        .block_number
+        .checked_sub(read.launch_block)
+        .and_then(|a| a.checked_add(valid_blocks));
+    if age.is_none_or(|a| a > profile.tax_witnessed_blocks) {
+        return Err(UnsupportedClassicHolding::TaxUnwitnessed);
+    }
+    if read.venue_fee != WITNESSED_VENUE_FEE || validated.venue_fee() != WITNESSED_VENUE_FEE {
+        return Err(UnsupportedClassicHolding::FeeTerms);
+    }
+    let sold = read
+        .max_offers
+        .checked_sub(read.offers)
+        .ok_or(UnsupportedClassicHolding::Curve)?;
+    Ok(ClassifiedClassicHolding {
+        codehash_generation: validated.codehash_generation(),
+        token: read.token,
+        block_hash: read.block_hash,
+        curve: ClassicCurve {
+            k: read.k,
+            t: read.t,
+            offers: read.offers,
+            sold,
+        },
+        fee: ClassicFee {
+            rate_bps: read.venue_fee.rate_bps,
+            min_fee: read.venue_fee.min_fee,
+            tax_bps: profile.tax_bps,
+        },
     })
 }

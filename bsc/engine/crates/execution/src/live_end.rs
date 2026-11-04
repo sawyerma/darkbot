@@ -912,8 +912,8 @@ impl End for LiveEnd {
         }
         let kind = match expected {
             ExpectedTx::Buy(_) | ExpectedTx::ClassicBuy(_) => LiveIntentKind::Buy,
-            ExpectedTx::Approve(_) => LiveIntentKind::Approve,
-            ExpectedTx::Sell(_) => LiveIntentKind::Sell,
+            ExpectedTx::Approve(_) | ExpectedTx::ClassicApprove(_) => LiveIntentKind::Approve,
+            ExpectedTx::Sell(_) | ExpectedTx::ClassicSell(_) => LiveIntentKind::Sell,
             ExpectedTx::Burn(_) => LiveIntentKind::Burn,
         };
         // BSC3-036: a canonical head older than the bound: the canonical

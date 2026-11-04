@@ -7,13 +7,14 @@
 use alloy_primitives::{Address, B256, U256};
 
 use super::*;
-use crate::venues::fourmeme::abi::{AbiError, encode_buy_token_amap};
+use crate::venues::fourmeme::abi::{AbiError, encode_buy_token_amap, encode_sell_token_min_funds};
 use crate::venues::fourmeme::deployment::{
     ValidatedFourDeployment, bsc_mainnet_g01_129842711, bsc_mainnet_r12b_131568366,
 };
 use crate::venues::fourmeme::profile::{
-    CLASSIC_PROFILES, UnsupportedClassicLaunch, VenueFee, WITNESSED_MAX_OFFERS,
-    WITNESSED_VENUE_FEE, classify_classic_launch,
+    CLASSIC_PROFILES, ClassicTokenRead, UnsupportedClassicHolding, UnsupportedClassicLaunch,
+    VenueFee, WITNESSED_MAX_OFFERS, WITNESSED_TOTAL_SUPPLY, WITNESSED_VENUE_FEE,
+    classify_classic_holding, classify_classic_launch,
 };
 use crate::venues::fourmeme::recognize::{
     ClassicLaunch, FourCall, decode_classic_buy_amap, decode_classic_create,
@@ -338,12 +339,47 @@ fn the_executed_direct_trades_are_reproduced_from_their_calls() {
                 assert_eq!((call.token, call.amount), (token, amount), "{f:?}");
                 let s = quote_sell(&before(offers - amount), &terms, amount).unwrap();
                 assert_eq!((s.gross, s.fee), (cost, fee_wei), "{f:?}");
+                // R12c-3: the SELL encoder's layout is the witnessed call's
+                // (a zero minimum, which it refuses, with the word zeroed).
+                let mut encoded =
+                    encode_sell_token_min_funds(token, call.amount, call.min_funds.max(U256::ONE))
+                        .unwrap();
+                if call.min_funds.is_zero() {
+                    encoded[4 + 2 * 32..].fill(0);
+                }
+                assert_eq!(encoded.as_slice(), input.as_slice(), "{f:?}");
                 sells += 1;
             }
             other => panic!("{other}"),
         }
     }
     assert_eq!((buys, sells), (10, 5));
+}
+
+/// R12c-3: the encoder's SELL is the call the production decoder reads
+/// back, with the selector of `sellToken(address,uint256,uint256)`; zero
+/// amounts are refused.
+#[test]
+fn the_encoded_sell_decodes_to_its_arguments() {
+    let token: Address = "0x1b1955899341dbd9569c8537f639d642c2a9ffff"
+        .parse()
+        .unwrap();
+    let (amount, min) = (u("196160233546478000000000"), u("793783783783783"));
+    let input = encode_sell_token_min_funds(token, amount, min).unwrap();
+    assert_eq!(input[..4], FourCall::ClassicSellTokenMinFunds.selector());
+    let call = decode_classic_sell_min_funds(&input).unwrap();
+    assert_eq!(
+        (call.token, call.amount, call.min_funds),
+        (token, amount, min)
+    );
+    assert_eq!(
+        encode_sell_token_min_funds(token, U256::ZERO, min),
+        Err(AbiError::ZeroAmount)
+    );
+    assert_eq!(
+        encode_sell_token_min_funds(token, amount, U256::ZERO),
+        Err(AbiError::ZeroMinAmount)
+    );
 }
 
 /// The encoder's BUY is the call the production decoder reads back, with
@@ -577,7 +613,7 @@ fn every_witnessed_block_names_its_implementation() {
             .unwrap_or_else(|| panic!("no IMPL row for block {block}"))
     };
     let mut n = 0;
-    for kind in ["LAUNCH", "PROBE", "BUY", "SELL", "EXEC"] {
+    for kind in ["LAUNCH", "PROBE", "SELLMIN", "BUY", "SELL", "EXEC"] {
         for f in rows(kind) {
             let at = implementation(f[1]);
             assert!(at == g01 || at == current, "{f:?}");
@@ -592,7 +628,7 @@ fn every_witnessed_block_names_its_implementation() {
             n += 1;
         }
     }
-    assert_eq!(n, 40 + 34 + 39 + 23 + 15);
+    assert_eq!(n, 40 + 34 + 29 + 39 + 23 + 15);
 }
 
 fn decoded_template(f: &[&str]) -> B256 {
@@ -697,4 +733,283 @@ fn an_admission_outside_the_qualified_state_or_amount_is_refused() {
         );
     }
     assert!(admit_classic_buy(&state, &policy(milli, 500)).is_ok());
+}
+
+/// R12c-3: the state a held token is read in for its SELL (`_tokenInfos`,
+/// `_tokenInfoEx1s`, `Helper3.getTokenInfo` at one block).
+fn holding_read(f: &[&str], after: &ClassicCurve) -> ClassicTokenRead {
+    ClassicTokenRead {
+        token: f[2].parse().unwrap(),
+        block_number: f[1].parse().unwrap(),
+        block_hash: B256::repeat_byte(0xb1),
+        quote: Address::ZERO,
+        template: word(&format!("0x{}", f[3])),
+        total_supply: WITNESSED_TOTAL_SUPPLY,
+        max_offers: WITNESSED_MAX_OFFERS,
+        offers: after.offers,
+        k: after.k,
+        t: after.t,
+        status: U256::ZERO,
+        fee_setting: u(f[4]),
+        extra_fee: U256::ZERO,
+        launch_block: launch_block(f[2]),
+        venue_fee: VenueFee {
+            rate_bps: f[8].parse().unwrap(),
+            min_fee: u(f[9]),
+        },
+        liquidity_added: false,
+    }
+}
+
+/// The blocks a SELL may land after its read (the shipped
+/// `BSC_EXEC_VALIDITY_BLOCKS`).
+const VALID: u64 = 2;
+
+fn holding_snapshot(block_hash: B256, codehash_generation: u64) -> SnapshotId {
+    SnapshotId {
+        canonical_block_hash: block_hash,
+        ordered_state_cursor: 3,
+        pending_candidate: B256::ZERO,
+        policy_generation: 4,
+        codehash_generation,
+    }
+}
+
+fn exit_policy(generation: u64, slippage_bps: u16) -> ExitPolicy {
+    ExitPolicy::new(generation, slippage_bps, 50_000_000, 100_000, 1_500_000).unwrap()
+}
+
+/// R12c-3: every executed probe SELL of a priced word (the tokens its BUY
+/// received, on the state right after that BUY) is the admitted SELL of
+/// the held state read there: its expected funds are the wei the
+/// execution returned, its minimum the slippage floor of its gross (what
+/// TokenManager2 compares `minFunds` with, see the SELLMIN rows), its
+/// calldata `sellToken(token, amount, minFunds)`.
+#[test]
+fn every_executed_probe_sell_is_the_admitted_sell_of_the_held_state() {
+    let mut n = 0;
+    for f in rows("PROBE") {
+        let template = word(&format!("0x{}", f[3]));
+        let Some(p) = CLASSIC_PROFILES.iter().find(|p| p.template == template) else {
+            continue;
+        };
+        let b = quote_buy(
+            &curve(f[5], f[6], f[7]),
+            &fee(f[8], f[9], p.tax_bps),
+            u(f[10]),
+        )
+        .unwrap();
+        let read = holding_read(&f, &b.after);
+        // The probe sold on the read state itself: it lands 0 blocks later.
+        let classified = classify_classic_holding(&validated(), &read, 0).unwrap();
+        let state =
+            QualifiedClassicHolding::at(&classified, holding_snapshot(read.block_hash, 1)).unwrap();
+        let sell = admit_classic_sell(&state, b.amount, &exit_policy(4, 100)).unwrap();
+        assert_eq!(sell.expected_funds(), u(f[13]), "{f:?}");
+        assert!(sell.expected_gross() > sell.expected_funds());
+        assert_eq!(
+            sell.min_funds(),
+            sell.expected_gross() * U256::from(9_900u64) / U256::from(10_000u64),
+            "{f:?}"
+        );
+        assert_eq!((sell.token(), sell.amount()), (read.token, b.amount));
+        let call = decode_classic_sell_min_funds(&sell.calldata().unwrap()).unwrap();
+        assert_eq!(
+            (call.token, call.amount, call.min_funds),
+            (read.token, b.amount, sell.min_funds())
+        );
+        n += 1;
+    }
+    assert_eq!(n, 29);
+}
+
+/// R12c-3: a held token is priced only as the launches are and only while
+/// it trades on its curve: each deviating field is refused by name.
+#[test]
+fn a_held_token_is_priced_only_as_witnessed() {
+    let f = rows("PROBE")
+        .find(|f| CLASSIC_PROFILES[0].template == word(&format!("0x{}", f[3])))
+        .unwrap();
+    let ok = holding_read(&f, &curve(f[5], f[6], f[7]));
+    classify_classic_holding(&validated(), &ok, VALID).unwrap();
+    // The last read whose SELL lands within the witnessed tax age.
+    let max_age = ok.launch_block + CLASSIC_PROFILES[0].tax_witnessed_blocks - VALID;
+    type Change = fn(&mut ClassicTokenRead, u64);
+    let cases: [(Change, UnsupportedClassicHolding); 13] = [
+        (
+            |r, _| r.quote = Address::repeat_byte(1),
+            UnsupportedClassicHolding::Quote,
+        ),
+        (
+            |r, _| r.template = B256::repeat_byte(2),
+            UnsupportedClassicHolding::Template,
+        ),
+        (
+            |r, _| r.total_supply += U256::ONE,
+            UnsupportedClassicHolding::TotalSupply,
+        ),
+        (
+            |r, _| r.max_offers += U256::ONE,
+            UnsupportedClassicHolding::MaxOffers,
+        ),
+        (
+            |r, _| r.fee_setting = U256::ONE,
+            UnsupportedClassicHolding::FeeSetting,
+        ),
+        (
+            |r, _| r.extra_fee = U256::ONE,
+            UnsupportedClassicHolding::ExtraFee,
+        ),
+        (
+            |r, _| r.status = U256::ONE,
+            UnsupportedClassicHolding::OffCurve,
+        ),
+        (
+            |r, _| r.liquidity_added = true,
+            UnsupportedClassicHolding::OffCurve,
+        ),
+        (
+            |r, max| r.block_number = max + 1,
+            UnsupportedClassicHolding::TaxUnwitnessed,
+        ),
+        (
+            |r, _| r.block_number = r.launch_block - 1,
+            UnsupportedClassicHolding::TaxUnwitnessed,
+        ),
+        (
+            |r, _| r.venue_fee.rate_bps += 1,
+            UnsupportedClassicHolding::FeeTerms,
+        ),
+        (
+            |r, _| r.venue_fee.min_fee = U256::ONE,
+            UnsupportedClassicHolding::FeeTerms,
+        ),
+        (
+            |r, _| r.offers = WITNESSED_MAX_OFFERS + U256::ONE,
+            UnsupportedClassicHolding::Curve,
+        ),
+    ];
+    for (change, want) in cases {
+        let mut read = ok;
+        change(&mut read, max_age);
+        assert_eq!(
+            classify_classic_holding(&validated(), &read, VALID),
+            Err(want)
+        );
+    }
+    // At the oldest witnessed age it is still priced.
+    let mut oldest = ok;
+    oldest.block_number = max_age;
+    classify_classic_holding(&validated(), &oldest, VALID).unwrap();
+    // A read at that age whose SELL may land a block later is refused.
+    assert_eq!(
+        classify_classic_holding(&validated(), &oldest, VALID + 1),
+        Err(UnsupportedClassicHolding::TaxUnwitnessed)
+    );
+    // Not on a deployment validated with other fee terms, nor on a
+    // decode-only one.
+    let d = bsc_mainnet_r12b_131568366();
+    let mut drifted = crate::venues::fourmeme::deployment::testkit::pinned_observation(&d);
+    drifted.venue_fee.rate_bps += 1;
+    assert_eq!(
+        classify_classic_holding(&d.validate(&drifted, 1).unwrap(), &ok, VALID),
+        Err(UnsupportedClassicHolding::FeeTerms)
+    );
+    let g01 = bsc_mainnet_g01_129842711();
+    let decode_only = g01
+        .validate(
+            &crate::venues::fourmeme::deployment::testkit::pinned_observation(&g01),
+            1,
+        )
+        .unwrap();
+    assert_eq!(
+        classify_classic_holding(&decode_only, &ok, VALID),
+        Err(UnsupportedClassicHolding::EconomicsNotWitnessed)
+    );
+}
+
+/// R12c-3: the admitted SELL belongs to the block its state was read at,
+/// the code generation it was classified under and the exit policy's
+/// generation; it sells no more than the curve sold and something.
+#[test]
+fn a_held_state_binds_its_block_generation_and_policy() {
+    let f = rows("PROBE")
+        .find(|f| CLASSIC_PROFILES[0].template == word(&format!("0x{}", f[3])))
+        .unwrap();
+    let read = holding_read(&f, &curve(f[5], f[6], f[7]));
+    let classified = classify_classic_holding(&validated(), &read, VALID).unwrap();
+    assert_eq!(
+        QualifiedClassicHolding::at(&classified, holding_snapshot(B256::repeat_byte(0xb2), 1)),
+        Err(ClassicAdmissionError::StaleRead)
+    );
+    assert_eq!(
+        QualifiedClassicHolding::at(&classified, holding_snapshot(read.block_hash, 2)),
+        Err(ClassicAdmissionError::GenerationMismatch)
+    );
+    let state =
+        QualifiedClassicHolding::at(&classified, holding_snapshot(read.block_hash, 1)).unwrap();
+    let sold = classified.curve().sold;
+    assert_eq!(
+        admit_classic_sell(&state, sold, &exit_policy(5, 100)),
+        Err(ClassicAdmissionError::PolicyGenerationMismatch)
+    );
+    assert_eq!(
+        admit_classic_sell(&state, sold + U256::from(GWEI), &exit_policy(4, 100)),
+        Err(ClassicAdmissionError::Quote(ClassicQuoteError::ExceedsSold))
+    );
+    assert_eq!(
+        admit_classic_sell(&state, U256::ZERO, &exit_policy(4, 100)),
+        Err(ClassicAdmissionError::Quote(ClassicQuoteError::ZeroInput))
+    );
+    let all = admit_classic_sell(&state, sold, &exit_policy(4, 0)).unwrap();
+    assert_eq!(all.min_funds(), all.expected_gross());
+    // Whole gwei units only, as every witnessed trade.
+    assert_eq!(
+        admit_classic_sell(&state, sold - U256::ONE, &exit_policy(4, 100)),
+        Err(ClassicAdmissionError::UnalignedAmount)
+    );
+}
+
+/// R12c-3 review M1: the production SELL `sellToken(token, amount,
+/// minFunds)` executed after each priced probe's BUY (the SELLMIN rows):
+/// TokenManager2 accepts `minFunds` = the SELL's gross and reverts one wei
+/// above it, so it compares the minimum with the curve's wei before the
+/// fee and the tax; the admission's expected gross is that gross to the
+/// wei, its minimum the slippage floor of it.
+#[test]
+fn the_sells_minimum_is_bound_to_its_gross_as_executed() {
+    let mut n = 0;
+    for s in rows("SELLMIN") {
+        assert_eq!((s[7], s[8]), ("OK", "REVERT"), "{s:?}");
+        let f = rows("PROBE")
+            .find(|f| (f[1], f[2], f[10]) == (s[1], s[2], s[3]))
+            .unwrap();
+        let p = CLASSIC_PROFILES
+            .iter()
+            .find(|p| p.template == word(&format!("0x{}", f[3])))
+            .unwrap();
+        let b = quote_buy(
+            &curve(f[5], f[6], f[7]),
+            &fee(f[8], f[9], p.tax_bps),
+            u(f[10]),
+        )
+        .unwrap();
+        assert_eq!(b.amount, u(s[4]), "{s:?}");
+        let read = holding_read(&f, &b.after);
+        let classified = classify_classic_holding(&validated(), &read, 0).unwrap();
+        let state =
+            QualifiedClassicHolding::at(&classified, holding_snapshot(read.block_hash, 1)).unwrap();
+        let exact = admit_classic_sell(&state, b.amount, &exit_policy(4, 0)).unwrap();
+        assert_eq!(
+            (
+                exact.expected_gross(),
+                exact.min_funds(),
+                exact.expected_funds()
+            ),
+            (u(s[6]), u(s[6]), u(s[5])),
+            "{s:?}"
+        );
+        n += 1;
+    }
+    assert_eq!(n, 29);
 }

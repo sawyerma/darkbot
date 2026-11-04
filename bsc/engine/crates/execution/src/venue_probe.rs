@@ -44,10 +44,18 @@ use darkbot_bsc_trading::venues::flap::deployment::{
 use darkbot_bsc_trading::venues::fourmeme::deployment::{
     CLASSIC_TEMPLATES, FourDeployment, ObservedFour,
 };
-use darkbot_bsc_trading::venues::fourmeme::profile::VenueFee;
+use darkbot_bsc_trading::venues::fourmeme::profile::{ClassicTokenRead, VenueFee};
 
-/// `TokenManagerHelper3.getTokenInfo(address)`.
+/// `TokenManagerHelper3.getTokenInfo(address)`: 12 words, `tradingFeeRate`
+/// word 4, `minTradingFee` 5, `liquidityAdded` 11.
 const GET_TOKEN_INFO: [u8; 4] = [0x1f, 0x69, 0x56, 0x5f];
+/// R12c-3: `TokenManager2._tokenInfos(address)`: 13 words (base, quote,
+/// template, totalSupply, maxOffers, maxRaising, launchTime, offers, funds,
+/// lastPrice, K, T, status).
+const TOKEN_INFOS: [u8; 4] = [0xe6, 0x84, 0x62, 0x6b];
+/// R12c-3: `TokenManager2._tokenInfoEx1s(address)`: 5 words (launchFee,
+/// pcFee, feeSetting, blockNumber, extraFee).
+const TOKEN_INFO_EX1S: [u8; 4] = [0x9f, 0x26, 0x63, 0x31];
 use serde_json::Value;
 
 use crate::chain_follower::http::Client;
@@ -151,6 +159,11 @@ pub enum ProbeRead {
     /// R12c: `Helper3.getTokenInfo` of the Four reference token (the fee
     /// terms).
     FourFeeTerms,
+    /// R12c-3: a held Classic token's `_tokenInfos`, `_tokenInfoEx1s` and
+    /// `Helper3.getTokenInfo`.
+    FourTokenInfo,
+    FourTokenInfoEx1,
+    FourTokenFeeTerms,
 }
 
 /// How a well-formed hex answer violates its ABI or storage type.
@@ -197,6 +210,9 @@ pub enum ProbeError {
     /// After the state reads, the pinned block is no longer the canonical
     /// block at its height.
     Reorg { number: u64 },
+    /// R12c-3: TokenManager2 holds no such token (its `_tokenInfos` names
+    /// another base).
+    UnknownToken(ProbeRead),
 }
 
 impl core::fmt::Display for ProbeError {
@@ -217,6 +233,7 @@ impl core::fmt::Display for ProbeError {
                 f,
                 "venue probe: block {number} left the canonical chain during the reads"
             ),
+            Self::UnknownToken(read) => write!(f, "venue probe: {read:?}: not the venue's token"),
         }
     }
 }
@@ -685,6 +702,94 @@ where
         block_number,
         block_hash,
         observed,
+    })
+}
+
+/// R12c-3: a held Four Classic `token` as `deployment`'s TokenManager2 and
+/// Helper3 held it at the block `number` whose hash is `hash` (each read
+/// pinned to that hash; the block still the one at its height afterwards),
+/// read-only over `endpoint` as [`read_flap_curve`] reads a Flap token.
+pub fn read_four_holding(
+    endpoint: &str,
+    limits: &FollowerLimits,
+    deployment: &FourDeployment,
+    token: Address,
+    number: u64,
+    hash: [u8; 32],
+) -> Result<ClassicTokenRead, ProbeError> {
+    let t = Target::of(endpoint, limits)?;
+    let connect =
+        |stop: &AtomicBool| connect_tls(&t.endpoint, &t.tls, &t.bounds, stop, Instant::now());
+    let mut client = Client::new(connect, t.authority.clone(), t.path.clone(), limits);
+    holding_with(&mut client, deployment, token, number, hash)
+}
+
+/// [`read_four_holding`] over a connected client (plain TCP in the tests).
+fn holding_with<S, C>(
+    client: &mut Client<S, C>,
+    deployment: &FourDeployment,
+    token: Address,
+    number: u64,
+    hash: [u8; 32],
+) -> Result<ClassicTokenRead, ProbeError>
+where
+    S: Read + Write,
+    C: FnMut(&AtomicBool) -> Result<S, DisconnectReason>,
+{
+    let mut wire = Wire {
+        client,
+        stop: AtomicBool::new(false),
+        id: 0,
+    };
+    let at = pinned(&hash);
+    let call = |selector: [u8; 4]| {
+        let mut calldata = selector.to_vec();
+        calldata.extend_from_slice(&address_word(token));
+        calldata
+    };
+    let read = ProbeRead::FourTokenInfo;
+    let info =
+        abi_words::<13>(&wire.call(&at, read, deployment.token_manager2, &call(TOKEN_INFOS))?)
+            .map_err(abi(read))?;
+    if word_address(&info[0]).map_err(abi(read))? != token {
+        return Err(ProbeError::UnknownToken(read));
+    }
+    let quote = word_address(&info[1]).map_err(abi(read))?;
+    let read = ProbeRead::FourTokenInfoEx1;
+    let ex1 =
+        abi_words::<5>(&wire.call(&at, read, deployment.token_manager2, &call(TOKEN_INFO_EX1S))?)
+            .map_err(abi(read))?;
+    let launch_block =
+        u64::try_from(U256::from_be_bytes(ex1[3])).map_err(|_| abi(read)(AbiFault::Range))?;
+    let read = ProbeRead::FourTokenFeeTerms;
+    let fee = abi_words::<12>(&wire.call(&at, read, deployment.helper3, &call(GET_TOKEN_INFO))?)
+        .map_err(abi(read))?;
+    let rate_bps =
+        u16::try_from(U256::from_be_bytes(fee[4])).map_err(|_| abi(read)(AbiFault::Range))?;
+    let liquidity_added = word_flag(&fee[11]).map_err(abi(read))?;
+    if wire.block_hash(ProbeRead::BlockRecheck, number)? != hash {
+        return Err(ProbeError::Reorg { number });
+    }
+    Ok(ClassicTokenRead {
+        token,
+        block_number: number,
+        block_hash: B256::from(hash),
+        quote,
+        template: B256::from(info[2]),
+        total_supply: U256::from_be_bytes(info[3]),
+        max_offers: U256::from_be_bytes(info[4]),
+        offers: U256::from_be_bytes(info[7]),
+        k: U256::from_be_bytes(info[10]),
+        t: U256::from_be_bytes(info[11]),
+        status: U256::from_be_bytes(info[12]),
+        fee_setting: U256::from_be_bytes(ex1[2]),
+        extra_fee: U256::from_be_bytes(ex1[4]),
+        launch_block,
+        venue_fee: VenueFee {
+            rate_bps,
+            min_fee: U256::from_be_bytes(fee[5]),
+        },
+        liquidity_added,
     })
 }
 
@@ -1937,6 +2042,9 @@ mod tests {
             ),
             (GET_TOKEN_V8_SAFE_SELECTOR, "getTokenV8Safe(address)"),
             (NFT_GATE_SELECTOR, "nftGate(address)"),
+            (GET_TOKEN_INFO, "getTokenInfo(address)"),
+            (TOKEN_INFOS, "_tokenInfos(address)"),
+            (TOKEN_INFO_EX1S, "_tokenInfoEx1s(address)"),
         ] {
             assert_eq!(selector[..], keccak256(signature)[..4], "{signature}");
         }
@@ -2068,6 +2176,186 @@ mod tests {
                 FourDrift::ClassicPair(1)
             ]
         );
+    }
+
+    /// R12c-3: a held Classic token is read at its pinned block from
+    /// `_tokenInfos`, `_tokenInfoEx1s` and `Helper3.getTokenInfo`; a token
+    /// TokenManager2 does not hold, a short answer, a flag outside 0/1 or a
+    /// reorg between the reads refuse it.
+    #[test]
+    fn a_held_four_tokens_state_is_read_at_its_block() {
+        let (d, _) = served_four();
+        let token = Address::repeat_byte(0x4f);
+        let info = |base: Address, n: usize| {
+            let mut out = Vec::new();
+            out.extend_from_slice(&address_word(base));
+            out.extend_from_slice(&address_word(Address::ZERO));
+            out.extend_from_slice(&[0x24; 32]);
+            for v in [1u64, 2, 3, 4, 5, 6, 7, 8, 9, 0] {
+                out.extend_from_slice(&u64_word(v));
+            }
+            out.truncate(n * WORD);
+            out
+        };
+        let call = |selector: [u8; 4]| {
+            let mut c = selector.to_vec();
+            c.extend_from_slice(&address_word(token));
+            c
+        };
+        let node = |base: Address, liquidity: u64, info_words: usize| {
+            let mut n = Node::mainnet();
+            n.set_call(d.token_manager2, call(TOKEN_INFOS), info(base, info_words));
+            n.set_call(
+                d.token_manager2,
+                call(TOKEN_INFO_EX1S),
+                words(&[11, 12, 13, 129_000_000, 15]),
+            );
+            n.set_call(
+                d.helper3,
+                call(GET_TOKEN_INFO),
+                words(&[2, 21, 22, 23, 100, 7, 26, 27, 28, 29, 30, liquidity]),
+            );
+            n
+        };
+        let read = |n: Node| {
+            let server = serve(n);
+            let limits = limits();
+            let mut client = Client::new(
+                connector(server.addr, limits),
+                server.addr.to_string(),
+                "/rpc".to_owned(),
+                &limits,
+            );
+            let result = holding_with(&mut client, &d, token, HEAD, HASH);
+            drop(client);
+            server.done.store(true, Ordering::Release);
+            (result, server.handle.join().unwrap())
+        };
+        let (result, seen) = read(node(token, 0, 13));
+        let r = result.unwrap();
+        assert_eq!(
+            (r.token, r.block_number, r.block_hash, r.quote),
+            (token, HEAD, B256::from(HASH), Address::ZERO)
+        );
+        assert_eq!(r.template, B256::repeat_byte(0x24));
+        assert_eq!(
+            [r.total_supply, r.max_offers, r.offers, r.k, r.t, r.status],
+            [1u64, 2, 5, 8, 9, 0].map(U256::from)
+        );
+        assert_eq!(
+            (r.fee_setting, r.extra_fee, r.launch_block),
+            (U256::from(13u8), U256::from(15u8), 129_000_000)
+        );
+        assert_eq!(
+            (r.venue_fee.rate_bps, r.venue_fee.min_fee, r.liquidity_added),
+            (100, U256::from(7u8), false)
+        );
+        // Every read at the pinned block, the block rechecked last.
+        let calls: Vec<&Value> = seen
+            .iter()
+            .filter(|(m, _)| m == "eth_call")
+            .map(|(_, p)| p)
+            .collect();
+        assert_eq!(calls.len(), 3);
+        for p in calls {
+            assert_eq!(p[1]["blockHash"], format!("0x{}", hex::encode(HASH)));
+        }
+        assert_eq!(
+            seen.last().map(|(m, _)| m.as_str()),
+            Some("eth_getBlockByNumber")
+        );
+        assert!(read(node(token, 1, 13)).0.unwrap().liquidity_added);
+        assert_eq!(
+            read(node(Address::repeat_byte(0x50), 0, 13)).0,
+            Err(ProbeError::UnknownToken(ProbeRead::FourTokenInfo))
+        );
+        assert_eq!(
+            read(node(token, 0, 12)).0,
+            Err(ProbeError::Abi {
+                read: ProbeRead::FourTokenInfo,
+                fault: AbiFault::Length
+            })
+        );
+        assert_eq!(
+            read(node(token, 2, 13)).0,
+            Err(ProbeError::Abi {
+                read: ProbeRead::FourTokenFeeTerms,
+                fault: AbiFault::Flag
+            })
+        );
+        let mut moved = node(token, 0, 13);
+        moved.hashes = [HASH, [0xe4; 32]];
+        moved.blocks_served = 1;
+        assert_eq!(read(moved).0, Err(ProbeError::Reorg { number: HEAD }));
+    }
+
+    /// R12c-3: a priced token of the R12 fixture read at its PROBE block on
+    /// the free archive endpoint is classified as held: its curve is the
+    /// fixture's. Read-only; run it with `BSC_FREE_ARCHIVE_RPC=<the free
+    /// archive endpoint>`
+    /// `cargo test -p darkbot-bsc-execution --all-features --lib venue_probe::tests::live_four_holding -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "network: read-only reads of one Four.meme token at BSC_FREE_ARCHIVE_RPC"]
+    fn live_four_holding_is_the_fixtures_state() {
+        use darkbot_bsc_trading::venues::fourmeme::deployment::bsc_mainnet_r12b_131568366;
+        use darkbot_bsc_trading::venues::fourmeme::profile::{
+            CLASSIC_PROFILES, classify_classic_holding,
+        };
+        const FIXTURE: &str =
+            include_str!("../../trading/fixtures/fourmeme/classic_parity_20261104.txt");
+        let rpc = std::env::var("BSC_FREE_ARCHIVE_RPC")
+            .expect("BSC_FREE_ARCHIVE_RPC names the free archive endpoint");
+        let limits = FollowerLimits {
+            request_timeout: Duration::from_secs(10),
+            max_response_bytes: 16 << 20,
+            connect_timeout: Duration::from_secs(5),
+            handshake_timeout: Duration::from_secs(10),
+            read_tick: Duration::from_millis(100),
+            ..limits()
+        };
+        let f: Vec<&str> = FIXTURE
+            .lines()
+            .map(|l| l.split(' ').collect::<Vec<_>>())
+            .find(|f| {
+                f[0] == "PROBE"
+                    && format!("0x{}", f[3]).parse::<B256>().ok()
+                        == Some(CLASSIC_PROFILES[0].template)
+            })
+            .unwrap();
+        let (token, number): (Address, u64) = (f[2].parse().unwrap(), f[1].parse().unwrap());
+        let t = Target::of(&rpc, &limits).unwrap();
+        let connect =
+            |stop: &AtomicBool| connect_tls(&t.endpoint, &t.tls, &t.bounds, stop, Instant::now());
+        let mut client = Client::new(connect, t.authority.clone(), t.path.clone(), &limits);
+        let hash = Wire {
+            client: &mut client,
+            stop: AtomicBool::new(false),
+            id: 0,
+        }
+        .block_hash(ProbeRead::Block, number)
+        .unwrap();
+        let d = bsc_mainnet_r12b_131568366();
+        let r = read_four_holding(&rpc, &limits, &d, token, number, hash).unwrap();
+        println!("{r:?}");
+        let u = |s: &str| U256::from_str_radix(s, 10).unwrap();
+        assert_eq!((r.k, r.t, r.offers), (u(f[5]), u(f[6]), u(f[7])));
+        assert_eq!((r.fee_setting, r.extra_fee), (u(f[4]), U256::ZERO));
+        // Its launch block is the fixture's (its LAUNCH or LAUNCHED row).
+        let launched = FIXTURE
+            .lines()
+            .map(|l| l.split(' ').collect::<Vec<_>>())
+            .find_map(|g| match g[0] {
+                "LAUNCH" if g[3].eq_ignore_ascii_case(f[2]) => g[1].parse::<u64>().ok(),
+                "LAUNCHED" if g[1].eq_ignore_ascii_case(f[2]) => g[2].parse::<u64>().ok(),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(r.launch_block, launched);
+        let v = d
+            .validate(&probe_four(&rpc, &limits, &d).unwrap().observed, 1)
+            .unwrap();
+        let held = classify_classic_holding(&v, &r, 2).unwrap();
+        assert_eq!(held.token(), token);
     }
 
     /// The live Four.meme deployment against the freeze. Read-only; prints

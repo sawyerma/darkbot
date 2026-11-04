@@ -1,8 +1,8 @@
 //! Canonical ABI reading for the Four.meme calls and events: borrowed
 //! words, no allocation, fail closed. A value is accepted only in the one
 //! canonical encoding (minimal offsets in order, zero padding, nothing
-//! after the last member). One encoder: the Classic BUY
-//! [`encode_buy_token_amap`].
+//! after the last member). Two encoders: the Classic BUY
+//! [`encode_buy_token_amap`] and (R12c-3) SELL [`encode_sell_token_min_funds`].
 
 use alloy_primitives::{Address, B256, U256};
 
@@ -31,6 +31,8 @@ pub enum AbiError {
     ZeroFunds,
     /// The encoder was given a zero minimum amount (no slippage bound).
     ZeroMinAmount,
+    /// The encoder was given a zero token amount.
+    ZeroAmount,
 }
 
 impl core::fmt::Display for AbiError {
@@ -45,6 +47,7 @@ impl core::fmt::Display for AbiError {
             Self::UnwitnessedLayout => "four abi: layout not witnessed by the freeze",
             Self::ZeroFunds => "four abi: zero funds",
             Self::ZeroMinAmount => "four abi: zero minimum amount",
+            Self::ZeroAmount => "four abi: zero token amount",
         })
     }
 }
@@ -200,5 +203,34 @@ pub fn encode_buy_token_amap(
     out[4 + 12..4 + WORD].copy_from_slice(token.as_slice());
     out[4 + WORD..4 + 2 * WORD].copy_from_slice(&funds.to_be_bytes::<32>());
     out[4 + 2 * WORD..].copy_from_slice(&min_amount.to_be_bytes::<32>());
+    Ok(out)
+}
+
+/// Exact size of a Classic `sellToken(address,uint256,uint256)` call.
+pub const SELL_TOKEN_MIN_FUNDS_LEN: usize = 4 + 3 * WORD;
+
+/// The calldata of Classic `sellToken(token, amount, minFunds)`, sent to
+/// TokenManager2 after the token's `approve(TokenManager2, amount)`: the
+/// direct SELL of the witnessed sellers (the fixture's EXEC sales) and the
+/// one [`super::recognize::decode_classic_sell_min_funds`] decodes.
+/// TokenManager2 reverts when the SELL's gross (the curve's wei before its
+/// trading fee and the token's tax) is below `minFunds` (executed: the
+/// fixture's SELLMIN rows). Zero amounts are refused.
+pub fn encode_sell_token_min_funds(
+    token: Address,
+    amount: U256,
+    min_funds: U256,
+) -> Result<[u8; SELL_TOKEN_MIN_FUNDS_LEN], AbiError> {
+    if amount.is_zero() {
+        return Err(AbiError::ZeroAmount);
+    }
+    if min_funds.is_zero() {
+        return Err(AbiError::ZeroMinAmount);
+    }
+    let mut out = [0u8; SELL_TOKEN_MIN_FUNDS_LEN];
+    out[..4].copy_from_slice(&super::recognize::FourCall::ClassicSellTokenMinFunds.selector());
+    out[4 + 12..4 + WORD].copy_from_slice(token.as_slice());
+    out[4 + WORD..4 + 2 * WORD].copy_from_slice(&amount.to_be_bytes::<32>());
+    out[4 + 2 * WORD..].copy_from_slice(&min_funds.to_be_bytes::<32>());
     Ok(out)
 }

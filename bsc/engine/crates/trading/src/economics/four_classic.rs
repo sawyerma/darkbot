@@ -52,11 +52,14 @@ use alloy_primitives::{Address, U256};
 
 use super::arith::{ArithError, add, mul, mul_div_down, mul_div_up, sub};
 use super::fees::BPS_DENOMINATOR;
-use super::policy::BuyPolicy;
+use super::policy::{BuyPolicy, ExitPolicy};
 use super::slippage::{SlippageError, min_output};
 use crate::chain_state::SnapshotId;
-use crate::venues::fourmeme::abi::{AbiError, BUY_TOKEN_AMAP_LEN, encode_buy_token_amap};
-use crate::venues::fourmeme::profile::ClassifiedClassicLaunch;
+use crate::venues::fourmeme::abi::{
+    AbiError, BUY_TOKEN_AMAP_LEN, SELL_TOKEN_MIN_FUNDS_LEN, encode_buy_token_amap,
+    encode_sell_token_min_funds,
+};
+use crate::venues::fourmeme::profile::{ClassifiedClassicHolding, ClassifiedClassicLaunch};
 
 /// Token amounts are whole gwei-units of the 18-decimal token (`1e9`).
 const GWEI: u64 = 1_000_000_000;
@@ -356,6 +359,12 @@ pub enum ClassicAdmissionError {
     StateNotFresh,
     /// An amount no probe executed on a fresh launch.
     UnqualifiedAmount,
+    /// R12c-3: the held token's state was read at another block than the
+    /// snapshot's.
+    StaleRead,
+    /// R12c-3: a SELL of a token amount that is not whole gwei units (every
+    /// witnessed trade's is).
+    UnalignedAmount,
     Quote(ClassicQuoteError),
     Slippage(SlippageError),
 }
@@ -370,6 +379,10 @@ impl core::fmt::Display for ClassicAdmissionError {
             }
             Self::StateNotFresh => f.write_str("classic admission: token state is not fresh"),
             Self::UnqualifiedAmount => f.write_str("classic admission: amount not qualified"),
+            Self::StaleRead => f.write_str("classic admission: state read at another block"),
+            Self::UnalignedAmount => {
+                f.write_str("classic admission: amount not in whole gwei units")
+            }
             Self::Quote(e) => write!(f, "classic admission: {e}"),
             Self::Slippage(e) => write!(f, "classic admission: {e}"),
         }
@@ -507,6 +520,141 @@ pub fn admit_classic_buy(
         expected_tokens: quote.amount,
         min_tokens,
         spent: quote.spent,
+        slippage_bps: policy.slippage_bps(),
+        snapshot: state.snapshot,
+    })
+}
+
+/// R12c-3: a held token's state at the snapshot's canonical block, the
+/// one state its SELL is admitted on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct QualifiedClassicHolding {
+    token: Address,
+    curve: ClassicCurve,
+    fee: ClassicFee,
+    snapshot: SnapshotId,
+}
+
+impl QualifiedClassicHolding {
+    /// Binds a classified holding to `snapshot` (a canonical snapshot of
+    /// the block it was read at, under its code generation).
+    pub fn at(
+        classified: &ClassifiedClassicHolding,
+        snapshot: SnapshotId,
+    ) -> Result<Self, ClassicAdmissionError> {
+        if classified.codehash_generation() != snapshot.codehash_generation {
+            return Err(ClassicAdmissionError::GenerationMismatch);
+        }
+        if classified.block_hash() != snapshot.canonical_block_hash {
+            return Err(ClassicAdmissionError::StaleRead);
+        }
+        Ok(Self {
+            token: classified.token(),
+            curve: classified.curve(),
+            fee: classified.fee(),
+            snapshot,
+        })
+    }
+
+    #[inline]
+    pub fn token(&self) -> Address {
+        self.token
+    }
+
+    #[inline]
+    pub fn snapshot(&self) -> SnapshotId {
+        self.snapshot
+    }
+}
+
+/// A Classic SELL that passed admission: only [`admit_classic_sell`]
+/// creates one. TokenManager2 compares `minFunds` with the SELL's gross
+/// (the curve's wei before the trading fee and the token's tax: executed,
+/// the gross passes and one wei above it reverts), so the minimum is the
+/// slippage floor of the expected gross. Invariants: `amount > 0`,
+/// `0 < min_funds <= expected_gross`, `expected_funds < expected_gross`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AdmittedClassicSell {
+    token: Address,
+    amount: U256,
+    expected_gross: U256,
+    expected_funds: U256,
+    min_funds: U256,
+    slippage_bps: u16,
+    snapshot: SnapshotId,
+}
+
+impl AdmittedClassicSell {
+    #[inline]
+    pub fn token(&self) -> Address {
+        self.token
+    }
+
+    /// Tokens to sell (the approval covers exactly these).
+    #[inline]
+    pub fn amount(&self) -> U256 {
+        self.amount
+    }
+
+    /// Wei the quote expects to the seller (after the fee and the tax).
+    #[inline]
+    pub fn expected_funds(&self) -> U256 {
+        self.expected_funds
+    }
+
+    /// Wei the quote expects from the curve before the fee and the tax
+    /// (what TokenManager2 compares `minFunds` with).
+    #[inline]
+    pub fn expected_gross(&self) -> U256 {
+        self.expected_gross
+    }
+
+    /// The `minFunds` bound into the calldata: the slippage floor of the
+    /// expected gross.
+    #[inline]
+    pub fn min_funds(&self) -> U256 {
+        self.min_funds
+    }
+
+    #[inline]
+    pub fn slippage_bps(&self) -> u16 {
+        self.slippage_bps
+    }
+
+    #[inline]
+    pub fn snapshot(&self) -> SnapshotId {
+        self.snapshot
+    }
+
+    /// The calldata of the direct `sellToken(token, amount, minFunds)`.
+    pub fn calldata(&self) -> Result<[u8; SELL_TOKEN_MIN_FUNDS_LEN], AbiError> {
+        encode_sell_token_min_funds(self.token, self.amount, self.min_funds)
+    }
+}
+
+/// Admits a SELL of `amount` tokens of a held token in its qualified state
+/// under the exit `policy`.
+pub fn admit_classic_sell(
+    state: &QualifiedClassicHolding,
+    amount: U256,
+    policy: &ExitPolicy,
+) -> Result<AdmittedClassicSell, ClassicAdmissionError> {
+    if policy.generation() != state.snapshot.policy_generation {
+        return Err(ClassicAdmissionError::PolicyGenerationMismatch);
+    }
+    if amount % U256::from(GWEI) != U256::ZERO {
+        return Err(ClassicAdmissionError::UnalignedAmount);
+    }
+    let quote =
+        quote_sell(&state.curve, &state.fee, amount).map_err(ClassicAdmissionError::Quote)?;
+    let min_funds =
+        min_output(quote.gross, policy.slippage_bps()).map_err(ClassicAdmissionError::Slippage)?;
+    Ok(AdmittedClassicSell {
+        token: state.token,
+        amount,
+        expected_gross: quote.gross,
+        expected_funds: quote.funds,
+        min_funds,
         slippage_bps: policy.slippage_bps(),
         snapshot: state.snapshot,
     })

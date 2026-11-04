@@ -285,3 +285,318 @@ fn the_intent_kind_carries_the_classic_buy() {
         Ok(hash)
     );
 }
+
+/// R12c-3: the admitted SELL of the first priced probe's state (its
+/// launch block's curve, the tokens its creator bought).
+fn admitted_sell(slippage_bps: u16) -> (AdmittedClassicSell, ExitPolicy) {
+    use crate::economics::four_classic::{QualifiedClassicHolding, admit_classic_sell};
+    use crate::venues::fourmeme::profile::{
+        CLASSIC_PROFILES, ClassicTokenRead, VenueFee, WITNESSED_MAX_OFFERS, WITNESSED_TOTAL_SUPPLY,
+        classify_classic_holding,
+    };
+    let u = |s: &str| U256::from_str_radix(s, 10).unwrap();
+    let f: Vec<&str> = FIXTURE
+        .lines()
+        .map(|l| l.split(' ').collect::<Vec<_>>())
+        .find(|f| {
+            f[0] == "PROBE"
+                && f[3].parse::<B256>().ok() == Some(CLASSIC_PROFILES[0].template)
+                && f[4] == "0"
+        })
+        .unwrap();
+    let block: u64 = f[1].parse().unwrap();
+    let read = ClassicTokenRead {
+        token: f[2].parse().unwrap(),
+        block_number: block,
+        block_hash: B256::repeat_byte(0xc1),
+        quote: Address::ZERO,
+        template: CLASSIC_PROFILES[0].template,
+        total_supply: WITNESSED_TOTAL_SUPPLY,
+        max_offers: WITNESSED_MAX_OFFERS,
+        offers: u(f[7]),
+        k: u(f[5]),
+        t: u(f[6]),
+        status: U256::ZERO,
+        fee_setting: U256::ZERO,
+        extra_fee: U256::ZERO,
+        launch_block: block,
+        venue_fee: VenueFee {
+            rate_bps: f[8].parse().unwrap(),
+            min_fee: u(f[9]),
+        },
+        liquidity_added: false,
+    };
+    let classified = classify_classic_holding(&validated(1), &read, 2).unwrap();
+    let snapshot = SnapshotId {
+        canonical_block_hash: read.block_hash,
+        ordered_state_cursor: 2,
+        pending_candidate: B256::ZERO,
+        policy_generation: 5,
+        codehash_generation: 1,
+    };
+    let state = QualifiedClassicHolding::at(&classified, snapshot).unwrap();
+    let policy = ExitPolicy::new(5, slippage_bps, 100_000_000, 120_000, 400_000).unwrap();
+    let sold = classified.curve().sold;
+    (admit_classic_sell(&state, sold, &policy).unwrap(), policy)
+}
+
+fn exit_expectation(signer: &Signer, nonce: u64) -> ExpectedClassicExit {
+    let (a, policy) = admitted_sell(300);
+    ExpectedClassicExit::from_admitted(&validated(1), &a, &policy, signer.address(), nonce).unwrap()
+}
+
+/// R12c-3: the production signer signs exactly the exit's approval (of
+/// TokenManager2, on the token, for the tokens sold, at `nonce`) and its
+/// SELL (`sellToken(token, amount, minFunds)` to TokenManager2 at
+/// `nonce + 1`), no value; each passes its final check and fails the
+/// other's.
+#[test]
+fn the_production_signer_signs_exactly_the_admitted_exit() {
+    let signer = Signer::from_secret_bytes(&[0x65; 32]).unwrap();
+    let (a, _) = admitted_sell(300);
+    let e = exit_expectation(&signer, 6);
+    assert_eq!(
+        (e.token(), e.amount(), e.min_funds(), e.nonce()),
+        (a.token(), a.amount(), a.min_funds(), 6)
+    );
+    let (mut scratch, mut approve, mut sell) = (Vec::new(), Vec::new(), Vec::new());
+    let ha = e.sign_approve(&signer, &mut scratch, &mut approve).unwrap();
+    let hs = e.sign_sell(&signer, &mut scratch, &mut sell).unwrap();
+    let now = e.snapshot();
+    assert_eq!(
+        verify_final_classic_approve(&approve, &e, &now, &mut scratch),
+        Ok(ha)
+    );
+    assert_eq!(
+        verify_final_classic_sell(&sell, &e, &now, &mut scratch),
+        Ok(hs)
+    );
+    let a_tx = decode_signed(&approve).unwrap();
+    assert_eq!(
+        (a_tx.tx.to, a_tx.tx.nonce, a_tx.tx.value, a_tx.tx.gas_limit),
+        (a.token(), 6, U256::ZERO, 120_000)
+    );
+    assert_eq!(
+        crate::venues::flap::abi::decode_approve(a_tx.tx.input).unwrap(),
+        (bsc_mainnet_r12b_131568366().token_manager2, a.amount())
+    );
+    let s_tx = decode_signed(&sell).unwrap();
+    assert_eq!(
+        (s_tx.tx.to, s_tx.tx.nonce, s_tx.tx.value, s_tx.tx.gas_limit),
+        (e.token_manager2(), 7, U256::ZERO, 400_000)
+    );
+    assert_eq!(s_tx.tx.input, a.calldata().unwrap().as_slice());
+    // Each transaction is refused as the other.
+    assert_eq!(
+        verify_final_classic_sell(&approve, &e, &now, &mut scratch),
+        Err(BindingError::WrongNonce)
+    );
+    assert_eq!(
+        verify_final_classic_approve(&sell, &e, &now, &mut scratch),
+        Err(BindingError::WrongNonce)
+    );
+    let other = Signer::from_secret_bytes(&[0x66; 32]).unwrap();
+    assert_eq!(
+        e.sign_sell(&other, &mut scratch, &mut sell),
+        Err(BuildError::WrongSigner)
+    );
+    assert!(sell.is_empty());
+    assert_eq!(
+        e.sign_approve(&other, &mut scratch, &mut approve),
+        Err(BuildError::WrongSigner)
+    );
+}
+
+/// R12c-3: every bound field of the exit is enforced at the send boundary.
+#[test]
+fn every_bound_exit_field_is_enforced() {
+    let signer = Signer::from_secret_bytes(&[0x67; 32]).unwrap();
+    let e = exit_expectation(&signer, 2);
+    let (mut scratch, mut approve, mut sell) = (Vec::new(), Vec::new(), Vec::new());
+    e.sign_approve(&signer, &mut scratch, &mut approve).unwrap();
+    e.sign_sell(&signer, &mut scratch, &mut sell).unwrap();
+    let one = U256::from(1u8);
+    let both: [(ExpectedClassicExit, BindingError); 5] = [
+        (
+            ExpectedClassicExit {
+                sender: Address::repeat_byte(1),
+                ..e
+            },
+            BindingError::WrongSender,
+        ),
+        (
+            ExpectedClassicExit { nonce: 3, ..e },
+            BindingError::WrongNonce,
+        ),
+        (
+            ExpectedClassicExit {
+                gas_price: e.gas_price + 1,
+                ..e
+            },
+            BindingError::WrongGasPrice,
+        ),
+        (
+            ExpectedClassicExit {
+                amount: e.amount + one,
+                ..e
+            },
+            BindingError::WrongInputAmount,
+        ),
+        (
+            ExpectedClassicExit {
+                token: Address::repeat_byte(3),
+                ..e
+            },
+            BindingError::WrongToken,
+        ),
+    ];
+    for (x, error) in both {
+        let now = x.snapshot();
+        assert_eq!(
+            verify_final_classic_approve(&approve, &x, &now, &mut scratch),
+            Err(error)
+        );
+        assert_eq!(
+            verify_final_classic_sell(&sell, &x, &now, &mut scratch),
+            Err(error)
+        );
+    }
+    let tm2 = ExpectedClassicExit {
+        token_manager2: Address::repeat_byte(4),
+        ..e
+    };
+    let now = e.snapshot();
+    assert_eq!(
+        verify_final_classic_approve(&approve, &tm2, &now, &mut scratch),
+        Err(BindingError::WrongSpender)
+    );
+    assert_eq!(
+        verify_final_classic_sell(&sell, &tm2, &now, &mut scratch),
+        Err(BindingError::WrongPortal)
+    );
+    let gas = ExpectedClassicExit {
+        approve_gas_limit: e.approve_gas_limit + 1,
+        sell_gas_limit: e.sell_gas_limit + 1,
+        ..e
+    };
+    for raw in [&approve, &sell] {
+        let check = if raw == &approve {
+            verify_final_classic_approve(raw, &gas, &now, &mut scratch)
+        } else {
+            verify_final_classic_sell(raw, &gas, &now, &mut scratch)
+        };
+        assert_eq!(check, Err(BindingError::WrongGasLimit));
+    }
+    let min = ExpectedClassicExit {
+        min_funds: e.min_funds + one,
+        ..e
+    };
+    assert_eq!(
+        verify_final_classic_sell(&sell, &min, &now, &mut scratch),
+        Err(BindingError::WrongMinOutput)
+    );
+    let mut moved = now;
+    moved.ordered_state_cursor += 1;
+    assert_eq!(
+        verify_final_classic_sell(&sell, &e, &moved, &mut scratch),
+        Err(BindingError::StaleSnapshot)
+    );
+    assert_eq!(
+        verify_final_classic_approve(&approve, &e, &moved, &mut scratch),
+        Err(BindingError::StaleSnapshot)
+    );
+    // A SELL that carries value is no exit's.
+    let input =
+        crate::venues::fourmeme::abi::encode_sell_token_min_funds(e.token, e.amount, e.min_funds)
+            .unwrap();
+    let mut forged = Vec::new();
+    signer
+        .sign_legacy(
+            &LegacyTx {
+                chain_id: e.chain_id,
+                nonce: e.nonce + 1,
+                gas_price: e.gas_price,
+                gas_limit: e.sell_gas_limit,
+                to: e.token_manager2,
+                value: one,
+                input: &input,
+            },
+            &mut scratch,
+            &mut forged,
+        )
+        .unwrap();
+    assert_eq!(
+        verify_final_classic_sell(&forged, &e, &now, &mut scratch),
+        Err(BindingError::WrongValue)
+    );
+}
+
+/// R12c-3: the exit's expectation needs its code and policy generation and
+/// the slippage it was admitted with; `ExpectedTx` carries both of its
+/// transactions (the SELL at the approval's nonce + 1, no value, TokenManager2).
+#[test]
+fn the_exit_expectation_and_its_intent_kinds() {
+    let (a, policy) = admitted_sell(300);
+    let sender = Address::repeat_byte(8);
+    assert_eq!(
+        ExpectedClassicExit::from_admitted(&validated(2), &a, &policy, sender, 1),
+        Err(IntentError::GenerationMismatch)
+    );
+    let other_gen = ExitPolicy::new(6, 300, 100_000_000, 120_000, 400_000).unwrap();
+    assert_eq!(
+        ExpectedClassicExit::from_admitted(&validated(1), &a, &other_gen, sender, 1),
+        Err(IntentError::PolicyGenerationMismatch)
+    );
+    let other_slippage = ExitPolicy::new(5, 200, 100_000_000, 120_000, 400_000).unwrap();
+    assert_eq!(
+        ExpectedClassicExit::from_admitted(&validated(1), &a, &other_slippage, sender, 1),
+        Err(IntentError::PolicyMismatch)
+    );
+    assert_eq!(
+        ExpectedClassicExit::from_admitted(&validated(1), &a, &policy, sender, u64::MAX),
+        Err(IntentError::PolicyMismatch)
+    );
+    let signer = Signer::from_secret_bytes(&[0x68; 32]).unwrap();
+    let e = exit_expectation(&signer, 11);
+    let (approve, sell) = (ExpectedTx::ClassicApprove(&e), ExpectedTx::ClassicSell(&e));
+    assert_eq!((approve.nonce(), sell.nonce()), (11, 12));
+    for tx in [approve, sell] {
+        assert_eq!(
+            (
+                tx.chain_id(),
+                tx.sender(),
+                tx.token(),
+                tx.portal(),
+                tx.value_wei()
+            ),
+            (
+                56,
+                signer.address(),
+                e.token(),
+                e.token_manager2(),
+                U256::ZERO
+            )
+        );
+        assert_eq!(tx.snapshot(), e.snapshot());
+    }
+    assert_eq!(
+        (approve.gas_wei(), sell.gas_wei()),
+        (
+            U256::from(100_000_000u64 * 120_000),
+            U256::from(100_000_000u64 * 400_000)
+        )
+    );
+    let (mut scratch, mut raw) = (Vec::new(), Vec::new());
+    let h = e.sign_sell(&signer, &mut scratch, &mut raw).unwrap();
+    assert_eq!(sell.verify_final(&raw, &e.snapshot(), &mut scratch), Ok(h));
+    assert!(
+        approve
+            .verify_final(&raw, &e.snapshot(), &mut scratch)
+            .is_err()
+    );
+    let h = e.sign_approve(&signer, &mut scratch, &mut raw).unwrap();
+    assert_eq!(
+        approve.verify_final(&raw, &e.snapshot(), &mut scratch),
+        Ok(h)
+    );
+}
