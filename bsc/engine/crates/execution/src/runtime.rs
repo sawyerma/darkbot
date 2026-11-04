@@ -1805,7 +1805,7 @@ pub fn run(
                         crate::venue_probe::probe_four(
                             &endpoint,
                             &limits,
-                            &darkbot_bsc_trading::venues::fourmeme::deployment::bsc_mainnet_g01_129842711(),
+                            &darkbot_bsc_trading::venues::fourmeme::deployment::bsc_mainnet_r12b_131568366(),
                         )
                     })
                     .map_err(|e| {

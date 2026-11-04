@@ -25,7 +25,7 @@ use darkbot_bsc_journal::storage::run::RunReader;
 use darkbot_bsc_record::schema::bsc_capture::{capture_run as cr, replay_proof as rp};
 use darkbot_bsc_record::schema::bsc_runtime::runtime_status as rs;
 use darkbot_bsc_record::{Draft, Record, Value, decode};
-use darkbot_bsc_trading::venues::fourmeme::deployment::bsc_mainnet_g01_129842711;
+use darkbot_bsc_trading::venues::fourmeme::deployment::bsc_mainnet_r12b_131568366;
 use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
@@ -183,7 +183,7 @@ pub fn prove(
             .reasons
             .push("no run manifest: the run is not sealed".into()),
     }
-    let four = bsc_mainnet_g01_129842711();
+    let four = bsc_mainnet_r12b_131568366();
     // Hashes of every journaled first sighting, and the joined launches.
     let mut sighted: HashSet<[u8; 32]> = HashSet::new();
     let mut joined: Vec<([u8; 32], u8, bool, Option<bool>)> = Vec::new();

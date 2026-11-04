@@ -3,7 +3,8 @@
 //! freeze at block 129842711,
 //! `bsc/native/evidence/g01/four_freeze_20261026T053659Z/`, and the v3
 //! freeze at block 129907738, `four_freeze_20261026T134532Z/`: SELLs,
-//! presets, lifecycle).
+//! presets, lifecycle; the R12b refreeze at block 131568366,
+//! `four_freeze_20261104T052604Z/`: TokenManager2's new implementation).
 //!
 //! What is decoded is what the freeze proves (selectors in the executing
 //! dispatcher, the published ABIs re-hashed, canonical fixtures, the CREATE2

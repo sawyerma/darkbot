@@ -29,7 +29,7 @@ use darkbot_bsc_execution::sources::SourceId;
 use darkbot_bsc_journal::RecordKind;
 use darkbot_bsc_record::Draft;
 use darkbot_bsc_record::schema::bsc_capture::ingest_latency as il;
-use darkbot_bsc_trading::venues::fourmeme::deployment::bsc_mainnet_g01_129842711;
+use darkbot_bsc_trading::venues::fourmeme::deployment::bsc_mainnet_r12b_131568366;
 use std::fs;
 use std::hint::black_box;
 use std::path::Path;
@@ -127,7 +127,7 @@ fn stage(name: &str, values: &[u64]) -> (Draft, String) {
 #[test]
 #[ignore = "Phase F ingest latency measurement; run in release"]
 fn f_ingest_latency() {
-    let four = bsc_mainnet_g01_129842711();
+    let four = bsc_mainnet_r12b_131568366();
     let flap_launch = legacy(
         PORTAL,
         &alloy_primitives::hex::decode(

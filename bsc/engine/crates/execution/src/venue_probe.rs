@@ -1957,8 +1957,8 @@ mod tests {
     /// The Four deployment whose fingerprints are those of the served codes,
     /// and a node serving it (the frozen addresses, test codes).
     fn served_four() -> (FourDeployment, Node) {
-        use darkbot_bsc_trading::venues::fourmeme::deployment::bsc_mainnet_g01_129842711;
-        let real = bsc_mainnet_g01_129842711();
+        use darkbot_bsc_trading::venues::fourmeme::deployment::bsc_mainnet_r12b_131568366;
+        let real = bsc_mainnet_r12b_131568366();
         let code = |n: u8| vec![0x60, 0x80, 0x60, 0x40, 0x10 + n];
         let mut d = real;
         d.token_manager2_implementation_runtime_keccak256 = keccak256(code(1));
@@ -2049,12 +2049,15 @@ mod tests {
     }
 
     /// The live Four.meme deployment against the freeze. Read-only; prints
-    /// what differs. Run it with
+    /// what differs. Run it with `BSC_FREE_ARCHIVE_RPC=<the free archive
+    /// endpoint>`
     /// `cargo test -p darkbot-bsc-execution --features runtime --lib venue_probe::tests::live_four -- --ignored --nocapture`.
     #[test]
-    #[ignore = "network: read-only probe of the Four.meme contracts at bsc-dataseed.bnbchain.org"]
+    #[ignore = "network: read-only probe of the Four.meme contracts at BSC_FREE_ARCHIVE_RPC"]
     fn live_four_deployment_is_the_frozen_one() {
-        use darkbot_bsc_trading::venues::fourmeme::deployment::bsc_mainnet_g01_129842711;
+        let rpc = std::env::var("BSC_FREE_ARCHIVE_RPC")
+            .expect("BSC_FREE_ARCHIVE_RPC names the free archive endpoint");
+        use darkbot_bsc_trading::venues::fourmeme::deployment::bsc_mainnet_r12b_131568366;
         let limits = FollowerLimits {
             request_timeout: Duration::from_secs(10),
             max_response_bytes: 16 << 20,
@@ -2063,12 +2066,7 @@ mod tests {
             read_tick: Duration::from_millis(100),
             ..limits()
         };
-        let o = probe_four(
-            "https://bsc-dataseed.bnbchain.org",
-            &limits,
-            &bsc_mainnet_g01_129842711(),
-        )
-        .unwrap();
+        let o = probe_four(&rpc, &limits, &bsc_mainnet_r12b_131568366()).unwrap();
         println!("four at block {}: drift {:?}", o.block_number, o.drift);
         assert!(o.drift.is_empty());
     }

@@ -24,7 +24,7 @@ use alloy_primitives::Address;
 use darkbot_bsc_geth_ipc::ingress::{C14_FLAP_SCOPE, decode_tx_target};
 use darkbot_bsc_trading::venues::flap::recognize::{Recognized, recognize};
 use darkbot_bsc_trading::venues::fourmeme::deployment::{
-    FourDeployment, bsc_mainnet_g01_129842711,
+    FourDeployment, bsc_mainnet_r12b_131568366,
 };
 use darkbot_bsc_trading::venues::fourmeme::recognize as four;
 use std::collections::{HashMap, VecDeque};
@@ -292,7 +292,7 @@ impl IngressCore {
             stats: [SourceStats::default(); 5],
             launches: 0,
             max_launch_calldata,
-            four: bsc_mainnet_g01_129842711(),
+            four: bsc_mainnet_r12b_131568366(),
             last_first_full: false,
             last_venue_target: false,
         }
@@ -870,7 +870,7 @@ mod tests {
                 .unwrap(),
         )
         .unwrap();
-        let four = bsc_mainnet_g01_129842711();
+        let four = bsc_mainnet_r12b_131568366();
         assert!(venue_target(&four, &buy));
         assert!(venue_target(&four, &legacy(PORTAL, LAUNCH)));
         assert!(!venue_target(&four, &legacy([7; 20], LAUNCH)));
@@ -917,7 +917,7 @@ mod tests {
     /// table decodes, but its token is UNKNOWN before execution.
     #[test]
     fn an_unfrozen_openfour_preset_has_no_pending_token() {
-        use darkbot_bsc_trading::venues::fourmeme::deployment::bsc_mainnet_g01_129842711;
+        use darkbot_bsc_trading::venues::fourmeme::deployment::bsc_mainnet_r12b_131568366;
         let calls = include_str!("../../trading/fixtures/fourmeme/freeze_20261026_calls.txt");
         let row: Vec<&str> = calls
             .lines()
@@ -926,7 +926,7 @@ mod tests {
             .split_whitespace()
             .collect();
         let mut raw = alloy_primitives::hex::decode(row[10]).unwrap();
-        let d = bsc_mainnet_g01_129842711();
+        let d = bsc_mainnet_r12b_131568366();
         assert!(matches!(
             four_launch_token(&d, &raw, MAX_CALLDATA),
             Some(four::PendingToken::Derived(_))

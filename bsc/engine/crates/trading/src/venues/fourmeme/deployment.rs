@@ -1,6 +1,15 @@
 //! The frozen Four.meme deployment on BSC mainnet: addresses, runtime
 //! fingerprints and the inputs of the token-address derivation.
 //!
+//! Current: [`bsc_mainnet_r12b_131568366`], the R12b refreeze at block
+//! 131568366 (`bsc/native/evidence/g01/four_freeze_20261104T052604Z/`,
+//! over the free archive endpoint, receipts of direct calls only):
+//! TokenManager2 runs implementation 0xa38d9d48 since the G0.1 freeze; the
+//! other contracts' code and both Classic pairs are unchanged, the
+//! window's Classic launches reproduce under both pairs (3 and 1); one
+//! OpenFour preset (…735) reproduced in the window, the others are carried
+//! over from the v3 freeze (a direct-calls scan cannot name every preset).
+//!
 //! Witness: the G0.1 Four freeze at block 129842711
 //! (`bsc/native/evidence/g01/four_freeze_20261026T053659Z/{classic,openfour}.dbrec`),
 //! re-verified by the v3 freeze at block 129907738
@@ -169,6 +178,20 @@ pub const fn bsc_mainnet_g01_129842711() -> FourDeployment {
     }
 }
 
+/// BSC mainnet as re-frozen by R12b at block 131568366: the G0.1 deployment
+/// with TokenManager2's new implementation (dispatcher 16/16 launch, BUY and
+/// SELL selectors, the window's Classic launches reproduce under both pairs;
+/// R12a executed its BUYs and SELLs). See the module doc for the presets.
+pub const fn bsc_mainnet_r12b_131568366() -> FourDeployment {
+    FourDeployment {
+        token_manager2_implementation: address!("a38d9d4845f49188a9fec089e55890ae4b0e2e72"),
+        token_manager2_implementation_runtime_keccak256: b256!(
+            "8da2a695b0d2e9471ffbf04e1259f306a587857bb2e6f93798b74c3f8b875377"
+        ),
+        ..bsc_mainnet_g01_129842711()
+    }
+}
+
 impl FourDeployment {
     /// The contract of `family` that receives its calls and emits its events.
     pub const fn contract(&self, family: Family) -> Address {
@@ -261,6 +284,31 @@ mod tests {
         assert_eq!(d.family_of(d.token_manager2), Some(Family::Classic));
         assert_eq!(d.family_of(d.openfour_core), Some(Family::OpenFour));
         assert_eq!(d.family_of(d.openfour_registry), None);
+    }
+
+    /// R12b: the refreeze changes TokenManager2's implementation pin only
+    /// (the freeze at block 131568366 read every other pinned contract's
+    /// code unchanged; presets other than …735 are carried over from v3).
+    #[test]
+    fn the_refreeze_moves_only_the_token_manager2_implementation() {
+        let (g01, now) = (bsc_mainnet_g01_129842711(), bsc_mainnet_r12b_131568366());
+        assert_ne!(
+            now.token_manager2_implementation,
+            g01.token_manager2_implementation
+        );
+        assert_ne!(
+            now.token_manager2_implementation_runtime_keccak256,
+            g01.token_manager2_implementation_runtime_keccak256
+        );
+        assert_eq!(
+            FourDeployment {
+                token_manager2_implementation: g01.token_manager2_implementation,
+                token_manager2_implementation_runtime_keccak256: g01
+                    .token_manager2_implementation_runtime_keccak256,
+                ..now
+            },
+            g01
+        );
     }
 
     /// Paket 8 review H1: both witnessed launches of the second Classic

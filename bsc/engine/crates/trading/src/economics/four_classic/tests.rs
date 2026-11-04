@@ -8,7 +8,7 @@ use alloy_primitives::{Address, B256, U256};
 
 use super::*;
 use crate::venues::fourmeme::abi::{AbiError, encode_buy_token_amap};
-use crate::venues::fourmeme::deployment::bsc_mainnet_g01_129842711;
+use crate::venues::fourmeme::deployment::{bsc_mainnet_g01_129842711, bsc_mainnet_r12b_131568366};
 use crate::venues::fourmeme::profile::{
     CLASSIC_PROFILES, UnsupportedClassicLaunch, VenueFee, WITNESSED_MAX_OFFERS,
     WITNESSED_VENUE_FEE, classify_classic_launch,
@@ -114,7 +114,7 @@ fn launch_block(token: &str) -> u64 {
 }
 
 fn decoded(l: &Launch) -> ClassicLaunch<'_> {
-    decode_classic_create(&l.calldata, bsc_mainnet_g01_129842711().classic_args_len).unwrap()
+    decode_classic_create(&l.calldata, bsc_mainnet_r12b_131568366().classic_args_len).unwrap()
 }
 
 fn start(l: &Launch) -> ClassicCurve {
@@ -256,7 +256,7 @@ fn every_launch_curve_and_priced_creator_purchase_is_reproduced() {
 /// curve after it; every other word is refused.
 #[test]
 fn a_priced_launch_names_its_token_and_state_before_execution() {
-    let d = bsc_mainnet_g01_129842711();
+    let d = bsc_mainnet_r12b_131568366();
     let (mut priced_launches, mut refused) = (0, 0);
     for (token, l) in launches() {
         let launch = decoded(&l);
@@ -455,7 +455,7 @@ fn a_buy_of_exactly_the_remaining_offers_is_refused() {
 /// refuses it with that field.
 #[test]
 fn a_priced_launch_with_one_field_changed_is_refused() {
-    let d = bsc_mainnet_g01_129842711();
+    let d = bsc_mainnet_r12b_131568366();
     let (_, l) = launches()
         .into_iter()
         .find(|(_, l)| l.purchase.is_some() && l.quote == Address::ZERO)
@@ -535,9 +535,10 @@ fn a_priced_launch_with_one_field_changed_is_refused() {
 /// one.
 #[test]
 fn every_witnessed_block_names_its_implementation() {
+    let address = |a: Address| a.to_string().to_lowercase();
     let (g01, current) = (
-        "0xf32ee25a7a94f5858692b90815493bda9f992eee",
-        "0xa38d9d4845f49188a9fec089e55890ae4b0e2e72",
+        address(bsc_mainnet_g01_129842711().token_manager2_implementation),
+        address(bsc_mainnet_r12b_131568366().token_manager2_implementation),
     );
     let implementation = |block: &str| {
         rows("IMPL")
@@ -567,6 +568,6 @@ fn every_witnessed_block_names_its_implementation() {
 fn decoded_template(f: &[&str]) -> B256 {
     let calldata = bytes(f[13]);
     let launch =
-        decode_classic_create(&calldata, bsc_mainnet_g01_129842711().classic_args_len).unwrap();
+        decode_classic_create(&calldata, bsc_mainnet_r12b_131568366().classic_args_len).unwrap();
     launch.launch_args().unwrap().template
 }
