@@ -1,6 +1,6 @@
 use super::*;
 use alloy_primitives::{hex, keccak256};
-use darkbot_bsc_trading::economics::flap::native_curve20::WITNESSED_MAINNET_TERMS;
+use darkbot_bsc_trading::economics::flap::native_curve20::{PricedToken, WITNESSED_MAINNET_TERMS};
 use darkbot_bsc_trading::signer::Signer;
 use darkbot_bsc_trading::transactions::legacy::{LegacyTx, decode_signed};
 use darkbot_bsc_trading::venues::flap::abi::{
@@ -826,6 +826,18 @@ pub(crate) fn strategy_c2_next(head: Option<ChainHead>, next: u64) -> CanonicalC
     }
 }
 
+/// A Flap strategy curve's terms, reserve and circulating supply.
+pub(crate) fn flap(c: StrategyCurve) -> (PricedToken, U256, U256) {
+    match c {
+        StrategyCurve::Flap {
+            terms,
+            reserve,
+            circulating,
+        } => (terms, reserve, circulating),
+        StrategyCurve::Four(_) => panic!("a Flap curve"),
+    }
+}
+
 /// A curve after real BUYs of `wei` from the fresh curve, and the
 /// quote of a BUY of `input` on it.
 pub(crate) fn curve_after(wei: u128) -> StrategyCurve {
@@ -844,7 +856,7 @@ pub(crate) fn curve_after(wei: u128) -> StrategyCurve {
         holding_cap: HoldingCap::None,
     })
     .unwrap();
-    StrategyCurve {
+    StrategyCurve::Flap {
         terms,
         reserve: q.reserve_after,
         circulating: q.supply_after,
@@ -906,19 +918,19 @@ fn a_strategy_entry_and_exit_reach_the_sink() {
     );
     // The exit of the tokens bought, on the curve with them in it.
     let tokens = call.min_output_amount;
-    let after = StrategyCurve {
-        reserve: curve.reserve + input,
-        circulating: curve.circulating + tokens,
-        ..curve
+    let after = StrategyCurve::Flap {
+        reserve: flap(curve).1 + input,
+        circulating: flap(curve).2 + tokens,
+        terms: flap(curve).0,
     };
     let curve_with_buy = {
         use darkbot_bsc_trading::economics::flap::native_curve20::{
             HoldingCap, NativeBuyInputs, quote_native_buy,
         };
         let q = quote_native_buy(&NativeBuyInputs {
-            token: curve.terms,
-            reserve_before: curve.reserve,
-            circulating_before: curve.circulating,
+            token: flap(curve).0,
+            reserve_before: flap(curve).1,
+            circulating_before: flap(curve).2,
             input_amount: input,
             protocol_fee_bps: WITNESSED_MAINNET_TERMS.protocol_buy_fee_bps,
             tax_on_bonding_curve_enabled: true,
@@ -926,10 +938,10 @@ fn a_strategy_entry_and_exit_reach_the_sink() {
             holding_cap: HoldingCap::None,
         })
         .unwrap();
-        StrategyCurve {
+        StrategyCurve::Flap {
             reserve: q.reserve_after,
             circulating: q.supply_after,
-            ..after
+            terms: flap(after).0,
         }
     };
     let (exits, refused) = exec.on_strategy_exit(

@@ -74,6 +74,19 @@ pub struct Config {
     pub gas_price_wei: U256,
 }
 
+/// The exact curve a Strategy C intent is admitted and signed on
+/// ([`Engine::curve_of`]): a Flap token's validated terms with its reserve
+/// and circulating supply, or (SC4) a Four.meme venue's exact curve.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StrategyCurve {
+    Flap {
+        terms: PricedToken,
+        reserve: U256,
+        circulating: U256,
+    },
+    Four(FourCurve),
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Input {
     /// A canonical block: everything before it belongs to the previous one.
@@ -317,14 +330,19 @@ impl Engine {
     /// The exact curve a PAPER intent of `token` is admitted on (Phase I):
     /// its validated terms, reserve and circulating supply, on the
     /// position's shadow curve once one is open. `None` when the token is
-    /// not followed or no longer tracked.
-    pub fn curve_of(&self, token: &[u8; 20]) -> Option<(PricedToken, U256, U256)> {
+    /// not followed or no longer tracked, or (SC4) its Four.meme curve has
+    /// no execution path yet.
+    pub fn curve_of(&self, token: &[u8; 20]) -> Option<StrategyCurve> {
         let t = self.tokens.values().find(|t| t.token == *token)?;
         let book = match &t.stage {
             Stage::Open { shadow, .. } | Stage::Exiting { shadow, .. } => shadow.as_ref(),
             Stage::Observing(_) | Stage::Entering { .. } | Stage::Held { .. } => &t.book,
         };
-        Some((book.priced().ok()?, book.reserve, book.circulating))
+        Some(StrategyCurve::Flap {
+            terms: book.priced().ok()?,
+            reserve: book.reserve,
+            circulating: book.circulating,
+        })
     }
 
     /// The tokens an open position holds (what its exit sells).

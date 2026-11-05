@@ -26,6 +26,7 @@ fn loopback_never_runs_on_the_accounts_owner_state() {
 }
 use crate::chain_follower::{CanonicalEvent, CanonicalTx};
 use crate::live_end::tests::{club48_findings, key_file, stand_in};
+use crate::paper_exec::tests::flap;
 
 /// R10: the BlockRazor authorization is read under the key's rules (a
 /// private file outside the repository, through its own name only).
@@ -1105,7 +1106,7 @@ fn a_real_position_opens_closes_and_is_accounted() {
         holding_cap: HoldingCap::None,
     })
     .unwrap();
-    let curve = StrategyCurve {
+    let curve = StrategyCurve::Flap {
         terms,
         reserve: fresh.reserve_after,
         circulating: fresh.supply_after,
@@ -1125,8 +1126,8 @@ fn a_real_position_opens_closes_and_is_accounted() {
     // Its receipt: included with its gas and the Portal's trade.
     let bought = quote_native_buy(&NativeBuyInputs {
         token: terms,
-        reserve_before: curve.reserve,
-        circulating_before: curve.circulating,
+        reserve_before: flap(curve).1,
+        circulating_before: flap(curve).2,
         input_amount: input,
         protocol_fee_bps: WITNESSED_MAINNET_TERMS.protocol_buy_fee_bps,
         tax_on_bonding_curve_enabled: true,
@@ -1218,10 +1219,10 @@ fn a_real_position_opens_closes_and_is_accounted() {
     assert_eq!(changes, vec![opened]);
     // The exit: approval, then (on a ready connection) the SELL of the
     // real tokens, both signed by the buyer key.
-    let held = StrategyCurve {
+    let held = StrategyCurve::Flap {
         reserve: bought.reserve_after,
         circulating: bought.supply_after,
-        ..curve
+        terms: flap(curve).0,
     };
     let exit = StrategyAction::Exit {
         token,
@@ -1287,8 +1288,8 @@ fn a_real_position_opens_closes_and_is_accounted() {
     let proceeds = quote_native_sell(
         &darkbot_bsc_trading::economics::flap::native_curve20::NativeSellInputs {
             token: terms,
-            reserve_before: held.reserve,
-            circulating_before: held.circulating,
+            reserve_before: flap(held).1,
+            circulating_before: flap(held).2,
             input_amount: tokens,
             protocol_fee_bps: WITNESSED_MAINNET_TERMS.protocol_sell_fee_bps,
             tax_on_bonding_curve_enabled: true,
@@ -1465,7 +1466,7 @@ fn reverted_exit_steps(tag: &str, reverts_max: u64, sell_out_of_gas: bool) {
         holding_cap: HoldingCap::None,
     })
     .unwrap();
-    let curve = StrategyCurve {
+    let curve = StrategyCurve::Flap {
         terms,
         reserve: fresh.reserve_after,
         circulating: fresh.supply_after,
@@ -1485,8 +1486,8 @@ fn reverted_exit_steps(tag: &str, reverts_max: u64, sell_out_of_gas: bool) {
     // Its receipt: included with its gas and the Portal's trade.
     let bought = quote_native_buy(&NativeBuyInputs {
         token: terms,
-        reserve_before: curve.reserve,
-        circulating_before: curve.circulating,
+        reserve_before: flap(curve).1,
+        circulating_before: flap(curve).2,
         input_amount: input,
         protocol_fee_bps: WITNESSED_MAINNET_TERMS.protocol_buy_fee_bps,
         tax_on_bonding_curve_enabled: true,
@@ -1557,10 +1558,10 @@ fn reverted_exit_steps(tag: &str, reverts_max: u64, sell_out_of_gas: bool) {
     assert_eq!(changes, vec![opened]);
     // The exit: approval, then (on a ready connection) the SELL of the
     // real tokens, both signed by the buyer key.
-    let held = StrategyCurve {
+    let held = StrategyCurve::Flap {
         reserve: bought.reserve_after,
         circulating: bought.supply_after,
-        ..curve
+        terms: flap(curve).0,
     };
     let exit = StrategyAction::Exit {
         token,
@@ -1726,8 +1727,8 @@ fn reverted_exit_steps(tag: &str, reverts_max: u64, sell_out_of_gas: bool) {
     let dump = quote_native_sell(
         &darkbot_bsc_trading::economics::flap::native_curve20::NativeSellInputs {
             token: terms,
-            reserve_before: held.reserve,
-            circulating_before: held.circulating,
+            reserve_before: flap(held).1,
+            circulating_before: flap(held).2,
             input_amount: tokens,
             protocol_fee_bps: WITNESSED_MAINNET_TERMS.protocol_sell_fee_bps,
             tax_on_bonding_curve_enabled: true,
@@ -1735,10 +1736,10 @@ fn reverted_exit_steps(tag: &str, reverts_max: u64, sell_out_of_gas: bool) {
         },
     )
     .unwrap();
-    let crashed = StrategyCurve {
+    let crashed = StrategyCurve::Flap {
         reserve: dump.reserve_after,
         circulating: dump.supply_after,
-        ..held
+        terms: flap(held).0,
     };
     let exit_again = StrategyAction::Exit {
         token,
@@ -1761,8 +1762,8 @@ fn reverted_exit_steps(tag: &str, reverts_max: u64, sell_out_of_gas: bool) {
     let proceeds = quote_native_sell(
         &darkbot_bsc_trading::economics::flap::native_curve20::NativeSellInputs {
             token: terms,
-            reserve_before: crashed.reserve,
-            circulating_before: crashed.circulating,
+            reserve_before: flap(crashed).1,
+            circulating_before: flap(crashed).2,
             input_amount: tokens,
             protocol_fee_bps: WITNESSED_MAINNET_TERMS.protocol_sell_fee_bps,
             tax_on_bonding_curve_enabled: true,
@@ -2455,17 +2456,17 @@ fn an_exit_refused_for_the_nonce_order_continues_once_it_may() {
         U256::ZERO,
         U256::from(1_000_000_000_000_000_000u128),
     );
-    let curve = StrategyCurve {
+    let curve = StrategyCurve::Flap {
         terms,
         reserve: fresh.reserve_after,
         circulating: fresh.supply_after,
     };
-    let bought = quote(curve.reserve, curve.circulating, input);
+    let bought = quote(flap(curve).1, flap(curve).2, input);
     let tokens = bought.output_amount;
-    let held = StrategyCurve {
+    let held = StrategyCurve::Flap {
         reserve: bought.reserve_after,
         circulating: bought.supply_after,
-        ..curve
+        terms: flap(curve).0,
     };
     let buy = |token| StrategyAction::Buy {
         token,
@@ -2641,18 +2642,18 @@ impl Sc {
             U256::ZERO,
             U256::from(1_000_000_000_000_000_000u128),
         );
-        let curve = crate::paper_exec::StrategyCurve {
+        let curve = crate::paper_exec::StrategyCurve::Flap {
             terms,
             reserve: fresh.reserve_after,
             circulating: fresh.supply_after,
         };
-        let bought = quote(curve.reserve, curve.circulating, input);
+        let bought = quote(flap(curve).1, flap(curve).2, input);
         Sc {
             curve,
-            held: crate::paper_exec::StrategyCurve {
+            held: crate::paper_exec::StrategyCurve::Flap {
                 reserve: bought.reserve_after,
                 circulating: bought.supply_after,
-                ..curve
+                terms: flap(curve).0,
             },
             tokens: bought.output_amount,
             input,
@@ -3477,9 +3478,10 @@ fn a_lost_exit_step_goes_again_at_its_nonce_before_any_buy() {
     let moved = crate::runtime_strategy::StrategyAction::Exit {
         token: a,
         tokens: sc.tokens,
-        curve: crate::paper_exec::StrategyCurve {
-            reserve: sc.held.reserve + U256::from(1_000_000_000_000_000u64),
-            ..sc.held
+        curve: crate::paper_exec::StrategyCurve::Flap {
+            reserve: flap(sc.held).1 + U256::from(1_000_000_000_000_000u64),
+            circulating: flap(sc.held).2,
+            terms: flap(sc.held).0,
         },
         decided_ns: 0,
     };
@@ -6629,7 +6631,7 @@ fn a_strategy_buy_starts_within_its_deadline_after_its_admission() {
         let buy = StrategyAction::Buy {
             token: [0xAB; 20],
             creator: [0; 20],
-            curve: StrategyCurve {
+            curve: StrategyCurve::Flap {
                 terms,
                 reserve: fresh.reserve_after,
                 circulating: fresh.supply_after,
@@ -6818,7 +6820,7 @@ fn the_c3_lease_yields_its_nonce_and_goes_back_with_the_arm() {
     let buy = StrategyAction::Buy {
         token: [0xAB; 20],
         creator: [0; 20],
-        curve: StrategyCurve {
+        curve: StrategyCurve::Flap {
             terms,
             reserve: fresh.reserve_after,
             circulating: fresh.supply_after,
@@ -7225,7 +7227,7 @@ fn fresh_buy(token: [u8; 20]) -> crate::runtime_strategy::StrategyAction {
     crate::runtime_strategy::StrategyAction::Buy {
         token,
         creator: [0; 20],
-        curve: StrategyCurve {
+        curve: StrategyCurve::Flap {
             terms,
             reserve: fresh.reserve_after,
             circulating: fresh.supply_after,

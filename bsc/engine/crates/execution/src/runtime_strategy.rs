@@ -967,13 +967,7 @@ impl StrategyRuntime {
     }
 
     fn curve(&self, token: &[u8; 20]) -> Option<StrategyCurve> {
-        self.engine
-            .curve_of(token)
-            .map(|(terms, reserve, circulating)| StrategyCurve {
-                terms,
-                reserve,
-                circulating,
-            })
+        self.engine.curve_of(token)
     }
 
     /// SC4: the venues whose launches it follows.
@@ -1886,7 +1880,14 @@ mod tests {
         }
         assert_eq!(s.counters.passed, 1);
         // A buy in the decision block 105, after its record.
-        let (terms, reserve, circulating) = s.engine.curve_of(&TOKEN).unwrap();
+        let Some(darkbot_bsc_trading::strategy::engine::StrategyCurve::Flap {
+            terms,
+            reserve,
+            circulating,
+        }) = s.engine.curve_of(&TOKEN)
+        else {
+            panic!("a Flap curve")
+        };
         let eth = U256::from(100_000_000_000_000_000u64);
         let q = quote_native_buy(
             &darkbot_bsc_trading::economics::flap::native_curve20::NativeBuyInputs {
@@ -1933,11 +1934,16 @@ mod tests {
         else {
             panic!("{actions:?}")
         };
-        assert_eq!(
-            (curve.reserve, curve.circulating),
-            (q.reserve_after, q.supply_after)
-        );
-        assert_ne!(curve.reserve, reserve);
+        let StrategyCurve::Flap {
+            reserve: after,
+            circulating,
+            ..
+        } = *curve
+        else {
+            panic!("a Flap curve")
+        };
+        assert_eq!((after, circulating), (q.reserve_after, q.supply_after));
+        assert_ne!(after, reserve);
         assert_eq!(*decided_ns, 1);
         j.finish().unwrap();
         std::fs::remove_dir_all(&base).unwrap();

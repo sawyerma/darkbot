@@ -1210,7 +1210,7 @@ fn live_buy_to_sell_is_synthetic_and_never_leaves_the_host() {
     // The exit by the rules: the approval, then, once it is canonical
     // (BSC3-055: one nonce after the other), the SELL of the real tokens,
     // signed by the buyer key, each admitted by the owner.
-    let held = StrategyCurve {
+    let held = StrategyCurve::Flap {
         terms,
         reserve: q.reserve_after,
         circulating: q.supply_after,
@@ -1263,8 +1263,8 @@ fn live_buy_to_sell_is_synthetic_and_never_leaves_the_host() {
     requests.recv_timeout(Duration::from_secs(2)).unwrap();
     let proceeds = quote_native_sell(&NativeSellInputs {
         token: terms,
-        reserve_before: held.reserve,
-        circulating_before: held.circulating,
+        reserve_before: q.reserve_after,
+        circulating_before: q.supply_after,
         input_amount: tokens,
         protocol_fee_bps: WITNESSED_MAINNET_TERMS.protocol_sell_fee_bps,
         tax_on_bonding_curve_enabled: true,

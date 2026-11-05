@@ -289,7 +289,7 @@ fn strategy_paper_path_latency() {
         holding_cap: HoldingCap::None,
     })
     .unwrap();
-    let curve = StrategyCurve {
+    let curve = StrategyCurve::Flap {
         terms,
         reserve: q.reserve_after,
         circulating: q.supply_after,

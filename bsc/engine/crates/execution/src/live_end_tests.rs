@@ -1,6 +1,6 @@
 use super::*;
 use crate::paper_exec::tests::{
-    HEAD, c2_next, clock, config, curve_after, dir, launch, strategy_c2_next, validated,
+    HEAD, c2_next, clock, config, curve_after, dir, flap, launch, strategy_c2_next, validated,
 };
 use crate::paper_exec::{Arming, Executor, IntentKind, PendingLaunch, StrategyCurve};
 use crate::sources::tests::{grant_of, live_ready_granting};
@@ -466,9 +466,9 @@ fn live_intents_leave_through_the_release_only_as_the_owner_admits_them() {
     let call = decode_swap_exact_input_native(decode_signed(&entry.raw).unwrap().tx.input).unwrap();
     let tokens = call.min_output_amount;
     let q = quote_native_buy(&NativeBuyInputs {
-        token: curve.terms,
-        reserve_before: curve.reserve,
-        circulating_before: curve.circulating,
+        token: flap(curve).0,
+        reserve_before: flap(curve).1,
+        circulating_before: flap(curve).2,
         input_amount: input,
         protocol_fee_bps: WITNESSED_MAINNET_TERMS.protocol_buy_fee_bps,
         tax_on_bonding_curve_enabled: true,
@@ -476,10 +476,10 @@ fn live_intents_leave_through_the_release_only_as_the_owner_admits_them() {
         holding_cap: HoldingCap::None,
     })
     .unwrap();
-    let held = StrategyCurve {
+    let held = StrategyCurve::Flap {
         reserve: q.reserve_after,
         circulating: q.supply_after,
-        ..curve
+        terms: flap(curve).0,
     };
     reconnect(&mut exec);
     // The day's BUYs are taken; the exit needs none. Once the BUY is
@@ -705,9 +705,9 @@ fn one_sender_releases_one_nonce_after_the_other() {
         .unwrap()
         .min_output_amount;
     let q = quote_native_buy(&NativeBuyInputs {
-        token: curve.terms,
-        reserve_before: curve.reserve,
-        circulating_before: curve.circulating,
+        token: flap(curve).0,
+        reserve_before: flap(curve).1,
+        circulating_before: flap(curve).2,
         input_amount: input,
         protocol_fee_bps: WITNESSED_MAINNET_TERMS.protocol_buy_fee_bps,
         tax_on_bonding_curve_enabled: true,
@@ -715,10 +715,10 @@ fn one_sender_releases_one_nonce_after_the_other() {
         holding_cap: HoldingCap::None,
     })
     .unwrap();
-    let held = StrategyCurve {
+    let held = StrategyCurve::Flap {
         reserve: q.reserve_after,
         circulating: q.supply_after,
-        ..curve
+        terms: flap(curve).0,
     };
     let exit = |exec: &mut Executor<LiveEnd>, next: u64| {
         exec.on_strategy_exit(

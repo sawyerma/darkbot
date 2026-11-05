@@ -541,7 +541,9 @@ fn a_held_real_position_exits_by_the_same_rules_once() {
     c.next_block();
     c.next_block();
     assert_eq!(c.kinds(), ["trigger 105 Target"]);
-    let (_, reserve, _) = c.engine.curve_of(&TOKEN).unwrap();
+    let Some(StrategyCurve::Flap { reserve, .. }) = c.engine.curve_of(&TOKEN) else {
+        panic!("a Flap curve")
+    };
     assert_eq!(reserve, c.book(TOKEN).reserve, "the real curve");
     c.feed(Input::Unhold { token: TOKEN });
     assert_eq!((c.engine.held_positions(), c.engine.followed()), (0, 0));
@@ -610,7 +612,9 @@ fn a_position_held_again_on_its_read_curve_exits_by_the_same_rules() {
     c.next_block();
     c.next_block();
     assert_eq!(c.kinds(), ["trigger 101 Target"]);
-    let (_, reserve, _) = c.engine.curve_of(&TOKEN).unwrap();
+    let Some(StrategyCurve::Flap { reserve, .. }) = c.engine.curve_of(&TOKEN) else {
+        panic!("a Flap curve")
+    };
     assert_eq!(reserve, c.book(TOKEN).reserve, "the real curve");
     // A token this engine never followed: held on its read curve alone.
     let other = [0xAB; 20];

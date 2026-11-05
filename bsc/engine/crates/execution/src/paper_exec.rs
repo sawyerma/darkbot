@@ -53,8 +53,8 @@ use darkbot_bsc_trading::chain_state::SnapshotId;
 use darkbot_bsc_trading::chain_state::canonical::{FinalityProof, InclusionProof, OrphanProof};
 use darkbot_bsc_trading::economics::flap::AdmittedBuy;
 use darkbot_bsc_trading::economics::flap::native_curve20::{
-    CurveState, PricedToken, QUALIFIED_MAINNET_INPUT_WEI, QualifiedNativeState, VenueBuyTerms,
-    admit_curve_buy, admit_curve_sell, admit_native_buy,
+    CurveState, QUALIFIED_MAINNET_INPUT_WEI, QualifiedNativeState, VenueBuyTerms, admit_curve_buy,
+    admit_curve_sell, admit_native_buy,
 };
 use darkbot_bsc_trading::economics::four_classic::{
     AdmittedClassicBuy, QUALIFIED_CLASSIC_INPUTS_WEI, QualifiedClassicState, admit_classic_buy,
@@ -466,6 +466,9 @@ pub enum Refusal {
     /// Phase I gate M2: the path does not take the sender in this arm
     /// (`BSC_EXEC_SENDER_PATHS`).
     PathOff,
+    /// SC4: a Strategy C intent on a Four.meme curve whose venue has no
+    /// strategy execution armed.
+    VenueUnarmed,
     /// Plan 28.10.: the plan or a transport is not qualified for a release.
     Unqualified,
     /// Plan 28.10.: the native owner did not admit the LIVE intent now.
@@ -516,6 +519,7 @@ impl Refusal {
             Self::StaleHead => "STALE_HEAD",
             Self::NonceTaken => "NONCE_TAKEN",
             Self::PathOff => "PATH_OFF",
+            Self::VenueUnarmed => "VENUE_UNARMED",
             Self::Unqualified => "UNQUALIFIED",
             Self::Owner => "OWNER",
             Self::SenderNonce => "SENDER_NONCE",
@@ -614,7 +618,9 @@ struct FourArm {
 
 /// A C3 BUY admitted on one venue, before the lane, signature and plan.
 struct C3Admitted {
-    intent: C3Intent,
+    intent: BuyAdmitted,
+    /// The arm's policy of its venue.
+    policy: BuyPolicy,
     token: [u8; 20],
     budget: BudgetEnvelope,
     decoded_ns: u64,
@@ -623,10 +629,40 @@ struct C3Admitted {
     head: ChainHead,
 }
 
-enum C3Intent {
+/// A BUY admitted on one venue (C3 or Strategy C), before its nonce: what
+/// [`Executor::expect_buy`] binds and signs.
+enum BuyAdmitted {
     Flap(AdmittedBuy),
-    Four(AdmittedClassicBuy),
+    Classic(AdmittedClassicBuy),
     OpenFour(AdmittedOpenFourBuy),
+}
+
+impl BuyAdmitted {
+    fn token(&self) -> Address {
+        match self {
+            Self::Flap(a) => a.token(),
+            Self::Classic(a) => a.token(),
+            Self::OpenFour(a) => a.token(),
+        }
+    }
+}
+
+/// An admitted BUY bound to its nonce and signed (the raw transaction in
+/// the executor's buffer).
+enum ExpectedBuyTx {
+    Flap(ExpectedBuy),
+    Classic(ExpectedClassicBuy),
+    OpenFour(ExpectedOpenFourBuy),
+}
+
+impl ExpectedBuyTx {
+    fn tx(&self) -> ExpectedTx<'_> {
+        match self {
+            Self::Flap(e) => ExpectedTx::Buy(e),
+            Self::Classic(e) => ExpectedTx::ClassicBuy(e),
+            Self::OpenFour(e) => ExpectedTx::OpenFourBuy(e),
+        }
+    }
 }
 
 /// A native value as signed (big-endian, no leading zero), in wei.
@@ -664,15 +700,12 @@ impl IntentKind {
 
 /// The exact curve a Strategy C intent is admitted on
 /// (`strategy::engine::Engine::curve_of`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct StrategyCurve {
-    pub terms: PricedToken,
-    pub reserve: U256,
-    pub circulating: U256,
-}
+pub use darkbot_bsc_trading::strategy::engine::StrategyCurve;
 
 /// How an exit's SELL is priced: on the token's curve, or (REV.1.0 R5) by
-/// the Portal's quote of a token that migrated to its DEX.
+/// the Portal's quote of a token that migrated to its DEX. A transient
+/// `Copy` value of one exit: a boxed curve would allocate on the exit path.
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ExitSale {
     Curve(StrategyCurve),
@@ -1826,7 +1859,8 @@ impl<E: End> Executor<E> {
         let admitted = admit_native_buy(&state, &self.policy).map_err(|_| Refusal::Admission)?;
         Ok(C3Admitted {
             token: admitted.token().into_array(),
-            intent: C3Intent::Flap(admitted),
+            intent: BuyAdmitted::Flap(admitted),
+            policy: self.policy,
             budget: self.budget,
             decoded_ns,
             admitted_ns: clock.now_ns(),
@@ -1871,7 +1905,8 @@ impl<E: End> Executor<E> {
         let admitted = admit_classic_buy(&state, &four.policy).map_err(|_| Refusal::Admission)?;
         Ok(C3Admitted {
             token: admitted.token().into_array(),
-            intent: C3Intent::Four(admitted),
+            intent: BuyAdmitted::Classic(admitted),
+            policy: four.policy,
             budget: four.budget,
             decoded_ns,
             admitted_ns: clock.now_ns(),
@@ -1923,7 +1958,8 @@ impl<E: End> Executor<E> {
         let admitted = admit_openfour_buy(&state, &arm.policy).map_err(|_| Refusal::Admission)?;
         Ok(C3Admitted {
             token: admitted.token().into_array(),
-            intent: C3Intent::OpenFour(admitted),
+            intent: BuyAdmitted::OpenFour(admitted),
+            policy: arm.policy,
             budget: arm.budget,
             decoded_ns,
             admitted_ns: clock.now_ns(),
@@ -1979,7 +2015,8 @@ impl<E: End> Executor<E> {
         if E::CHAIN_ORDERED && c2.next_nonce != Some(self.first_nonce) {
             return Err(Refusal::SenderNonce);
         }
-        let Some(lane) = self.lanes.get_mut(self.used) else {
+        let index = self.used;
+        let Some(lane) = self.lanes.get_mut(index) else {
             return Err(Refusal::LanesExhausted);
         };
         // The lane is consumed by this attempt, whatever happens next.
@@ -1991,67 +2028,18 @@ impl<E: End> Executor<E> {
         // burns it there: a replacement launch of it is refused.
         self.bought.push(token);
         self.bought_on.push((token, hash));
-        let sender = Address::from(self.end.address());
-        let flap_expected;
-        let four_expected;
-        let openfour_expected;
-        let expected = match a.intent {
-            C3Intent::Flap(admitted) => {
-                flap_expected = ExpectedBuy::from_admitted(
-                    &self.deployment,
-                    &admitted,
-                    &self.policy,
-                    sender,
-                    ticket.nonce(),
-                )
-                .map_err(|_| Refusal::Intent)?;
-                flap_expected
-                    .sign(self.end.signer(), &mut self.scratch, &mut self.raw)
-                    .map_err(|_| Refusal::Build)?;
-                ExpectedTx::Buy(&flap_expected)
-            }
-            C3Intent::Four(admitted) => {
-                let four = self.four.as_ref().ok_or(Refusal::Intent)?;
-                four_expected = ExpectedClassicBuy::from_admitted(
-                    &four.validated,
-                    &admitted,
-                    &four.policy,
-                    sender,
-                    ticket.nonce(),
-                )
-                .map_err(|_| Refusal::Intent)?;
-                four_expected
-                    .sign(self.end.signer(), &mut self.scratch, &mut self.raw)
-                    .map_err(|_| Refusal::Build)?;
-                ExpectedTx::ClassicBuy(&four_expected)
-            }
-            C3Intent::OpenFour(admitted) => {
-                let arm = self.openfour.as_ref().ok_or(Refusal::Intent)?;
-                openfour_expected = ExpectedOpenFourBuy::from_admitted(
-                    &arm.validated,
-                    &admitted,
-                    &arm.policy,
-                    sender,
-                    ticket.nonce(),
-                )
-                .map_err(|_| Refusal::Intent)?;
-                openfour_expected
-                    .sign(self.end.signer(), &mut self.scratch, &mut self.raw)
-                    .map_err(|_| Refusal::Build)?;
-                ExpectedTx::OpenFourBuy(&openfour_expected)
-            }
-        };
+        let expected = self.expect_buy(&a.intent, &a.policy, ticket.nonce())?;
         let signed_ns = clock.now_ns();
         let (handoff, prepared_ns, planned_ns, (admitted, disclosed)) = to_end(
             Parts {
                 end: &mut self.end,
-                lane,
+                lane: &mut self.lanes[index],
                 config: &self.config,
                 scratch: &mut self.scratch,
             },
             ticket,
             &self.raw,
-            expected,
+            expected.tx(),
             &a.budget,
             exits,
             &a.snapshot,
@@ -2083,6 +2071,47 @@ impl<E: End> Executor<E> {
             },
             raw: self.raw.clone(),
         })
+    }
+
+    /// A5: the expected BUY of `admitted` under `policy` at `nonce`, bound
+    /// to its venue's deployment and signed into the raw buffer: the one
+    /// intent + nonce to transaction step of C3 and Strategy C.
+    fn expect_buy(
+        &mut self,
+        admitted: &BuyAdmitted,
+        policy: &BuyPolicy,
+        nonce: u64,
+    ) -> Result<ExpectedBuyTx, Refusal> {
+        let sender = Address::from(self.end.address());
+        let expected = match admitted {
+            BuyAdmitted::Flap(a) => {
+                ExpectedBuy::from_admitted(&self.deployment, a, policy, sender, nonce)
+                    .map(ExpectedBuyTx::Flap)
+                    .map_err(|_| Refusal::Intent)?
+            }
+            BuyAdmitted::Classic(a) => {
+                let arm = self.four.as_ref().ok_or(Refusal::Intent)?;
+                ExpectedClassicBuy::from_admitted(&arm.validated, a, policy, sender, nonce)
+                    .map(ExpectedBuyTx::Classic)
+                    .map_err(|_| Refusal::Intent)?
+            }
+            BuyAdmitted::OpenFour(a) => {
+                let arm = self.openfour.as_ref().ok_or(Refusal::Intent)?;
+                ExpectedOpenFourBuy::from_admitted(&arm.validated, a, policy, sender, nonce)
+                    .map(ExpectedBuyTx::OpenFour)
+                    .map_err(|_| Refusal::Intent)?
+            }
+        };
+        let (signer, scratch, raw) = (self.end.signer(), &mut self.scratch, &mut self.raw);
+        let signed = match &expected {
+            ExpectedBuyTx::Flap(e) => e.sign(signer, scratch, raw).is_ok(),
+            ExpectedBuyTx::Classic(e) => e.sign(signer, scratch, raw).is_ok(),
+            ExpectedBuyTx::OpenFour(e) => e.sign(signer, scratch, raw).is_ok(),
+        };
+        match signed {
+            true => Ok(expected),
+            false => Err(Refusal::Build),
+        }
     }
 
     /// Phase I: a Strategy C PASS on `token` (`decided_ns`: the decision
@@ -2532,6 +2561,14 @@ impl<E: End> Executor<E> {
         if !self.config.sender_paths.strategy() {
             return Err(Refusal::PathOff);
         }
+        let StrategyCurve::Flap {
+            terms,
+            reserve,
+            circulating,
+        } = curve
+        else {
+            return Err(Refusal::VenueUnarmed);
+        };
         let policy = BuyPolicy::new(
             self.config.policy_generation,
             input_wei,
@@ -2548,14 +2585,16 @@ impl<E: End> Executor<E> {
         let head = c2.fresh_head(self.config.strategy_max_head_age_ms)?;
         let state = CurveState::tracked(
             Address::from(token),
-            curve.terms,
-            curve.reserve,
-            curve.circulating,
+            terms,
+            reserve,
+            circulating,
             &self.terms,
             snapshot,
         )
         .map_err(|_| Refusal::Admission)?;
         let admitted = admit_curve_buy(&state, &policy).map_err(|_| Refusal::Admission)?;
+        let min_tokens = admitted.min_output_amount();
+        let admitted = BuyAdmitted::Flap(admitted);
         let admitted_ns = clock.now_ns();
         if self.holds(&token) {
             return Err(Refusal::DuplicateToken);
@@ -2590,22 +2629,7 @@ impl<E: End> Executor<E> {
             self.strategy_refused(index, true);
             return Err(Refusal::Lane);
         };
-        let sender = Address::from(self.end.address());
-        let built = ExpectedBuy::from_admitted(
-            &self.deployment,
-            &admitted,
-            &policy,
-            sender,
-            ticket.nonce(),
-        )
-        .map_err(|_| Refusal::Intent)
-        .and_then(|expected| {
-            expected
-                .sign(self.end.signer(), &mut self.scratch, &mut self.raw)
-                .map(|_| expected)
-                .map_err(|_| Refusal::Build)
-        });
-        let expected = match built {
+        let expected = match self.expect_buy(&admitted, &policy, ticket.nonce()) {
             Ok(e) => e,
             Err(r) => {
                 self.strategy_refused(index, false);
@@ -2622,7 +2646,7 @@ impl<E: End> Executor<E> {
             },
             ticket,
             &self.raw,
-            ExpectedTx::Buy(&expected),
+            expected.tx(),
             &budget,
             exits,
             &snapshot,
@@ -2648,7 +2672,7 @@ impl<E: End> Executor<E> {
         self.strategy_bought.push(Held {
             released: false,
             token,
-            min_tokens: admitted.min_output_amount(),
+            min_tokens,
             input_wei,
         });
         self.recount(&token, before);
@@ -2725,12 +2749,17 @@ impl<E: End> Executor<E> {
         };
         let exit_policy = repriced.unwrap_or(self.exit_policy);
         let admitted = match sale {
-            ExitSale::Curve(curve) => SellAdmitted::Curve(
+            ExitSale::Curve(StrategyCurve::Four(_)) => return Err(Refusal::VenueUnarmed),
+            ExitSale::Curve(StrategyCurve::Flap {
+                terms,
+                reserve,
+                circulating,
+            }) => SellAdmitted::Curve(
                 CurveState::tracked(
                     Address::from(token),
-                    curve.terms,
-                    curve.reserve,
-                    curve.circulating,
+                    terms,
+                    reserve,
+                    circulating,
                     &self.terms,
                     snapshot,
                 )
