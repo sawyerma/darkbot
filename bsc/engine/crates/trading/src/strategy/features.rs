@@ -16,7 +16,6 @@ use alloy_primitives::{U256, U512};
 
 use super::book::{TokenBook, Trade};
 use super::fixed::{ratio, scale};
-use crate::economics::flap::curve::TOTAL_SUPPLY;
 
 /// The feature names, in contract order.
 pub const NAMES: [&str; 16] = [
@@ -213,10 +212,11 @@ impl Observation {
         // Without a trade in the window the empty curve is t0 and t.
         let price_t0 = self.price_t0.or_else(|| book.empty_price());
         let price_t = self.price_t.or(price_t0);
+        // Flap: circulating over the DEX threshold; SC4 Four.meme: sold
+        // over the sale.
         let progress = book
-            .terms
-            .dex_threshold
-            .and_then(|t| ratio(book.circulating.checked_mul(U256::from(100u8))?, t, p));
+            .progress()
+            .and_then(|(n, d)| ratio(n.checked_mul(U256::from(100u8))?, d, p));
         [
             Value::Num(i128::from(self.buy_count)),
             Value::Num(i128::from(self.sell_count)),
@@ -251,7 +251,7 @@ impl Observation {
             } else {
                 Value::Null
             },
-            num(ratio(self.dev_tokens, U256::from(TOTAL_SUPPLY), p)),
+            num(ratio(self.dev_tokens, book.total_supply(), p)),
             num(progress),
             // A coverage gap only: a token the book stopped tracking (a
             // term outside the scope, a mismatch) is NOT_TRACKED with its

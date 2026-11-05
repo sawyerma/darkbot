@@ -194,7 +194,10 @@ fn part(x: U256, bps: u16) -> Result<U256, ClassicQuoteError> {
 }
 
 /// `K·1e18 / T`: the virtual quote reserve.
-fn virtual_quote(curve: &ClassicCurve) -> Result<U256, ClassicQuoteError> {
+/// The curve's virtual quote reserve `floor(K · 1e18 / t)`: what it raised
+/// since the launch is its difference to the launch curve's (SC4: the
+/// `funds` a Classic trade reports).
+pub fn virtual_quote(curve: &ClassicCurve) -> Result<U256, ClassicQuoteError> {
     Ok(mul_div_down(curve.k, U256::from(ONE), curve.t)?)
 }
 

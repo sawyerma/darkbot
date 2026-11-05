@@ -496,8 +496,10 @@ pub(crate) struct Gates {
     /// R12d: OpenFour launches likewise, while the OpenFour venue is.
     pub openfour_admitted: bool,
     /// BSC_STRATEGY_C runs (SHADOW or LIVE) under a runtime mode of SHADOW,
-    /// PAPER or LIVE; switched off, its ledger ends.
+    /// PAPER or LIVE, with a venue admitted; switched off, its ledger ends.
     pub strategy_on: bool,
+    /// SC4: the venues whose launches it follows (each admitted).
+    pub strategy_venues: crate::runtime_strategy::StrategyVenues,
     /// The C3 PAPER path: a venue admitted, runtime mode PAPER and
     /// BSC_EXEC SHADOW (its own effective mode, as the owner stores it).
     pub c3_wanted: bool,
@@ -513,11 +515,17 @@ pub(crate) fn gates(eff: impl Fn(crate::sources::Entity) -> Effective, exec: Eff
     let four_admitted = running(eff(VenueId::FourClassic.into()));
     let openfour_admitted = running(eff(VenueId::OpenFour.into()));
     let runtime_mode = eff(crate::sources::Entity::Runtime);
+    let strategy_venues = crate::runtime_strategy::StrategyVenues {
+        flap: flap_admitted,
+        four: four_admitted,
+        openfour: openfour_admitted,
+    };
     Gates {
         flap_admitted,
         four_admitted,
         openfour_admitted,
-        strategy_on: flap_admitted
+        strategy_venues,
+        strategy_on: strategy_venues.any()
             && matches!(
                 runtime_mode,
                 Effective::Shadow | Effective::Paper | Effective::Live
@@ -548,6 +556,41 @@ pub(crate) struct FourArmed {
     pub classic: bool,
     /// R12d.
     pub openfour: bool,
+}
+
+/// SC4: what a reconcile does with Strategy C.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum StrategySwitch {
+    /// Not running and not wanted: nothing to journal.
+    Off,
+    /// Wanted, not running: switched on with the admitted venues.
+    Start,
+    /// Running on other venues than those admitted now: off, then on.
+    Restart,
+    /// Running, not wanted: switched off.
+    Stop,
+    /// Wanted, its gas evidence refused: not started.
+    Refused,
+    /// Running on the admitted venues.
+    Keep,
+}
+
+/// SC4: the switch of Strategy C for `on` (its gates), the venues it runs on
+/// (`running`) and those admitted now, its gas evidence loaded or not.
+pub(crate) fn strategy_switch(
+    on: bool,
+    running: Option<crate::runtime_strategy::StrategyVenues>,
+    venues: crate::runtime_strategy::StrategyVenues,
+    gas_ok: bool,
+) -> StrategySwitch {
+    match (on, running) {
+        (false, None) => StrategySwitch::Off,
+        (false, Some(_)) => StrategySwitch::Stop,
+        (true, None) if gas_ok => StrategySwitch::Start,
+        (true, None) => StrategySwitch::Refused,
+        (true, Some(v)) if v != venues && gas_ok => StrategySwitch::Restart,
+        (true, Some(_)) => StrategySwitch::Keep,
+    }
 }
 
 /// Whether a venue's sighting may reach the C3 PAPER path: admitted by the
@@ -1314,6 +1357,7 @@ pub fn run(
                     four_admitted,
                     openfour_admitted,
                     strategy_on,
+                    strategy_venues,
                     c3_wanted,
                     c2_on,
                 } = reconciled;
@@ -1323,28 +1367,42 @@ pub fn run(
                 if let Some(c) = canonical.as_mut() {
                     // Each switch is journaled: a replay starts and ends its
                     // engine at the same record.
-                    match (strategy_on, c.strategy.is_some(), &strategy_gas) {
-                        (true, false, Ok(gas)) => {
+                    // SC4: other admitted venues start it over (off, then on
+                    // with them), as a replay does.
+                    let running = c.strategy.as_ref().map(|s| s.venues());
+                    let switch = strategy_switch(
+                        strategy_on,
+                        running,
+                        strategy_venues,
+                        strategy_gas.is_ok(),
+                    );
+                    if matches!(switch, StrategySwitch::Stop | StrategySwitch::Restart) {
+                        journal.record(
+                            RecordKind::Runtime,
+                            clock.now_ns(),
+                            crate::runtime_strategy::switch_payload(false, strategy_venues),
+                        );
+                        c.strategy = None;
+                        c.strategy_refused = None;
+                    }
+                    match (switch, &strategy_gas) {
+                        (StrategySwitch::Start | StrategySwitch::Restart, Ok(gas)) => {
                             journal.record(
                                 RecordKind::Runtime,
                                 clock.now_ns(),
-                                crate::runtime_strategy::switch_payload(true),
+                                crate::runtime_strategy::switch_payload(true, strategy_venues),
                             );
                             c.strategy = Some(crate::runtime_strategy::StrategyRuntime::new(
                                 config.strategy.engine.clone(),
                                 gas.clone(),
+                                strategy_venues,
                             ));
                             c.strategy_refused = None;
                         }
-                        (true, false, Err(why)) => c.strategy_refused = Some(why.clone()),
-                        (false, running, _) => {
-                            if running {
-                                journal.record(
-                                    RecordKind::Runtime,
-                                    clock.now_ns(),
-                                    crate::runtime_strategy::switch_payload(false),
-                                );
-                            }
+                        (StrategySwitch::Refused, Err(why)) => {
+                            c.strategy_refused = Some(why.clone())
+                        }
+                        (StrategySwitch::Off, _) => {
                             c.strategy = None;
                             c.strategy_refused = None;
                         }
@@ -1855,6 +1913,7 @@ pub fn run(
                 let (code, block, verdict) = match job.join() {
                     Ok(Ok(o)) if current.validate(&o.observed, o.block_number).is_ok() => {
                         c.four_drift = false;
+                        c.four_validated = current.validate(&o.observed, o.block_number).ok();
                         (
                             1,
                             o.block_number,
@@ -1863,6 +1922,7 @@ pub fn run(
                     }
                     Ok(Ok(o)) => {
                         c.four_drift = true;
+                        c.four_validated = None;
                         let at = o.block_number;
                         let drifts: Vec<String> = current
                             .drifts(&o.observed)

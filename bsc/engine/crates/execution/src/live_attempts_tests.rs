@@ -1642,6 +1642,7 @@ fn a_restarts_caught_up_launches_are_skips() {
             c1_scope: true,
             venue_target: true,
             four_token: FourToken::NotApplicable,
+            four_raw: None,
             unverifiable: None,
         };
         let rec = rj::catchup_launch_payload(&launch, T0_MS + 36 * 450);

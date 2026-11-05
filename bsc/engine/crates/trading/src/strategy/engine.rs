@@ -36,14 +36,16 @@ use std::collections::BTreeMap;
 
 use alloy_primitives::{U256, U512};
 
-use super::book::{Term, TokenBook, Trade, Untracked};
+use super::book::{FourCurve, FourPost, Term, TokenBook, Trade, Untracked};
 use super::features::{Observation, Value};
 use super::filters::{Rule, Verdict, evaluate};
 use super::fixed::scale;
 use crate::economics::flap::QuoteError;
 use crate::economics::flap::native_curve20::{PricedToken, quote_native_sell};
-use crate::economics::flap::position::{Entry, Exit, Outcome, PositionError, entry, exit, outcome};
-use crate::economics::network::{CostError, GasEvidence};
+use crate::economics::flap::position::{
+    Entry, Exit, Outcome, PositionError, entry, entry_of, exit, exit_of, outcome,
+};
+use crate::economics::network::{CostError, GasEvidence, Venue};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CreatorSoldBeforeFill {
@@ -63,6 +65,8 @@ pub struct Config {
     pub target_net_multiple: i128,
     pub stop_net_multiple: i128,
     pub hold_ms: u64,
+    /// Positions entered and not closed, per venue (SC4: one venue's never
+    /// takes another's slot; the session caps bound them all together).
     pub max_open: usize,
     pub input_wei: U256,
     pub fill_delay_blocks: u64,
@@ -93,8 +97,33 @@ pub enum Input {
     Migrated {
         token: [u8; 20],
     },
-    /// A refused Flap log, a gap or a reorg: no curve stays tracked.
+    /// A gap or a reorg: no curve stays tracked.
     Incomplete,
+    /// SC4: a refused Flap log: no Flap curve stays tracked (the Four.meme
+    /// ones are not concerned).
+    FlapIncomplete,
+    /// SC4: a Four.meme launch on its classified curve, or why it is not
+    /// priced.
+    FourLaunch {
+        token: [u8; 20],
+        creator: [u8; 20],
+        tx_index: u64,
+        curve: Result<FourCurve, &'static str>,
+    },
+    /// SC4: a Four.meme curve trade (`trade.eth` its curve quote) and the
+    /// state it left.
+    FourTrade {
+        token: [u8; 20],
+        trade: Trade,
+        post: FourPost,
+    },
+    /// SC4: an OpenFour token's vault left its trading phase.
+    FourOffCurve {
+        token: [u8; 20],
+    },
+    /// SC4: a refused Four.meme curve log: no Four.meme curve stays
+    /// tracked (the Flap ones are not concerned).
+    FourIncomplete,
     /// Plan 28.10.: a real LIVE position on `token`, its BUY included at
     /// `filled_ms`: `tokens` received for `spent_wei` (input and gas).
     Hold {
@@ -312,6 +341,8 @@ impl Engine {
     /// it prices (tracked, every term in the priced scope): its exit is
     /// decided here.
     pub fn holds(&self, token: &[u8; 20]) -> bool {
+        // SC4: a Four.meme curve gets its exit actions with its execution
+        // path; until then its real position is not held here.
         self.tokens.values().any(|t| {
             t.token == *token && matches!(t.stage, Stage::Held { .. }) && t.book.priced().is_ok()
         })
@@ -337,10 +368,11 @@ impl Engine {
         self.tokens.values_mut().find(|t| t.token == *token)
     }
 
-    fn slots_taken(&self) -> usize {
+    /// The slots taken on `venue`'s curves.
+    fn slots_taken(&self, venue: Venue) -> usize {
         self.tokens
             .values()
-            .filter(|t| !matches!(t.stage, Stage::Observing(_)))
+            .filter(|t| !matches!(t.stage, Stage::Observing(_)) && Self::venue_of(&t.book) == venue)
             .count()
     }
 
@@ -358,66 +390,40 @@ impl Engine {
                 token,
                 creator,
                 tx_index,
-            } => {
-                if let Some((number, time_ms)) = self.block {
-                    self.tokens.entry((number, tx_index)).or_insert(Token {
-                        token,
-                        creator,
-                        book: TokenBook::new(),
-                        creator_sold: None,
-                        stage: Stage::Observing(Box::new(Observation::new(
-                            creator,
-                            (number, tx_index),
-                            time_ms,
-                            self.cfg.observation_ms,
-                            self.cfg.ratio_places,
-                        ))),
-                    });
-                }
-            }
+            } => self.launch(token, creator, tx_index, TokenBook::new()),
+            Input::FourLaunch {
+                token,
+                creator,
+                tx_index,
+                curve,
+            } => self.launch(token, creator, tx_index, TokenBook::four(curve)),
             Input::Term { token, term } => {
                 if let Some(t) = self.token_mut(&token) {
                     t.book.term(term);
                 }
             }
-            Input::Trade { token, trade } => {
-                let at_ms = self.block.map_or(0, |(_, ms)| ms);
-                // A held position not followed now: its creator's sale is
-                // kept for when it is held again.
-                if let Some(u) = self.held_creators.get_mut(&token)
-                    && trade.sell
-                    && trade.trader == u.creator
-                {
-                    u.creator_sold.get_or_insert(trade.block_number);
-                }
+            Input::Trade { token, trade } => self.trade(token, &trade, |b| b.apply(&trade)),
+            Input::FourTrade { token, trade, post } => {
+                self.trade(token, &trade, |b| b.four_trade(post))
+            }
+            Input::FourOffCurve { token } => {
                 if let Some(t) = self.token_mut(&token) {
-                    t.book.apply(&trade);
-                    let launch_tx = match &t.stage {
-                        Stage::Observing(o) => o.launch,
-                        _ => (u64::MAX, u64::MAX),
-                    };
-                    if trade.sell
-                        && trade.trader == t.creator
-                        && (trade.block_number, trade.tx_index) != launch_tx
-                    {
-                        t.creator_sold.get_or_insert(trade.block_number);
+                    t.book.migrated();
+                }
+            }
+            Input::FlapIncomplete => {
+                for t in self.tokens.values_mut().filter(|t| t.book.four.is_none()) {
+                    t.book.gap();
+                    if let Stage::Observing(o) = &mut t.stage {
+                        o.gap = true;
                     }
-                    match &mut t.stage {
-                        Stage::Observing(o) => o.trade(&trade, at_ms, &t.book),
-                        Stage::Open {
-                            shadow, fill_block, ..
-                        }
-                        | Stage::Exiting {
-                            shadow, fill_block, ..
-                        } if trade.block_number > *fill_block => {
-                            // A failure leaves the shadow untracked.
-                            let _ = if trade.sell {
-                                shadow.push_sell(trade.amount)
-                            } else {
-                                shadow.push_buy(trade.eth)
-                            };
-                        }
-                        _ => {}
+                }
+            }
+            Input::FourIncomplete => {
+                for t in self.tokens.values_mut().filter(|t| t.book.four.is_some()) {
+                    t.book.gap();
+                    if let Stage::Observing(o) = &mut t.stage {
+                        o.gap = true;
                     }
                 }
             }
@@ -516,6 +522,151 @@ impl Engine {
         out
     }
 
+    /// A launch at the current block, its token on `book`.
+    fn launch(&mut self, token: [u8; 20], creator: [u8; 20], tx_index: u64, book: TokenBook) {
+        if let Some((number, time_ms)) = self.block {
+            self.tokens.entry((number, tx_index)).or_insert(Token {
+                token,
+                creator,
+                book,
+                creator_sold: None,
+                stage: Stage::Observing(Box::new(Observation::new(
+                    creator,
+                    (number, tx_index),
+                    time_ms,
+                    self.cfg.observation_ms,
+                    self.cfg.ratio_places,
+                ))),
+            });
+        }
+    }
+
+    /// One curve trade of `token`, moved onto its book by `apply`; a PAPER
+    /// position's shadow follows it (Flap: the trade replayed on it; SC4
+    /// Four.meme: the real curve with the position's tokens in it).
+    fn trade(&mut self, token: [u8; 20], trade: &Trade, apply: impl FnOnce(&mut TokenBook)) {
+        let at_ms = self.block.map_or(0, |(_, ms)| ms);
+        // A held position not followed now: its creator's sale is kept for
+        // when it is held again.
+        if let Some(u) = self.held_creators.get_mut(&token)
+            && trade.sell
+            && trade.trader == u.creator
+        {
+            u.creator_sold.get_or_insert(trade.block_number);
+        }
+        if let Some(t) = self.token_mut(&token) {
+            apply(&mut t.book);
+            let launch_tx = match &t.stage {
+                Stage::Observing(o) => o.launch,
+                _ => (u64::MAX, u64::MAX),
+            };
+            if trade.sell
+                && trade.trader == t.creator
+                && (trade.block_number, trade.tx_index) != launch_tx
+            {
+                t.creator_sold.get_or_insert(trade.block_number);
+            }
+            match &mut t.stage {
+                Stage::Observing(o) => o.trade(trade, at_ms, &t.book),
+                Stage::Open {
+                    shadow,
+                    fill_block,
+                    entry,
+                    ..
+                }
+                | Stage::Exiting {
+                    shadow,
+                    fill_block,
+                    entry,
+                    ..
+                } if trade.block_number > *fill_block => {
+                    if t.book.four.is_some() {
+                        **shadow = t.book.four_shifted(entry.tokens);
+                    } else {
+                        // A failure leaves the shadow untracked.
+                        let _ = if trade.sell {
+                            shadow.push_sell(trade.amount)
+                        } else {
+                            shadow.push_buy(trade.eth)
+                        };
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// The network venue of a book's curve.
+    fn venue_of(book: &TokenBook) -> Venue {
+        match book.four {
+            None => Venue::Flap,
+            Some(FourCurve::Classic { .. }) => Venue::FourClassic,
+            Some(FourCurve::OpenFour { .. }) => Venue::OpenFour,
+        }
+    }
+
+    /// The PAPER BUY of `input_wei` on `book` and the shadow curve it
+    /// leaves: Flap's native quote, SC4 Four.meme's exact venue quote (the
+    /// wei it takes, the rest refunded), each with its network fee.
+    fn entry_on(&self, book: &TokenBook) -> Result<(Entry, Box<TokenBook>), Cancel> {
+        let cost = |e: PositionError| match e {
+            PositionError::Quote(q) => Cancel::Quote(q),
+            PositionError::Cost(c) => Cancel::Cost(c),
+            _ => Cancel::Cost(CostError::Overflow),
+        };
+        let Some(curve) = book.four else {
+            let buy = book
+                .buy_inputs(self.cfg.input_wei)
+                .map_err(Cancel::NotTracked)?;
+            let e = entry(&buy, &self.gas, self.cfg.gas_price_wei).map_err(cost)?;
+            let mut shadow = book.clone();
+            let tokens = shadow
+                .push_buy(self.cfg.input_wei)
+                .map_err(Cancel::NotTracked)?;
+            debug_assert_eq!(tokens, e.tokens);
+            return Ok((e, Box::new(shadow)));
+        };
+        book.status.map_err(Cancel::NotTracked)?;
+        let (tokens, paid) = curve
+            .buy(self.cfg.input_wei)
+            .ok_or(Cancel::NotTracked(Untracked::Quote))?;
+        let e = entry_of(
+            Self::venue_of(book),
+            tokens,
+            paid,
+            &self.gas,
+            self.cfg.gas_price_wei,
+        )
+        .map_err(cost)?;
+        let shadow = book.four_shifted(tokens);
+        shadow.status.map_err(Cancel::NotTracked)?;
+        Ok((e, Box::new(shadow)))
+    }
+
+    /// The SELL of an entry's tokens on `shadow` (not approved): its
+    /// proceeds and every exit network fee; `None` when it cannot be
+    /// quoted.
+    fn exit_on(&self, shadow: &TokenBook, e: &Entry) -> Option<Exit> {
+        match shadow.four {
+            None => {
+                let sell = shadow.sell_inputs(e.tokens).ok()?;
+                quote_native_sell(&sell).ok()?;
+                exit(e, &sell, false, &self.gas, self.cfg.gas_price_wei).ok()
+            }
+            Some(curve) => {
+                shadow.status.ok()?;
+                exit_of(
+                    Self::venue_of(shadow),
+                    curve.sell(e.tokens)?,
+                    false,
+                    &self.gas,
+                    self.cfg.gas_price_wei,
+                )
+                .ok()
+            }
+        }
+    }
+
     /// The decisions of every window whose cutoff `time_ms` passed.
     fn decide(&mut self, number: u64, time_ms: u64, out: &mut Vec<Output>) {
         let keys: Vec<(u64, u64)> = self.tokens.keys().copied().collect();
@@ -537,7 +688,9 @@ impl Engine {
                 (_, Err(why)) => Decision::NotTracked(why),
                 (Verdict::Reject(f), Ok(())) => Decision::Reject(f),
                 (Verdict::Pass, Ok(())) if t.creator_sold.is_some() => Decision::CreatorSold,
-                (Verdict::Pass, Ok(())) if self.slots_taken() >= self.cfg.max_open => {
+                (Verdict::Pass, Ok(()))
+                    if self.slots_taken(Self::venue_of(&t.book)) >= self.cfg.max_open =>
+                {
                     Decision::SlotLimit
                 }
                 (Verdict::Pass, Ok(())) => Decision::Pass,
@@ -568,8 +721,7 @@ impl Engine {
     /// cost`, so a stop of 0 still fires once the value is not positive),
     /// or neither; `None` when the position cannot be quoted.
     fn valuation(&self, shadow: &TokenBook, e: &Entry) -> Option<(bool, bool)> {
-        let sell = shadow.sell_inputs(e.tokens).ok()?;
-        let x = exit(e, &sell, false, &self.gas, self.cfg.gas_price_wei).ok()?;
+        let x = self.exit_on(shadow, e)?;
         let one = U512::from(u128::try_from(scale(self.cfg.ratio_places)?).ok()?);
         let spent = U512::from(e.spent_wei);
         let multiple = |m: i128| Some(U512::from(u128::try_from(m).ok()?) * spent);
@@ -607,24 +759,7 @@ impl Engine {
                     {
                         Err(Cancel::CreatorSold)
                     } else {
-                        t.book
-                            .buy_inputs(self.cfg.input_wei)
-                            .map_err(Cancel::NotTracked)
-                            .and_then(|buy| {
-                                let e = entry(&buy, &self.gas, self.cfg.gas_price_wei).map_err(
-                                    |e| match e {
-                                        PositionError::Quote(q) => Cancel::Quote(q),
-                                        PositionError::Cost(c) => Cancel::Cost(c),
-                                        _ => Cancel::Cost(CostError::Overflow),
-                                    },
-                                )?;
-                                let mut shadow = t.book.clone();
-                                let tokens = shadow
-                                    .push_buy(self.cfg.input_wei)
-                                    .map_err(Cancel::NotTracked)?;
-                                debug_assert_eq!(tokens, e.tokens);
-                                Ok((e, Box::new(shadow)))
-                            })
+                        self.entry_on(&t.book)
                     };
                     match result {
                         Ok((e, shadow)) => {
@@ -764,14 +899,9 @@ impl Engine {
                     let valued = t
                         .book
                         .tracking()
-                        .then(|| shadow.sell_inputs(e.tokens).ok())
+                        .then(|| self.exit_on(&shadow, &e))
                         .flatten()
-                        .and_then(|sell| {
-                            quote_native_sell(&sell).ok()?;
-                            let x =
-                                exit(&e, &sell, false, &self.gas, self.cfg.gas_price_wei).ok()?;
-                            Some((x, outcome(&e, &x).ok()?))
-                        });
+                        .and_then(|x| Some((x, outcome(&e, &x).ok()?)));
                     match valued {
                         Some((x, o)) => out.push(Output::Exited {
                             token: t.token,

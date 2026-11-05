@@ -257,6 +257,7 @@ fn flap_block_with_two_launches_and_one_external_buy() {
             c1_scope: true,
             venue_target: true,
             four_token: FourToken::NotApplicable,
+            four_raw: None,
             unverifiable: None,
         },
         CanonicalLaunch {
@@ -274,6 +275,7 @@ fn flap_block_with_two_launches_and_one_external_buy() {
             c1_scope: false,
             venue_target: false,
             four_token: FourToken::NotApplicable,
+            four_raw: None,
             unverifiable: None,
         },
     ];
@@ -325,6 +327,7 @@ fn flap_block_with_one_launch_and_no_external_buy() {
         c1_scope: false,
         venue_target: false,
         four_token: FourToken::NotApplicable,
+        four_raw: None,
         unverifiable: None,
     };
     assert_eq!(launches, vec![expected.clone()]);
@@ -341,6 +344,16 @@ fn four_block_launch_has_token_and_creator_but_no_buy_count() {
     let hash = hex!("51d04ca917cbec94c520b6f68fea4e3093f3ee933d57bf35f13a895ff94dfbae");
     assert_eq!(block.header.hash, hash);
     let launches = complete(FOUR_BLOCK, 129_781_119, detect(&block, &receipts));
+    // SC4: a Four.meme launch carries its verified signed bytes (they hash
+    // to the launch transaction).
+    let signed = launches[0]
+        .four_raw
+        .clone()
+        .expect("a Four launch's signed bytes");
+    assert_eq!(
+        keccak256(&signed).0,
+        hex!("3163c268f047f99b5328f8e622348c1aeadde9445c49542ee8d081f286fa2354")
+    );
     let expected = CanonicalLaunch {
         venue: Venue::Four,
         block_number: 129_781_119,
@@ -362,6 +375,7 @@ fn four_block_launch_has_token_and_creator_but_no_buy_count() {
         c1_scope: false,
         venue_target: true,
         four_token: FourToken::Candidate,
+        four_raw: Some(signed.clone()),
         unverifiable: None,
     };
     assert_eq!(launches, vec![expected.clone()]);
@@ -402,6 +416,16 @@ fn openfour_block_launch_has_token_creator_and_a_derived_pending_token() {
     assert_eq!(block.header.hash, hash);
     let launches = complete(OPENFOUR_BLOCK, 129_842_141, detect(&block, &receipts));
     let raw = raw_tx(OPENFOUR_BLOCK, 74);
+    // SC4: a Four.meme launch carries its verified signed bytes (they hash
+    // to the launch transaction).
+    let signed = launches[0]
+        .four_raw
+        .clone()
+        .expect("a Four launch's signed bytes");
+    assert_eq!(
+        keccak256(&signed).0,
+        hex!("fbc6421c2298b7bc253ea426768fdcc38c51bf75555848a5a17dc50235dc3088")
+    );
     let expected = CanonicalLaunch {
         venue: Venue::OpenFour,
         block_number: 129_842_141,
@@ -417,6 +441,7 @@ fn openfour_block_launch_has_token_creator_and_a_derived_pending_token() {
         c1_scope: true,
         venue_target: true,
         four_token: FourToken::Matched,
+        four_raw: Some(signed.clone()),
         unverifiable: None,
     };
     assert_eq!(launches, vec![expected.clone()]);

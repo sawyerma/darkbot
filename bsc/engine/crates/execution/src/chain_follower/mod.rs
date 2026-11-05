@@ -506,6 +506,9 @@ pub struct CanonicalLaunch {
     pub venue_target: bool,
     /// Four.meme: the pending decoder's token against the canonical one.
     pub four_token: FourToken,
+    /// SC4: a Four.meme launch's verified signed bytes (its calldata and
+    /// value classify its curve); none for Flap or an unverifiable one.
+    pub four_raw: Option<Vec<u8>>,
     /// Why the node's transaction object could not be rebuilt and verified
     /// (an unsupported type, pre-EIP-155, a hash or signer mismatch): a
     /// per-launch result, journaled and counted, never a retried fault.

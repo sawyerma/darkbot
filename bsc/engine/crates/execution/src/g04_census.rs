@@ -764,6 +764,8 @@ fn replay(
             (RecordKind::Canonical, Some(b'Z'))
                 if crate::runtime_journal::four_trade_of(p).is_some() => {}
             (RecordKind::Canonical, Some(b'y')) if p.len() == 79 => {}
+            (RecordKind::Canonical, Some(b'n'))
+                if crate::runtime_strategy::four_launch_of(p).is_some() => {}
             (RecordKind::Canonical, Some(b'z')) if p.len() == 57 => {}
             (RecordKind::Canonical, Some(b'M')) if p.len() == 77 => {}
             // Phase H: the strategy's blocks, Flap launches and resyncs.

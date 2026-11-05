@@ -216,6 +216,10 @@ impl ReceiptLaunch {
             },
             venue_target: tx.is_ok_and(|t| crate::ingress::venue_target(&four, &t.raw)),
             four_token,
+            four_raw: match self.venue {
+                Venue::Flap => None,
+                Venue::Four | Venue::OpenFour => tx.ok().map(|t| t.raw.clone()),
+            },
             unverifiable: tx.err(),
         }
     }

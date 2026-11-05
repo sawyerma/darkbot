@@ -2298,7 +2298,11 @@ pub(crate) mod tests {
             )
             .unwrap();
         }
-        c.strategy = Some(StrategyRuntime::new(cfg, gas));
+        c.strategy = Some(StrategyRuntime::new(
+            cfg,
+            gas,
+            crate::runtime_strategy::StrategyVenues::FLAP,
+        ));
         let mut journal = RuntimeJournal::open(
             &dir.join("journal"),
             7,
@@ -2357,6 +2361,7 @@ pub(crate) mod tests {
                 c1_scope: true,
                 venue_target: true,
                 four_token: FourToken::NotApplicable,
+                four_raw: None,
                 unverifiable: None,
             }),
         );

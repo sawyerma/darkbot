@@ -357,7 +357,8 @@ impl VenueId {
 
 /// The owner's rule for a venue: SHADOW admits Flap launches to the C3
 /// PAPER path and Strategy C, Four.meme Classic (R12c) and OpenFour (R12d,
-/// its executed bonding preset) launches to the C3 PAPER path; a requested
+/// its executed bonding preset) launches to the C3 PAPER path and (SC4)
+/// Strategy C's ledger (their PAPER intents not yet); a requested
 /// LIVE of a Four venue is blocked for its missing LIVE path, whatever the
 /// LIVE gate (as the LIVE view reads it).
 pub fn venue_effective(venue: VenueId, requested: Mode, live: LiveGate) -> Effective {

@@ -485,12 +485,38 @@ fn the_runtime_mode_bounds_the_components_as_the_plan_says() {
     }
 }
 
+/// SC4: Strategy C starts with the admitted venues, starts over when
+/// others are admitted while it runs (off, then on, as a replay reads it),
+/// stops when no longer wanted; refused gas evidence starts nothing.
+#[test]
+fn strategy_c_starts_over_on_other_admitted_venues() {
+    use crate::runtime::{StrategySwitch as S, strategy_switch};
+    use crate::runtime_strategy::StrategyVenues;
+    let flap = StrategyVenues::FLAP;
+    let both = StrategyVenues { four: true, ..flap };
+    for (on, running, venues, gas_ok, want) in [
+        (false, None, flap, true, S::Off),
+        (false, Some(flap), flap, true, S::Stop),
+        (true, None, flap, true, S::Start),
+        (true, None, flap, false, S::Refused),
+        (true, Some(flap), flap, true, S::Keep),
+        (true, Some(flap), both, true, S::Restart),
+        (true, Some(both), flap, true, S::Restart),
+    ] {
+        assert_eq!(
+            strategy_switch(on, running, venues, gas_ok),
+            want,
+            "{on} {running:?} {venues:?} {gas_ok}"
+        );
+    }
+}
+
 /// R12c: Four.meme Classic SHADOW admits its first sightings to the C3
 /// PAPER path, alone or beside Flap (C3 is then wanted under PAPER and
-/// EXEC SHADOW), never to Strategy C; a blocked Four request admits
-/// nothing. R12d: OpenFour SHADOW likewise, on its own.
+/// EXEC SHADOW); a blocked Four request admits nothing. R12d: OpenFour
+/// SHADOW likewise, on its own. SC4: and their launches to Strategy C.
 #[test]
-fn four_shadow_admits_its_launches_to_c3_only() {
+fn four_shadow_admits_its_launches_to_c3_and_strategy_c() {
     use crate::canonical_join::Venue;
     use crate::runtime::FourArmed;
     use crate::sources::Entity;
@@ -512,15 +538,22 @@ fn four_shadow_admits_its_launches_to_c3_only() {
     };
     let blocked = Blocked("FOUR_EXECUTION_PATH_MISSING");
     // (flap, four, openfour, runtime, exec) -> (C3 wanted, strategy, admits
-    // Flap, admits Four, admits OpenFour)
-    for (flap, four, openfour, runtime, exec, want) in [
+    // Flap, admits Four, admits OpenFour); SC4: Strategy C runs with any
+    // venue admitted and follows exactly the admitted ones.
+    let s = |flap, four, openfour| crate::runtime_strategy::StrategyVenues {
+        flap,
+        four,
+        openfour,
+    };
+    for (flap, four, openfour, runtime, exec, want, venues) in [
         (
             Off,
             Shadow,
             Off,
             Paper,
             Shadow,
-            (true, false, false, true, false),
+            (true, true, false, true, false),
+            s(false, true, false),
         ),
         (
             Shadow,
@@ -529,6 +562,7 @@ fn four_shadow_admits_its_launches_to_c3_only() {
             Paper,
             Shadow,
             (true, true, true, true, false),
+            s(true, true, false),
         ),
         (
             Shadow,
@@ -537,6 +571,7 @@ fn four_shadow_admits_its_launches_to_c3_only() {
             Paper,
             Shadow,
             (true, true, true, false, false),
+            s(true, false, false),
         ),
         (
             Off,
@@ -544,7 +579,8 @@ fn four_shadow_admits_its_launches_to_c3_only() {
             Off,
             Shadow,
             Shadow,
-            (false, false, false, true, false),
+            (false, true, false, true, false),
+            s(false, true, false),
         ),
         (
             Off,
@@ -552,7 +588,8 @@ fn four_shadow_admits_its_launches_to_c3_only() {
             Off,
             Paper,
             Off,
-            (false, false, false, true, false),
+            (false, true, false, true, false),
+            s(false, true, false),
         ),
         (
             Off,
@@ -561,6 +598,7 @@ fn four_shadow_admits_its_launches_to_c3_only() {
             Paper,
             Shadow,
             (false, false, false, false, false),
+            s(false, false, false),
         ),
         (
             Off,
@@ -569,6 +607,7 @@ fn four_shadow_admits_its_launches_to_c3_only() {
             Paper,
             Shadow,
             (false, false, false, false, false),
+            s(false, false, false),
         ),
         (
             Off,
@@ -576,7 +615,8 @@ fn four_shadow_admits_its_launches_to_c3_only() {
             Shadow,
             Paper,
             Shadow,
-            (true, false, false, false, true),
+            (true, true, false, false, true),
+            s(false, false, true),
         ),
         (
             Shadow,
@@ -585,6 +625,7 @@ fn four_shadow_admits_its_launches_to_c3_only() {
             Paper,
             Shadow,
             (true, true, true, true, true),
+            s(true, true, true),
         ),
         (
             Off,
@@ -592,7 +633,8 @@ fn four_shadow_admits_its_launches_to_c3_only() {
             Shadow,
             Paper,
             Off,
-            (false, false, false, false, true),
+            (false, true, false, false, true),
+            s(false, false, true),
         ),
         (
             Off,
@@ -601,6 +643,17 @@ fn four_shadow_admits_its_launches_to_c3_only() {
             Paper,
             Shadow,
             (false, false, false, false, false),
+            s(false, false, false),
+        ),
+        // The runtime mode OFF: no strategy whatever is admitted.
+        (
+            Shadow,
+            Shadow,
+            Shadow,
+            Off,
+            Shadow,
+            (false, false, true, true, true),
+            s(true, true, true),
         ),
     ] {
         let g = run(flap, four, openfour, runtime, exec);
@@ -615,6 +668,7 @@ fn four_shadow_admits_its_launches_to_c3_only() {
             want,
             "{flap:?} {four:?} {openfour:?} {runtime:?} {exec:?}"
         );
+        assert_eq!(g.strategy_venues, venues);
     }
     // The run loop's two decisions on a verified sighting: C2's pending
     // candidate and the C3 hand-off (a first sighting only).
@@ -1543,6 +1597,7 @@ fn a_drifted_four_deployment_proves_no_token() {
             c1_scope: false,
             venue_target: true,
             four_token: FourToken::Matched,
+            four_raw: None,
             unverifiable: None,
         })
     };
@@ -1561,6 +1616,124 @@ fn a_drifted_four_deployment_proves_no_token() {
         (2, 1, 1)
     );
     let _ = journal.finish();
+    fs::remove_dir_all(&base).unwrap();
+}
+
+/// SC4: a Four.meme launch of the window is journaled for Strategy C with
+/// the curve its classification on the drift guard's validated deployment
+/// names; unprobed or drifted, as not validated (never priced on an
+/// unproven deployment).
+#[test]
+fn a_four_launch_is_journaled_with_its_classified_curve() {
+    use crate::chain_follower::{CanonicalLaunch, FourToken, Venue};
+    use crate::runtime::exec::tests::{four_observation, openfour_launch};
+    use crate::runtime_strategy::{FOUR_LAUNCH_REFUSALS, four_launch_of};
+    use alloy_primitives::Address;
+    use darkbot_bsc_journal::storage::run::RunReader;
+    use darkbot_bsc_trading::strategy::book::FourCurve;
+    use darkbot_bsc_trading::venues::fourmeme::deployment::bsc_mainnet_r12d_131608421;
+    use darkbot_bsc_trading::venues::fourmeme::recognize::{Recognized, recognize};
+    const BLOCK_MS: u64 = 1_792_000_000_000;
+    let base = std::env::temp_dir().join(format!("bsc-runtime-four-seed-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&base);
+    let config = RuntimeConfig::parse(CONFIG).unwrap();
+    let cc = config.canonical.clone().unwrap();
+    let mut c = Canonical::new(&cc, BLOCK_MS);
+    let mut journal = RuntimeJournal::open(
+        &base,
+        1,
+        1,
+        JournalSetup::whole(64, journal_max_payload(&config)),
+    )
+    .unwrap();
+    let d = bsc_mainnet_r12d_131608421();
+    let v = d.validate(&four_observation(&d).observed, 1).unwrap();
+    let (hash, raw, launcher) = openfour_launch(1);
+    let target = darkbot_bsc_geth_ipc::ingress::decode_tx_target(&raw).unwrap();
+    let Recognized::OpenFourLaunch(l) =
+        recognize(&d, target.to.map(Address::from), target.data, 16_384)
+    else {
+        panic!()
+    };
+    let token = d
+        .openfour_token(
+            l.preset_id,
+            l.init.token_salt,
+            l.request_id,
+            Some(Address::from(launcher)),
+        )
+        .unwrap()
+        .into_array();
+    let launch = |tx: u64| {
+        CanonicalEvent::Launch(CanonicalLaunch {
+            venue: Venue::OpenFour,
+            block_number: 10,
+            block_hash: [10; 32],
+            tx_index: tx,
+            tx_hash: hash,
+            token: Some(token),
+            creator: Some(launcher),
+            external_buys_after: None,
+            first_external_buy_index: None,
+            sender: Some(launcher),
+            nonce: Some(1),
+            c1_scope: true,
+            venue_target: true,
+            four_token: FourToken::Matched,
+            four_raw: Some(raw.clone()),
+            unverifiable: None,
+        })
+    };
+    c.event(
+        10,
+        CanonicalEvent::Block {
+            number: 10,
+            hash: [10; 32],
+            parent_hash: [9; 32],
+            timestamp_s: BLOCK_MS / 1_000,
+            timestamp_ms: BLOCK_MS,
+            txs: Vec::new(),
+            observed: Instant::now(),
+            observed_unix_ms: Some(BLOCK_MS + 300),
+        },
+        &mut journal,
+    );
+    // Unprobed, validated, drifted.
+    c.event(10, launch(2), &mut journal);
+    c.four_validated = Some(v);
+    c.event(10, launch(3), &mut journal);
+    c.four_drift = true;
+    c.event(10, launch(4), &mut journal);
+    journal.finish().unwrap();
+    let run = fs::read_dir(&base).unwrap().next().unwrap().unwrap().path();
+    let mut reader = RunReader::open(&run, journal_max_payload(&config)).unwrap();
+    let mut seeds = Vec::new();
+    while let Some(r) = reader.next_record().unwrap() {
+        if r.payload.first() == Some(&b'n') {
+            seeds.push(four_launch_of(&r.payload).unwrap());
+        }
+    }
+    let curves: Vec<_> = seeds.iter().map(|s| (s.2, s.3, s.4, s.5)).collect();
+    let classified = crate::runtime_strategy::classify_four_launch(
+        Some(v),
+        Venue::OpenFour,
+        Some(&raw),
+        Some(launcher),
+        (token, hash),
+        16_384,
+    )
+    .unwrap();
+    let FourCurve::OpenFour { start, fee, .. } = classified else {
+        panic!()
+    };
+    assert_eq!(
+        curves,
+        [
+            (2, token, launcher, Err(FOUR_LAUNCH_REFUSALS[0])),
+            (3, token, launcher, Ok(FourCurve::openfour(start, fee))),
+            (4, token, launcher, Err(FOUR_LAUNCH_REFUSALS[0])),
+        ]
+    );
     fs::remove_dir_all(&base).unwrap();
 }
 
@@ -1652,6 +1825,7 @@ fn a_launch_without_its_head_and_four_classes_are_counted() {
             c1_scope: false,
             venue_target: false,
             four_token: crate::chain_follower::FourToken::NotApplicable,
+            four_raw: None,
             unverifiable: None,
         })
     };
@@ -1936,6 +2110,7 @@ fn a_forgotten_sighting_is_evicted_not_missed() {
                 c1_scope: true,
                 venue_target: true,
                 four_token: crate::chain_follower::FourToken::NotApplicable,
+                four_raw: None,
                 unverifiable: None,
             }),
             &mut journal,
@@ -2029,6 +2204,7 @@ fn canonical_events_join_into_status_journal_and_census() {
             c1_scope,
             venue_target: c1_scope,
             four_token: crate::chain_follower::FourToken::NotApplicable,
+            four_raw: None,
             unverifiable: None,
         })
     };

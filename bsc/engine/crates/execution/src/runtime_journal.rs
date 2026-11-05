@@ -629,7 +629,7 @@ pub fn source_event_payload(source: SourceId, event: SourceEvent) -> Vec<u8> {
     vec![b'S', source_byte(source), event as u8]
 }
 
-fn venue_byte(venue: Venue) -> u8 {
+pub(crate) fn venue_byte(venue: Venue) -> u8 {
     match venue {
         Venue::Flap => 1,
         Venue::Four => 2,

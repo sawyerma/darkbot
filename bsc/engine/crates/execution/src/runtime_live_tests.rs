@@ -2017,6 +2017,7 @@ fn launch_event(n: u64, h: u8, index: u64, token: [u8; 20], creator: [u8; 20]) -
         c1_scope: true,
         venue_target: true,
         four_token: crate::canonical_join::FourToken::NotApplicable,
+        four_raw: None,
         unverifiable: None,
     })
 }
@@ -8263,6 +8264,7 @@ fn the_runtime_holds_an_earlier_processs_open_lots_again() {
     c.strategy = Some(crate::runtime_strategy::StrategyRuntime::new(
         config.strategy.engine.clone(),
         config.strategy.gas(&repo).unwrap(),
+        crate::runtime_strategy::StrategyVenues::FLAP,
     ));
     c.lot.config.lot_reads_max = 2;
     c.lot.config.lot_read_retry_ms = 0;

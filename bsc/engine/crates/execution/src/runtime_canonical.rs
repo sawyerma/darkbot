@@ -688,6 +688,13 @@ pub(super) struct Canonical {
     /// proven (journaled as UNKNOWN).
     pub(super) four_deployment: String,
     pub(super) four_drift: bool,
+    /// SC4: the deployment the drift guard's last matching probe validated
+    /// (none while unprobed or drifted): a Four.meme launch's curve is
+    /// classified on it for Strategy C.
+    pub(super) four_validated:
+        Option<darkbot_bsc_trading::venues::fourmeme::deployment::ValidatedFourDeployment>,
+    /// The largest launch calldata the decoders read (the follower's).
+    max_launch_calldata: usize,
     pub(super) head: Option<(u64, [u8; 32])>,
     head_seen_ns: Option<u64>,
     /// The head block's time (header ms) and the local wall ms when the
@@ -1073,6 +1080,8 @@ impl Canonical {
             state: "CONNECTING",
             four_deployment: "UNPROBED".into(),
             four_drift: false,
+            four_validated: None,
+            max_launch_calldata: config.limits.max_launch_calldata,
             head: None,
             head_seen_ns: None,
             head_block_ms: None,
@@ -1479,20 +1488,45 @@ impl Canonical {
                     block_seen_ns: self.head_seen_ns.filter(|_| same).unwrap_or(at),
                     block_seen_unix_ms: self.head_seen_unix_ms.filter(|_| same),
                 };
-                if let (crate::canonical_join::Venue::Flap, Some(token), Some(creator)) =
-                    (l.venue, l.token, l.creator)
-                {
-                    self.put(
-                        RecordKind::Canonical,
-                        at,
-                        crate::runtime_strategy::flap_launch_payload(
-                            l.block_number,
-                            l.tx_index,
-                            &token,
-                            &creator,
-                        ),
-                        journal,
-                    );
+                match (l.venue, l.token, l.creator) {
+                    (crate::canonical_join::Venue::Flap, Some(token), Some(creator)) => {
+                        self.put(
+                            RecordKind::Canonical,
+                            at,
+                            crate::runtime_strategy::flap_launch_payload(
+                                l.block_number,
+                                l.tx_index,
+                                &token,
+                                &creator,
+                            ),
+                            journal,
+                        );
+                    }
+                    // SC4: a Four.meme launch with the curve its
+                    // classification on the validated deployment names.
+                    (venue, Some(token), Some(creator)) => {
+                        let curve = crate::runtime_strategy::classify_four_launch(
+                            self.four_validated.filter(|_| !self.four_drift),
+                            venue,
+                            l.four_raw.as_deref(),
+                            l.sender,
+                            (token, l.tx_hash),
+                            self.max_launch_calldata,
+                        );
+                        self.put(
+                            RecordKind::Canonical,
+                            at,
+                            crate::runtime_strategy::four_launch_payload(
+                                venue,
+                                (l.block_number, l.tx_index),
+                                &token,
+                                &creator,
+                                curve,
+                            ),
+                            journal,
+                        );
+                    }
+                    _ => {}
                 }
                 journal.record(RecordKind::Canonical, at, pending_launch_payload(&launch));
                 self.ledger.push(launch);

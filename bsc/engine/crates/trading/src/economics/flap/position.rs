@@ -47,6 +47,7 @@ impl From<ArithError> for PositionError {
     }
 }
 
+#[cfg(test)]
 const fn flap(action: Action) -> PathClass {
     PathClass {
         venue: Venue::Flap,
@@ -71,12 +72,36 @@ pub fn entry(
     gas_price_wei: U256,
 ) -> Result<Entry, PositionError> {
     let quote = quote_native_buy(buy)?;
-    let fee = gas.counterfactual_fee_wei(flap(Action::Buy), gas_price_wei)?;
+    entry_of(
+        Venue::Flap,
+        quote.output_amount,
+        buy.input_amount,
+        gas,
+        gas_price_wei,
+    )
+}
+
+/// SC4: the BUY on `venue` that yields `tokens` for `input_wei` (its exact
+/// quote's), at `gas_price_wei`: the class's network fee added.
+pub fn entry_of(
+    venue: Venue,
+    tokens: U256,
+    input_wei: U256,
+    gas: &GasEvidence,
+    gas_price_wei: U256,
+) -> Result<Entry, PositionError> {
+    let fee = gas.counterfactual_fee_wei(
+        PathClass {
+            venue,
+            action: Action::Buy,
+        },
+        gas_price_wei,
+    )?;
     Ok(Entry {
-        tokens: quote.output_amount,
-        input_wei: buy.input_amount,
+        tokens,
+        input_wei,
         network_fee_wei: fee,
-        spent_wei: add(buy.input_amount, fee)?,
+        spent_wei: add(input_wei, fee)?,
     })
 }
 
@@ -102,15 +127,35 @@ pub fn exit(
         return Err(PositionError::NotTheEntrysTokens);
     }
     let quote = quote_native_sell(sell)?;
-    let mut fee = gas.counterfactual_fee_wei(flap(Action::Sell), gas_price_wei)?;
+    exit_of(
+        Venue::Flap,
+        quote.output_amount,
+        approved,
+        gas,
+        gas_price_wei,
+    )
+}
+
+/// SC4: the SELL on `venue` of an entry's tokens that returns `proceeds_wei`
+/// (its exact quote's), at `gas_price_wei`: the SELL's and (unless
+/// `approved`) the approval's network fees.
+pub fn exit_of(
+    venue: Venue,
+    proceeds_wei: U256,
+    approved: bool,
+    gas: &GasEvidence,
+    gas_price_wei: U256,
+) -> Result<Exit, PositionError> {
+    let class = |action| PathClass { venue, action };
+    let mut fee = gas.counterfactual_fee_wei(class(Action::Sell), gas_price_wei)?;
     if !approved {
         fee = add(
             fee,
-            gas.counterfactual_fee_wei(flap(Action::Approve), gas_price_wei)?,
+            gas.counterfactual_fee_wei(class(Action::Approve), gas_price_wei)?,
         )?;
     }
     Ok(Exit {
-        proceeds_wei: quote.output_amount,
+        proceeds_wei,
         network_fee_wei: fee,
     })
 }

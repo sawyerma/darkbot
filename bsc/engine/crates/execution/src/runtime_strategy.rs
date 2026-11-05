@@ -14,7 +14,7 @@ use alloy_primitives::U256;
 use darkbot_bsc_journal::RecordKind;
 use darkbot_bsc_trading::economics::flap::position::Outcome;
 use darkbot_bsc_trading::economics::network::GasEvidence;
-use darkbot_bsc_trading::strategy::book::{Term, Trade, Untracked};
+use darkbot_bsc_trading::strategy::book::{FourCurve, FourPost, Term, Trade, Untracked};
 use darkbot_bsc_trading::strategy::engine::{
     Cancel, Config, CreatorSoldBeforeFill, Decision, Engine, ExitReason, Input, Output,
 };
@@ -53,6 +53,190 @@ pub fn flap_launch_payload(
 }
 
 pub const LAUNCH_LEN: usize = 57;
+
+/// SC4: why a Four.meme launch's curve is not priced (its code in the `n`
+/// record is the index plus one).
+pub const FOUR_LAUNCH_REFUSALS: [&str; 5] = [
+    "four deployment not validated",
+    "four launch unverifiable",
+    "four launch not decoded",
+    "four launch profile",
+    "four token mismatch",
+];
+
+/// SC4: a Four.meme launch's curve as its classification on the drift
+/// guard's validated deployment names it (the launch curve, its fee
+/// terms), or the index of [`FOUR_LAUNCH_REFUSALS`] why not: `raw` the
+/// launch's verified signed bytes, `sender` their signer (an OpenFour
+/// token's derivation names it), `token` the canonical event's.
+pub fn classify_four_launch(
+    validated: Option<darkbot_bsc_trading::venues::fourmeme::deployment::ValidatedFourDeployment>,
+    venue: crate::canonical_join::Venue,
+    raw: Option<&[u8]>,
+    sender: Option<[u8; 20]>,
+    (token, tx_hash): ([u8; 20], [u8; 32]),
+    max_calldata: usize,
+) -> Result<FourCurve, usize> {
+    use crate::canonical_join::Venue;
+    use alloy_primitives::{Address, B256};
+    use darkbot_bsc_trading::venues::fourmeme::profile::{
+        WITNESSED_MAX_OFFERS, classify_classic_launch, classify_openfour_launch,
+    };
+    use darkbot_bsc_trading::venues::fourmeme::recognize::{Recognized, recognize};
+    let v = validated.ok_or(0usize)?;
+    let raw = raw.ok_or(1usize)?;
+    let target = darkbot_bsc_geth_ipc::ingress::decode_tx_target(raw).map_err(|_| 1usize)?;
+    let value = U256::try_from_be_slice(target.value).ok_or(1usize)?;
+    let candidate = B256::from(tx_hash);
+    let decoded = recognize(
+        v.deployment(),
+        target.to.map(Address::from),
+        target.data,
+        max_calldata,
+    );
+    let (named, curve) = match (venue, decoded) {
+        (Venue::Four, Recognized::ClassicLaunch(d)) => {
+            let c = classify_classic_launch(&v, &d, value, candidate).map_err(|_| 3usize)?;
+            (c.token(), FourCurve::classic_at(c.curve(), c.fee()))
+        }
+        (Venue::OpenFour, Recognized::OpenFourLaunch(d)) => {
+            let sender = Address::from(sender.ok_or(1usize)?);
+            let c =
+                classify_openfour_launch(&v, &d, sender, value, candidate).map_err(|_| 3usize)?;
+            (
+                c.token(),
+                FourCurve::openfour_at(c.curve(), WITNESSED_MAX_OFFERS, c.fee()),
+            )
+        }
+        _ => return Err(2),
+    };
+    if named.into_array() != token {
+        return Err(4);
+    }
+    curve.ok_or(3)
+}
+
+/// SC4: a Four.meme launch with its creator and its curve (`n | venue u8 |
+/// block u64 | tx_index u64 | token [20] | creator [20] | refused u8 |
+/// w0..w3 [4 × 32] | a u16 | b [32] | c u16`): Classic the launch curve's
+/// `k t offers 0` and the fee `rate min tax`, OpenFour `k T Q remaining`
+/// and `protocol 0 dev`; refused, the code of [`FOUR_LAUNCH_REFUSALS`]
+/// (index + 1) and every word zero.
+pub fn four_launch_payload(
+    venue: crate::canonical_join::Venue,
+    (block, tx_index): (u64, u64),
+    token: &[u8; 20],
+    creator: &[u8; 20],
+    curve: Result<FourCurve, usize>,
+) -> Vec<u8> {
+    let mut out = Vec::with_capacity(FOUR_LAUNCH_LEN);
+    out.push(b'n');
+    out.push(crate::runtime_journal::venue_byte(venue));
+    out.extend_from_slice(&block.to_le_bytes());
+    out.extend_from_slice(&tx_index.to_le_bytes());
+    out.extend_from_slice(token);
+    out.extend_from_slice(creator);
+    let (refused, words, (a, b, c)) = match curve {
+        Ok(FourCurve::Classic { start, fee, .. }) => (
+            0u8,
+            [start.k, start.t, start.offers, U256::ZERO],
+            (fee.rate_bps, fee.min_fee, fee.tax_bps),
+        ),
+        Ok(FourCurve::OpenFour { start, fee, .. }) => (
+            0u8,
+            [
+                start.k,
+                start.token_reserve,
+                start.quote_reserve,
+                start.remaining,
+            ],
+            (fee.protocol_bps, U256::ZERO, fee.dev_bps),
+        ),
+        Err(i) => (
+            u8::try_from(i + 1).unwrap_or(u8::MAX),
+            [U256::ZERO; 4],
+            (0, U256::ZERO, 0),
+        ),
+    };
+    out.push(refused);
+    for w in words {
+        out.extend_from_slice(&w.to_be_bytes::<32>());
+    }
+    out.extend_from_slice(&a.to_le_bytes());
+    out.extend_from_slice(&b.to_be_bytes::<32>());
+    out.extend_from_slice(&c.to_le_bytes());
+    out
+}
+
+pub const FOUR_LAUNCH_LEN: usize = 223;
+
+/// An `n` record back: its venue, block, launch index, token, creator and
+/// the curve (or why it is not priced); `None` for any other bytes (a Flap
+/// venue, an unknown code, a curve the words do not name).
+#[allow(clippy::type_complexity)]
+pub fn four_launch_of(
+    p: &[u8],
+) -> Option<(
+    crate::canonical_join::Venue,
+    u64,
+    u64,
+    [u8; 20],
+    [u8; 20],
+    Result<FourCurve, &'static str>,
+)> {
+    use crate::canonical_join::Venue;
+    use darkbot_bsc_trading::economics::four_classic::{ClassicCurve, ClassicFee};
+    use darkbot_bsc_trading::economics::openfour::{OpenFourCurve, OpenFourFee};
+    if p.len() != FOUR_LAUNCH_LEN || p[0] != b'n' {
+        return None;
+    }
+    let venue = crate::runtime_journal::venue_of_byte(p[1]).filter(|v| *v != Venue::Flap)?;
+    let w = |i: usize| U256::from_be_slice(&p[59 + 32 * i..91 + 32 * i]);
+    let a = u16::from_le_bytes([p[187], p[188]]);
+    let b = U256::from_be_slice(&p[189..221]);
+    let c = u16::from_le_bytes([p[221], p[222]]);
+    let curve = match (p[58], venue) {
+        (0, Venue::Four) => Ok(FourCurve::classic(
+            ClassicCurve {
+                k: w(0),
+                t: w(1),
+                offers: w(2),
+                sold: w(3),
+            },
+            ClassicFee {
+                rate_bps: a,
+                min_fee: b,
+                tax_bps: c,
+            },
+        )?),
+        (0, _) => {
+            let start = OpenFourCurve {
+                k: w(0),
+                token_reserve: w(1),
+                quote_reserve: w(2),
+                remaining: w(3),
+            };
+            (start.quote_reserve.checked_mul(start.token_reserve)? == start.k && b.is_zero())
+                .then_some(())?;
+            Ok(FourCurve::openfour(
+                start,
+                OpenFourFee {
+                    protocol_bps: a,
+                    dev_bps: c,
+                },
+            ))
+        }
+        (code, _) => Err(*FOUR_LAUNCH_REFUSALS.get(usize::from(code) - 1)?),
+    };
+    Some((
+        venue,
+        u64::from_le_bytes(p[2..10].try_into().ok()?),
+        u64::from_le_bytes(p[10..18].try_into().ok()?),
+        p[18..38].try_into().ok()?,
+        p[38..58].try_into().ok()?,
+        curve,
+    ))
+}
 
 /// A resync the strategy must see (`I | new head u64`): no curve it holds
 /// stays exact.
@@ -233,8 +417,50 @@ pub fn input_of_record(kind: RecordKind, p: &[u8]) -> Option<Input> {
         (RecordKind::Canonical, b'M') if p.len() == 77 => Some(Input::Migrated {
             token: p.get(57..77)?.try_into().ok()?,
         }),
-        // A refused Flap log, a reorg, a resync: no curve stays exact.
-        (RecordKind::Canonical, b'W') if p.len() == 57 => Some(Input::Incomplete),
+        // SC4: a Four.meme launch, curve trade, vault phase, refused log.
+        (RecordKind::Canonical, b'n') => {
+            let (_, _, tx_index, token, creator, curve) = four_launch_of(p)?;
+            Some(Input::FourLaunch {
+                token,
+                creator,
+                tx_index,
+                curve,
+            })
+        }
+        (RecordKind::Canonical, b'Z') => {
+            let t = crate::runtime_journal::four_trade_of(p)?;
+            Some(Input::FourTrade {
+                token: t.token,
+                trade: Trade {
+                    block_number: t.block_number,
+                    tx_index: t.tx_index,
+                    log_index: t.log_index,
+                    sell: t.sell,
+                    trader: t.trader,
+                    amount: word(&t.amount),
+                    eth: word(&t.quote),
+                    fee: U256::ZERO,
+                },
+                post: FourPost {
+                    remaining: word(&t.remaining),
+                    raised: word(&t.raised),
+                },
+            })
+        }
+        // The vault entering its trading phase is the launch's; any other
+        // phase is off the curve.
+        (RecordKind::Canonical, b'y') if p.len() == 79 => {
+            let to = p[78];
+            (to != darkbot_bsc_trading::venues::fourmeme::profile::OPENFOUR_PHASE_TRADING).then(
+                || Input::FourOffCurve {
+                    token: p[57..77].try_into().unwrap_or([0; 20]),
+                },
+            )
+        }
+        (RecordKind::Canonical, b'z') if p.len() == 57 => Some(Input::FourIncomplete),
+        // A refused Flap log: no Flap curve stays exact (SC4: the Four.meme
+        // ones are not concerned); a reorg, a resync: no curve stays exact.
+        (RecordKind::Canonical, b'W') if p.len() == 57 => Some(Input::FlapIncomplete),
         (RecordKind::Reorg, b'R') if p.len() == 45 => Some(Input::Incomplete),
         (RecordKind::Reorg, b'G') if p.len() == 17 => Some(Input::Incomplete),
         (RecordKind::Canonical, b'I') if p.len() == 9 => Some(Input::Incomplete),
@@ -244,8 +470,67 @@ pub fn input_of_record(kind: RecordKind, p: &[u8]) -> Option<Input> {
 
 /// The strategy switched on (`U | 1`) or off (`U | 0`), a `Runtime`
 /// record: a replay starts and ends its engine at the same place.
-pub fn switch_payload(on: bool) -> Vec<u8> {
-    vec![b'U', u8::from(on)]
+/// SC4: the switch on with venues besides Flap carries their mask (`U | 1 |
+/// mask`); Flap alone, and off, as before.
+pub fn switch_payload(on: bool, venues: StrategyVenues) -> Vec<u8> {
+    match on && venues != StrategyVenues::FLAP {
+        true => vec![b'U', 1, venues.mask()],
+        false => vec![b'U', u8::from(on)],
+    }
+}
+
+/// SC4: the venues whose launches Strategy C follows: those effective
+/// SHADOW (or LIVE) when it was switched on.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct StrategyVenues {
+    pub flap: bool,
+    pub four: bool,
+    pub openfour: bool,
+}
+
+impl StrategyVenues {
+    pub const FLAP: Self = Self {
+        flap: true,
+        four: false,
+        openfour: false,
+    };
+
+    pub fn any(self) -> bool {
+        self.flap || self.four || self.openfour
+    }
+
+    fn mask(self) -> u8 {
+        u8::from(self.flap) | u8::from(self.four) << 1 | u8::from(self.openfour) << 2
+    }
+
+    /// The venues of a switch record's mask; `None` for no venue or an
+    /// unknown bit.
+    pub fn of_mask(mask: u8) -> Option<Self> {
+        (mask != 0 && mask < 8).then_some(Self {
+            flap: mask & 1 != 0,
+            four: mask & 2 != 0,
+            openfour: mask & 4 != 0,
+        })
+    }
+
+    fn takes(self, venue: crate::canonical_join::Venue) -> bool {
+        use crate::canonical_join::Venue;
+        match venue {
+            Venue::Flap => self.flap,
+            Venue::Four => self.four,
+            Venue::OpenFour => self.openfour,
+        }
+    }
+}
+
+/// The venues a switch-on record names (`U | 1`, Flap alone; `U | 1 |
+/// mask`); `None` for any other bytes.
+pub fn switched_on(p: &[u8]) -> Option<StrategyVenues> {
+    match p {
+        [b'U', 1] => Some(StrategyVenues::FLAP),
+        [b'U', 1, mask] => StrategyVenues::of_mask(*mask),
+        _ => None,
+    }
 }
 
 /// The kinds of a `Y` record.
@@ -274,10 +559,11 @@ fn decision_code(d: Decision) -> (u8, u8) {
     }
 }
 
-/// Why a token is not tracked: the reason in the high nibble, for a term
-/// outside the scope the term in the low one (1 version, 2 quote token,
-/// 3 NFT gate, 4 holding cap, 5 curve, 6 tax, 7 threshold, 8 not
-/// tradable, 15 another).
+/// Why a token is not tracked: the reason in the high nibble (SC4: 7 the
+/// venue's quote refused), for a term outside the scope the term in the low
+/// one (1 version, 2 quote token, 3 NFT gate, 4 holding cap, 5 curve, 6
+/// tax, 7 threshold, 8 not tradable, SC4: 9 a Four.meme curve, 10..14
+/// [`FOUR_LAUNCH_REFUSALS`], 15 another).
 fn untracked_code(u: Untracked) -> u8 {
     let (reason, term) = match u {
         Untracked::Unsupported(why) => (
@@ -291,7 +577,13 @@ fn untracked_code(u: Untracked) -> u8 {
                 "tax" => 6,
                 "threshold" => 7,
                 "not tradable" => 8,
-                _ => 15,
+                // SC4: a Four.meme curve (no Flap quote), and why a Four.meme
+                // launch is not priced.
+                "four.meme curve" => 9,
+                why => FOUR_LAUNCH_REFUSALS
+                    .iter()
+                    .position(|r| *r == why)
+                    .map_or(15, |i| 10 + i as u8),
             },
         ),
         Untracked::TermsIncomplete => (2, 0),
@@ -299,6 +591,7 @@ fn untracked_code(u: Untracked) -> u8 {
         Untracked::Migrated => (4, 0),
         Untracked::Gap => (5, 0),
         Untracked::ShadowReplay => (6, 0),
+        Untracked::Quote => (7, 0),
     };
     (reason << 4) | term
 }
@@ -552,6 +845,8 @@ pub fn paper_intent_kind(p: &[u8]) -> Option<IntentKind> {
 /// The strategy component of one run.
 pub struct StrategyRuntime {
     engine: Engine,
+    /// SC4: the venues whose launches it follows.
+    venues: StrategyVenues,
     pub counters: Counters,
     input_wei: U256,
     /// Decisions for the PAPER path since the last `take_actions`
@@ -617,8 +912,9 @@ pub fn status_draft(
 }
 
 impl StrategyRuntime {
-    pub fn new(config: Config, gas: GasEvidence) -> Self {
+    pub fn new(config: Config, gas: GasEvidence, venues: StrategyVenues) -> Self {
         Self {
+            venues,
             input_wei: config.input_wei,
             engine: Engine::new(config, gas),
             counters: Counters::default(),
@@ -678,6 +974,11 @@ impl StrategyRuntime {
                 reserve,
                 circulating,
             })
+    }
+
+    /// SC4: the venues whose launches it follows.
+    pub fn venues(&self) -> StrategyVenues {
+        self.venues
     }
 
     pub fn followed(&self) -> usize {
@@ -741,16 +1042,33 @@ impl StrategyRuntime {
         at: u64,
         journal: Option<&mut RuntimeJournal>,
     ) -> Vec<Vec<u8>> {
+        // SC4: a launch or a Four.meme curve record of a venue it does not
+        // follow is no input (nor counted).
+        use crate::canonical_join::Venue;
+        let four = self.venues.four || self.venues.openfour;
+        let followed = match (kind, payload.first()) {
+            (RecordKind::Canonical, Some(b'N')) => self.venues.flap,
+            (RecordKind::Canonical, Some(b'n' | b'Z')) => payload
+                .get(1)
+                .and_then(|b| crate::runtime_journal::venue_of_byte(*b))
+                .is_some_and(|v| self.venues.takes(v)),
+            (RecordKind::Canonical, Some(b'y')) => self.venues.takes(Venue::OpenFour),
+            (RecordKind::Canonical, Some(b'z')) => four,
+            _ => true,
+        };
+        if !followed {
+            return Vec::new();
+        }
         let Some(input) = input_of_record(kind, payload) else {
             return Vec::new();
         };
         let c = &mut self.counters;
         match input {
-            Input::Launch { .. } => c.launches += 1,
-            Input::Trade { .. } => c.trades += 1,
+            Input::Launch { .. } | Input::FourLaunch { .. } => c.launches += 1,
+            Input::Trade { .. } | Input::FourTrade { .. } => c.trades += 1,
             Input::Term { .. } => c.terms += 1,
-            Input::Migrated { .. } => c.migrations += 1,
-            Input::Incomplete => c.incomplete += 1,
+            Input::Migrated { .. } | Input::FourOffCurve { .. } => c.migrations += 1,
+            Input::Incomplete | Input::FlapIncomplete | Input::FourIncomplete => c.incomplete += 1,
             Input::Block { .. } | Input::Hold { .. } | Input::Unhold { .. } | Input::Reheld(_) => {}
         }
         let typed = self.engine.step(input);
@@ -876,6 +1194,17 @@ pub struct Position {
     pub time_lower_bound: bool,
 }
 
+/// A canonical BUY of a token (Flap, SC4 Four.meme) and its block: what an
+/// entry's position is placed against.
+fn foreign_buy(input: &Input) -> Option<([u8; 20], u64)> {
+    match input {
+        Input::Trade { token, trade } | Input::FourTrade { token, trade, .. } if !trade.sell => {
+            Some((*token, trade.block_number))
+        }
+        _ => None,
+    }
+}
+
 /// The positions of `entries` (paper, token, decided block, action time,
 /// whether that time is the action's own) in a run started at
 /// `started_ms`, against the journaled block times and the foreign BUYs
@@ -983,15 +1312,15 @@ pub fn replay(
         };
         out.records += 1;
         match (r.kind, &*r.payload) {
-            (RecordKind::Runtime, [b'U', on]) => {
+            (RecordKind::Runtime, p @ ([b'U', _] | [b'U', 1, _])) => {
                 // The counters of every period the strategy ran add up.
                 if let Some(s) = strategy.take() {
                     add(&mut out.counters, &s.counters);
                     out.open_at_end += s.engine.open_positions() as u64;
                 }
-                if *on == 1 {
+                if let Some(venues) = switched_on(p) {
                     out.starts += 1;
-                    strategy = Some(StrategyRuntime::new(config.clone(), gas.clone()));
+                    strategy = Some(StrategyRuntime::new(config.clone(), gas.clone(), venues));
                 }
             }
             (RecordKind::Runtime, p) if p.first() == Some(&b'Y') => journaled.push(p.to_vec()),
@@ -1013,8 +1342,8 @@ pub fn replay(
                     Some(Input::Block { number, time_ms }) => {
                         blocks.insert(number, time_ms);
                     }
-                    Some(Input::Trade { token, trade }) if !trade.sell => {
-                        buys.push((token, trade.block_number));
+                    Some(input) if foreign_buy(&input).is_some() => {
+                        buys.extend(foreign_buy(&input));
                     }
                     _ => {}
                 }
@@ -1365,7 +1694,7 @@ mod tests {
     }
 
     fn runtime() -> StrategyRuntime {
-        StrategyRuntime::new(config(), gas())
+        StrategyRuntime::new(config(), gas(), StrategyVenues::FLAP)
     }
 
     fn be(v: U256) -> [u8; 32] {
@@ -1507,8 +1836,12 @@ mod tests {
                 tx_index: 3
             })
         );
+        // SC4: a refused Flap log concerns the Flap curves only.
+        assert_eq!(
+            input_of_record(RecordKind::Canonical, &trade_gap_payload(5, &HASH, 1, 2)),
+            Some(Input::FlapIncomplete)
+        );
         for (kind, p) in [
-            (RecordKind::Canonical, trade_gap_payload(5, &HASH, 1, 2)),
             (RecordKind::Canonical, incomplete_payload(9)),
             (
                 RecordKind::Reorg,
@@ -1718,7 +2051,11 @@ mod tests {
             build_dirty: None,
             capture_pending: "VENUES",
         });
-        assert!(j.record(RecordKind::Runtime, 2, switch_payload(true)));
+        assert!(j.record(
+            RecordKind::Runtime,
+            2,
+            switch_payload(true, StrategyVenues::FLAP)
+        ));
         let mut s = runtime();
         let (k, p) = block(100);
         assert!(j.record(k, 3, p.clone()));
@@ -1741,7 +2078,11 @@ mod tests {
             s.record(k, &p, 5, Some(&mut j));
         }
         assert!(s.has_pending(), "the held position's timeout exit");
-        assert!(j.record(RecordKind::Runtime, 6, switch_payload(false)));
+        assert!(j.record(
+            RecordKind::Runtime,
+            6,
+            switch_payload(false, StrategyVenues::FLAP)
+        ));
         assert!(j.record(RecordKind::Runtime, 7, EXIT_PAYLOAD.to_vec()));
         j.finish().unwrap();
         let r = replay(&base, "7", max, &config(), &gas(), Some([0xC0; 32])).unwrap();
@@ -1777,7 +2118,11 @@ mod tests {
         for (k, p) in launch_records(90) {
             assert!(j.record(k, 1, p));
         }
-        assert!(j.record(RecordKind::Runtime, 2, switch_payload(true)));
+        assert!(j.record(
+            RecordKind::Runtime,
+            2,
+            switch_payload(true, StrategyVenues::FLAP)
+        ));
         let mut s = runtime();
         let mut records = launch_records(100);
         records.extend((101..=107).map(block));
@@ -1801,7 +2146,11 @@ mod tests {
         // Gate M1: the action at the PASS block's completion (105, fill
         // delay 1: the fill is 106), journaled as the runtime does.
         assert!(j.record(RecordKind::Runtime, 3, action_payload(105)));
-        assert!(j.record(RecordKind::Runtime, 4, switch_payload(false)));
+        assert!(j.record(
+            RecordKind::Runtime,
+            4,
+            switch_payload(false, StrategyVenues::FLAP)
+        ));
         // After it: journaled only.
         assert!(j.record(RecordKind::Canonical, 5, block_payload(108, &HASH, 6_000)));
         assert!(j.record(RecordKind::Runtime, 6, EXIT_PAYLOAD.to_vec()));
@@ -1865,6 +2214,45 @@ mod tests {
         let r = replay(&base, "7", max, &config(), &gas(), Some([0xC0; 32])).unwrap();
         assert_eq!((r.verdict(), r.config_match), ("INCOMPLETE", None));
         std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    /// SC4: the foreign BUYs an entry is placed against are the canonical
+    /// BUYs of either venue, never a SELL.
+    #[test]
+    fn foreign_buys_are_the_canonical_buys_of_either_venue() {
+        let trade = |sell| Trade {
+            block_number: 101,
+            tx_index: 1,
+            log_index: 0,
+            sell,
+            trader: [0x77; 20],
+            amount: U256::ONE,
+            eth: U256::ONE,
+            fee: U256::ZERO,
+        };
+        let post = FourPost {
+            remaining: U256::ONE,
+            raised: U256::ONE,
+        };
+        for sell in [false, true] {
+            let want = (!sell).then_some((TOKEN, 101));
+            assert_eq!(
+                foreign_buy(&Input::Trade {
+                    token: TOKEN,
+                    trade: trade(sell)
+                }),
+                want
+            );
+            assert_eq!(
+                foreign_buy(&Input::FourTrade {
+                    token: TOKEN,
+                    trade: trade(sell),
+                    post
+                }),
+                want
+            );
+        }
+        assert_eq!(foreign_buy(&Input::FourIncomplete), None);
     }
 
     /// Phase I (PHASENPLAN §17 J input): an entry's position against the
@@ -1960,7 +2348,11 @@ mod tests {
             build_dirty: None,
             capture_pending: "VENUES",
         });
-        assert!(j.record(RecordKind::Runtime, 2, switch_payload(true)));
+        assert!(j.record(
+            RecordKind::Runtime,
+            2,
+            switch_payload(true, StrategyVenues::FLAP)
+        ));
         let mut records = launch_records(100);
         records.extend((101..=107).map(block));
         for (k, p) in records {
@@ -1975,7 +2367,11 @@ mod tests {
         paper.extend([0u8; 32]);
         paper.extend([0xAA; 8]);
         assert!(j.record(RecordKind::Runtime, 5_000_000, paper));
-        assert!(j.record(RecordKind::Runtime, 6_000_000, switch_payload(false)));
+        assert!(j.record(
+            RecordKind::Runtime,
+            6_000_000,
+            switch_payload(false, StrategyVenues::FLAP)
+        ));
         assert!(j.record(RecordKind::Runtime, 7_000_000, EXIT_PAYLOAD.to_vec()));
         j.finish().unwrap();
         let r = replay(&base, "7", max, &config(), &gas(), Some([0xC0; 32])).unwrap();
@@ -2065,5 +2461,340 @@ mod tests {
             Ok(CreatorSoldBeforeFill::TxLands)
         );
         assert!(creator_sold_policy("free_cancel").is_err());
+    }
+
+    /// SC4: the Four.meme strategy records.
+    mod four {
+        use super::*;
+        use crate::canonical_join::Venue as LaunchVenue;
+        use crate::runtime::exec::tests::{four_launch, four_observation, openfour_launch};
+        use alloy_primitives::{Address, B256};
+        use darkbot_bsc_geth_ipc::ingress::decode_tx_target;
+        use darkbot_bsc_trading::economics::four_classic::LaunchTerms;
+        use darkbot_bsc_trading::economics::openfour::launch_curve;
+        use darkbot_bsc_trading::venues::fourmeme::deployment::{
+            bsc_mainnet_r12b_131568366, bsc_mainnet_r12d_131608421,
+        };
+        use darkbot_bsc_trading::venues::fourmeme::profile::{
+            OPENFOUR_WITNESSED_RAISE, WITNESSED_MAX_OFFERS, WITNESSED_TOTAL_SUPPLY,
+            classify_classic_launch,
+        };
+        use darkbot_bsc_trading::venues::fourmeme::recognize::{Recognized, recognize};
+
+        const MAX: usize = 16_384;
+
+        /// The witnessed launches classify on the validated deployment to
+        /// their launch curves (OpenFour: the bonding preset's terms; its
+        /// token from its signer), each refusal with its code; the `n`
+        /// record reads back to that curve and code.
+        #[test]
+        fn four_launches_classify_to_their_launch_curves() {
+            let d = bsc_mainnet_r12d_131608421();
+            let v = d.validate(&four_observation(&d).observed, 1).unwrap();
+            // OpenFour.
+            let (hash, raw, launcher) = openfour_launch(1);
+            let launch = match recognize(
+                &d,
+                decode_tx_target(&raw).unwrap().to.map(Address::from),
+                decode_tx_target(&raw).unwrap().data,
+                MAX,
+            ) {
+                Recognized::OpenFourLaunch(l) => l,
+                other => panic!("{other:?}"),
+            };
+            let token = d
+                .openfour_token(
+                    launch.preset_id,
+                    launch.init.token_salt,
+                    launch.request_id,
+                    Some(Address::from(launcher)),
+                )
+                .unwrap()
+                .into_array();
+            let classify = |validated, venue, raw: Option<&[u8]>, sender, token| {
+                classify_four_launch(validated, venue, raw, sender, (token, hash), MAX)
+            };
+            let curve = classify(
+                Some(v),
+                LaunchVenue::OpenFour,
+                Some(&raw),
+                Some(launcher),
+                token,
+            )
+            .unwrap();
+            let start = launch_curve(&LaunchTerms {
+                total_supply: WITNESSED_TOTAL_SUPPLY,
+                max_offers: WITNESSED_MAX_OFFERS,
+                max_raising: OPENFOUR_WITNESSED_RAISE,
+            })
+            .unwrap();
+            let FourCurve::OpenFour { start: s, now, fee } = curve else {
+                panic!()
+            };
+            assert_eq!(s, start);
+            assert!(
+                now.remaining < start.remaining,
+                "the creator's BUY is in it"
+            );
+            assert_eq!((fee.protocol_bps, fee.dev_bps), (50, 50));
+            for (validated, venue, raw, sender, t, code) in [
+                (
+                    None,
+                    LaunchVenue::OpenFour,
+                    Some(&raw[..]),
+                    Some(launcher),
+                    token,
+                    0,
+                ),
+                (
+                    Some(v),
+                    LaunchVenue::OpenFour,
+                    None,
+                    Some(launcher),
+                    token,
+                    1,
+                ),
+                (
+                    Some(v),
+                    LaunchVenue::OpenFour,
+                    Some(&raw[..]),
+                    None,
+                    token,
+                    1,
+                ),
+                (
+                    Some(v),
+                    LaunchVenue::Four,
+                    Some(&raw[..]),
+                    Some(launcher),
+                    token,
+                    2,
+                ),
+                (
+                    Some(v),
+                    LaunchVenue::OpenFour,
+                    Some(&raw[..]),
+                    Some([0x11; 20]),
+                    token,
+                    4,
+                ),
+                (
+                    Some(v),
+                    LaunchVenue::OpenFour,
+                    Some(&raw[..]),
+                    Some(launcher),
+                    [0x22; 20],
+                    4,
+                ),
+            ] {
+                assert_eq!(classify(validated, venue, raw, sender, t), Err(code));
+            }
+            // A pin without the executed preset: outside the profile.
+            let earlier = bsc_mainnet_r12b_131568366();
+            let unbonded = earlier
+                .validate(&four_observation(&earlier).observed, 1)
+                .unwrap();
+            assert_eq!(
+                classify(
+                    Some(unbonded),
+                    LaunchVenue::OpenFour,
+                    Some(&raw),
+                    Some(launcher),
+                    token
+                ),
+                Err(3)
+            );
+            // The record: the launch curve, read back; a refusal's code.
+            let p = four_launch_payload(
+                LaunchVenue::OpenFour,
+                (9, 4),
+                &token,
+                &[0xC1; 20],
+                Ok(curve),
+            );
+            assert_eq!(p.len(), FOUR_LAUNCH_LEN);
+            assert_eq!(
+                four_launch_of(&p),
+                Some((
+                    LaunchVenue::OpenFour,
+                    9,
+                    4,
+                    token,
+                    [0xC1; 20],
+                    Ok(FourCurve::openfour(start, fee))
+                ))
+            );
+            for (code, why) in FOUR_LAUNCH_REFUSALS.iter().enumerate() {
+                let p =
+                    four_launch_payload(LaunchVenue::Four, (9, 4), &token, &[0xC1; 20], Err(code));
+                assert_eq!(four_launch_of(&p).map(|r| r.5), Some(Err(*why)));
+            }
+            let mut flap = p.clone();
+            flap[1] = 1;
+            let mut code = p.clone();
+            code[58] = FOUR_LAUNCH_REFUSALS.len() as u8 + 1;
+            let mut product = four_launch_payload(
+                LaunchVenue::OpenFour,
+                (9, 4),
+                &token,
+                &[0xC1; 20],
+                Ok(curve),
+            );
+            product[60] ^= 1;
+            for bad in [flap, code, product, p[..p.len() - 1].to_vec()] {
+                assert_eq!(four_launch_of(&bad), None);
+            }
+            // Classic: the launch curve its classification leaves, with the
+            // creator's BUY taken back.
+            let (hash, raw, _) = four_launch(2);
+            let target = decode_tx_target(&raw).unwrap();
+            let Recognized::ClassicLaunch(l) =
+                recognize(&d, target.to.map(Address::from), target.data, MAX)
+            else {
+                panic!()
+            };
+            let c = classify_classic_launch(
+                &v,
+                &l,
+                U256::from_be_slice(target.value),
+                B256::from(hash),
+            )
+            .unwrap();
+            let curve = classify_four_launch(
+                Some(v),
+                LaunchVenue::Four,
+                Some(&raw),
+                None,
+                (c.token().into_array(), hash),
+                MAX,
+            )
+            .unwrap();
+            let FourCurve::Classic { start, now, fee } = curve else {
+                panic!()
+            };
+            assert_eq!((now, fee), (c.curve(), c.fee()));
+            assert!(start.sold.is_zero() && start.t == now.t + now.sold);
+            let p = four_launch_payload(LaunchVenue::Four, (9, 4), &[1; 20], &[2; 20], Ok(curve));
+            assert_eq!(
+                four_launch_of(&p).map(|r| r.5),
+                Some(Ok(FourCurve::classic(start, fee).unwrap()))
+            );
+        }
+
+        /// The Four.meme curve records are the engine's Four inputs (a phase
+        /// into trading is none); the strategy follows only the venues it
+        /// was switched on with, and the switch record names them (Flap
+        /// alone as before).
+        #[test]
+        fn four_records_reach_only_a_strategy_that_follows_their_venue() {
+            use crate::chain_follower::CanonicalFourTrade;
+            use crate::runtime_journal::{
+                four_phase_payload, four_trade_gap_payload, four_trade_payload,
+            };
+            let trade = CanonicalFourTrade {
+                venue: LaunchVenue::OpenFour,
+                block_number: 5,
+                block_hash: HASH,
+                tx_index: 3,
+                tx_hash: [3; 32],
+                log_index: 1,
+                origin: [0x77; 20],
+                sell: true,
+                token: TOKEN,
+                trader: [0x77; 20],
+                amount: U256::from(11u8).to_be_bytes(),
+                quote: U256::from(12u8).to_be_bytes(),
+                remaining: U256::from(13u8).to_be_bytes(),
+                raised: U256::from(14u8).to_be_bytes(),
+            };
+            assert_eq!(
+                input_of_record(RecordKind::Canonical, &four_trade_payload(&trade)),
+                Some(Input::FourTrade {
+                    token: TOKEN,
+                    trade: Trade {
+                        block_number: 5,
+                        tx_index: 3,
+                        log_index: 1,
+                        sell: true,
+                        trader: [0x77; 20],
+                        amount: U256::from(11u8),
+                        eth: U256::from(12u8),
+                        fee: U256::ZERO,
+                    },
+                    post: FourPost {
+                        remaining: U256::from(13u8),
+                        raised: U256::from(14u8),
+                    },
+                })
+            );
+            let phase = |to| four_phase_payload(5, &HASH, (3, 2), &TOKEN, (1, to));
+            assert_eq!(input_of_record(RecordKind::Canonical, &phase(1)), None);
+            assert_eq!(
+                input_of_record(RecordKind::Canonical, &phase(2)),
+                Some(Input::FourOffCurve { token: TOKEN })
+            );
+            assert_eq!(
+                input_of_record(
+                    RecordKind::Canonical,
+                    &four_trade_gap_payload(5, &HASH, 3, 4)
+                ),
+                Some(Input::FourIncomplete)
+            );
+            // The switch records.
+            let four = StrategyVenues {
+                flap: false,
+                four: true,
+                openfour: true,
+            };
+            assert_eq!(switch_payload(true, StrategyVenues::FLAP), [b'U', 1]);
+            assert_eq!(switch_payload(false, four), [b'U', 0]);
+            assert_eq!(switched_on(&switch_payload(true, four)), Some(four));
+            assert_eq!(switched_on(&[b'U', 1]), Some(StrategyVenues::FLAP));
+            for bad in [&[b'U', 0][..], &[b'U', 1, 0], &[b'U', 1, 8], &[b'U', 2, 1]] {
+                assert_eq!(switched_on(bad), None, "{bad:?}");
+            }
+            // Only the followed venues' launches are inputs.
+            let launch =
+                four_launch_payload(LaunchVenue::OpenFour, (5, 2), &TOKEN, &CREATOR, Err(3));
+            let flap = flap_launch_payload(5, 3, &[0xBB; 20], &CREATOR);
+            // A Flap-only strategy neither steps nor counts the Four.meme
+            // curve records.
+            for (venues, counted) in [(StrategyVenues::FLAP, (0, 0, 0)), (four, (1, 1, 1))] {
+                let mut s = StrategyRuntime::new(config(), gas(), venues);
+                for p in [
+                    four_trade_payload(&trade),
+                    phase(2),
+                    four_trade_gap_payload(5, &HASH, 3, 4),
+                ] {
+                    s.record(RecordKind::Canonical, &p, 1, None);
+                }
+                assert_eq!(
+                    (
+                        s.counters.trades,
+                        s.counters.migrations,
+                        s.counters.incomplete
+                    ),
+                    counted,
+                    "{venues:?}"
+                );
+            }
+            for (venues, launches) in [
+                (StrategyVenues::FLAP, 1),
+                (four, 1),
+                (StrategyVenues { flap: true, ..four }, 2),
+            ] {
+                let mut s = StrategyRuntime::new(config(), gas(), venues);
+                s.record(
+                    RecordKind::Canonical,
+                    &block_payload(5, &HASH, 750),
+                    1,
+                    None,
+                );
+                s.record(RecordKind::Canonical, &launch, 2, None);
+                s.record(RecordKind::Canonical, &flap, 3, None);
+                assert_eq!(s.counters.launches, launches, "{venues:?}");
+                assert_eq!(s.followed() as u64, launches);
+            }
+        }
     }
 }

@@ -779,3 +779,359 @@ fn a_held_position_without_its_terms_is_not_held() {
     });
     assert!(!c.engine.holds(&TOKEN), "no priced curve, no decided exit");
 }
+
+/// SC4: an OpenFour token on its exact curve, driven as the follower
+/// reports it (each trade with the state it left).
+mod four {
+    use super::*;
+    use crate::economics::four_classic::LaunchTerms;
+    use crate::economics::openfour::{OpenFourCurve, OpenFourFee, launch_curve};
+    use crate::strategy::book::{FourCurve, FourPost};
+
+    const FOUR_TOKEN: [u8; 20] = [0xF4; 20];
+    const FEE: OpenFourFee = OpenFourFee {
+        protocol_bps: 50,
+        dev_bps: 50,
+    };
+
+    fn gas() -> GasEvidence {
+        let mut e = super::gas();
+        // The frozen OpenFour receipts' largest gas used per class.
+        for (action, used) in [
+            (Action::Buy, 1_694_570),
+            (Action::Approve, 48_788),
+            (Action::Sell, 570_922),
+        ] {
+            e.add(
+                PathClass {
+                    venue: Venue::OpenFour,
+                    action,
+                },
+                used,
+            )
+            .unwrap();
+        }
+        e
+    }
+
+    fn start() -> OpenFourCurve {
+        let e18 = U256::from(10u64).pow(U256::from(18u8));
+        launch_curve(&LaunchTerms {
+            total_supply: U256::from(1_000_000_000u64) * e18,
+            max_offers: U256::from(800_000_000u64) * e18,
+            max_raising: U256::from(18u64) * e18,
+        })
+        .unwrap()
+    }
+
+    /// The chain's OpenFour curve and the engine fed with its trades.
+    struct FourChain {
+        engine: Engine,
+        real: FourCurve,
+        block: u64,
+        tx: u64,
+        out: Vec<Output>,
+    }
+
+    impl FourChain {
+        fn new(cfg: Config) -> Self {
+            let mut c = Self {
+                engine: Engine::new(cfg, gas()),
+                real: FourCurve::openfour(start(), FEE),
+                block: 100,
+                tx: 0,
+                out: Vec::new(),
+            };
+            c.feed(Input::Block {
+                number: 100,
+                time_ms: 0,
+            });
+            c
+        }
+
+        fn feed(&mut self, input: Input) {
+            self.out.extend(self.engine.step(input));
+        }
+
+        fn next_block(&mut self) {
+            self.block += 1;
+            self.tx = 0;
+            self.feed(Input::Block {
+                number: self.block,
+                time_ms: (self.block - 100) * BLOCK_MS,
+            });
+        }
+
+        /// The state the chain's curve reports.
+        fn post(&self) -> FourPost {
+            let FourCurve::OpenFour { start, now, .. } = self.real else {
+                panic!()
+            };
+            FourPost {
+                remaining: now.remaining,
+                raised: now.quote_reserve - start.quote_reserve,
+            }
+        }
+
+        /// A BUY of `wei` by `trader` (`launch`: inside the launch tx).
+        fn buy(&mut self, trader: [u8; 20], wei: u64, launch: bool) {
+            if !launch {
+                self.tx += 1;
+            }
+            let (tokens, paid) = self.real.buy(U256::from(wei)).unwrap();
+            self.real = self.real.shifted(tokens).unwrap();
+            let trade = Trade {
+                block_number: self.block,
+                tx_index: self.tx,
+                log_index: 0,
+                sell: false,
+                trader,
+                amount: tokens,
+                eth: paid,
+                fee: U256::ZERO,
+            };
+            let post = self.post();
+            self.feed(Input::FourTrade {
+                token: FOUR_TOKEN,
+                trade,
+                post,
+            });
+        }
+
+        /// The launch with its creator's BUY, four buyers, the decision
+        /// block (105).
+        fn passing_launch(&mut self) {
+            self.tx += 1;
+            self.feed(Input::FourLaunch {
+                token: FOUR_TOKEN,
+                creator: CREATOR,
+                tx_index: self.tx,
+                curve: Ok(self.real),
+            });
+            self.buy(CREATOR, 5_000_000_000_000_000, true);
+            for i in 1..=4u8 {
+                self.next_block();
+                self.buy([i; 20], 20_000_000_000_000_000, false);
+            }
+            self.next_block();
+        }
+
+        fn kinds(&self) -> Vec<String> {
+            self.out
+                .iter()
+                .map(|o| match o {
+                    Output::Decided {
+                        decision, block, ..
+                    } => format!("decided {block} {decision:?}"),
+                    Output::Entered { block, .. } => format!("entered {block}"),
+                    Output::ExitTriggered { block, reason, .. } => {
+                        format!("trigger {block} {reason:?}")
+                    }
+                    Output::Exited { block, reason, .. } => format!("exited {block} {reason:?}"),
+                    Output::Unresolved { block, reason, .. } => {
+                        format!("unresolved {block} {reason:?}")
+                    }
+                    other => format!("{other:?}"),
+                })
+                .collect()
+        }
+    }
+
+    /// PASS, the exact-amount BUY at the fill (the largest within the
+    /// input, its payment the input it takes, the OpenFour BUY's gas on
+    /// top), a rally to the target on the shadow (the real curve with the
+    /// position's tokens), the SELL's proceeds that shadow's exact quote.
+    #[test]
+    fn an_openfour_launch_enters_and_exits_at_the_target_on_its_exact_curve() {
+        let mut c = FourChain::new(config("buy_count:3:,unique_buyers:3:"));
+        c.passing_launch();
+        c.next_block(); // 106: the fill at its end
+        let at_fill = c.real;
+        c.next_block(); // 107
+        for i in 10..30u8 {
+            c.buy([i; 20], 200_000_000_000_000_000, false);
+        }
+        let at_exit = c.real;
+        c.next_block(); // 108: target at the end of 107
+        c.next_block(); // 109: exit filled at the end of 108
+        assert_eq!(
+            c.kinds(),
+            [
+                "decided 105 Pass",
+                "entered 106",
+                "trigger 107 Target",
+                "exited 108 Target"
+            ]
+        );
+        let Some(Output::Entered { entry, .. }) = c.out.get(1) else {
+            panic!()
+        };
+        let input = U256::from(10_000_000_000_000_000u64);
+        let (tokens, paid) = at_fill.buy(input).unwrap();
+        assert_eq!((entry.tokens, entry.input_wei), (tokens, paid));
+        assert!(paid <= input);
+        assert_eq!(
+            entry.spent_wei,
+            paid + U256::from(1_694_570u64) * U256::from(100_000_000u64)
+        );
+        let Some(Output::Exited { exit, outcome, .. }) = c.out.get(3) else {
+            panic!()
+        };
+        let shadow = at_exit.shifted(tokens).unwrap();
+        assert_eq!(exit.proceeds_wei, shadow.sell(tokens).unwrap());
+        assert_eq!(
+            exit.network_fee_wei,
+            U256::from(570_922u64 + 48_788) * U256::from(100_000_000u64)
+        );
+        assert!(matches!(outcome, Outcome::Gain(_)));
+        assert_eq!(c.engine.followed(), 0);
+    }
+
+    /// A Classic token: the fill takes the wei its BUY takes (the gwei-
+    /// floored tokens' cost, fee and tax), the rest of the input refunded,
+    /// the Classic BUY's gas on top.
+    #[test]
+    fn a_classic_fill_takes_what_its_buy_takes() {
+        use crate::economics::four_classic::{ClassicCurve, ClassicFee, quote_buy, virtual_quote};
+        let e18 = U256::from(10u64).pow(U256::from(18u8));
+        let sale = U256::from(800_000_000u64) * e18;
+        let start = ClassicCurve {
+            k: U256::from_str_radix("5296303246049315066534058923", 10).unwrap(),
+            t: U256::from(1_073_972_602u64) * e18,
+            offers: sale,
+            sold: U256::ZERO,
+        };
+        let fee = ClassicFee {
+            rate_bps: 100,
+            min_fee: U256::ZERO,
+            tax_bps: 1_000,
+        };
+        let mut gas = gas();
+        gas.add(
+            PathClass {
+                venue: Venue::FourClassic,
+                action: Action::Buy,
+            },
+            1_000_000,
+        )
+        .unwrap();
+        let mut engine = Engine::new(config(""), gas);
+        let mut out = Vec::new();
+        out.extend(engine.step(Input::Block {
+            number: 100,
+            time_ms: 0,
+        }));
+        out.extend(engine.step(Input::FourLaunch {
+            token: FOUR_TOKEN,
+            creator: CREATOR,
+            tx_index: 1,
+            curve: Ok(FourCurve::classic(start, fee).unwrap()),
+        }));
+        // Decided at 105 (past the 3 s cutoff), filled at the end of 106.
+        for n in 101..=107u64 {
+            out.extend(engine.step(Input::Block {
+                number: n,
+                time_ms: (n - 100) * BLOCK_MS,
+            }));
+        }
+        let entry = out
+            .iter()
+            .find_map(|o| match o {
+                Output::Entered { entry, .. } => Some(*entry),
+                _ => None,
+            })
+            .expect("the entry");
+        let input = U256::from(10_000_000_000_000_000u64);
+        let q = quote_buy(&start, &fee, input).unwrap();
+        assert!(q.spent < input, "a refund");
+        assert_eq!((entry.tokens, entry.input_wei), (q.amount, q.spent));
+        assert_eq!(
+            entry.spent_wei,
+            q.spent + U256::from(1_000_000u64) * U256::from(100_000_000u64)
+        );
+        assert!(virtual_quote(&q.after).unwrap() > virtual_quote(&start).unwrap());
+    }
+
+    /// Each venue has its own slots: an open Flap position at `max_open` 1
+    /// leaves a Four.meme PASS its entry (and a refused Flap log leaves the
+    /// Four.meme curve tracked).
+    #[test]
+    fn each_venue_has_its_own_slots() {
+        let mut cfg = config("buy_count:3:,unique_buyers:3:");
+        cfg.max_open = 1;
+        let mut flap = Chain::new(cfg.clone());
+        // One engine with the gas of both venues.
+        flap.engine = Engine::new(cfg.clone(), gas());
+        flap.feed(Input::Block {
+            number: 100,
+            time_ms: 0,
+        });
+        flap.passing_launch(TOKEN);
+        flap.next_block(); // 106: the Flap fill
+        flap.next_block(); // 107
+        assert_eq!(flap.kinds(), ["decided 105 Pass", "entered 106"]);
+        // A Four.meme launch now, on the same engine.
+        let mut c = FourChain::new(cfg);
+        c.engine = flap.engine.clone();
+        c.block = flap.block;
+        c.passing_launch();
+        c.feed(Input::FlapIncomplete);
+        c.next_block();
+        c.next_block();
+        let kinds = c.kinds();
+        assert!(
+            kinds.contains(&format!("decided {} Pass", 107 + 5)),
+            "{kinds:?}"
+        );
+        assert!(kinds.contains(&format!("entered {}", 107 + 6)), "{kinds:?}");
+    }
+
+    /// A refused Four.meme log ends the Four.meme curves' tracking only; the
+    /// vault leaving its trading phase leaves an open position unresolved;
+    /// an unclassified launch is not tracked, with its reason.
+    #[test]
+    fn four_gaps_and_phases_concern_four_curves_only() {
+        // A Flap launch decides as before past a refused Four.meme log.
+        let mut flap = Chain::new(config("buy_count:3:,unique_buyers:3:"));
+        flap.launch(TOKEN, 5_000_000_000_000_000);
+        flap.feed(Input::FourIncomplete);
+        for i in 1..=4u8 {
+            flap.next_block();
+            flap.buy(TOKEN, [i; 20], 20_000_000_000_000_000);
+        }
+        flap.next_block();
+        assert_eq!(flap.kinds(), ["decided 105 Pass"]);
+        // A Four.meme position open: the refused log leaves it unresolved.
+        let mut c = FourChain::new(config("buy_count:3:,unique_buyers:3:"));
+        c.passing_launch();
+        c.next_block(); // 106: filled
+        c.next_block();
+        c.feed(Input::FourIncomplete);
+        c.next_block();
+        assert_eq!(
+            c.kinds()[1..],
+            ["entered 106".to_string(), "unresolved 107 Gap".to_string()]
+        );
+        let mut c = FourChain::new(config("buy_count:3:,unique_buyers:3:"));
+        c.passing_launch();
+        c.next_block();
+        c.next_block();
+        c.feed(Input::FourOffCurve { token: FOUR_TOKEN });
+        c.next_block();
+        assert_eq!(c.kinds().last().unwrap(), "unresolved 107 Migrated");
+        let mut c = FourChain::new(config("buy_count:0:"));
+        c.feed(Input::FourLaunch {
+            token: FOUR_TOKEN,
+            creator: CREATOR,
+            tx_index: 1,
+            curve: Err("preset"),
+        });
+        for _ in 0..5 {
+            c.next_block();
+        }
+        assert_eq!(
+            c.kinds(),
+            ["decided 105 NotTracked(Unsupported(\"preset\"))"]
+        );
+    }
+}

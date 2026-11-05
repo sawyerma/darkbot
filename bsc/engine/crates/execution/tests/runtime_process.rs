@@ -950,8 +950,14 @@ fn the_runtime_mode_and_the_venues_decide_what_runs() {
         assert!(line.contains("effective=SHADOW"), "{line}");
     }
     assert_eq!(strategy(&deliver(&rt)), Some(0));
-    // B08: Flap OFF: the strategy's ledger ends, C3 stays off.
+    // B08: Flap OFF: SC4 the strategy's ledger runs on while a Four.meme
+    // venue is admitted (started over on them), and ends with them OFF; C3
+    // stays off.
     rt.request("BSC_VENUE_FLAP", "OFF");
+    assert!(strategy(&rt.settle(2)).is_some());
+    for venue in ["BSC_VENUE_FOUR_CLASSIC", "BSC_VENUE_OPENFOUR"] {
+        rt.request(venue, "OFF");
+    }
     rt.until("the ledger ended", |r| strategy(r).is_none());
     let r = deliver(&rt);
     assert_eq!((strategy(&r), exec_state(&r).as_str()), (None, "OFF"));
