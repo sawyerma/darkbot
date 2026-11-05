@@ -654,9 +654,11 @@ fn a_position_held_again_on_its_read_curve_exits_by_the_same_rules() {
         c.feed(Input::Reheld(Reheld {
             token,
             creator,
-            terms: read_terms(&book),
-            reserve: book.reserve,
-            circulating: book.circulating,
+            curve: HeldCurve::Flap {
+                terms: read_terms(&book),
+                reserve: book.reserve,
+                circulating: book.circulating,
+            },
             tokens: q.output_amount,
             spent_wei: spent,
             filled_ms: 0,
@@ -698,12 +700,14 @@ fn a_position_held_again_on_its_read_curve_exits_by_the_same_rules() {
     migrated.feed(Input::Reheld(Reheld {
         token: other,
         creator: [0; 20],
-        terms: crate::economics::flap::native_curve20::TokenTerms {
-            tradable: false,
-            ..read_terms(&book)
+        curve: HeldCurve::Flap {
+            terms: crate::economics::flap::native_curve20::TokenTerms {
+                tradable: false,
+                ..read_terms(&book)
+            },
+            reserve: book.reserve,
+            circulating: book.circulating,
         },
-        reserve: book.reserve,
-        circulating: book.circulating,
         tokens: q.output_amount,
         spent_wei: spent,
         filled_ms: 0,
@@ -736,9 +740,11 @@ fn a_position_held_again_after_a_gap_keeps_its_creator_rule() {
     c.feed(Input::Reheld(Reheld {
         token: TOKEN,
         creator: [0; 20],
-        terms: read_terms(&book),
-        reserve: book.reserve,
-        circulating: book.circulating,
+        curve: HeldCurve::Flap {
+            terms: read_terms(&book),
+            reserve: book.reserve,
+            circulating: book.circulating,
+        },
         tokens: q.output_amount,
         spent_wei: spent,
         filled_ms: 0,
@@ -812,9 +818,11 @@ fn a_creator_sale_while_a_position_waits_to_be_held_again_still_counts() {
     c.feed(Input::Reheld(Reheld {
         token: TOKEN,
         creator: [0; 20],
-        terms: read_terms(&book),
-        reserve: book.reserve,
-        circulating: book.circulating,
+        curve: HeldCurve::Flap {
+            terms: read_terms(&book),
+            reserve: book.reserve,
+            circulating: book.circulating,
+        },
         tokens: q.output_amount,
         spent_wei: spent,
         filled_ms: 0,
@@ -1163,6 +1171,30 @@ mod four {
             filled_ms: 0,
         });
         assert!(c.engine.holds(&FOUR_TOKEN));
+        c.feed(Input::FourIncomplete);
+        assert!(!c.engine.holds(&FOUR_TOKEN));
+    }
+
+    /// SC4 d: a real Four.meme position read again after a restart (its
+    /// token not launched in this run) is held on its classified curve: its
+    /// curve is the intents' until its tracking ends.
+    #[test]
+    fn a_four_position_read_again_is_held_on_its_curve() {
+        let mut c = FourChain::new(config("buy_count:3:,unique_buyers:3:"));
+        assert!(!c.engine.holds(&FOUR_TOKEN));
+        c.feed(Input::Reheld(Reheld {
+            token: FOUR_TOKEN,
+            creator: CREATOR,
+            curve: HeldCurve::Four(c.real),
+            tokens: U256::from(1_000u64),
+            spent_wei: U256::from(2_000u64),
+            filled_ms: 0,
+        }));
+        assert!(c.engine.holds(&FOUR_TOKEN));
+        assert_eq!(
+            c.engine.curve_of(&FOUR_TOKEN),
+            Some(StrategyCurve::Four(c.real))
+        );
         c.feed(Input::FourIncomplete);
         assert!(!c.engine.holds(&FOUR_TOKEN));
     }

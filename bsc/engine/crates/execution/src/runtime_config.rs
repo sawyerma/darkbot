@@ -276,6 +276,11 @@ pub struct CanonicalConfig {
     /// (`BSC_CANONICAL_LOT_READ_REFUSED_MAX`): one bad answer, maybe from
     /// one endpoint, is read again.
     pub lot_read_refused_max: u32,
+    /// SC4 d: the blocks a re-read Four Classic lot's SELL may land after
+    /// its read (`BSC_CANONICAL_LOT_SELL_WINDOW_BLOCKS`): its token's tax is
+    /// priced only while witnessed up to that block (at most the priced
+    /// profiles' witnessed age).
+    pub lot_sell_window_blocks: u64,
     /// REV.1.0 R3b (BSC3-024/041): at most this many receipt recoveries of
     /// unresolved LIVE transactions at a time
     /// (`BSC_CANONICAL_RECOVERY_READS_MAX`), and one asked again no earlier
@@ -597,6 +602,15 @@ impl RuntimeConfig {
                         64,
                     )?)
                     .map_err(|_| "BSC_CANONICAL_LOT_READ_REFUSED_MAX")?,
+                    lot_sell_window_blocks: take(
+                        "BSC_CANONICAL_LOT_SELL_WINDOW_BLOCKS",
+                        1,
+                        darkbot_bsc_trading::venues::fourmeme::profile::CLASSIC_PROFILES
+                            .iter()
+                            .map(|p| p.tax_witnessed_blocks)
+                            .min()
+                            .unwrap_or(1),
+                    )?,
                     recovery_reads_max: usize::try_from(take(
                         "BSC_CANONICAL_RECOVERY_READS_MAX",
                         1,

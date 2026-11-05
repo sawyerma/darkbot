@@ -289,6 +289,7 @@ fn token_from(path: &Path, repo_root: &Path) -> Result<AuthorizationToken, Strin
 fn risk_refusal(
     grant: &crate::sources::LiveGrant,
     x: &crate::paper_exec::ExecConfig,
+    scope: FourScope,
 ) -> Option<String> {
     let Some(risk) = grant.risk else {
         return Some(crate::sources::LIVE_GRANT_RISK_MISSING.into());
@@ -316,6 +317,17 @@ fn risk_refusal(
             )
         }
     };
+    // SC4 d: the exits of the open lots on another venue the path arms.
+    let (approve, sell) = [
+        (scope.classic, VenueId::FourClassic),
+        (scope.openfour, VenueId::OpenFour),
+    ]
+    .into_iter()
+    .filter(|(armed, _)| *armed)
+    .map(|(_, v)| x.on_venue(v))
+    .fold((approve, sell), |(a, s), (_, _, va, vs)| {
+        (a.max(va), s.max(vs))
+    });
     risk.admits(
         &crate::sources::SignedRisk {
             buy_slippage_bps,
@@ -598,6 +610,9 @@ pub struct LiveRuntime {
     /// SC4 c (review M2): Strategy C BUYs on a venue the armed path does
     /// not BUY on (VENUE_UNARMED).
     strategy_buys_venue_unarmed: u64,
+    /// SC4 d review M2: probes after which a venue of open lots alone did
+    /// not validate (its lots wait, undecided).
+    four_lots_unarmed: u64,
     /// REV.1.0 R2: the providers' answers read and not yet journaled (here,
     /// not in the end: a disarm between a poll and the runtime's take drops
     /// none).
@@ -785,6 +800,7 @@ impl LiveRuntime {
             exit_deciders: None,
             strategy_buys_refused: 0,
             strategy_buys_venue_unarmed: 0,
+            four_lots_unarmed: 0,
             answers: Vec::new(),
             block_launches: Vec::new(),
             block_buys: Vec::new(),
@@ -992,6 +1008,33 @@ impl LiveRuntime {
             faults,
             fault,
         });
+    }
+
+    /// SC4 d: the venue of `token`'s open lot (its BUY's).
+    pub fn lot_venue(&self, token: &[u8; 20]) -> Option<VenueId> {
+        self.book.open_lot(token).map(|p| p.venue)
+    }
+
+    /// SC4 d: whether `venue`'s family has its execution keys (Flap always).
+    pub fn venue_configured(&self, venue: VenueId) -> bool {
+        let x = &self.exec.exec;
+        match venue {
+            VenueId::Flap => true,
+            VenueId::FourClassic => x.four.is_some(),
+            VenueId::OpenFour => x.openfour.is_some(),
+        }
+    }
+
+    /// SC4 d: the Four.meme deployment the armed path validated, while it
+    /// is armed on `venue` (its lots are read and exited on it).
+    pub fn four_armed_on(&self, venue: VenueId) -> Option<ValidatedFourDeployment> {
+        let x = self.executor.as_ref()?;
+        let armed = match venue {
+            VenueId::Flap => false,
+            VenueId::FourClassic => x.four_armed(),
+            VenueId::OpenFour => x.openfour_armed(),
+        };
+        armed.then_some(self.four_validated).flatten()
     }
 
     /// REV.1.0 R2: the creator of the launch of `token`'s open lot (its
@@ -2089,15 +2132,35 @@ impl LiveRuntime {
         };
         let generation = self.codehash_generation + 1;
         // SC4 d: the Four.meme deployment the grant's venue trades on, at
-        // every probe (a drift ends the path as the Flap one's does).
+        // every probe (a drift ends the path as the Flap one's does), as
+        // one armed for open lots does. Review M2: a venue of open lots not
+        // armed yet waits for a probe that validates; the path and its
+        // other exits go on (those lots undecided, counted).
+        let needed = self.grant_venue != VenueId::Flap
+            || self
+                .executor
+                .as_ref()
+                .is_some_and(|x| x.four_armed() || x.openfour_armed());
         let four = match (self.four_scope.any(), four) {
             (false, _) => None,
-            (true, None) => return self.stop(Phase::ProbeFailed("four: no probe".into())),
-            (true, Some(Err(e))) => return self.stop(Phase::ProbeFailed(format!("four: {e}"))),
             (true, Some(Ok(f))) => match validate_four(&f, generation, self.four_scope) {
                 Ok(v) => Some(v),
-                Err(refused) => return self.stop(refused.into()),
+                Err(refused) if needed => return self.stop(refused.into()),
+                Err(_) => {
+                    self.four_lots_unarmed += 1;
+                    None
+                }
             },
+            (true, None) if needed => {
+                return self.stop(Phase::ProbeFailed("four: no probe".into()));
+            }
+            (true, Some(Err(e))) if needed => {
+                return self.stop(Phase::ProbeFailed(format!("four: {e}")));
+            }
+            (true, _) => {
+                self.four_lots_unarmed += 1;
+                None
+            }
         };
         let validated = bsc_mainnet_v5_27_2().validate(&observation.deployment(), generation);
         let terms = observation.terms;
@@ -2249,12 +2312,27 @@ impl LiveRuntime {
             ),
             Err(e) => return self.close(format!("owner state: {e}")),
         };
-        // SC4 d: the Four.meme BUY the grant's venue names.
+        // SC4 d: the Four.meme BUY the grant's venue names, and the exits
+        // of the open lots on a Four.meme venue (a restart, an earlier
+        // grant): probed, validated and armed for them.
         self.grant_venue = venue.unwrap_or(VenueId::Flap);
-        self.rescope(FourScope {
-            classic: venue == Some(VenueId::FourClassic),
-            openfour: venue == Some(VenueId::OpenFour),
-        });
+        // Review M2: a family without its keys is never armed (its lots
+        // are stranded on the canonical side).
+        let lots = |v: VenueId| {
+            self.venue_configured(v)
+                && self.book.positions.iter().any(|p| {
+                    p.venue == v
+                        && matches!(
+                            p.state,
+                            PositionState::Pending | PositionState::Open | PositionState::Exiting
+                        )
+                })
+        };
+        let scope = FourScope {
+            classic: venue == Some(VenueId::FourClassic) || lots(VenueId::FourClassic),
+            openfour: venue == Some(VenueId::OpenFour) || lots(VenueId::OpenFour),
+        };
+        self.rescope(scope);
         let Some(strategies) = strategies else {
             return self.close(crate::sources::LIVE_GRANT_MISSING.into());
         };
@@ -2504,7 +2582,7 @@ impl LiveRuntime {
         }
         // BSC3-069: the executor signs within the execution risk the grant
         // names (a grant without it is not clear at all).
-        if let Some(why) = risk_refusal(live_now.grant(), &self.exec.exec) {
+        if let Some(why) = risk_refusal(live_now.grant(), &self.exec.exec, self.four_scope) {
             self.phase = Phase::Blocked(why);
             return;
         }
@@ -3843,6 +3921,7 @@ impl LiveRuntime {
                 "STRATEGY_BUYS_VENUE_UNARMED",
                 self.strategy_buys_venue_unarmed,
             ),
+            ("FOUR_LOT_VENUES_UNARMED", self.four_lots_unarmed),
             ("EXIT_FIRST", self.exit_first),
             ("BUYS_CLOSED", self.buys_refused),
             ("BUYS_UNFUNDED", self.unfunded_refused),

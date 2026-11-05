@@ -30,6 +30,7 @@ fn a_lease_on_the_last_slot_keeps_the_reconcile_on() {
         origin: ORIGIN,
         max_block: 900,
         exit_reserve_wei: 0,
+        venue: Some(crate::sources::VenueId::Flap),
     };
     s.lease_live(&armed, &lease, &attempt, &q, now).unwrap();
     let g = s.current().unwrap();
@@ -521,6 +522,20 @@ fn the_longest_strategy_hold_is_within_the_classic_tax_window() {
     for p in CLASSIC_PROFILES {
         assert!(oldest_sell < p.tax_witnessed_blocks, "{p:?}");
     }
+    // SC4 d: a Classic lot read again: its SELL window at most the
+    // witnessed tax age (the shipped one the longest hold at 250 ms).
+    let window = CLASSIC_PROFILES
+        .iter()
+        .map(|p| p.tax_witnessed_blocks)
+        .min()
+        .unwrap();
+    let shipped = RuntimeConfig::parse(CONFIG).unwrap();
+    assert_eq!(
+        shipped.canonical.unwrap().lot_sell_window_blocks,
+        longest / 250
+    );
+    assert!(set("BSC_CANONICAL_LOT_SELL_WINDOW_BLOCKS", window).is_ok());
+    assert!(set("BSC_CANONICAL_LOT_SELL_WINDOW_BLOCKS", window + 1).is_err());
 }
 
 /// A6: the exit multiples are checked once, natively, before anything runs:
@@ -2832,4 +2847,157 @@ fn a_burst_of_one_source_drops_only_its_own_events() {
     );
     assert!(waited.elapsed() < bound, "{:?}", waited.elapsed());
     assert!(pushed.join().unwrap());
+}
+
+/// SC4 d: a held Four.meme token read again is held on the curve its armed
+/// deployment classifies (Classic on the priced word within its tax's
+/// witnessed age for the SELL window, OpenFour on the executed preset: the
+/// curve the strategy tracks); otherwise stranded with why (off its curve,
+/// unpriced, no armed deployment).
+#[test]
+fn a_four_lot_read_again_is_classified_or_stranded() {
+    use crate::sources::{LIVE_POSITION_OFF_CURVE, LIVE_POSITION_UNPRICED};
+    use crate::venue_probe::FourHeld;
+    use alloy_primitives::{Address, B256, U256};
+    use canonical::four_held_curve;
+    use darkbot_bsc_trading::economics::four_classic::{ClassicCurve, ClassicFee};
+    use darkbot_bsc_trading::strategy::book::FourCurve;
+    use darkbot_bsc_trading::venues::fourmeme::deployment::bsc_mainnet_r12d_131608421;
+    use darkbot_bsc_trading::venues::fourmeme::profile::{
+        CLASSIC_PROFILES, ClassicTokenRead, OpenFourTokenRead, WITNESSED_MAX_OFFERS,
+        WITNESSED_TOTAL_SUPPLY, WITNESSED_VENUE_FEE,
+    };
+    const CLASSIC: &str =
+        include_str!("../../trading/fixtures/fourmeme/classic_parity_20261104.txt");
+    const OPENFOUR: &str =
+        include_str!("../../trading/fixtures/fourmeme/openfour_parity_20261104.txt");
+    let rows = |text: &'static str, kind: &'static str| {
+        text.lines()
+            .map(|l| l.split(' ').collect::<Vec<_>>())
+            .filter(move |f| f[0] == kind)
+    };
+    let u = |s: &str| U256::from_str_radix(s, 10).unwrap();
+    let d = bsc_mainnet_r12d_131608421();
+    let v = d
+        .validate(
+            &crate::runtime::exec::tests::four_observation(&d).observed,
+            1,
+        )
+        .unwrap();
+    // Classic: an executed probe's state of the priced word.
+    let profile = CLASSIC_PROFILES[0];
+    let f = rows(CLASSIC, "PROBE")
+        .find(|f| format!("0x{}", f[3]).parse::<B256>().ok() == Some(profile.template))
+        .unwrap();
+    let launch_block = CLASSIC
+        .lines()
+        .map(|l| l.split(' ').collect::<Vec<_>>())
+        .find_map(|l| match l[0] {
+            "LAUNCH" if l[3].eq_ignore_ascii_case(f[2]) => l[1].parse::<u64>().ok(),
+            "LAUNCHED" if l[1].eq_ignore_ascii_case(f[2]) => l[2].parse::<u64>().ok(),
+            _ => None,
+        })
+        .unwrap();
+    let classic = ClassicTokenRead {
+        token: f[2].parse().unwrap(),
+        block_number: f[1].parse().unwrap(),
+        block_hash: B256::repeat_byte(0xb1),
+        quote: Address::ZERO,
+        template: profile.template,
+        total_supply: WITNESSED_TOTAL_SUPPLY,
+        max_offers: WITNESSED_MAX_OFFERS,
+        offers: u(f[7]),
+        k: u(f[5]),
+        t: u(f[6]),
+        status: U256::ZERO,
+        fee_setting: u(f[4]),
+        extra_fee: U256::ZERO,
+        launch_block,
+        venue_fee: WITNESSED_VENUE_FEE,
+        liquidity_added: false,
+    };
+    let held = |read| four_held_curve(v, &FourHeld::Classic(read), 2);
+    assert_eq!(
+        held(classic),
+        Ok(FourCurve::classic_at(
+            ClassicCurve {
+                k: u(f[5]),
+                t: u(f[6]),
+                offers: u(f[7]),
+                sold: WITNESSED_MAX_OFFERS - u(f[7]),
+            },
+            ClassicFee {
+                rate_bps: WITNESSED_VENUE_FEE.rate_bps,
+                min_fee: WITNESSED_VENUE_FEE.min_fee,
+                tax_bps: profile.tax_bps,
+            },
+        )
+        .unwrap())
+    );
+    assert_eq!(
+        held(ClassicTokenRead {
+            liquidity_added: true,
+            ..classic
+        }),
+        Err(LIVE_POSITION_OFF_CURVE)
+    );
+    // A SELL window past its tax's witnessed age: not priced.
+    assert_eq!(
+        four_held_curve(v, &FourHeld::Classic(classic), profile.tax_witnessed_blocks),
+        Err(LIVE_POSITION_UNPRICED)
+    );
+    // OpenFour: the witnessed launch's state at a snapshot block is the
+    // curve the strategy tracks there.
+    let block = "131615000";
+    let l = rows(OPENFOUR, "OFLAUNCH").next().unwrap();
+    let s = rows(OPENFOUR, "OFSNAP").find(|s| s[1] == block).unwrap();
+    let bonding = d.openfour_bonding.unwrap();
+    let openfour = OpenFourTokenRead {
+        token: l[4].parse().unwrap(),
+        block_number: block.parse().unwrap(),
+        block_hash: B256::repeat_byte(0xa1),
+        preset_id: u(l[5]),
+        max_supply: u(l[8]),
+        sale_amount: u(l[9]),
+        raise_amount: u(l[10]),
+        quote_asset: l[12].parse().unwrap(),
+        exists: true,
+        paused: false,
+        anti_sniper_enabled: false,
+        custom_data: Address::ZERO,
+        phase: 1,
+        module_beacons: bonding.modules.map(|m| m.beacon),
+        initial_quote: u(s[3]),
+        initial_token: u(s[4]),
+        current_quote: u(s[5]),
+        current_token: u(s[6]),
+        remaining: u(s[7]),
+    };
+    let (tracked, _, _) = crate::paper_exec::tests::openfour_strategy_state(block);
+    assert_eq!(
+        four_held_curve(v, &FourHeld::OpenFour(openfour), 2),
+        Ok(tracked)
+    );
+    assert_eq!(
+        four_held_curve(
+            v,
+            &FourHeld::OpenFour(OpenFourTokenRead {
+                phase: 2,
+                ..openfour
+            }),
+            2
+        ),
+        Err(LIVE_POSITION_OFF_CURVE)
+    );
+    assert_eq!(
+        four_held_curve(
+            v,
+            &FourHeld::OpenFour(OpenFourTokenRead {
+                paused: true,
+                ..openfour
+            }),
+            2
+        ),
+        Err(LIVE_POSITION_UNPRICED)
+    );
 }

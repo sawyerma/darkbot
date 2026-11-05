@@ -511,6 +511,7 @@ fn admitted(n: u8, token: Option<[u8; 20]>) -> Admitted {
         max_block: token.map(|_| 100),
         origin: token.map(|_| crate::sources::tests::ORIGIN),
         lease: false,
+        venue: None,
     }
 }
 

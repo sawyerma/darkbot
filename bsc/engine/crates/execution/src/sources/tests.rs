@@ -2779,6 +2779,7 @@ fn an_exit_only_grant_admits_exits_and_no_buy() {
         origin: ORIGIN,
         max_block: 900,
         exit_reserve_wei: 0,
+        venue: Some(VenueId::Flap),
     };
     assert_eq!(
         s.admit_live(&armed, &intent(0, LiveIntentKind::Buy), &q, now)
@@ -2849,6 +2850,7 @@ fn a_buy_leaves_the_grant_room_for_its_exit() {
         } else {
             0
         },
+        venue: Some(VenueId::Flap),
     };
     // A BUY that leaves less than its exit costs is refused, nothing
     // consumed.
@@ -2906,6 +2908,7 @@ fn each_live_intent_is_admitted_by_the_owner_as_it_holds_now() {
         origin: ORIGIN,
         max_block: 900 + n as u64,
         exit_reserve_wei: 0,
+        venue: Some(VenueId::Flap),
     };
     let buy = |n| intent(n, LiveIntentKind::Buy, 1_000, 2_000);
     let first = s.admit_live(&armed, &buy(0), &q, now).unwrap();
@@ -2929,6 +2932,7 @@ fn each_live_intent_is_admitted_by_the_owner_as_it_holds_now() {
             max_block: Some(900),
             origin: Some(ORIGIN),
             lease: false,
+            venue: Some(VenueId::Flap),
         }]
     );
     assert_eq!(
@@ -3026,6 +3030,7 @@ fn nonce_buy(id: &str, nonce: u64, most: u128) -> LiveIntent<'_> {
         origin: ORIGIN,
         max_block: 900,
         exit_reserve_wei: 0,
+        venue: Some(VenueId::Flap),
     }
 }
 
@@ -3049,6 +3054,7 @@ fn admitted_of(
         max_block: Some(900),
         origin,
         lease: false,
+        venue: None,
     }
 }
 
@@ -3058,7 +3064,7 @@ fn spend_entry(dir: &Path, a: &Admitted) {
     use darkbot_bsc_record::Value;
     use darkbot_bsc_record::schema::bsc_runtime::live_spend as ls;
     let mut d = Draft::new(match a.origin {
-        Some(_) => &ls::SCHEMA,
+        Some(_) => &ls::V2,
         None => &ls::V1,
     });
     d.set(ls::INTENT_ID, hex32(&a.tx_hash).as_str())
@@ -3079,6 +3085,74 @@ fn spend_entry(dir: &Path, a: &Admitted) {
     create_durable_dir(&spend_dir(dir)).unwrap();
     let path = spend_dir(dir).join(format!("{}.dbrec", hex32(&a.tx_hash)));
     fs::write(path, d.encode().unwrap()).unwrap();
+}
+
+/// SC4 d review L4: the owner's admission names the intent's venue (a
+/// lot recovered after a crash is its venue's) and admits a BUY on the
+/// grant's venue alone; an exit of a lot on another venue goes on. An
+/// entry before the venue (v2) reads without one.
+#[test]
+fn an_admission_names_its_venue_and_a_buy_is_the_grants() {
+    let (dir, s, now) = live_ready_limited("live-venue-admit", (6, 6), |now| LiveGrant {
+        max_attempts: 6,
+        ..grant_of(now + 3_600_000, LiveStrategies::C3)
+    });
+    let q = qualified_in(&s);
+    let armed = s.live_now(&[ComponentId::ExecC3], &q, now).unwrap();
+    let ids: Vec<String> = (0..4u8).map(|n| hex32(&[n; 32])).collect();
+    let on = |n: usize, nonce: u64, venue: VenueId| LiveIntent {
+        venue: Some(venue),
+        ..nonce_buy(&ids[n], nonce, 2_000)
+    };
+    assert_eq!(
+        s.admit_live(&armed, &on(0, 7, VenueId::OpenFour), &q, now)
+            .unwrap_err(),
+        LIVE_NOT_IN_SCOPE
+    );
+    // Review L4: a BUY naming no venue is none of the grant's.
+    let unnamed = LiveIntent {
+        venue: None,
+        ..on(0, 7, VenueId::Flap)
+    };
+    assert_eq!(
+        s.admit_live(&armed, &unnamed, &q, now).unwrap_err(),
+        LIVE_NOT_IN_SCOPE
+    );
+    s.admit_live(&armed, &on(1, 7, VenueId::Flap), &q, now)
+        .unwrap();
+    let exit = LiveIntent {
+        kind: LiveIntentKind::Sell,
+        input_wei: 0,
+        ..on(2, 8, VenueId::OpenFour)
+    };
+    s.admit_live(&armed, &exit, &q, now).unwrap();
+    let mut read: Vec<(u8, Option<VenueId>)> = admitted_intents(&dir)
+        .unwrap()
+        .iter()
+        .map(|a| (a.tx_hash[0], a.venue))
+        .collect();
+    read.sort_by_key(|(n, _)| *n);
+    assert_eq!(
+        read,
+        [(1, Some(VenueId::Flap)), (2, Some(VenueId::OpenFour))]
+    );
+    // The ledger's recovery of an admitted Four exit keeps its venue.
+    let recovered = admitted_intents(&dir)
+        .unwrap()
+        .into_iter()
+        .find(|a| a.tx_hash[0] == 2)
+        .and_then(|a| crate::live_ledger::Fact::admitted(&a, crate::live_ledger::FactKind::Unknown))
+        .unwrap();
+    assert_eq!(recovered.venue, Some(VenueId::OpenFour));
+    // v2: no venue.
+    spend_entry(&dir, &admitted_of(3, 1, Some(9), Some(ORIGIN), 1));
+    assert!(
+        admitted_intents(&dir)
+            .unwrap()
+            .iter()
+            .any(|a| a.tx_hash[0] == 3 && a.venue.is_none())
+    );
+    fs::remove_dir_all(dir).unwrap();
 }
 
 /// Budget fix (tests A, M, G): the alternatives of one (chain, sender,

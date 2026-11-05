@@ -765,6 +765,33 @@ where
     })
 }
 
+/// SC4 d: a held Four.meme token's state as its venue holds it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FourHeld {
+    Classic(ClassicTokenRead),
+    OpenFour(OpenFourTokenRead),
+}
+
+/// SC4 d: a held Four.meme `token` at the block `number` (hash `hash`):
+/// an OpenFour one's ([`read_openfour_holding`]) or a Classic one's
+/// ([`read_four_holding`]).
+pub fn read_four_held(
+    endpoint: &str,
+    limits: &FollowerLimits,
+    deployment: &FourDeployment,
+    openfour: bool,
+    token: Address,
+    number: u64,
+    hash: [u8; 32],
+) -> Result<FourHeld, ProbeError> {
+    match openfour {
+        true => read_openfour_holding(endpoint, limits, deployment, token, number, hash)
+            .map(FourHeld::OpenFour),
+        false => read_four_holding(endpoint, limits, deployment, token, number, hash)
+            .map(FourHeld::Classic),
+    }
+}
+
 /// R12c-3: a held Four Classic `token` as `deployment`'s TokenManager2 and
 /// Helper3 held it at the block `number` whose hash is `hash` (each read
 /// pinned to that hash; the block still the one at its height afterwards),

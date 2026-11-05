@@ -284,7 +284,15 @@ pub fn unhold_payload(token: [u8; 20]) -> Vec<u8> {
 /// reserve [32] | circulating [32] | tokens [32] | spent wei [32] | filled
 /// ms u64`.
 pub fn reheld_payload(r: &Reheld) -> Vec<u8> {
-    let t = &r.terms;
+    let (t, reserve, circulating) = match r.curve {
+        HeldCurve::Flap {
+            terms,
+            reserve,
+            circulating,
+        } => (terms, reserve, circulating),
+        HeldCurve::Four(curve) => return reheld_four_payload(r, curve),
+    };
+    let t = &t;
     let mut out = Vec::with_capacity(REHELD_LEN);
     out.push(b'k');
     out.extend_from_slice(&r.token);
@@ -298,16 +306,121 @@ pub fn reheld_payload(r: &Reheld) -> Vec<u8> {
     }
     out.extend_from_slice(&t.buy_tax_bps.to_le_bytes());
     out.extend_from_slice(&t.sell_tax_bps.to_le_bytes());
-    for w in [r.reserve, r.circulating, r.tokens, r.spent_wei] {
+    for w in [reserve, circulating, r.tokens, r.spent_wei] {
         out.extend_from_slice(&w.to_be_bytes::<32>());
     }
     out.extend_from_slice(&r.filled_ms.to_le_bytes());
     out
 }
 
+/// SC4 d: a real LIVE Four.meme position held again on its curve as read,
+/// a `Runtime` record: `q | venue u8 | token [20] | creator [20] | start
+/// w0..w3 [4 × 32] | now w0..w3 [4 × 32] | a u16 | b [32] | c u16 | tokens
+/// [32] | spent wei [32] | filled ms u64`: Classic `k t offers sold` and
+/// the fee `rate min tax`, OpenFour `k T Q remaining` and `protocol 0 dev`.
+fn reheld_four_payload(r: &Reheld, curve: FourCurve) -> Vec<u8> {
+    use crate::canonical_join::Venue;
+    let classic = |c: darkbot_bsc_trading::economics::four_classic::ClassicCurve| {
+        [c.k, c.t, c.offers, c.sold]
+    };
+    let openfour = |c: darkbot_bsc_trading::economics::openfour::OpenFourCurve| {
+        [c.k, c.token_reserve, c.quote_reserve, c.remaining]
+    };
+    let (venue, start, now, (a, b, c)) = match curve {
+        FourCurve::Classic { start, now, fee } => (
+            Venue::Four,
+            classic(start),
+            classic(now),
+            (fee.rate_bps, fee.min_fee, fee.tax_bps),
+        ),
+        FourCurve::OpenFour { start, now, fee } => (
+            Venue::OpenFour,
+            openfour(start),
+            openfour(now),
+            (fee.protocol_bps, U256::ZERO, fee.dev_bps),
+        ),
+    };
+    let mut out = Vec::with_capacity(REHELD_FOUR_LEN);
+    out.push(b'q');
+    out.push(crate::runtime_journal::venue_byte(venue));
+    out.extend_from_slice(&r.token);
+    out.extend_from_slice(&r.creator);
+    for w in start.into_iter().chain(now) {
+        out.extend_from_slice(&w.to_be_bytes::<32>());
+    }
+    out.extend_from_slice(&a.to_le_bytes());
+    out.extend_from_slice(&b.to_be_bytes::<32>());
+    out.extend_from_slice(&c.to_le_bytes());
+    for w in [r.tokens, r.spent_wei] {
+        out.extend_from_slice(&w.to_be_bytes::<32>());
+    }
+    out.extend_from_slice(&r.filled_ms.to_le_bytes());
+    out
+}
+
+const REHELD_FOUR_LEN: usize = 1 + 1 + 20 + 20 + 8 * 32 + 2 + 32 + 2 + 2 * 32 + 8;
+
+/// A `q` record back; `None` for any other bytes (a Flap venue, a curve the
+/// words do not name).
+fn reheld_four_of(p: &[u8]) -> Option<Reheld> {
+    use crate::canonical_join::Venue;
+    use darkbot_bsc_trading::economics::four_classic::{ClassicCurve, ClassicFee};
+    use darkbot_bsc_trading::economics::openfour::{OpenFourCurve, OpenFourFee};
+    if p.len() != REHELD_FOUR_LEN || p[0] != b'q' {
+        return None;
+    }
+    let venue = crate::runtime_journal::venue_of_byte(p[1])?;
+    let w = |i: usize| U256::from_be_slice(&p[42 + 32 * i..74 + 32 * i]);
+    let at = 42 + 8 * 32;
+    let a = u16::from_le_bytes([p[at], p[at + 1]]);
+    let b = U256::from_be_slice(&p[at + 2..at + 34]);
+    let c = u16::from_le_bytes([p[at + 34], p[at + 35]]);
+    let rest = at + 36;
+    let classic = |o: usize| ClassicCurve {
+        k: w(o),
+        t: w(o + 1),
+        offers: w(o + 2),
+        sold: w(o + 3),
+    };
+    let openfour = |o: usize| OpenFourCurve {
+        k: w(o),
+        token_reserve: w(o + 1),
+        quote_reserve: w(o + 2),
+        remaining: w(o + 3),
+    };
+    let curve = match venue {
+        Venue::Four => FourCurve::Classic {
+            start: classic(0),
+            now: classic(4),
+            fee: ClassicFee {
+                rate_bps: a,
+                min_fee: b,
+                tax_bps: c,
+            },
+        },
+        Venue::OpenFour if b.is_zero() => FourCurve::OpenFour {
+            start: openfour(0),
+            now: openfour(4),
+            fee: OpenFourFee {
+                protocol_bps: a,
+                dev_bps: c,
+            },
+        },
+        _ => return None,
+    };
+    Some(Reheld {
+        token: p.get(2..22)?.try_into().ok()?,
+        creator: p.get(22..42)?.try_into().ok()?,
+        curve: HeldCurve::Four(curve),
+        tokens: U256::from_be_slice(p.get(rest..rest + 32)?),
+        spent_wei: U256::from_be_slice(p.get(rest + 32..rest + 64)?),
+        filled_ms: u64_at(p, rest + 64)?,
+    })
+}
+
 const REHELD_LEN: usize = 1 + 20 + 20 + 1 + 1 + 20 + 20 + 4 * 32 + 2 + 2 + 4 * 32 + 8;
 
-pub use darkbot_bsc_trading::strategy::engine::Reheld;
+pub use darkbot_bsc_trading::strategy::engine::{HeldCurve, Reheld};
 
 fn reheld_of(p: &[u8]) -> Option<Reheld> {
     use darkbot_bsc_trading::economics::flap::curve::Curve;
@@ -327,22 +440,24 @@ fn reheld_of(p: &[u8]) -> Option<Reheld> {
     Some(Reheld {
         token: p.get(1..21)?.try_into().ok()?,
         creator: p.get(21..41)?.try_into().ok()?,
-        terms: TokenTerms {
-            tradable,
-            version: p[42],
-            quote_token: p.get(43..63)?.try_into().ok()?,
-            nft_gate: p.get(63..83)?.try_into().ok()?,
-            curve: Curve {
-                r: w(words)?,
-                h: w(words + 32)?,
-                k: w(words + 64)?,
+        curve: HeldCurve::Flap {
+            terms: TokenTerms {
+                tradable,
+                version: p[42],
+                quote_token: p.get(43..63)?.try_into().ok()?,
+                nft_gate: p.get(63..83)?.try_into().ok()?,
+                curve: Curve {
+                    r: w(words)?,
+                    h: w(words + 32)?,
+                    k: w(words + 64)?,
+                },
+                dex_supply_threshold: w(words + 96)?,
+                buy_tax_bps: bps(after)?,
+                sell_tax_bps: bps(after + 2)?,
             },
-            dex_supply_threshold: w(words + 96)?,
-            buy_tax_bps: bps(after)?,
-            sell_tax_bps: bps(after + 2)?,
+            reserve: w(after + 4)?,
+            circulating: w(after + 36)?,
         },
-        reserve: w(after + 4)?,
-        circulating: w(after + 36)?,
         tokens: w(after + 68)?,
         spent_wei: w(after + 100)?,
         filled_ms: u64_at(p, after + 132)?,
@@ -353,6 +468,7 @@ fn reheld_of(p: &[u8]) -> Option<Reheld> {
 pub fn input_of_record(kind: RecordKind, p: &[u8]) -> Option<Input> {
     match (kind, p.first()?) {
         (RecordKind::Runtime, b'k') => reheld_of(p).map(Input::Reheld),
+        (RecordKind::Runtime, b'q') => reheld_four_of(p).map(Input::Reheld),
         (RecordKind::Runtime, b'h') if p.len() == HOLD_LEN => Some(Input::Hold {
             token: p.get(1..21)?.try_into().ok()?,
             tokens: U256::from_be_slice(p.get(21..53)?),
@@ -513,7 +629,8 @@ impl StrategyVenues {
         })
     }
 
-    fn takes(self, venue: crate::canonical_join::Venue) -> bool {
+    /// Whether Strategy C follows `venue`'s launches and trades.
+    pub fn takes(self, venue: crate::canonical_join::Venue) -> bool {
         use crate::canonical_join::Venue;
         match venue {
             Venue::Flap => self.flap,
@@ -1660,9 +1777,11 @@ mod tests {
         let r = Reheld {
             token: [0xE1; 20],
             creator: [0xC1; 20],
-            terms: profile_terms(100, 200),
-            reserve: U256::from(7u8),
-            circulating: U256::from(8u8),
+            curve: HeldCurve::Flap {
+                terms: profile_terms(100, 200),
+                reserve: U256::from(7u8),
+                circulating: U256::from(8u8),
+            },
             tokens: U256::from(9u8),
             spent_wei: U256::from(10u8),
             filled_ms: 11,
@@ -1681,6 +1800,92 @@ mod tests {
         let mut flag = p.clone();
         flag[41] = 2;
         assert_eq!(input_of_record(RecordKind::Runtime, &flag), None);
+    }
+
+    /// SC4 d: a Four.meme position held again reads back as its input
+    /// (a `q` record: either family's start and current curve and fees);
+    /// a Flap venue byte or an OpenFour record with a Classic minimum fee
+    /// is no input.
+    #[test]
+    fn a_four_reheld_record_reads_back_as_its_input() {
+        use darkbot_bsc_trading::economics::four_classic::{ClassicCurve, ClassicFee};
+        use darkbot_bsc_trading::economics::openfour::{OpenFourCurve, OpenFourFee};
+        let w = |n: u64| U256::from(n);
+        let classic = |sold: u64| ClassicCurve {
+            k: w(1),
+            t: w(2) + w(sold),
+            offers: w(3) + w(sold),
+            sold: w(sold),
+        };
+        let openfour = |remaining: u64| OpenFourCurve {
+            k: w(4),
+            token_reserve: w(5),
+            quote_reserve: w(6),
+            remaining: w(remaining),
+        };
+        for curve in [
+            FourCurve::Classic {
+                start: classic(0),
+                now: classic(7),
+                fee: ClassicFee {
+                    rate_bps: 100,
+                    min_fee: w(8),
+                    tax_bps: 1_000,
+                },
+            },
+            FourCurve::OpenFour {
+                start: openfour(9),
+                now: openfour(10),
+                fee: OpenFourFee {
+                    protocol_bps: 50,
+                    dev_bps: 60,
+                },
+            },
+        ] {
+            let r = Reheld {
+                token: [0xE1; 20],
+                creator: [0xC1; 20],
+                curve: HeldCurve::Four(curve),
+                tokens: w(11),
+                spent_wei: w(12),
+                filled_ms: 13,
+            };
+            let p = reheld_payload(&r);
+            assert_eq!((p[0], p.len()), (b'q', REHELD_FOUR_LEN));
+            assert_eq!(
+                input_of_record(RecordKind::Runtime, &p),
+                Some(Input::Reheld(r))
+            );
+            assert_eq!(input_of_record(RecordKind::Canonical, &p), None);
+            assert_eq!(
+                input_of_record(RecordKind::Runtime, &p[..p.len() - 1]),
+                None
+            );
+            let mut flap = p.clone();
+            flap[1] = crate::runtime_journal::venue_byte(crate::canonical_join::Venue::Flap);
+            assert_eq!(input_of_record(RecordKind::Runtime, &flap), None);
+        }
+        let openfour_with_min_fee = |p: &mut Vec<u8>| {
+            let at = 42 + 8 * 32 + 2;
+            p[at + 31] = 1;
+        };
+        let mut p = reheld_payload(&Reheld {
+            token: [0xE1; 20],
+            creator: [0xC1; 20],
+            curve: HeldCurve::Four(FourCurve::OpenFour {
+                start: openfour(9),
+                now: openfour(10),
+                fee: OpenFourFee {
+                    protocol_bps: 50,
+                    dev_bps: 60,
+                },
+            }),
+            tokens: w(11),
+            spent_wei: w(12),
+            filled_ms: 13,
+        });
+        openfour_with_min_fee(&mut p);
+        assert_eq!(input_of_record(RecordKind::Runtime, &p), None);
     }
     use crate::chain_follower::{CanonicalTerm, CanonicalTrade};
     use crate::runtime_journal::{flap_term_payload, flap_trade_payload, trade_gap_payload};
@@ -2199,9 +2404,11 @@ mod tests {
         let held = Reheld {
             token: [0xAB; 20],
             creator: [0; 20],
-            terms: profile_terms(100, 100),
-            reserve: U256::from(2_000_000_000_000_000_000u128),
-            circulating: U256::from(300_000_000_000_000_000_000_000u128),
+            curve: HeldCurve::Flap {
+                terms: profile_terms(100, 100),
+                reserve: U256::from(2_000_000_000_000_000_000u128),
+                circulating: U256::from(300_000_000_000_000_000_000_000u128),
+            },
             tokens: U256::from(1_000_000_000_000_000_000u128),
             spent_wei: U256::from(10_000_000_000_000_000u128),
             filled_ms: 0,

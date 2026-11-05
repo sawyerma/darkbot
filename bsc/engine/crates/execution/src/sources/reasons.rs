@@ -139,6 +139,14 @@ pub const LIVE_POSITION_UNREADABLE: &str = "LIVE_POSITION_UNREADABLE";
 /// read (another version, an NFT gate, a tax or threshold out of range):
 /// no strategy exit prices it; no new BUY until it ends.
 pub const LIVE_POSITION_UNPRICED: &str = "LIVE_POSITION_UNPRICED";
+/// SC4 d: an open Four.meme lot whose venue Strategy C does not follow
+/// (switched on without it): its curve is not tracked, no strategy exit
+/// prices it; no new BUY until it ends.
+pub const LIVE_POSITION_VENUE_UNFOLLOWED: &str = "LIVE_POSITION_VENUE_UNFOLLOWED";
+/// SC4 d: an open Four.meme lot of a family without its execution keys
+/// (`BSC_EXEC_FOUR_*`, `BSC_EXEC_OPENFOUR_*`): the path does not arm its
+/// venue, no strategy exit sells it; no new BUY until it ends.
+pub const LIVE_POSITION_VENUE_UNCONFIGURED: &str = "LIVE_POSITION_VENUE_UNCONFIGURED";
 /// REV.1.0 R3b (BSC3-024/041): an unresolved LIVE transaction whose
 /// receipt recovery is asked (not answered yet), would need the second
 /// source (none configured), or failed (asked again after

@@ -209,12 +209,23 @@ struct Unheld {
 pub struct Reheld {
     pub token: [u8; 20],
     pub creator: [u8; 20],
-    pub terms: crate::economics::flap::native_curve20::TokenTerms,
-    pub reserve: U256,
-    pub circulating: U256,
+    pub curve: HeldCurve,
     pub tokens: U256,
     pub spent_wei: U256,
     pub filled_ms: u64,
+}
+
+/// SC4 d: the curve a position is held again on, as read.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HeldCurve {
+    /// A Flap token: its terms, the curve's reserve and circulating supply.
+    Flap {
+        terms: crate::economics::flap::native_curve20::TokenTerms,
+        reserve: U256,
+        circulating: U256,
+    },
+    /// A Four.meme token on its classified curve.
+    Four(FourCurve),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -548,9 +559,7 @@ impl Engine {
             Input::Reheld(Reheld {
                 token,
                 creator,
-                terms,
-                reserve,
-                circulating,
+                curve,
                 tokens,
                 spent_wei,
                 filled_ms,
@@ -561,7 +570,14 @@ impl Engine {
                     _ => creator,
                 };
                 let sold = known.and_then(|k| k.creator_sold);
-                let book = TokenBook::seeded(&terms, reserve, circulating);
+                let book = match curve {
+                    HeldCurve::Flap {
+                        terms,
+                        reserve,
+                        circulating,
+                    } => TokenBook::seeded(&terms, reserve, circulating),
+                    HeldCurve::Four(curve) => TokenBook::four(Ok(curve)),
+                };
                 let stage = Stage::Held {
                     entry: Entry {
                         tokens,

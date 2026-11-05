@@ -554,8 +554,40 @@ pub mod live_spend {
     /// (chain, sender, nonce) can spend at most once (one of them lands).
     pub const SENDER: u16 = 13;
     pub const CHAIN_ID: u16 = 14;
+    /// v3 (SC4 d): the venue it trades on (`BSC_VENUE_*`; absent: Flap's,
+    /// or a nonce burn's none): a lot recovered after a crash is its
+    /// venue's.
+    pub const VENUE: u16 = 15;
 
     pub const SCHEMA: Schema = Schema {
+        name: "darkbot.bsc.live-spend.v1",
+        record_type: 67,
+        schema_version: 3,
+        fields: &[
+            Field::req(INTENT_ID, "intent_id", Text),
+            Field::req(KIND, "kind", Text),
+            Field::req(PROVENANCE_TOOL, "_provenance.tool", Text),
+            Field::req(
+                PROVENANCE_OBSERVED_UNIX_MS,
+                "_provenance.observed_unix_ms",
+                U64,
+            ),
+            Field::req(COMPONENT, "component", Text),
+            Field::req(GRANT_GENERATION, "grant_generation", U64),
+            Field::req(INPUT_WEI, "input_wei", U256),
+            Field::req(MAX_WEI, "max_wei", U256),
+            Field::opt(TOKEN, "token", Address),
+            Field::opt(NONCE, "nonce", U64),
+            Field::opt(MAX_BLOCK, "max_block", U64),
+            Field::opt(EXIT_RESERVE_WEI, "exit_reserve_wei", U256),
+            Field::req(SENDER, "sender", Address),
+            Field::req(CHAIN_ID, "chain_id", U64),
+            Field::opt(VENUE, "venue", Text),
+        ],
+    };
+
+    /// v2 (no venue: Flap's), kept readable.
+    pub const V2: Schema = Schema {
         name: "darkbot.bsc.live-spend.v1",
         record_type: 67,
         schema_version: 2,
@@ -2628,6 +2660,7 @@ pub const ALL: &[&Schema] = &[
     &buy_attempt_slot::SCHEMA,
     &buy_attempt_total_slot::SCHEMA,
     &live_spend::SCHEMA,
+    &live_spend::V2,
     &live_spend::V1,
     &live_ledger::SCHEMA,
     &live_ledger::V4,

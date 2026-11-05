@@ -659,6 +659,8 @@ pub struct LiveIntent<'a> {
     /// own (approval and SELL at the signed gas) may still cost; the
     /// grant's spend keeps room for it (BSC3-057). An exit step: zero.
     pub exit_reserve_wei: u128,
+    /// SC4 d: the venue it trades on (none: a nonce burn).
+    pub venue: Option<VenueId>,
 }
 
 /// One LIVE intent the owner admitted, as its entry holds it: the
@@ -682,6 +684,8 @@ pub struct Admitted {
     /// BSC3-076: a lease of the next C3 BUY ([`Store::lease_live`]): no
     /// transaction of its own, its token none (zero), its id no hash.
     pub lease: bool,
+    /// SC4 d: the venue it trades on (absent before v3: Flap's).
+    pub venue: Option<VenueId>,
 }
 
 impl Admitted {
@@ -711,9 +715,19 @@ pub fn admitted_intents(dir: &Path) -> Result<Vec<Admitted>, String> {
         }
         let bad = || format!("{LIVE_SPEND_UNREADABLE}: {}", entry.path().display());
         let bytes = fs::read(entry.path()).map_err(|_| bad())?;
-        let (r, v2) = match decode(&ls::SCHEMA, &bytes) {
-            Ok(r) => (r, true),
-            Err(_) => (decode(&ls::V1, &bytes).map_err(|_| bad())?, false),
+        let (r, v2, v3) = match decode(&ls::SCHEMA, &bytes) {
+            Ok(r) => (r, true, true),
+            Err(_) => match decode(&ls::V2, &bytes) {
+                Ok(r) => (r, true, false),
+                Err(_) => (decode(&ls::V1, &bytes).map_err(|_| bad())?, false, false),
+            },
+        };
+        let venue = match v3 {
+            true => match r.opt_text(ls::VENUE).map_err(|_| bad())? {
+                Some(v) => Some(VenueId::parse(v).ok_or_else(bad)?),
+                None => None,
+            },
+            false => None,
         };
         let (kind, lease) = match r.text(ls::KIND).map_err(|_| bad())? {
             "BUY" => (LiveIntentKind::Buy, false),
@@ -758,6 +772,7 @@ pub fn admitted_intents(dir: &Path) -> Result<Vec<Admitted>, String> {
                 false => None,
             },
             lease,
+            venue,
         });
         // An entry that names its sender and chain names its nonce too.
         if out

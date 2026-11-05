@@ -2168,6 +2168,121 @@ fn openfour_round() -> FourRound {
     }
 }
 
+/// SC4 d: an OpenFour lot from before (a restart, an earlier grant) under
+/// a Flap grant: the path probes, validates and arms OpenFour for the
+/// lot's exit (its read and its exit on the armed deployment); a BUY stays
+/// the grant's venue's.
+#[test]
+fn a_four_lot_under_a_flap_grant_is_armed_for_its_exit() {
+    use crate::live_ledger::{Fact, FactKind, Ledger};
+    use crate::paper_exec::{IntentKind, Refusal, StrategyCurve};
+    use crate::runtime_strategy::StrategyAction;
+    let mut r = Rig::new("live-four-lot", LiveStrategies::StrategyC);
+    r.exec.exec.openfour = Some(crate::paper_exec::FourExecConfig {
+        input_wei: 10_000_000_000_000_000,
+        ..crate::runtime::exec::tests::openfour_config()
+    });
+    r.exec.exec.session_cap_wei = 100_000_000_000_000_000;
+    r.exec.exec.strategy_session_cap_wei = 100_000_000_000_000_000;
+    let round = openfour_round();
+    let input = U256::from(10_000_000_000_000_000u64);
+    let ledger = Ledger::open(&r.state);
+    let buy = Fact {
+        kind: FactKind::Released,
+        tx_hash: [0x41; 32],
+        intent: crate::sources::LiveIntentKind::Buy,
+        component: ComponentId::StrategyC,
+        token: round.token,
+        nonce: 0,
+        grant_generation: 1,
+        input_wei: Some(input),
+        max_wei: Some(input),
+        block: None,
+        gas_wei: None,
+        tokens: None,
+        eth_wei: None,
+        max_block: Some(HEAD + 2),
+        by_tx: None,
+        response: None,
+        origin: None,
+        launcher: None,
+        placement: None,
+        attempt: None,
+        operator: None,
+        source: None,
+        venue: Some(VenueId::OpenFour),
+    };
+    ledger.append(&buy, 1).unwrap();
+    ledger
+        .append(
+            &Fact {
+                block: Some((HEAD, [0xb1; 32], 1_793_000_000_000)),
+                gas_wei: Some(U256::from(1u8)),
+                tokens: Some(round.tokens),
+                eth_wei: Some(round.spent),
+                ..Fact::about(&buy, FactKind::Included)
+            },
+            1,
+        )
+        .unwrap();
+    let mut x = r.runtime("boot-1").four_probing(four_pinned);
+    let c2 = c2_at(&r.d, r.buyer, 1);
+    settle(&mut x, &c2);
+    assert!(x.armed(), "{:?}", reason(&x));
+    let armed = x.executor.as_ref().unwrap();
+    assert!(armed.openfour_armed() && !armed.four_armed());
+    assert_eq!(x.lot_venue(&round.token), Some(VenueId::OpenFour));
+    assert!(x.four_armed_on(VenueId::OpenFour).is_some());
+    assert!(x.four_armed_on(VenueId::FourClassic).is_none());
+    // Its spend is the trade's (the refund kept), its exit reserved at
+    // OpenFour's limits.
+    assert_eq!(x.book().positions[0].input_wei, round.spent);
+    let (_, _, approve, sell) = x.exec.exec.on_venue(VenueId::OpenFour);
+    let price = U256::from(x.exit_price());
+    assert_eq!(
+        x.exit_reserve(),
+        price * U256::from(approve) + price * U256::from(sell)
+    );
+    let t = Cell::new(5_000_000_000u64);
+    let clock = FnClock {
+        id: 1,
+        now: || {
+            t.set(t.get() + 3);
+            t.get()
+        },
+    };
+    // An OpenFour BUY: not the grant's venue.
+    let other = StrategyAction::Buy {
+        token: [0xB0; 20],
+        creator: [0; 20],
+        curve: StrategyCurve::Four(round.curve),
+        input_wei: input,
+        decided_ns: 0,
+    };
+    let (out, refused) = x.on_strategy(&other, &c2, &clock, DECIDED_MS).unwrap();
+    assert_eq!((out.len(), refused), (0, Some(Refusal::VenueUnarmed)));
+    // The lot's exit goes on the OpenFour arm.
+    let failed = x
+        .executor
+        .as_mut()
+        .unwrap()
+        .end_mut()
+        .connect(Duration::from_secs(2));
+    assert!(failed.is_empty());
+    let exit = StrategyAction::Exit {
+        token: round.token,
+        tokens: round.tokens,
+        curve: StrategyCurve::Four(round.held),
+        decided_ns: 0,
+    };
+    let (out, refused) = x.on_strategy(&exit, &c2, &clock, DECIDED_MS).unwrap();
+    assert_eq!((out.len(), refused), (1, None), "{:?}", reason(&x));
+    assert_eq!(out[0].kind, IntentKind::Approve);
+    r.requests.recv_timeout(Duration::from_secs(2)).unwrap();
+    x.shutdown();
+    r.clean();
+}
+
 /// SC4 d review M2: a Four trade's wei are the pinned deployment's
 /// witnessed terms' (no arm needed: one stopped or not yet probed after a
 /// restart attributes the same): a BUY its spend, a SELL its proceeds.
@@ -2314,6 +2429,13 @@ fn four_grant_round(tag: &str, venue: VenueId, round: FourRound) {
     assert!(sent.contains("eth_sendBundle"), "{sent}");
     let released = &x.book().unresolved().next().unwrap().released;
     assert_eq!((released.token, released.venue), (token, Some(venue)));
+    // Review L4: the owner's admission names its venue too.
+    assert!(
+        crate::sources::admitted_intents(&r.state)
+            .unwrap()
+            .iter()
+            .any(|a| a.token == Some(token) && a.venue == Some(venue))
+    );
     let buy_tx = out[0].handoff.tx_hash;
     // Its receipt and its trade: the position holds the tokens at what
     // the BUY spent (its quote with the fee and tax, below the value).
@@ -6580,6 +6702,7 @@ fn alternatives_admitted_before_a_crash_count_once_after_it() {
             origin,
             max_block: HEAD + 2,
             exit_reserve_wei: 0,
+            venue: Some(crate::sources::VenueId::Flap),
         };
         store.admit_live(&armed, &intent, &q, NOW).unwrap();
     }
@@ -6788,7 +6911,10 @@ fn a_four_grant_is_held_to_what_its_venue_signs() {
         max_approve_gas_limit: 120_000,
         ..TEST_RISK
     };
-    assert_eq!(risk_refusal(&grant(wide), &x), None);
+    assert_eq!(
+        risk_refusal(&grant(wide), &x, crate::runtime::exec::FourScope::default()),
+        None
+    );
     for (risk, named) in [
         (
             GrantRisk {
@@ -6815,7 +6941,7 @@ fn a_four_grant_is_held_to_what_its_venue_signs() {
         ),
     ] {
         assert_eq!(
-            risk_refusal(&grant(risk), &x),
+            risk_refusal(&grant(risk), &x, crate::runtime::exec::FourScope::default()),
             Some(format!(
                 "{}: {named}",
                 crate::sources::LIVE_RISK_OUTSIDE_GRANT
@@ -6826,7 +6952,39 @@ fn a_four_grant_is_held_to_what_its_venue_signs() {
         venue: VenueId::OpenFour,
         ..grant(wide)
     };
-    assert!(risk_refusal(&openfour, &x).is_some_and(|w| w.contains("not configured")));
+    assert!(
+        risk_refusal(&openfour, &x, crate::runtime::exec::FourScope::default())
+            .is_some_and(|w| w.contains("not configured"))
+    );
+    // SC4 d: the exits of open lots on another venue the path arms count
+    // at that venue's limits (a Flap grant with an OpenFour lot).
+    let mut lots = x.clone();
+    lots.openfour = Some(crate::paper_exec::FourExecConfig {
+        sell_gas_limit: 2_000_000,
+        ..crate::runtime::exec::tests::openfour_config()
+    });
+    let flap = LiveGrant {
+        venue: VenueId::Flap,
+        ..grant(GrantRisk {
+            max_sell_gas_limit: 1_999_999,
+            ..wide
+        })
+    };
+    let with_lot = crate::runtime::exec::FourScope {
+        classic: false,
+        openfour: true,
+    };
+    assert_eq!(
+        risk_refusal(&flap, &lots, crate::runtime::exec::FourScope::default()),
+        None
+    );
+    assert_eq!(
+        risk_refusal(&flap, &lots, with_lot),
+        Some(format!(
+            "{}: sell_gas_limit 2000000 above 1999999",
+            crate::sources::LIVE_RISK_OUTSIDE_GRANT
+        ))
+    );
     // The per-venue limits of the LIVE path.
     assert_eq!(
         exit_limits(&x, VenueId::Flap),
@@ -6874,7 +7032,14 @@ fn every_granted_bound_is_held_against_what_the_executor_signs() {
         exit_only,
         ..grant_of(NOW + 3_600_000, LiveStrategies::C3)
     };
-    assert_eq!(risk_refusal(&grant(TEST_RISK, false), &x), None);
+    assert_eq!(
+        risk_refusal(
+            &grant(TEST_RISK, false),
+            &x,
+            crate::runtime::exec::FourScope::default()
+        ),
+        None
+    );
     let below: [(GrantRisk, &str); 6] = [
         (
             GrantRisk {
@@ -6921,7 +7086,11 @@ fn every_granted_bound_is_held_against_what_the_executor_signs() {
     ];
     for (risk, named) in below {
         assert_eq!(
-            risk_refusal(&grant(risk, false), &x),
+            risk_refusal(
+                &grant(risk, false),
+                &x,
+                crate::runtime::exec::FourScope::default()
+            ),
             Some(format!(
                 "{}: {named}",
                 crate::sources::LIVE_RISK_OUTSIDE_GRANT
@@ -6933,8 +7102,22 @@ fn every_granted_bound_is_held_against_what_the_executor_signs() {
         max_buy_gas_limit: 21_000,
         ..TEST_RISK
     };
-    assert_eq!(risk_refusal(&grant(no_buys, true), &x), None);
-    assert!(risk_refusal(&grant(no_buys, false), &x).is_some());
+    assert_eq!(
+        risk_refusal(
+            &grant(no_buys, true),
+            &x,
+            crate::runtime::exec::FourScope::default()
+        ),
+        None
+    );
+    assert!(
+        risk_refusal(
+            &grant(no_buys, false),
+            &x,
+            crate::runtime::exec::FourScope::default()
+        )
+        .is_some()
+    );
     assert!(
         risk_refusal(
             &grant(
@@ -6944,7 +7127,8 @@ fn every_granted_bound_is_held_against_what_the_executor_signs() {
                 },
                 true
             ),
-            &x
+            &x,
+            crate::runtime::exec::FourScope::default()
         )
         .is_some_and(|why| why.ends_with("exit_slippage_bps 300 above 299"))
     );
@@ -6953,7 +7137,7 @@ fn every_granted_bound_is_held_against_what_the_executor_signs() {
         ..grant(TEST_RISK, false)
     };
     assert_eq!(
-        risk_refusal(&none, &x),
+        risk_refusal(&none, &x, crate::runtime::exec::FourScope::default()),
         Some(crate::sources::LIVE_GRANT_RISK_MISSING.into())
     );
 }
@@ -10865,4 +11049,590 @@ fn an_unreadable_ledger_ends_no_lot_for_the_strategy() {
     assert_eq!(x.exits_wanted, vec![a]);
     x.shutdown();
     r.clean();
+}
+
+/// SC4 d: the witnessed OpenFour token's held state at block 131615000 (the
+/// fixture's snapshot), as the venue reader answers for `token` at
+/// `number`/`hash`, in vault phase `phase`.
+fn openfour_held_read(
+    token: alloy_primitives::Address,
+    number: u64,
+    hash: [u8; 32],
+    phase: u8,
+) -> darkbot_bsc_trading::venues::fourmeme::profile::OpenFourTokenRead {
+    use darkbot_bsc_trading::venues::fourmeme::deployment::bsc_mainnet_r12d_131608421;
+    const OPENFOUR: &str =
+        include_str!("../../trading/fixtures/fourmeme/openfour_parity_20261104.txt");
+    let rows = |kind: &'static str| {
+        OPENFOUR
+            .lines()
+            .map(|l| l.split(' ').collect::<Vec<_>>())
+            .filter(move |f| f[0] == kind)
+    };
+    let u = |s: &str| U256::from_str_radix(s, 10).unwrap();
+    let l = rows("OFLAUNCH").next().unwrap();
+    let s = rows("OFSNAP").find(|s| s[1] == "131615000").unwrap();
+    let bonding = bsc_mainnet_r12d_131608421().openfour_bonding.unwrap();
+    darkbot_bsc_trading::venues::fourmeme::profile::OpenFourTokenRead {
+        token,
+        block_number: number,
+        block_hash: hash.into(),
+        preset_id: u(l[5]),
+        max_supply: u(l[8]),
+        sale_amount: u(l[9]),
+        raise_amount: u(l[10]),
+        quote_asset: l[12].parse().unwrap(),
+        exists: true,
+        paused: false,
+        anti_sniper_enabled: false,
+        custom_data: alloy_primitives::Address::ZERO,
+        phase,
+        module_beacons: bonding.modules.map(|m| m.beacon),
+        initial_quote: u(s[3]),
+        initial_token: u(s[4]),
+        current_quote: u(s[5]),
+        current_token: u(s[6]),
+        remaining: u(s[7]),
+    }
+}
+
+/// SC4 d: a priced Classic token's executed probe state as the venue
+/// reader answers it: the PROBE row of the priced word whose token is
+/// `age` blocks past its launch (the row's block, its launch from the
+/// fixture).
+fn classic_held_read(
+    token: alloy_primitives::Address,
+    age: u64,
+) -> darkbot_bsc_trading::venues::fourmeme::profile::ClassicTokenRead {
+    use darkbot_bsc_trading::venues::fourmeme::profile::{
+        CLASSIC_PROFILES, ClassicTokenRead, WITNESSED_MAX_OFFERS, WITNESSED_TOTAL_SUPPLY,
+        WITNESSED_VENUE_FEE,
+    };
+    const CLASSIC: &str =
+        include_str!("../../trading/fixtures/fourmeme/classic_parity_20261104.txt");
+    let rows = || CLASSIC.lines().map(|l| l.split(' ').collect::<Vec<_>>());
+    let u = |s: &str| U256::from_str_radix(s, 10).unwrap();
+    let launch = |t: &str| {
+        rows()
+            .find_map(|l| match l[0] {
+                "LAUNCH" if l[3].eq_ignore_ascii_case(t) => l[1].parse::<u64>().ok(),
+                "LAUNCHED" if l[1].eq_ignore_ascii_case(t) => l[2].parse::<u64>().ok(),
+                _ => None,
+            })
+            .unwrap()
+    };
+    let template = CLASSIC_PROFILES[0].template;
+    let f = rows()
+        .find(|f| {
+            f[0] == "PROBE"
+                && format!("0x{}", f[3]).parse::<alloy_primitives::B256>().ok() == Some(template)
+                && f[1].parse::<u64>().unwrap() - launch(f[2]) == age
+        })
+        .unwrap();
+    ClassicTokenRead {
+        token,
+        block_number: f[1].parse().unwrap(),
+        block_hash: alloy_primitives::B256::repeat_byte(0xb1),
+        quote: alloy_primitives::Address::ZERO,
+        template,
+        total_supply: WITNESSED_TOTAL_SUPPLY,
+        max_offers: WITNESSED_MAX_OFFERS,
+        offers: u(f[7]),
+        k: u(f[5]),
+        t: u(f[6]),
+        status: U256::ZERO,
+        fee_setting: u(f[4]),
+        extra_fee: U256::ZERO,
+        launch_block: launch(f[2]),
+        venue_fee: WITNESSED_VENUE_FEE,
+        liquidity_added: false,
+    }
+}
+
+/// The reader of a held Four.meme token (the canonical side's).
+type FourRead = fn(
+    &str,
+    &FollowerLimits,
+    &darkbot_bsc_trading::venues::fourmeme::deployment::FourDeployment,
+    bool,
+    alloy_primitives::Address,
+    u64,
+    [u8; 32],
+) -> Result<crate::venue_probe::FourHeld, crate::venue_probe::ProbeError>;
+
+/// SC4 d: how [`rehold_four_lots`] runs: the families configured, the
+/// Four.meme probe, and whether the path disarms between a read and its
+/// hold.
+struct Rehold {
+    four: bool,
+    openfour: bool,
+    prober: crate::runtime::exec::FourProber,
+    disarm: bool,
+    /// The strategy switched on anew following these venues after the
+    /// first reads were asked.
+    refollow: Option<crate::runtime_strategy::StrategyVenues>,
+}
+
+impl Rehold {
+    fn plain() -> Self {
+        Rehold {
+            four: true,
+            openfour: true,
+            prober: four_pinned,
+            disarm: false,
+            refollow: None,
+        }
+    }
+}
+
+/// What [`rehold_four_lots`] ends with: the lots held again, stranded
+/// (with why) and undecided, and whether a probe left a lot's venue
+/// unarmed (counted).
+struct Reheld {
+    held: Vec<[u8; 20]>,
+    stranded: Vec<([u8; 20], &'static str)>,
+    undecided: Vec<[u8; 20]>,
+    unarmed: bool,
+}
+
+/// SC4 d: an earlier process's open Four.meme `lots` under a Flap grant,
+/// the strategy following `venues`, each lot read by `read`: what the
+/// strategy holds again and what is stranded (with why) after two blocks;
+/// a trade of `overtaken` after the first read overtakes its read (read
+/// again, never held on the moved curve).
+fn rehold_four_lots(
+    tag: &str,
+    venues: crate::runtime_strategy::StrategyVenues,
+    lots: &[([u8; 20], VenueId)],
+    read: FourRead,
+    overtaken: Option<[u8; 20]>,
+    how: Rehold,
+) -> Reheld {
+    use crate::chain_follower::CanonicalFourTrade;
+    use crate::live_ledger::{Fact, FactKind, Ledger};
+    use crate::runtime::{Canonical, Clock, RuntimeConfig, apply_canonical, journal_max_payload};
+    use crate::runtime_journal::{JournalSetup, RuntimeJournal};
+    let config =
+        RuntimeConfig::parse(include_str!("../../../../config/ingress.public.env")).unwrap();
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../..");
+    let mut c = Canonical::new(&config.canonical.clone().unwrap(), 0);
+    c.strategy = Some(crate::runtime_strategy::StrategyRuntime::new(
+        config.strategy.engine.clone(),
+        config.strategy.gas(&repo).unwrap(),
+        venues,
+    ));
+    c.lot.config.lot_reads_max = 4;
+    c.lot.config.lot_read_retry_ms = 0;
+    c.lot.four_reader = read;
+    let base = std::env::temp_dir().join(format!("bsc-{tag}-journal-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&base);
+    let mut journal = RuntimeJournal::open(
+        &base,
+        1,
+        1,
+        JournalSetup::whole(64, journal_max_payload(&config)),
+    )
+    .unwrap();
+    let mut r = Rig::new(tag, LiveStrategies::StrategyC);
+    let configured = |f: crate::paper_exec::FourExecConfig| {
+        Some(crate::paper_exec::FourExecConfig {
+            input_wei: 10_000_000_000_000_000,
+            ..f
+        })
+    };
+    r.exec.exec.four = configured(crate::runtime::exec::tests::four_config()).filter(|_| how.four);
+    r.exec.exec.openfour =
+        configured(crate::runtime::exec::tests::openfour_config()).filter(|_| how.openfour);
+    r.exec.exec.session_cap_wei = 100_000_000_000_000_000;
+    r.exec.exec.strategy_session_cap_wei = 100_000_000_000_000_000;
+    let ledger = Ledger::open(&r.state);
+    for (n, (token, venue)) in lots.iter().enumerate() {
+        let buy = Fact {
+            kind: FactKind::Released,
+            tx_hash: [0xf0 + n as u8; 32],
+            intent: crate::sources::LiveIntentKind::Buy,
+            component: ComponentId::StrategyC,
+            token: *token,
+            nonce: n as u64,
+            grant_generation: 1,
+            input_wei: Some(U256::from(10_000u64)),
+            max_wei: Some(U256::from(10_000u64)),
+            block: None,
+            gas_wei: None,
+            tokens: None,
+            eth_wei: None,
+            max_block: Some(HEAD - 10),
+            by_tx: None,
+            response: None,
+            origin: None,
+            launcher: None,
+            placement: None,
+            attempt: None,
+            operator: None,
+            source: None,
+            venue: Some(*venue),
+        };
+        ledger.append(&buy, NOW).unwrap();
+        ledger
+            .append(
+                &Fact {
+                    block: Some((HEAD - 20, [0x91; 32], NOW - 60_000)),
+                    gas_wei: Some(U256::ZERO),
+                    tokens: Some(U256::from(1_000_000u64)),
+                    eth_wei: Some(U256::from(10_000u64)),
+                    ..Fact::about(&buy, FactKind::Included)
+                },
+                NOW,
+            )
+            .unwrap();
+    }
+    let c2 = c2_at(&r.d, r.buyer, lots.len() as u64);
+    let mut live = Some(r.runtime("boot-1").four_probing(how.prober));
+    live.as_mut().unwrap().exit_deciders = None;
+    settle(live.as_mut().unwrap(), &c2);
+    assert!(
+        live.as_ref().unwrap().armed(),
+        "{:?}",
+        reason(live.as_ref().unwrap())
+    );
+    let now = darkbot_bsc_record::observed_now().unwrap();
+    let apply =
+        |c: &mut Canonical, live: &mut Option<LiveRuntime>, journal: &mut RuntimeJournal, event| {
+            apply_canonical(
+                c,
+                &mut None,
+                &mut None,
+                live,
+                journal,
+                Clock(Instant::now()),
+                1,
+                event,
+            )
+        };
+    let block = |number: u64| CanonicalEvent::Block {
+        number,
+        hash: [number as u8; 32],
+        parent_hash: [(number - 1) as u8; 32],
+        timestamp_s: now / 1_000,
+        timestamp_ms: now,
+        txs: Vec::new(),
+        observed: Instant::now(),
+        observed_unix_ms: Some(now),
+    };
+    let complete = |number: u64| CanonicalEvent::BlockComplete {
+        number,
+        hash: [number as u8; 32],
+    };
+    apply(&mut c, &mut live, &mut journal, block(HEAD));
+    apply(&mut c, &mut live, &mut journal, complete(HEAD));
+    c.lot.settle();
+    if how.disarm {
+        live.as_mut()
+            .unwrap()
+            .stop(Phase::ProbeFailed("test: disarmed".into()));
+    }
+    if let Some(venues) = how.refollow {
+        c.strategy = Some(crate::runtime_strategy::StrategyRuntime::new(
+            config.strategy.engine.clone(),
+            config.strategy.gas(&repo).unwrap(),
+            venues,
+        ));
+    }
+    if let Some(token) = overtaken {
+        let venue = match lots.iter().find(|(t, _)| *t == token).unwrap().1 {
+            VenueId::OpenFour => crate::canonical_join::Venue::OpenFour,
+            _ => crate::canonical_join::Venue::Four,
+        };
+        let trade = CanonicalEvent::FourTrade(CanonicalFourTrade {
+            venue,
+            block_number: HEAD + 1,
+            block_hash: [(HEAD + 1) as u8; 32],
+            tx_index: 0,
+            tx_hash: [0x77; 32],
+            log_index: 0,
+            origin: [0x99; 20],
+            sell: false,
+            token,
+            trader: [0x99; 20],
+            amount: [0; 32],
+            quote: [0; 32],
+            remaining: [0; 32],
+            raised: [0; 32],
+        });
+        apply(&mut c, &mut live, &mut journal, trade);
+    }
+    apply(&mut c, &mut live, &mut journal, block(HEAD + 1));
+    if let Some(token) = overtaken {
+        assert!(
+            !c.strategy.as_ref().unwrap().holds(&token),
+            "never a moved curve"
+        );
+    }
+    apply(&mut c, &mut live, &mut journal, complete(HEAD + 1));
+    if let Some(token) = overtaken {
+        assert!(c.lot.reads.iter().any(|r| r.token == token), "read again");
+    }
+    c.lot.settle();
+    apply(&mut c, &mut live, &mut journal, block(HEAD + 2));
+    apply(&mut c, &mut live, &mut journal, complete(HEAD + 2));
+    let s = c.strategy.as_ref().unwrap();
+    let held = lots
+        .iter()
+        .map(|(t, _)| *t)
+        .filter(|t| s.holds(t))
+        .collect();
+    let d = live.as_ref().unwrap().exit_deciders.clone().unwrap();
+    let mut stranded = d.stranded.clone();
+    stranded.sort();
+    let unarmed = refused_for(live.as_ref().unwrap(), "FOUR_LOT_VENUES_UNARMED");
+    live.as_mut().unwrap().shutdown();
+    journal.finish().unwrap();
+    let _ = fs::remove_dir_all(&base);
+    r.clean();
+    Reheld {
+        held,
+        stranded,
+        undecided: d.undecided,
+        unarmed,
+    }
+}
+
+/// SC4 d: an earlier process's open OpenFour lots get their exit decider
+/// again: each is read on its venue at a block's end (the armed deployment
+/// classifies it) and held again on that curve before the next block's
+/// events (journaled `q`), unless a trade of its token overtook the read
+/// (read again); one off its curve is stranded with why, a lot on a venue
+/// the strategy does not follow too (never read).
+#[test]
+fn the_runtime_holds_an_earlier_processs_four_lots_again() {
+    use crate::runtime_strategy::StrategyVenues;
+    use crate::sources::{LIVE_POSITION_OFF_CURVE, LIVE_POSITION_VENUE_UNFOLLOWED};
+    const HELD: [u8; 20] = [0xF1; 20];
+    const OFF: [u8; 20] = [0xF2; 20];
+    const CLASSIC: [u8; 20] = [0xF3; 20];
+    let out = rehold_four_lots(
+        "live-four-rehold",
+        StrategyVenues {
+            flap: true,
+            four: false,
+            openfour: true,
+        },
+        &[
+            (HELD, VenueId::OpenFour),
+            (OFF, VenueId::OpenFour),
+            (CLASSIC, VenueId::FourClassic),
+        ],
+        |_, _, _, openfour, token, number, hash| {
+            assert!(openfour, "the unfollowed Classic lot is never read");
+            let phase = match token.into_array() {
+                OFF => 2,
+                _ => 1,
+            };
+            Ok(crate::venue_probe::FourHeld::OpenFour(openfour_held_read(
+                token, number, hash, phase,
+            )))
+        },
+        Some(HELD),
+        Rehold::plain(),
+    );
+    assert_eq!(
+        (out.held, out.undecided, out.unarmed),
+        (vec![HELD], vec![], false)
+    );
+    assert_eq!(
+        out.stranded,
+        [
+            (OFF, LIVE_POSITION_OFF_CURVE),
+            (CLASSIC, LIVE_POSITION_VENUE_UNFOLLOWED)
+        ]
+    );
+}
+
+/// SC4 d: a Classic lot read again is held only while its token's tax is
+/// witnessed up to its SELL's last block (`BSC_CANONICAL_LOT_SELL_WINDOW_BLOCKS`
+/// after the read): one launched just before is held, one at the witnessed
+/// age is not priced.
+#[test]
+fn a_classic_lot_read_again_is_held_within_its_tax_window() {
+    use crate::runtime_strategy::StrategyVenues;
+    use crate::sources::LIVE_POSITION_UNPRICED;
+    use darkbot_bsc_trading::venues::fourmeme::profile::CLASSIC_PROFILES;
+    const YOUNG: [u8; 20] = [0xC1; 20];
+    const OLD: [u8; 20] = [0xC2; 20];
+    let out = rehold_four_lots(
+        "live-classic-rehold",
+        StrategyVenues {
+            flap: true,
+            four: true,
+            openfour: false,
+        },
+        &[(YOUNG, VenueId::FourClassic), (OLD, VenueId::FourClassic)],
+        |_, _, _, openfour, token, _, _| {
+            assert!(!openfour);
+            let age = match token.into_array() {
+                OLD => CLASSIC_PROFILES[0].tax_witnessed_blocks,
+                _ => 0,
+            };
+            Ok(crate::venue_probe::FourHeld::Classic(classic_held_read(
+                token, age,
+            )))
+        },
+        None,
+        Rehold::plain(),
+    );
+    assert_eq!((out.held, out.undecided), (vec![YOUNG], vec![]));
+    assert_eq!(out.stranded, [(OLD, LIVE_POSITION_UNPRICED)]);
+}
+
+/// The OpenFour reader of the held fixture state (phase 1).
+fn openfour_reader(
+    _: &str,
+    _: &FollowerLimits,
+    _: &darkbot_bsc_trading::venues::fourmeme::deployment::FourDeployment,
+    _: bool,
+    token: alloy_primitives::Address,
+    number: u64,
+    hash: [u8; 32],
+) -> Result<crate::venue_probe::FourHeld, crate::venue_probe::ProbeError> {
+    Ok(crate::venue_probe::FourHeld::OpenFour(openfour_held_read(
+        token, number, hash, 1,
+    )))
+}
+
+/// SC4 d review M1: a read answered while armed and held after the path
+/// disarmed is read again (undecided, not stranded): its token is as
+/// priced as before.
+#[test]
+fn a_four_read_held_after_a_disarm_is_read_again() {
+    const T: [u8; 20] = [0xD1; 20];
+    let out = rehold_four_lots(
+        "live-four-disarm",
+        crate::runtime_strategy::StrategyVenues {
+            flap: true,
+            four: false,
+            openfour: true,
+        },
+        &[(T, VenueId::OpenFour)],
+        openfour_reader,
+        None,
+        Rehold {
+            disarm: true,
+            ..Rehold::plain()
+        },
+    );
+    assert_eq!(
+        (out.held, out.stranded, out.undecided),
+        (vec![], vec![], vec![T])
+    );
+}
+
+/// SC4 d review M2: an open lot of a family without its keys is stranded
+/// (named) and never armed: the Flap path arms and its exits go on.
+#[test]
+fn an_unconfigured_four_lot_is_stranded_and_the_path_arms() {
+    const T: [u8; 20] = [0xD2; 20];
+    let out = rehold_four_lots(
+        "live-four-unconfigured",
+        crate::runtime_strategy::StrategyVenues {
+            flap: true,
+            four: false,
+            openfour: true,
+        },
+        &[(T, VenueId::OpenFour)],
+        openfour_reader,
+        None,
+        Rehold {
+            openfour: false,
+            ..Rehold::plain()
+        },
+    );
+    assert_eq!((out.held, out.undecided), (vec![], vec![]));
+    assert_eq!(
+        out.stranded,
+        [(T, crate::sources::LIVE_POSITION_VENUE_UNCONFIGURED)]
+    );
+}
+
+/// SC4 d review M2: a venue of open lots alone whose probe fails leaves
+/// those lots undecided (counted) and does not end the Flap path.
+#[test]
+fn a_lot_venue_whose_probe_fails_waits_and_the_path_arms() {
+    const T: [u8; 20] = [0xD3; 20];
+    let out = rehold_four_lots(
+        "live-four-unprobed",
+        crate::runtime_strategy::StrategyVenues {
+            flap: true,
+            four: false,
+            openfour: true,
+        },
+        &[(T, VenueId::OpenFour)],
+        openfour_reader,
+        None,
+        Rehold {
+            prober: |_, _, _| Err("four: down".into()),
+            ..Rehold::plain()
+        },
+    );
+    assert_eq!(
+        (out.held, out.stranded, out.undecided, out.unarmed),
+        (vec![], vec![], vec![T], true)
+    );
+}
+
+/// SC4 d review L3: a lot stranded because the strategy did not follow its
+/// venue is decided again once the strategy follows it (switched on
+/// anew); a read asked while it followed and answered after it stopped is
+/// not held (stranded as unfollowed).
+#[test]
+fn a_lots_venue_followed_again_is_decided_and_one_unfollowed_is_not_held() {
+    use crate::runtime_strategy::StrategyVenues;
+    const CLASSIC: [u8; 20] = [0xD4; 20];
+    let (flap_openfour, flap_four) = (
+        StrategyVenues {
+            flap: true,
+            four: false,
+            openfour: true,
+        },
+        StrategyVenues {
+            flap: true,
+            four: true,
+            openfour: false,
+        },
+    );
+    let out = rehold_four_lots(
+        "live-four-refollow",
+        flap_openfour,
+        &[(CLASSIC, VenueId::FourClassic)],
+        |_, _, _, _, token, _, _| {
+            Ok(crate::venue_probe::FourHeld::Classic(classic_held_read(
+                token, 0,
+            )))
+        },
+        None,
+        Rehold {
+            refollow: Some(flap_four),
+            ..Rehold::plain()
+        },
+    );
+    assert_eq!(
+        (out.held, out.stranded, out.undecided),
+        (vec![CLASSIC], vec![], vec![])
+    );
+    const OPENFOUR: [u8; 20] = [0xD5; 20];
+    let out = rehold_four_lots(
+        "live-four-unfollow",
+        flap_openfour,
+        &[(OPENFOUR, VenueId::OpenFour)],
+        openfour_reader,
+        None,
+        Rehold {
+            refollow: Some(flap_four),
+            ..Rehold::plain()
+        },
+    );
+    assert_eq!(out.held, Vec::<[u8; 20]>::new());
+    assert_eq!(
+        out.stranded,
+        [(OPENFOUR, crate::sources::LIVE_POSITION_VENUE_UNFOLLOWED)]
+    );
 }

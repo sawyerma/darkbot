@@ -20,7 +20,17 @@ pub(super) fn refresh_lot_deciders(c: &mut Canonical, live: &mut Option<LiveRunt
         })
         .collect();
     let lot = &mut c.lot;
-    lot.stranded.retain(|(t, _)| lot.open.contains(t));
+    // Review L3: a lot stranded on a venue the strategy did not follow is
+    // decided again once it does (the strategy switched on anew).
+    let venues = c.strategy.as_ref().map(|s| s.venues());
+    lot.stranded.retain(|(t, why)| {
+        lot.open.contains(t)
+            && (*why != crate::sources::LIVE_POSITION_VENUE_UNFOLLOWED
+                || !follows(
+                    venues,
+                    l.lot_venue(t).unwrap_or(crate::sources::VenueId::Flap),
+                ))
+    });
     lot.retry_at.retain(|(t, _)| lot.open.contains(t));
     lot.refused.retain(|(t, _)| lot.open.contains(t));
     let strategy = c.strategy.as_ref();
@@ -51,9 +61,6 @@ fn ask_lot_reads(c: &mut Canonical, live: &Option<LiveRuntime>, block: u64) {
     else {
         return;
     };
-    let Some(portal) = l.portal() else {
-        return;
-    };
     if number != block || !c.first_journaled {
         return;
     }
@@ -76,21 +83,55 @@ fn ask_lot_reads(c: &mut Canonical, live: &Option<LiveRuntime>, block: u64) {
         if lot.reads.len() >= lot.config.lot_reads_max {
             break;
         }
+        // SC4 d: a lot is read on its venue: a Flap one at the armed
+        // Portal, a Four.meme one once the path armed that venue.
+        let at = alloy_primitives::Address::from(token);
+        let (endpoint, limits) = (endpoint.clone(), lot.config.limits);
+        let read: Box<dyn FnOnce() -> Result<LotCurve, crate::venue_probe::ProbeError> + Send> =
+            match l.lot_venue(&token).unwrap_or(crate::sources::VenueId::Flap) {
+                crate::sources::VenueId::Flap => {
+                    let (Some(portal), read) = (l.portal(), lot.reader) else {
+                        continue;
+                    };
+                    Box::new(move || {
+                        read(&endpoint, &limits, portal, at, number, hash).map(LotCurve::Flap)
+                    })
+                }
+                venue => {
+                    // SC4 d: a Four.meme lot is decided on its venue's
+                    // curve only while the strategy follows that venue, and
+                    // read once the path armed it (review L6: on that
+                    // deployment); a family without its keys is never.
+                    if !follows(strategy.map(|s| s.venues()), venue) {
+                        lot.stranded
+                            .push((token, crate::sources::LIVE_POSITION_VENUE_UNFOLLOWED));
+                        continue;
+                    }
+                    if !l.venue_configured(venue) {
+                        lot.stranded
+                            .push((token, crate::sources::LIVE_POSITION_VENUE_UNCONFIGURED));
+                        continue;
+                    }
+                    let Some(armed) = l.four_armed_on(venue) else {
+                        continue;
+                    };
+                    let (read, openfour, pin) = (
+                        lot.four_reader,
+                        venue == crate::sources::VenueId::OpenFour,
+                        *armed.deployment(),
+                    );
+                    Box::new(move || {
+                        read(&endpoint, &limits, &pin, openfour, at, number, hash)
+                            .map(LotCurve::Four)
+                    })
+                }
+            };
         let (tx, rx) = std::sync::mpsc::sync_channel(1);
-        let (read, endpoint, limits) = (lot.reader, endpoint.clone(), lot.config.limits);
         let spawned = std::thread::Builder::new()
             .name("bsc-lot-curve".into())
             .spawn(move || {
                 use crate::venue_probe::ProbeError;
-                let result = read(
-                    &endpoint,
-                    &limits,
-                    portal,
-                    alloy_primitives::Address::from(token),
-                    number,
-                    hash,
-                )
-                .map_err(|e| LotFault {
+                let result = read().map_err(|e| LotFault {
                     again: !matches!(e, ProbeError::Abi { .. } | ProbeError::Config(_)),
                     why: e.to_string(),
                 });
@@ -187,6 +228,43 @@ fn hold_read_lots(
         if s.holds(&r.token) {
             continue;
         }
+        let curve = match curve {
+            LotCurve::Flap(curve) => curve,
+            LotCurve::Four(read) => {
+                let venue = l
+                    .lot_venue(&r.token)
+                    .unwrap_or(crate::sources::VenueId::Flap);
+                // Review L3: the strategy switched on without its venue
+                // since the read was asked.
+                if !follows(Some(s.venues()), venue) {
+                    lot.stranded
+                        .push((r.token, crate::sources::LIVE_POSITION_VENUE_UNFOLLOWED));
+                    continue;
+                }
+                // Review M1: disarmed since: read again once armed (its
+                // token is as priced as before).
+                let Some(armed) = l.four_armed_on(venue) else {
+                    lot.retry_later(r.token);
+                    continue;
+                };
+                match four_held_curve(armed, &read, lot.config.lot_sell_window_blocks) {
+                    Ok(curve) => s.reheld(
+                        &crate::runtime_strategy::Reheld {
+                            token: r.token,
+                            creator: l.launcher_of(&r.token).unwrap_or_default(),
+                            curve: crate::runtime_strategy::HeldCurve::Four(curve),
+                            tokens,
+                            spent_wei,
+                            filled_ms,
+                        },
+                        at,
+                        journal,
+                    ),
+                    Err(why) => lot.stranded.push((r.token, why)),
+                }
+                continue;
+            }
+        };
         if !curve.terms.tradable {
             // R5: a token migrated to its DEX is named so (its exit the DEX
             // exit's when ON).
@@ -206,9 +284,11 @@ fn hold_read_lots(
             &crate::runtime_strategy::Reheld {
                 token: r.token,
                 creator: l.launcher_of(&r.token).unwrap_or_default(),
-                terms: curve.terms,
-                reserve: curve.reserve,
-                circulating: curve.circulating,
+                curve: crate::runtime_strategy::HeldCurve::Flap {
+                    terms: curve.terms,
+                    reserve: curve.reserve,
+                    circulating: curve.circulating,
+                },
                 tokens,
                 spent_wei,
                 filled_ms,
@@ -866,6 +946,79 @@ impl Recoveries {
     }
 }
 
+/// SC4 d: reads a held Four.meme token at one block (production:
+/// [`crate::venue_probe::read_four_held`]; `true`: OpenFour).
+type FourReader = fn(
+    &str,
+    &FollowerLimits,
+    &darkbot_bsc_trading::venues::fourmeme::deployment::FourDeployment,
+    bool,
+    alloy_primitives::Address,
+    u64,
+    [u8; 32],
+) -> Result<crate::venue_probe::FourHeld, crate::venue_probe::ProbeError>;
+
+/// SC4 d: what a lot's read answers on its venue.
+#[derive(Clone, Debug)]
+#[allow(
+    clippy::large_enum_variant,
+    reason = "one answer per lot read, moved once through its channel"
+)]
+pub(super) enum LotCurve {
+    Flap(crate::venue_probe::FlapCurve),
+    Four(crate::venue_probe::FourHeld),
+}
+
+/// SC4 d: whether Strategy C following `venues` decides a lot on `venue`.
+fn follows(
+    venues: Option<crate::runtime_strategy::StrategyVenues>,
+    venue: crate::sources::VenueId,
+) -> bool {
+    use crate::canonical_join::Venue;
+    use crate::sources::VenueId;
+    venues.is_some_and(|v| {
+        v.takes(match venue {
+            VenueId::Flap => Venue::Flap,
+            VenueId::FourClassic => Venue::Four,
+            VenueId::OpenFour => Venue::OpenFour,
+        })
+    })
+}
+
+/// SC4 d: the curve a held Four.meme token is held again on, as the
+/// armed deployment `validated` classifies `read` for a SELL within
+/// `window` blocks; otherwise why it is stranded.
+pub(super) fn four_held_curve(
+    v: darkbot_bsc_trading::venues::fourmeme::deployment::ValidatedFourDeployment,
+    read: &crate::venue_probe::FourHeld,
+    window: u64,
+) -> Result<darkbot_bsc_trading::strategy::book::FourCurve, &'static str> {
+    use crate::sources::{LIVE_POSITION_OFF_CURVE, LIVE_POSITION_UNPRICED};
+    use crate::venue_probe::FourHeld;
+    use darkbot_bsc_trading::strategy::book::FourCurve;
+    use darkbot_bsc_trading::venues::fourmeme::profile::{
+        UnsupportedClassicHolding, UnsupportedOpenFourHolding, classify_classic_holding,
+        classify_openfour_holding,
+    };
+    match read {
+        FourHeld::Classic(read) => {
+            let c = classify_classic_holding(&v, read, window).map_err(|e| match e {
+                UnsupportedClassicHolding::OffCurve => LIVE_POSITION_OFF_CURVE,
+                _ => LIVE_POSITION_UNPRICED,
+            })?;
+            FourCurve::classic_at(c.curve(), c.fee()).ok_or(LIVE_POSITION_UNPRICED)
+        }
+        FourHeld::OpenFour(read) => {
+            let c = classify_openfour_holding(&v, read).map_err(|e| match e {
+                UnsupportedOpenFourHolding::OffCurve => LIVE_POSITION_OFF_CURVE,
+                _ => LIVE_POSITION_UNPRICED,
+            })?;
+            FourCurve::openfour_at(c.curve(), read.sale_amount, c.fee())
+                .ok_or(LIVE_POSITION_UNPRICED)
+        }
+    }
+}
+
 /// 01.11. (R1): reads a token's curve at one block (production:
 /// [`crate::venue_probe::read_flap_curve`]).
 type CurveReader = fn(
@@ -914,6 +1067,8 @@ pub(super) struct QuoteRead {
 pub(super) struct LotDeciders {
     pub(super) config: CanonicalConfig,
     pub(super) reader: CurveReader,
+    /// SC4 d: a Four.meme lot's reader.
+    pub(super) four_reader: FourReader,
     pub(super) reads: Vec<LotRead>,
     /// R5: the migrated lots' DEX quotes (the DEX exit ON).
     pub(super) quoter: DexQuoter,
@@ -935,7 +1090,7 @@ pub(super) struct LotRead {
     pub(super) token: [u8; 20],
     block: u64,
     hash: [u8; 32],
-    rx: std::sync::mpsc::Receiver<Result<crate::venue_probe::FlapCurve, LotFault>>,
+    rx: std::sync::mpsc::Receiver<Result<LotCurve, LotFault>>,
     overtaken: bool,
     #[cfg(test)]
     handle: Option<std::thread::JoinHandle<()>>,
@@ -953,6 +1108,7 @@ impl LotDeciders {
         LotDeciders {
             config: config.clone(),
             reader: crate::venue_probe::read_flap_curve,
+            four_reader: crate::venue_probe::read_four_held,
             reads: Vec::new(),
             quoter: crate::venue_probe::read_flap_dex_quote,
             quotes: Vec::new(),
@@ -973,10 +1129,14 @@ impl LotDeciders {
             CanonicalEvent::FlapTrade(t) => Some(t.token),
             CanonicalEvent::FlapTerm(t) => Some(t.token),
             CanonicalEvent::FlapMigrated { token, .. } => Some(*token),
+            // SC4 d: a Four.meme lot's token moved.
+            CanonicalEvent::FourTrade(t) => Some(t.token),
+            CanonicalEvent::FourPhase { token, .. } => Some(*token),
             CanonicalEvent::Reorg { .. }
             | CanonicalEvent::ReorgTooDeep { .. }
             | CanonicalEvent::Gap { .. }
-            | CanonicalEvent::FlapTradeUndecodable { .. } => {
+            | CanonicalEvent::FlapTradeUndecodable { .. }
+            | CanonicalEvent::FourTradeUndecodable { .. } => {
                 self.reads.iter_mut().for_each(|r| r.overtaken = true);
                 self.quotes.iter_mut().for_each(|q| q.overtaken = true);
                 None
@@ -1013,6 +1173,9 @@ impl LotDeciders {
             CanonicalEvent::FlapTrade(t) => self.open.contains(&t.token),
             CanonicalEvent::FlapTerm(t) => self.open.contains(&t.token),
             CanonicalEvent::FlapMigrated { token, .. } => self.open.contains(token),
+            CanonicalEvent::FourTrade(t) => self.open.contains(&t.token),
+            CanonicalEvent::FourPhase { token, .. } => self.open.contains(token),
+            CanonicalEvent::FourTradeUndecodable { .. } => true,
             CanonicalEvent::Block { .. }
             | CanonicalEvent::BlockComplete { .. }
             | CanonicalEvent::Reorg { .. }

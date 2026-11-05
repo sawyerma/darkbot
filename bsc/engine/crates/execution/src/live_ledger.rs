@@ -332,7 +332,8 @@ impl Fact {
             attempt: None,
             operator: None,
             source: None,
-            venue: None,
+            // Review L4: its venue as admitted.
+            venue: a.venue,
         })
     }
 }

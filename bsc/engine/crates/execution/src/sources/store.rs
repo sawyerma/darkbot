@@ -906,6 +906,10 @@ impl Store {
         if !exit && intent.component == ComponentId::StrategyC && !grant.strategies.strategy_c() {
             return Err(LIVE_NOT_IN_SCOPE.into());
         }
+        // SC4 d: a BUY on the grant's venue alone (an exit is its lot's).
+        if !exit && intent.venue != Some(grant.venue) {
+            return Err(LIVE_NOT_IN_SCOPE.into());
+        }
         g.live_clear(&entities, &ctx, exit)?;
         if !exit && intent.input_wei > grant.max_input_wei {
             return Err(LIVE_INPUT_ABOVE_GRANT.into());
@@ -998,6 +1002,9 @@ impl Store {
                 ls::EXIT_RESERVE_WEI,
                 darkbot_bsc_record::Value::u128(intent.exit_reserve_wei),
             );
+        if let Some(venue) = intent.venue {
+            d.set(ls::VENUE, venue.name());
+        }
         let bytes = d.encode().map_err(|e| e.to_string())?;
         create_durable_dir(&spend_dir(&self.dir))?;
         match write_new_as(&entry, &bytes, Durability::Handed) {
