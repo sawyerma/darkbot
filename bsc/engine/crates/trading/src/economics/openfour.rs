@@ -271,11 +271,29 @@ pub fn creator_buy(
     Ok(bought)
 }
 
-/// The BUY inputs admitted on a fresh launch of the bonding preset: those
-/// whose exact BUY the probes executed on the state after the witnessed
-/// launch (OFADMIT rows), in wei.
-pub const QUALIFIED_OPENFOUR_INPUTS_WEI: [u64; 2] =
-    [1_000_000_000_000_000, 100_000_000_000_000_000];
+/// The BUY inputs admitted on the bonding preset: those whose exact BUY the
+/// probes executed on the state after the witnessed launch and (SC4:
+/// Strategy C's tracked states) on later states of its token (OFADMIT
+/// rows), in wei.
+pub const QUALIFIED_OPENFOUR_INPUTS_WEI: [u64; 3] = [
+    1_000_000_000_000_000,
+    10_000_000_000_000_000,
+    100_000_000_000_000_000,
+];
+
+/// SC4 c (B2, review M1): the input a tracked OpenFour BUY may take: the
+/// Strategy C input, executed on every moved state down to
+/// [`QUALIFIED_OPENFOUR_MIN_REMAINING`] (0.001 and 0.1 BNB only on the launch
+/// state and one moved state above it).
+pub const QUALIFIED_OPENFOUR_TRACKED_INPUTS_WEI: [u64; 1] = [10_000_000_000_000_000];
+
+/// SC4 c (B2): `remainingForSale` of the deepest OpenFour state a BUY of
+/// the executed bonding preset was executed from (fixture OFADMIT rows,
+/// states third-party BUYs and SELLs moved): a tracked BUY further along its
+/// curve is not admitted. Exits are not bounded by it (their `minReceive`
+/// refuses a SELL the quote does not name).
+pub const QUALIFIED_OPENFOUR_MIN_REMAINING: U256 =
+    U256::from_limbs([2_831_123_858_252_707_805, 25_249_567, 0, 0]);
 
 /// Why an OpenFour BUY or SELL is not admissible.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -288,6 +306,11 @@ pub enum OpenFourAdmissionError {
     UnqualifiedAmount,
     /// The held token's state was read at another block than the snapshot's.
     StaleRead,
+    /// SC4: a tracked curve's fee terms are not the validated preset's.
+    TermsMismatch,
+    /// SC4 c (B2): a tracked state further along its curve than any state
+    /// a BUY was executed from ([`QUALIFIED_OPENFOUR_MIN_REMAINING`]).
+    Unwitnessed,
     Quote(OpenFourQuoteError),
     Slippage(SlippageError),
 }
@@ -305,6 +328,12 @@ impl core::fmt::Display for OpenFourAdmissionError {
             Self::StateNotFresh => f.write_str("openfour admission: token state is not fresh"),
             Self::UnqualifiedAmount => f.write_str("openfour admission: amount not qualified"),
             Self::StaleRead => f.write_str("openfour admission: state read at another block"),
+            Self::TermsMismatch => {
+                f.write_str("openfour admission: fee terms not the validated preset's")
+            }
+            Self::Unwitnessed => {
+                f.write_str("openfour admission: state deeper on its curve than any executed BUY's")
+            }
             Self::Quote(e) => write!(f, "openfour admission: {e}"),
             Self::Slippage(e) => write!(f, "openfour admission: {e}"),
         }
@@ -321,6 +350,9 @@ pub struct QualifiedOpenFourState {
     curve: OpenFourCurve,
     fee: OpenFourFee,
     snapshot: SnapshotId,
+    /// SC4 c: a tracked (moved) state, not a launch's: its BUY only of
+    /// [`QUALIFIED_OPENFOUR_TRACKED_INPUTS_WEI`].
+    tracked: bool,
 }
 
 impl QualifiedOpenFourState {
@@ -345,6 +377,30 @@ impl QualifiedOpenFourState {
             curve: classified.curve(),
             fee: classified.fee(),
             snapshot,
+            tracked: false,
+        })
+    }
+
+    /// SC4: binds a token's curve as Strategy C tracks it exactly to
+    /// `snapshot`, on the `validated` deployment the BUY is armed on: its
+    /// code generation the snapshot's, its fee terms its bonding preset's.
+    pub fn tracked(
+        validated: &crate::venues::fourmeme::deployment::ValidatedFourDeployment,
+        token: Address,
+        curve: OpenFourCurve,
+        fee: OpenFourFee,
+        snapshot: SnapshotId,
+    ) -> Result<Self, OpenFourAdmissionError> {
+        tracked_terms(validated, &fee, &snapshot)?;
+        if curve.remaining < QUALIFIED_OPENFOUR_MIN_REMAINING {
+            return Err(OpenFourAdmissionError::Unwitnessed);
+        }
+        Ok(Self {
+            token,
+            curve,
+            fee,
+            snapshot,
+            tracked: true,
         })
     }
 
@@ -357,6 +413,22 @@ impl QualifiedOpenFourState {
     pub fn snapshot(&self) -> SnapshotId {
         self.snapshot
     }
+}
+
+/// SC4: a tracked curve's generation and fee terms against the validated
+/// deployment's bonding preset.
+fn tracked_terms(
+    validated: &crate::venues::fourmeme::deployment::ValidatedFourDeployment,
+    fee: &OpenFourFee,
+    snapshot: &SnapshotId,
+) -> Result<(), OpenFourAdmissionError> {
+    if validated.codehash_generation() != snapshot.codehash_generation {
+        return Err(OpenFourAdmissionError::GenerationMismatch);
+    }
+    if validated.openfour_bonding().map(|b| b.fee) != Some(*fee) {
+        return Err(OpenFourAdmissionError::TermsMismatch);
+    }
+    Ok(())
 }
 
 /// An OpenFour BUY that passed admission: only [`admit_openfour_buy`]
@@ -424,10 +496,11 @@ pub fn admit_openfour_buy(
         return Err(OpenFourAdmissionError::PolicyGenerationMismatch);
     }
     let max_pay = policy.input_amount();
-    if !QUALIFIED_OPENFOUR_INPUTS_WEI
-        .iter()
-        .any(|w| U256::from(*w) == max_pay)
-    {
+    let inputs: &[u64] = match state.tracked {
+        true => &QUALIFIED_OPENFOUR_TRACKED_INPUTS_WEI,
+        false => &QUALIFIED_OPENFOUR_INPUTS_WEI,
+    };
+    if !inputs.iter().any(|w| U256::from(*w) == max_pay) {
         return Err(OpenFourAdmissionError::UnqualifiedAmount);
     }
     let whole = U256::from(BPS_DENOMINATOR);
@@ -470,6 +543,25 @@ impl QualifiedOpenFourHolding {
             token: classified.token(),
             curve: classified.curve(),
             fee: classified.fee(),
+            snapshot,
+        })
+    }
+
+    /// SC4: a PAPER position's token on the curve Strategy C tracks
+    /// exactly, bound to `snapshot` on the `validated` deployment (as
+    /// [`QualifiedOpenFourState::tracked`]).
+    pub fn tracked(
+        validated: &crate::venues::fourmeme::deployment::ValidatedFourDeployment,
+        token: Address,
+        curve: OpenFourCurve,
+        fee: OpenFourFee,
+        snapshot: SnapshotId,
+    ) -> Result<Self, OpenFourAdmissionError> {
+        tracked_terms(validated, &fee, &snapshot)?;
+        Ok(Self {
+            token,
+            curve,
+            fee,
             snapshot,
         })
     }

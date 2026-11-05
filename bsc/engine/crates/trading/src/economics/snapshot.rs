@@ -14,7 +14,7 @@
 use std::fmt::Write as _;
 
 /// The model version: raised with every semantic change of a rule here.
-pub const MODEL_VERSION: &str = "bsc-economics-7";
+pub const MODEL_VERSION: &str = "bsc-economics-8";
 
 /// The chain every scope belongs to.
 pub const CHAIN_ID: u64 = 56;
@@ -166,7 +166,7 @@ pub const SCOPES: &[Scope] = &[
         surface: FOUR_CLASSIC,
         path: "BUY",
         support: Support::Priced,
-        rule: "four_classic::quote_buy: budget floor(funds*1e4/(1e4+rate+tax)), tokens floor_gwei(T-ceil(K*1e18/(y+budget))) with y=floor(K*1e18/T), cost floor(K*1e18/(T-tokens))-y, fee floor(cost*rate/1e4), tax floor(cost*tax/1e4), the rest refunded; buyTokenAMAP executed by eth_call probes on mainnet state up to 461245 blocks after the launch (tokens, wei spent, minAmount accepted at the tokens and refused one above) and the launch receipts' creator purchases; executed direct trades of a BSC-USD-quote token (paid by approval) for the curve and fee; Helper3.tryBuy is the untaxed curve (fixtures/fourmeme/classic_parity_20261104.txt)",
+        rule: "four_classic::quote_buy: budget floor(funds*1e4/(1e4+rate+tax)), tokens floor_gwei(T-ceil(K*1e18/(y+budget))) with y=floor(K*1e18/T), cost floor(K*1e18/(T-tokens))-y, fee floor(cost*rate/1e4), tax floor(cost*tax/1e4), the rest refunded; buyTokenAMAP executed by eth_call probes on mainnet state up to 697605 blocks after the launch (tokens, wei spent, minAmount accepted at the tokens and refused one above) and the launch receipts' creator purchases; executed direct trades of a BSC-USD-quote token (paid by approval) for the curve and fee; Helper3.tryBuy is the untaxed curve (fixtures/fourmeme/classic_parity_20261104.txt)",
     },
     Scope {
         venue: "FOUR",
@@ -201,7 +201,14 @@ pub const SCOPES: &[Scope] = &[
         surface: FOUR_CLASSIC,
         path: "ADMITTED BUY",
         support: Support::Priced,
-        rule: "admit_classic_buy: a launch classified on a validated deployment (fourmeme::profile, FourDeployment::validate), the state directly after it, 0.001 or 0.1 BNB (buyTokenAMAP executed by probes on that state, tokens and wei to the unit), minAmount the slippage floor; signed and bound by fourmeme::binding",
+        rule: "admit_classic_buy: a launch classified on a validated deployment (fourmeme::profile, FourDeployment::validate), the state directly after it, 0.001, 0.01 or 0.1 BNB (buyTokenAMAP executed by probes on that state, tokens and wei to the unit), minAmount the slippage floor; signed and bound by fourmeme::binding",
+    },
+    Scope {
+        venue: "FOUR",
+        surface: FOUR_CLASSIC,
+        path: "CURVE BUY, SELL (Strategy C)",
+        support: Support::Priced,
+        rule: "strategy::book FourCurve: the state each trade's offers name (sold = maxOffers - offers, T = T0 - sold), its funds the curve's raised quote (CLSTATE rows: 8 trades against TokenManager2 storage); admit_classic_buy on QualifiedClassicState::tracked (the validated deployment's generation and venue fee, a priced word's tax), 0.01 BNB only (QUALIFIED_CLASSIC_TRACKED_INPUTS_WEI; PROBE rows on fresh states and on states third-party BUYs and SELLs moved, each the launch curve after its reported sale per MOVE rows, tokens and wei to the unit), not deeper than the deepest executed state (QUALIFIED_CLASSIC_MIN_OFFERS); its exit admit_classic_sell on QualifiedClassicHolding::tracked, whole gwei units, minFunds against the gross (SELLMIN rows); signed and bound by fourmeme::binding",
     },
     Scope {
         venue: "FOUR",
@@ -237,6 +244,13 @@ pub const SCOPES: &[Scope] = &[
         path: "LAUNCH CURVE, CREATOR BUY",
         support: Support::Priced,
         rule: "openfour::launch_curve: the Classic virtual reserves of maxSupply, saleAmount and raiseAmount, K their product; the creator BUY a curve quote of the value less the fees' share, the most tokens it buys (the witnessed launch's snapshot and TradeExecuted to the wei)",
+    },
+    Scope {
+        venue: "OPENFOUR",
+        surface: OPENFOUR_BONDING,
+        path: "CURVE BUY, SELL (Strategy C)",
+        support: Support::Priced,
+        rule: "strategy::book FourCurve: the state each TradeExecuted's remainingForSale names (T = T0 - sold, Q = floor(K/T)), its totalRaised Q - Q0 (OFSNAP rows); admit_openfour_buy on QualifiedOpenFourState::tracked (the validated deployment's generation and its bonding preset's fee terms), 0.01 BNB only (QUALIFIED_OPENFOUR_TRACKED_INPUTS_WEI; OFADMIT rows of the launch state and five later, distinct states moved by BUYs and SELLs, amount and pay to the wei), not deeper than the deepest executed state (QUALIFIED_OPENFOUR_MIN_REMAINING); its exit admit_openfour_sell on QualifiedOpenFourHolding::tracked; signed and bound by fourmeme::binding",
     },
     Scope {
         venue: "OPENFOUR",
@@ -409,10 +423,12 @@ mod tests {
                 ("FOUR", "SELL"),
                 ("FOUR", "LAUNCH CURVE, CREATOR BUY"),
                 ("FOUR", "ADMITTED BUY"),
+                ("FOUR", "CURVE BUY, SELL (Strategy C)"),
                 ("FOUR", "ADMITTED SELL"),
                 ("OPENFOUR", "BUY"),
                 ("OPENFOUR", "SELL"),
-                ("OPENFOUR", "LAUNCH CURVE, CREATOR BUY")
+                ("OPENFOUR", "LAUNCH CURVE, CREATOR BUY"),
+                ("OPENFOUR", "CURVE BUY, SELL (Strategy C)")
             ]
         );
         assert!(
@@ -462,7 +478,7 @@ mod tests {
     fn the_manifest_binds_every_file() {
         let files: Vec<(&str, [u8; 32])> = BOUND_FILES.iter().map(|p| (*p, [0u8; 32])).collect();
         let a = manifest(&files);
-        assert!(a.starts_with("darkbot.bsc.economics-snapshot\nchain 56\nmodel bsc-economics-7\n"));
+        assert!(a.starts_with("darkbot.bsc.economics-snapshot\nchain 56\nmodel bsc-economics-8\n"));
         assert_eq!(a.matches("\nfile ").count(), BOUND_FILES.len());
         let mut other = files.clone();
         other[3].1[0] = 1;

@@ -57,16 +57,19 @@ use darkbot_bsc_trading::economics::flap::native_curve20::{
     admit_curve_sell, admit_native_buy,
 };
 use darkbot_bsc_trading::economics::four_classic::{
-    AdmittedClassicBuy, QUALIFIED_CLASSIC_INPUTS_WEI, QualifiedClassicState, admit_classic_buy,
+    AdmittedClassicBuy, AdmittedClassicSell, QUALIFIED_CLASSIC_INPUTS_WEI, QualifiedClassicHolding,
+    QualifiedClassicState, admit_classic_buy, admit_classic_sell, floor_gwei,
 };
 use darkbot_bsc_trading::economics::openfour::{
-    AdmittedOpenFourBuy, QUALIFIED_OPENFOUR_INPUTS_WEI, QualifiedOpenFourState, admit_openfour_buy,
+    AdmittedOpenFourBuy, AdmittedOpenFourSell, QUALIFIED_OPENFOUR_INPUTS_WEI,
+    QualifiedOpenFourHolding, QualifiedOpenFourState, admit_openfour_buy, admit_openfour_sell,
 };
 use darkbot_bsc_trading::economics::policy::{BuyPolicy, ExitPolicy};
 use darkbot_bsc_trading::intent::{
     AdapterId, AdapterSet, ArmedFence, IntentLane, IntentState, Ticket,
 };
 use darkbot_bsc_trading::signer::Signer;
+use darkbot_bsc_trading::strategy::book::FourCurve;
 use darkbot_bsc_trading::submission_policy::capability::{
     AdapterBinding, AdapterKind, AdapterTable, CapabilityId, SubmissionMode,
 };
@@ -81,7 +84,9 @@ use darkbot_bsc_trading::venues::flap::binding::{
 use darkbot_bsc_trading::venues::flap::deployment::ValidatedDeployment;
 use darkbot_bsc_trading::venues::flap::profile::{UnsupportedLaunch, classify_launch};
 use darkbot_bsc_trading::venues::flap::recognize::{Recognized, recognize};
-use darkbot_bsc_trading::venues::fourmeme::binding::{ExpectedClassicBuy, ExpectedOpenFourBuy};
+use darkbot_bsc_trading::venues::fourmeme::binding::{
+    ExpectedClassicBuy, ExpectedClassicExit, ExpectedOpenFourBuy, ExpectedOpenFourExit,
+};
 use darkbot_bsc_trading::venues::fourmeme::deployment::ValidatedFourDeployment;
 use darkbot_bsc_trading::venues::fourmeme::profile::{
     UnsupportedClassicLaunch, UnsupportedOpenFourLaunch, classify_classic_launch,
@@ -576,6 +581,11 @@ pub struct FourExecConfig {
     pub input_wei: u128,
     pub slippage_bps: u16,
     pub gas_limit: u64,
+    /// SC4 c (B1): its exits' approval and SELL gas limits
+    /// (`*_APPROVE_GAS_LIMIT`, `*_SELL_GAS_LIMIT`), held to its family's
+    /// frozen APPROVE and SELL receipts.
+    pub approve_gas_limit: u64,
+    pub sell_gas_limit: u64,
 }
 
 impl FourExecConfig {
@@ -614,6 +624,8 @@ struct FourArm {
     validated: ValidatedFourDeployment,
     policy: BuyPolicy,
     budget: BudgetEnvelope,
+    /// SC4 c (B1): its positions' exit gas limits (approval, SELL).
+    exit_gas: (u64, u64),
 }
 
 /// A C3 BUY admitted on one venue, before the lane, signature and plan.
@@ -643,6 +655,15 @@ impl BuyAdmitted {
             Self::Flap(a) => a.token(),
             Self::Classic(a) => a.token(),
             Self::OpenFour(a) => a.token(),
+        }
+    }
+
+    /// The tokens the BUY is bound to yield at least (OpenFour: exactly).
+    fn min_tokens(&self) -> U256 {
+        match self {
+            Self::Flap(a) => a.min_output_amount(),
+            Self::Classic(a) => a.min_tokens(),
+            Self::OpenFour(a) => a.amount(),
         }
     }
 }
@@ -712,10 +733,52 @@ pub enum ExitSale {
     Quoted(U256),
 }
 
-/// An exit's SELL as admitted: on its curve, or (R5) at the Portal's quote.
+/// An exit's SELL as admitted: on its curve, or (R5) at the Portal's quote;
+/// SC4 on its Four.meme venue's curve.
 enum SellAdmitted {
     Curve(darkbot_bsc_trading::economics::flap::AdmittedSell),
     Quoted(U256),
+    Classic(AdmittedClassicSell),
+    OpenFour(AdmittedOpenFourSell),
+}
+
+/// An exit's approval and SELL as bound on its venue: what signs and what
+/// the lane and plan take of each step.
+enum ExitExpected {
+    Flap(ExpectedExit),
+    Classic(ExpectedClassicExit),
+    OpenFour(ExpectedOpenFourExit),
+}
+
+impl ExitExpected {
+    fn sign(
+        &self,
+        kind: IntentKind,
+        signer: &Signer,
+        scratch: &mut Vec<u8>,
+        out: &mut Vec<u8>,
+    ) -> bool {
+        let approve = kind == IntentKind::Approve;
+        match (self, approve) {
+            (Self::Flap(e), true) => e.sign_approve(signer, scratch, out).is_ok(),
+            (Self::Flap(e), false) => e.sign_sell(signer, scratch, out).is_ok(),
+            (Self::Classic(e), true) => e.sign_approve(signer, scratch, out).is_ok(),
+            (Self::Classic(e), false) => e.sign_sell(signer, scratch, out).is_ok(),
+            (Self::OpenFour(e), true) => e.sign_approve(signer, scratch, out).is_ok(),
+            (Self::OpenFour(e), false) => e.sign_sell(signer, scratch, out).is_ok(),
+        }
+    }
+
+    fn tx(&self, kind: IntentKind) -> ExpectedTx<'_> {
+        match (self, kind == IntentKind::Approve) {
+            (Self::Flap(e), true) => ExpectedTx::Approve(e),
+            (Self::Flap(e), false) => ExpectedTx::Sell(e),
+            (Self::Classic(e), true) => ExpectedTx::ClassicApprove(e),
+            (Self::Classic(e), false) => ExpectedTx::ClassicSell(e),
+            (Self::OpenFour(e), true) => ExpectedTx::OpenFourApprove(e),
+            (Self::OpenFour(e), false) => ExpectedTx::OpenFourSell(e),
+        }
+    }
 }
 
 /// A Strategy C position whose BUY reached the sink: the tokens it is bound
@@ -728,6 +791,9 @@ struct Held {
     /// Its input left the open exposure with its SELL's hand-over; an
     /// exit reopened (its SELL reverted or replaced) counts it again.
     released: bool,
+    /// SC4 c (B1): its venue's exit gas limits (approval, SELL): what its
+    /// exit is signed with and reserves.
+    exit_gas: (u64, u64),
 }
 
 /// The C2 facts of a Strategy C intent: the canonical snapshot under
@@ -927,11 +993,14 @@ impl Transport for SinkTransport<'_> {
 }
 
 /// BSC3-085: the held positions still to exit, and the approved ones of
-/// them.
+/// them; SC4 c (B1): the gas their exits still need at their venues'
+/// limits (each open position's SELL, the approval of each not approved).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct OpenExits {
     open: u64,
     approved: u64,
+    sell_gas: u128,
+    approve_gas: u128,
 }
 
 /// The armed path towards its end.
@@ -1746,6 +1815,7 @@ impl<E: End> Executor<E> {
             validated,
             policy,
             budget: four.budget(self.config.gas_price_wei),
+            exit_gas: (four.approve_gas_limit, four.sell_gas_limit),
         })
     }
 
@@ -1999,8 +2069,9 @@ impl<E: End> Executor<E> {
         }
         // BSC3-072: on a chain ordered end its position is adopted once
         // included and exits through the strategy: the strategy's cap keeps
-        // room for its exit and for the exits of what is open.
-        let exits = self.exits_after_buy(c2.exit_reserve_wei);
+        // room for its exit (its venue's, B1) and for the exits of what is
+        // open.
+        let exits = self.exits_after_buy(c2.exit_reserve_wei, self.exit_gas_of(&a.intent)?);
         if E::CHAIN_ORDERED
             && self.config.sender_paths.strategy()
             && self.strategy_spent_wei + exits > U256::from(self.config.strategy_session_cap_wei)
@@ -2349,36 +2420,54 @@ impl<E: End> Executor<E> {
 
     /// One position's exit at the signed gas price: its approval's gas and
     /// its SELL's.
-    fn exit_gas(&self) -> (U256, U256) {
-        let price = U256::from(self.config.gas_price_wei);
-        (
-            price * U256::from(self.config.approve_gas_limit),
-            price * U256::from(self.config.sell_gas_limit),
-        )
+    /// The Flap exit's gas limits (approval, SELL).
+    fn flap_exit_gas(&self) -> (u64, u64) {
+        (self.config.approve_gas_limit, self.config.sell_gas_limit)
+    }
+
+    /// SC4 c (B1): the exit gas limits of an admitted BUY's venue; a Four
+    /// BUY is admitted only on its venue's arm.
+    fn exit_gas_of(&self, admitted: &BuyAdmitted) -> Result<(u64, u64), Refusal> {
+        match admitted {
+            BuyAdmitted::Flap(_) => Ok(self.flap_exit_gas()),
+            BuyAdmitted::Classic(_) => self.four.map(|a| a.exit_gas).ok_or(Refusal::VenueUnarmed),
+            BuyAdmitted::OpenFour(_) => self
+                .openfour
+                .map(|a| a.exit_gas)
+                .ok_or(Refusal::VenueUnarmed),
+        }
+    }
+
+    /// The wei of `gas` at the arm's signing price.
+    fn wei_of_gas(&self, gas: u128) -> U256 {
+        U256::from(self.config.gas_price_wei) * U256::from(gas)
     }
 
     /// The most the exits of what this arm holds for the strategy may still
     /// cost: per position not sold its SELL and, unless approved, its
-    /// approval (a C3 position is the strategy's once adopted).
+    /// approval, each at its venue's limits (a C3 position is the
+    /// strategy's once adopted).
     fn held_exit_reserve(&self) -> U256 {
-        let (approval, sell) = self.exit_gas();
-        let OpenExits { open, approved } = self.open_exits;
-        U256::from(open) * sell + U256::from(open - approved) * approval
+        self.wei_of_gas(self.open_exits.sell_gas + self.open_exits.approve_gas)
     }
 
     /// The reserve as a scan of every position (the counted one's
     /// reference).
     #[cfg(test)]
     fn held_exit_reserve_scan(&self) -> U256 {
-        let (approval, sell) = self.exit_gas();
-        self.strategy_bought
+        let gas = self
+            .strategy_bought
             .iter()
             .filter(|h| !self.exited.contains(&h.token))
-            .map(|h| match self.approved.iter().any(|(a, _)| *a == h.token) {
-                true => sell,
-                false => approval + sell,
+            .map(|h| {
+                let (approval, sell) = (u128::from(h.exit_gas.0), u128::from(h.exit_gas.1));
+                match self.approved.iter().any(|(a, _)| *a == h.token) {
+                    true => sell,
+                    false => approval + sell,
+                }
             })
-            .fold(U256::ZERO, |sum, wei| sum + wei)
+            .sum();
+        self.wei_of_gas(gas)
     }
 
     /// BSC3-085: whether `token` is a held position still to exit, and
@@ -2393,9 +2482,27 @@ impl<E: End> Executor<E> {
     fn recount(&mut self, token: &[u8; 20], before: (bool, bool)) {
         let after = self.exit_state(token);
         let n = |b: bool| u64::from(b);
+        let (approve, sell) = self
+            .strategy_bought
+            .iter()
+            .find(|h| h.token == *token)
+            .map_or((0, 0), |h| {
+                (u128::from(h.exit_gas.0), u128::from(h.exit_gas.1))
+            });
+        // The gas still owed: the SELL while open, the approval while open
+        // and not approved.
+        let owed = |(open, approved): (bool, bool)| {
+            (
+                if open { sell } else { 0 },
+                if open && !approved { approve } else { 0 },
+            )
+        };
+        let (was, now) = (owed(before), owed(after));
         let o = &mut self.open_exits;
         o.open = o.open + n(after.0) - n(before.0);
         o.approved = o.approved + n(after.1) - n(before.1);
+        o.sell_gas = o.sell_gas + now.0 - was.0;
+        o.approve_gas = o.approve_gas + now.1 - was.1;
         #[cfg(test)]
         assert_eq!(self.held_exit_reserve(), self.held_exit_reserve_scan());
     }
@@ -2403,9 +2510,9 @@ impl<E: End> Executor<E> {
     /// What a BUY leaves room for (BSC3-057/072): the exits of the open
     /// positions (`known`, the end's ledger's; else what this arm holds)
     /// and its own.
-    fn exits_after_buy(&self, known: Option<U256>) -> U256 {
-        let (approval, sell) = self.exit_gas();
-        known.unwrap_or_else(|| self.held_exit_reserve()) + approval + sell
+    fn exits_after_buy(&self, known: Option<U256>, exit_gas: (u64, u64)) -> U256 {
+        let new = u128::from(exit_gas.0) + u128::from(exit_gas.1);
+        known.unwrap_or_else(|| self.held_exit_reserve()) + self.wei_of_gas(new)
     }
 
     /// What an exit of `tokens` sells: at most what the handed-off BUY is
@@ -2561,45 +2668,79 @@ impl<E: End> Executor<E> {
         if !self.config.sender_paths.strategy() {
             return Err(Refusal::PathOff);
         }
-        let StrategyCurve::Flap {
-            terms,
-            reserve,
-            circulating,
-        } = curve
-        else {
-            return Err(Refusal::VenueUnarmed);
+        // SC4: a Four.meme curve's BUY is admitted on its venue's arm: its
+        // code generation, its BUY slippage and gas limit.
+        let four = match curve {
+            StrategyCurve::Flap { .. } => None,
+            StrategyCurve::Four(FourCurve::Classic { .. }) => {
+                Some(self.four.ok_or(Refusal::VenueUnarmed)?)
+            }
+            StrategyCurve::Four(FourCurve::OpenFour { .. }) => {
+                Some(self.openfour.ok_or(Refusal::VenueUnarmed)?)
+            }
+        };
+        let (slippage_bps, gas_limit, generation) = match four {
+            Some(arm) => (
+                arm.policy.slippage_bps(),
+                arm.policy.gas_limit(),
+                arm.validated.codehash_generation(),
+            ),
+            None => (
+                self.config.slippage_bps,
+                self.config.gas_limit,
+                self.deployment.codehash_generation(),
+            ),
         };
         let policy = BuyPolicy::new(
             self.config.policy_generation,
             input_wei,
-            self.config.slippage_bps,
+            slippage_bps,
             self.config.gas_price_wei,
-            self.config.gas_limit,
+            gas_limit,
         )
         .map_err(|_| Refusal::Admission)?;
-        let snapshot = (c2.snapshot)(
-            self.config.policy_generation,
-            self.deployment.codehash_generation(),
-        )
-        .ok_or(Refusal::NoSnapshot)?;
+        let snapshot =
+            (c2.snapshot)(self.config.policy_generation, generation).ok_or(Refusal::NoSnapshot)?;
         let head = c2.fresh_head(self.config.strategy_max_head_age_ms)?;
-        let state = CurveState::tracked(
-            Address::from(token),
-            terms,
-            reserve,
-            circulating,
-            &self.terms,
-            snapshot,
-        )
-        .map_err(|_| Refusal::Admission)?;
-        let admitted = admit_curve_buy(&state, &policy).map_err(|_| Refusal::Admission)?;
-        let min_tokens = admitted.min_output_amount();
-        let admitted = BuyAdmitted::Flap(admitted);
+        let at = Address::from(token);
+        let admitted = match (curve, four) {
+            (
+                StrategyCurve::Flap {
+                    terms,
+                    reserve,
+                    circulating,
+                },
+                _,
+            ) => BuyAdmitted::Flap(
+                CurveState::tracked(at, terms, reserve, circulating, &self.terms, snapshot)
+                    .map_err(|_| Refusal::Admission)
+                    .and_then(|s| admit_curve_buy(&s, &policy).map_err(|_| Refusal::Admission))?,
+            ),
+            (StrategyCurve::Four(FourCurve::Classic { now, fee, .. }), Some(arm)) => {
+                BuyAdmitted::Classic(
+                    QualifiedClassicState::tracked(&arm.validated, at, now, fee, snapshot)
+                        .ok()
+                        .and_then(|s| admit_classic_buy(&s, &policy).ok())
+                        .ok_or(Refusal::Admission)?,
+                )
+            }
+            (StrategyCurve::Four(FourCurve::OpenFour { now, fee, .. }), Some(arm)) => {
+                BuyAdmitted::OpenFour(
+                    QualifiedOpenFourState::tracked(&arm.validated, at, now, fee, snapshot)
+                        .ok()
+                        .and_then(|s| admit_openfour_buy(&s, &policy).ok())
+                        .ok_or(Refusal::Admission)?,
+                )
+            }
+            (StrategyCurve::Four(_), None) => return Err(Refusal::VenueUnarmed),
+        };
+        let min_tokens = admitted.min_tokens();
+        let exit_gas = self.exit_gas_of(&admitted)?;
         let admitted_ns = clock.now_ns();
         if self.holds(&token) {
             return Err(Refusal::DuplicateToken);
         }
-        let gas = U256::from(self.config.gas_price_wei) * U256::from(self.config.gas_limit);
+        let gas = U256::from(policy.gas_price()) * U256::from(policy.gas_limit());
         let budget = BudgetEnvelope {
             max_buy_input_wei: input_wei,
             max_buy_gas_wei: gas,
@@ -2607,9 +2748,9 @@ impl<E: End> Executor<E> {
             max_provider_payment_wei: U256::ZERO,
             max_total_wei: input_wei + gas,
         };
-        // BSC3-072: the cap keeps room for its exit and for the exits of
-        // what is open.
-        let exits = self.exits_after_buy(c2.exit_reserve_wei);
+        // BSC3-072: the cap keeps room for its exit (its venue's, B1) and
+        // for the exits of what is open.
+        let exits = self.exits_after_buy(c2.exit_reserve_wei, exit_gas);
         if self.strategy_spent_wei + budget.max_total_wei + exits
             > U256::from(self.config.strategy_session_cap_wei)
         {
@@ -2674,6 +2815,7 @@ impl<E: End> Executor<E> {
             token,
             min_tokens,
             input_wei,
+            exit_gas,
         });
         self.recount(&token, before);
         Ok(ExecIntent {
@@ -2725,48 +2867,77 @@ impl<E: End> Executor<E> {
             .iter()
             .find(|(t, _)| *t == token)
             .map(|(_, amount)| *amount);
+        // SC4: a Four.meme position exits on its venue's armed deployment.
+        let four = match sale {
+            ExitSale::Curve(StrategyCurve::Four(FourCurve::Classic { .. })) => {
+                Some(self.four.ok_or(Refusal::VenueUnarmed)?)
+            }
+            ExitSale::Curve(StrategyCurve::Four(FourCurve::OpenFour { .. })) => {
+                Some(self.openfour.ok_or(Refusal::VenueUnarmed)?)
+            }
+            ExitSale::Curve(StrategyCurve::Flap { .. }) | ExitSale::Quoted(_) => None,
+        };
         let snapshot = (c2.snapshot)(
             self.config.policy_generation,
-            self.deployment.codehash_generation(),
+            four.map_or(self.deployment.codehash_generation(), |a| {
+                a.validated.codehash_generation()
+            }),
         )
         .ok_or(Refusal::NoSnapshot)?;
         let head = c2.fresh_head(self.config.strategy_max_head_age_ms)?;
-        let amount = Self::sellable(tokens, held, approved);
-        // R5: a re-priced exit is signed and budgeted at its own price.
+        let amount = match sale {
+            // Whole gwei units, as every witnessed Classic trade's.
+            ExitSale::Curve(StrategyCurve::Four(FourCurve::Classic { .. })) => {
+                floor_gwei(Self::sellable(tokens, held, approved))
+            }
+            _ => Self::sellable(tokens, held, approved),
+        };
+        // R5: a re-priced exit is signed and budgeted at its own price; B1:
+        // at its venue's gas limits.
         let price = c2.exit_gas_price_wei.unwrap_or(self.config.gas_price_wei);
-        let repriced = match price == self.config.gas_price_wei {
-            true => None,
-            false => Some(
-                ExitPolicy::new(
+        let (approve_limit, sell_limit) = held.exit_gas;
+        let exit_policy =
+            match price == self.config.gas_price_wei && held.exit_gas == self.flap_exit_gas() {
+                true => self.exit_policy,
+                false => ExitPolicy::new(
                     self.config.policy_generation,
                     self.config.exit_slippage_bps,
                     price,
-                    self.config.approve_gas_limit,
-                    self.config.sell_gas_limit,
+                    approve_limit,
+                    sell_limit,
                 )
                 .map_err(|_| Refusal::Intent)?,
-            ),
-        };
-        let exit_policy = repriced.unwrap_or(self.exit_policy);
+            };
+        let at = Address::from(token);
         let admitted = match sale {
-            ExitSale::Curve(StrategyCurve::Four(_)) => return Err(Refusal::VenueUnarmed),
+            ExitSale::Curve(StrategyCurve::Four(curve)) => {
+                let arm = four.ok_or(Refusal::VenueUnarmed)?;
+                match curve {
+                    FourCurve::Classic { now, fee, .. } => SellAdmitted::Classic(
+                        QualifiedClassicHolding::tracked(&arm.validated, at, now, fee, snapshot)
+                            .ok()
+                            .and_then(|h| admit_classic_sell(&h, amount, &exit_policy).ok())
+                            .ok_or(Refusal::Admission)?,
+                    ),
+                    FourCurve::OpenFour { now, fee, .. } => SellAdmitted::OpenFour(
+                        QualifiedOpenFourHolding::tracked(&arm.validated, at, now, fee, snapshot)
+                            .ok()
+                            .and_then(|h| admit_openfour_sell(&h, amount, &exit_policy).ok())
+                            .ok_or(Refusal::Admission)?,
+                    ),
+                }
+            }
             ExitSale::Curve(StrategyCurve::Flap {
                 terms,
                 reserve,
                 circulating,
             }) => SellAdmitted::Curve(
-                CurveState::tracked(
-                    Address::from(token),
-                    terms,
-                    reserve,
-                    circulating,
-                    &self.terms,
-                    snapshot,
-                )
-                .map_err(|_| Refusal::Admission)
-                .and_then(|state| {
-                    admit_curve_sell(&state, amount, &exit_policy).map_err(|_| Refusal::Admission)
-                })?,
+                CurveState::tracked(at, terms, reserve, circulating, &self.terms, snapshot)
+                    .map_err(|_| Refusal::Admission)
+                    .and_then(|state| {
+                        admit_curve_sell(&state, amount, &exit_policy)
+                            .map_err(|_| Refusal::Admission)
+                    })?,
             ),
             // R5: a migrated token: the Portal's quote at the snapshot, of
             // exactly the tokens sold (else its minimum is another amount's).
@@ -2775,8 +2946,8 @@ impl<E: End> Executor<E> {
         };
         let admitted_ns = clock.now_ns();
         let (approval_gas, sell_gas) = (
-            U256::from(price) * U256::from(self.config.approve_gas_limit),
-            U256::from(price) * U256::from(self.config.sell_gas_limit),
+            U256::from(price) * U256::from(approve_limit),
+            U256::from(price) * U256::from(sell_limit),
         );
         let approve_gas = if approved.is_some() {
             U256::ZERO
@@ -2842,19 +3013,45 @@ impl<E: End> Executor<E> {
         let expected = match admitted {
             SellAdmitted::Curve(admitted) => {
                 ExpectedExit::from_admitted(&self.deployment, &admitted, &exit_policy, sender, base)
+                    .map(ExitExpected::Flap)
+                    .ok()
             }
             SellAdmitted::Quoted(quoted) => ExpectedExit::from_quote(
                 &self.deployment,
-                Address::from(token),
+                at,
                 amount,
                 quoted,
                 &exit_policy,
                 snapshot,
                 sender,
                 base,
-            ),
+            )
+            .map(ExitExpected::Flap)
+            .ok(),
+            SellAdmitted::Classic(admitted) => four.and_then(|arm| {
+                ExpectedClassicExit::from_admitted(
+                    &arm.validated,
+                    &admitted,
+                    &exit_policy,
+                    sender,
+                    base,
+                )
+                .map(ExitExpected::Classic)
+                .ok()
+            }),
+            SellAdmitted::OpenFour(admitted) => four.and_then(|arm| {
+                ExpectedOpenFourExit::from_admitted(
+                    &arm.validated,
+                    &admitted,
+                    &exit_policy,
+                    sender,
+                    base,
+                )
+                .map(ExitExpected::OpenFour)
+                .ok()
+            }),
         };
-        let Ok(expected) = expected else {
+        let Some(expected) = expected else {
             self.strategy_refused(first, false);
             return Err(Refusal::Intent);
         };
@@ -2867,21 +3064,12 @@ impl<E: End> Executor<E> {
                 .map(|(i, t)| (IntentKind::Sell, i, t, sell_gas)),
         ];
         for (kind, index, ticket, gas) in steps.into_iter().flatten() {
-            let built = match kind {
-                IntentKind::Approve => {
-                    expected.sign_approve(self.end.signer(), &mut self.scratch, &mut self.raw)
-                }
-                _ => expected.sign_sell(self.end.signer(), &mut self.scratch, &mut self.raw),
-            };
-            if built.is_err() {
+            if !expected.sign(kind, self.end.signer(), &mut self.scratch, &mut self.raw) {
                 self.strategy_refused(index, false);
                 return Err(Refusal::Build);
             }
             let signed_ns = clock.now_ns();
-            let tx = match kind {
-                IntentKind::Approve => ExpectedTx::Approve(&expected),
-                _ => ExpectedTx::Sell(&expected),
-            };
+            let tx = expected.tx(kind);
             let (handoff, prepared_ns, planned_ns, (_, disclosed)) = to_end(
                 Parts {
                     end: &mut self.end,
@@ -3037,11 +3225,14 @@ impl<E: End> Executor<E> {
             Some(h) => h.min_tokens = tokens,
             None => {
                 let before = self.exit_state(&token);
+                // The LIVE positions it adopts are Flap ones (a Four.meme
+                // LIVE BUY is refused until its LIVE path).
                 self.strategy_bought.push(Held {
                     released: false,
                     token,
                     min_tokens: tokens,
                     input_wei: U256::ZERO,
+                    exit_gas: self.flap_exit_gas(),
                 });
                 self.recount(&token, before);
             }

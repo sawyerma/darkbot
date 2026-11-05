@@ -485,6 +485,92 @@ fn the_runtime_mode_bounds_the_components_as_the_plan_says() {
     }
 }
 
+/// SC4 review: a Strategy C position on a Classic curve exits within the
+/// blocks its word's tax is witnessed for: the longest hold the
+/// configuration admits is fewer blocks than that window even at a
+/// conservative 250 ms per block (BSC's are slower), so a tracked SELL's
+/// tax is the witnessed one without reading the holding's age.
+#[test]
+fn the_longest_strategy_hold_is_within_the_classic_tax_window() {
+    use darkbot_bsc_trading::venues::fourmeme::profile::CLASSIC_PROFILES;
+    let longest = 86_400_000u64;
+    let line = CONFIG
+        .lines()
+        .find(|l| l.starts_with("BSC_STRATEGY_C_HOLD_MS="))
+        .unwrap();
+    let hold = |ms: u64| {
+        RuntimeConfig::parse(&CONFIG.replace(line, &format!("BSC_STRATEGY_C_HOLD_MS={ms}")))
+    };
+    assert!(hold(longest).is_ok());
+    assert!(hold(longest + 1).is_err());
+    // Review L4: a position's token age at its SELL is the observation, the
+    // fill delay and the hold, each at the most the configuration admits.
+    let set = |key: &str, value: u64| {
+        let line = CONFIG
+            .lines()
+            .find(|l| l.starts_with(&format!("{key}=")))
+            .unwrap();
+        RuntimeConfig::parse(&CONFIG.replace(line, &format!("{key}={value}")))
+    };
+    let (observation, fill_blocks) = (3_600_000u64, 100u64);
+    assert!(set("BSC_STRATEGY_C_OBSERVATION_MS", observation).is_ok());
+    assert!(set("BSC_STRATEGY_C_OBSERVATION_MS", observation + 1).is_err());
+    assert!(set("BSC_STRATEGY_C_FILL_DELAY_BLOCKS", fill_blocks).is_ok());
+    assert!(set("BSC_STRATEGY_C_FILL_DELAY_BLOCKS", fill_blocks + 1).is_err());
+    let oldest_sell = (observation + longest) / 250 + fill_blocks;
+    for p in CLASSIC_PROFILES {
+        assert!(oldest_sell < p.tax_witnessed_blocks, "{p:?}");
+    }
+}
+
+/// A6: the exit multiples are checked once, natively, before anything runs:
+/// `0 <= stop < 1x < target` at the configured places (the shipped 2x / 0.5x
+/// pass; 1x either way, a negative stop or a target below 1x are refused
+/// with the rule named).
+#[test]
+fn the_exit_multiples_are_refused_outside_stop_below_one_below_target() {
+    let set = |target: &str, stop: &str| {
+        let t = CONFIG
+            .lines()
+            .find(|l| l.starts_with("BSC_STRATEGY_C_TARGET_NET_MULTIPLE="))
+            .unwrap();
+        let s = CONFIG
+            .lines()
+            .find(|l| l.starts_with("BSC_STRATEGY_C_STOP_NET_MULTIPLE="))
+            .unwrap();
+        RuntimeConfig::parse(
+            &CONFIG
+                .replace(t, &format!("BSC_STRATEGY_C_TARGET_NET_MULTIPLE={target}"))
+                .replace(s, &format!("BSC_STRATEGY_C_STOP_NET_MULTIPLE={stop}")),
+        )
+    };
+    assert!(set("2", "0.5").is_ok());
+    assert!(set("1.1", "0").is_ok());
+    assert!(set("1.0001", "0.9999").is_ok());
+    for (target, stop, why) in [
+        (
+            "2",
+            "1",
+            "the stop net multiple must be at least 0 and below 1x",
+        ),
+        (
+            "2",
+            "1.5",
+            "the stop net multiple must be at least 0 and below 1x",
+        ),
+        ("1", "0.5", "the target net multiple must be above 1x"),
+        ("0.9", "0.5", "the target net multiple must be above 1x"),
+    ] {
+        let e = set(target, stop).unwrap_err();
+        assert!(
+            e.contains(why) && e.contains("0 <= stop < 1x < target"),
+            "{target}/{stop}: {e}"
+        );
+    }
+    // A negative stop never parses as a multiple.
+    assert!(set("2", "-0.5").is_err());
+}
+
 /// SC4: Strategy C starts with the admitted venues, starts over when
 /// others are admitted while it runs (off, then on, as a replay reads it),
 /// stops when no longer wanted; refused gas evidence starts nothing.
@@ -841,7 +927,8 @@ fn the_gas_limits_cover_the_frozen_evidence() {
             .filter(|l| l.starts_with("OFGAS "))
             .map(|l| l.split(' ').nth(6).unwrap().parse().unwrap())
             .collect();
-    assert_eq!(estimates.len(), 8);
+    // R12d's 0.001/0.1 BNB and SC4's 0.01 BNB admissions.
+    assert_eq!(estimates.len(), 20);
     assert!(estimates.iter().all(|g| *g <= openfour.gas_limit));
     for action in [Action::Buy, Action::BuyInLaunchBlock] {
         let mut over = GasEvidence::default();
@@ -855,6 +942,45 @@ fn the_gas_limits_cover_the_frozen_evidence() {
             )),
             "{e}"
         );
+    }
+    // SC4 c (B1/B3): each family's exit approval and SELL limits cover its
+    // frozen APPROVE and SELL receipts (Classic 49313/193306, OpenFour
+    // 48788/570922), and are held to them, each by its own key.
+    for (venue, f, keys) in [
+        (
+            Venue::FourClassic,
+            four,
+            [
+                "BSC_EXEC_FOUR_APPROVE_GAS_LIMIT",
+                "BSC_EXEC_FOUR_SELL_GAS_LIMIT",
+            ],
+        ),
+        (
+            Venue::OpenFour,
+            openfour,
+            [
+                "BSC_EXEC_OPENFOUR_APPROVE_GAS_LIMIT",
+                "BSC_EXEC_OPENFOUR_SELL_GAS_LIMIT",
+            ],
+        ),
+    ] {
+        for (action, limit, key) in [
+            (Action::Approve, f.approve_gas_limit, keys[0]),
+            (Action::Sell, f.sell_gas_limit, keys[1]),
+        ] {
+            let class = PathClass { venue, action };
+            assert!(gas.class(class).unwrap().gas_used_max <= limit, "{class:?}");
+            let mut over = GasEvidence::default();
+            over.add(class, limit + 1).unwrap();
+            let e = gas_limits_cover(&exec, &over).unwrap_err();
+            assert!(
+                e.contains(&format!(
+                    "{key} {limit} is below the largest {action:?} gas {}",
+                    limit + 1
+                )),
+                "{e}"
+            );
+        }
     }
     // Without the Four BUYs their evidence binds nothing.
     let mut flap_only = exec.clone();
@@ -1093,8 +1219,14 @@ fn the_config_is_strict() {
     // within its bounds, its input a witnessed one, under the session cap.
     let four = c.exec.as_ref().unwrap().exec.four.unwrap();
     assert_eq!(
-        (four.input_wei, four.slippage_bps, four.gas_limit),
-        (1_000_000_000_000_000, 100, 1_000_000)
+        (
+            four.input_wei,
+            four.slippage_bps,
+            four.gas_limit,
+            four.approve_gas_limit,
+            four.sell_gas_limit
+        ),
+        (1_000_000_000_000_000, 100, 1_000_000, 100_000, 350_000)
     );
     let unset: String = CONFIG
         .lines()
@@ -1114,7 +1246,18 @@ fn the_config_is_strict() {
         (
             "BSC_EXEC_FOUR_GAS_LIMIT=1000000\n",
             "",
-            "BSC_EXEC_FOUR_INPUT_WEI, BSC_EXEC_FOUR_SLIPPAGE_BPS and BSC_EXEC_FOUR_GAS_LIMIT go together",
+            "BSC_EXEC_FOUR_INPUT_WEI, BSC_EXEC_FOUR_SLIPPAGE_BPS, BSC_EXEC_FOUR_GAS_LIMIT, \
+             BSC_EXEC_FOUR_APPROVE_GAS_LIMIT and BSC_EXEC_FOUR_SELL_GAS_LIMIT go together",
+        ),
+        (
+            "BSC_EXEC_FOUR_SELL_GAS_LIMIT=350000\n",
+            "",
+            "BSC_EXEC_FOUR_SELL_GAS_LIMIT go together",
+        ),
+        (
+            "BSC_EXEC_FOUR_APPROVE_GAS_LIMIT=100000\n",
+            "BSC_EXEC_FOUR_APPROVE_GAS_LIMIT=20999\n",
+            "BSC_EXEC_FOUR_APPROVE_GAS_LIMIT=20999 is outside",
         ),
         (
             "BSC_EXEC_FOUR_SLIPPAGE_BPS=100\n",
@@ -1153,9 +1296,11 @@ fn the_config_is_strict() {
         (
             openfour.input_wei,
             openfour.slippage_bps,
-            openfour.gas_limit
+            openfour.gas_limit,
+            openfour.approve_gas_limit,
+            openfour.sell_gas_limit
         ),
-        (1_000_000_000_000_000, 100, 2_000_000)
+        (1_000_000_000_000_000, 100, 2_000_000, 100_000, 750_000)
     );
     let unset: String = CONFIG
         .lines()
@@ -1168,7 +1313,13 @@ fn the_config_is_strict() {
         (
             "BSC_EXEC_OPENFOUR_GAS_LIMIT=2000000\n",
             "",
-            "BSC_EXEC_OPENFOUR_INPUT_WEI, BSC_EXEC_OPENFOUR_SLIPPAGE_BPS and BSC_EXEC_OPENFOUR_GAS_LIMIT go together",
+            "BSC_EXEC_OPENFOUR_INPUT_WEI, BSC_EXEC_OPENFOUR_SLIPPAGE_BPS, BSC_EXEC_OPENFOUR_GAS_LIMIT, \
+             BSC_EXEC_OPENFOUR_APPROVE_GAS_LIMIT and BSC_EXEC_OPENFOUR_SELL_GAS_LIMIT go together",
+        ),
+        (
+            "BSC_EXEC_OPENFOUR_SELL_GAS_LIMIT=750000\n",
+            "BSC_EXEC_OPENFOUR_SELL_GAS_LIMIT=100000001\n",
+            "BSC_EXEC_OPENFOUR_SELL_GAS_LIMIT=100000001 is outside",
         ),
         (
             "BSC_EXEC_OPENFOUR_SLIPPAGE_BPS=100\n",

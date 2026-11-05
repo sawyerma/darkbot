@@ -768,6 +768,11 @@ pub struct Counters {
     /// Phase I gate L4: decisions whose token had no exact curve (or no
     /// position) when the block was complete: counted, never executed.
     pub paper_unpriced: u64,
+    /// SC4 c (B5): `cancelled` by reason.
+    pub cancelled_creator_sold: u64,
+    pub cancelled_not_tracked: u64,
+    pub cancelled_quote: u64,
+    pub cancelled_cost: u64,
 }
 
 /// A Strategy C decision for the PAPER path (Phase I): a PASS is a BUY of
@@ -904,7 +909,11 @@ pub fn status_draft(
         strategy.map_or(0, |s| s.engine.open_positions() as u64),
     )
     .set(st::PAPER_UNARMED, c.paper_unarmed)
-    .set(st::PAPER_UNPRICED, c.paper_unpriced);
+    .set(st::PAPER_UNPRICED, c.paper_unpriced)
+    .set(st::CANCELLED_CREATOR_SOLD, c.cancelled_creator_sold)
+    .set(st::CANCELLED_NOT_TRACKED, c.cancelled_not_tracked)
+    .set(st::CANCELLED_QUOTE, c.cancelled_quote)
+    .set(st::CANCELLED_COST, c.cancelled_cost);
     if let (None, Some(why)) = (strategy, refused) {
         d.set(st::REASON, why);
     }
@@ -1108,7 +1117,15 @@ impl StrategyRuntime {
                 Decision::CreatorSold => c.creator_sold += 1,
             },
             Output::Entered { .. } => c.entered += 1,
-            Output::EntryCancelled { .. } => c.cancelled += 1,
+            Output::EntryCancelled { cancel, .. } => {
+                c.cancelled += 1;
+                *match cancel {
+                    Cancel::CreatorSold => &mut c.cancelled_creator_sold,
+                    Cancel::NotTracked(_) => &mut c.cancelled_not_tracked,
+                    Cancel::Quote(_) => &mut c.cancelled_quote,
+                    Cancel::Cost(_) => &mut c.cancelled_cost,
+                } += 1;
+            }
             Output::ExitTriggered { .. } => {}
             Output::Exited {
                 reason, outcome, ..
@@ -1402,6 +1419,10 @@ fn add(sum: &mut Counters, c: &Counters) {
         (&mut sum.creator_sold, c.creator_sold),
         (&mut sum.entered, c.entered),
         (&mut sum.cancelled, c.cancelled),
+        (&mut sum.cancelled_creator_sold, c.cancelled_creator_sold),
+        (&mut sum.cancelled_not_tracked, c.cancelled_not_tracked),
+        (&mut sum.cancelled_quote, c.cancelled_quote),
+        (&mut sum.cancelled_cost, c.cancelled_cost),
         (&mut sum.exits_creator_sell, c.exits_creator_sell),
         (&mut sum.exits_target, c.exits_target),
         (&mut sum.exits_stop, c.exits_stop),
@@ -1689,6 +1710,57 @@ mod tests {
 
     fn runtime() -> StrategyRuntime {
         StrategyRuntime::new(config(), gas(), StrategyVenues::FLAP)
+    }
+
+    /// SC4 c (B5): a cancelled entry counts under its reason, and the status
+    /// names each reason besides the total.
+    #[test]
+    fn a_cancelled_entry_counts_under_its_reason() {
+        use darkbot_bsc_record::Value;
+        use darkbot_bsc_record::schema::bsc_runtime::runtime_status::strategy as st;
+        use darkbot_bsc_trading::economics::flap::QuoteError;
+        use darkbot_bsc_trading::economics::network::{Action, CostError, PathClass, Venue};
+        let mut s = runtime();
+        let class = PathClass {
+            venue: Venue::FourClassic,
+            action: Action::Sell,
+        };
+        for cancel in [
+            Cancel::CreatorSold,
+            Cancel::NotTracked(Untracked::Gap),
+            Cancel::NotTracked(Untracked::Quote),
+            Cancel::Quote(QuoteError::ZeroInput),
+            Cancel::Cost(CostError::NoEvidence(class)),
+            Cancel::Cost(CostError::Overflow),
+            Cancel::Cost(CostError::NoAttempt),
+        ] {
+            s.count(&Output::EntryCancelled {
+                token: TOKEN,
+                block: 1,
+                cancel,
+            });
+        }
+        let c = s.counters;
+        assert_eq!(
+            (
+                c.cancelled,
+                c.cancelled_creator_sold,
+                c.cancelled_not_tracked,
+                c.cancelled_quote,
+                c.cancelled_cost
+            ),
+            (7, 1, 2, 1, 3)
+        );
+        let d = status_draft(Some(&s), None, &config());
+        for (tag, n) in [
+            (st::CANCELLED, 7),
+            (st::CANCELLED_CREATOR_SOLD, 1),
+            (st::CANCELLED_NOT_TRACKED, 2),
+            (st::CANCELLED_QUOTE, 1),
+            (st::CANCELLED_COST, 3),
+        ] {
+            assert_eq!(d.values(tag), [Value::U64(n)], "{tag}");
+        }
     }
 
     fn be(v: U256) -> [u8; 32] {
@@ -2801,6 +2873,120 @@ mod tests {
                 assert_eq!(s.counters.launches, launches, "{venues:?}");
                 assert_eq!(s.followed() as u64, launches);
             }
+        }
+
+        /// SC4: a PASS on an OpenFour token is a BUY action on its Four.meme
+        /// curve as its journaled trades name it at the complete block; once the
+        /// position is open its exit action sells the position's tokens on
+        /// the shadow (the real curve with them in it).
+        #[test]
+        fn an_openfour_pass_and_exit_are_four_actions_on_the_exact_curve() {
+            use crate::chain_follower::CanonicalFourTrade;
+            use crate::runtime_journal::{JournalSetup, four_trade_payload};
+            use darkbot_bsc_trading::economics::network::{Action, PathClass, Venue};
+            use darkbot_bsc_trading::economics::openfour::OpenFourFee;
+            let base =
+                std::env::temp_dir().join(format!("bsc-strategy-four-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&base);
+            let mut j = RuntimeJournal::open(&base, 7, 1, JournalSetup::whole(64, 16_384)).unwrap();
+            let mut gas = gas();
+            for (action, used) in [
+                (Action::Buy, 1_694_570),
+                (Action::Approve, 48_788),
+                (Action::Sell, 570_922),
+            ] {
+                gas.add(
+                    PathClass {
+                        venue: Venue::OpenFour,
+                        action,
+                    },
+                    used,
+                )
+                .unwrap();
+            }
+            let venues = StrategyVenues {
+                flap: false,
+                four: false,
+                openfour: true,
+            };
+            let mut s = StrategyRuntime::new(config(), gas, venues);
+            let start = launch_curve(&LaunchTerms {
+                total_supply: WITNESSED_TOTAL_SUPPLY,
+                max_offers: WITNESSED_MAX_OFFERS,
+                max_raising: OPENFOUR_WITNESSED_RAISE,
+            })
+            .unwrap();
+            let fee = OpenFourFee {
+                protocol_bps: 50,
+                dev_bps: 50,
+            };
+            let mut real = FourCurve::openfour(start, fee);
+            let mut feed = |s: &mut StrategyRuntime, p: Vec<u8>| {
+                s.record(RecordKind::Canonical, &p, 1, Some(&mut j));
+            };
+            feed(&mut s, block_payload(100, &HASH, 0));
+            feed(
+                &mut s,
+                four_launch_payload(LaunchVenue::OpenFour, (100, 1), &TOKEN, &CREATOR, Ok(real)),
+            );
+            let buy = |s: &mut StrategyRuntime, real: &mut FourCurve, block, trader, wei: u64| {
+                let (tokens, paid) = real.buy(U256::from(wei)).unwrap();
+                *real = real.shifted(tokens).unwrap();
+                let FourCurve::OpenFour { start, now, .. } = *real else {
+                    panic!()
+                };
+                let p = four_trade_payload(&CanonicalFourTrade {
+                    venue: LaunchVenue::OpenFour,
+                    block_number: block,
+                    block_hash: HASH,
+                    tx_index: 2,
+                    tx_hash: [2; 32],
+                    log_index: 0,
+                    origin: trader,
+                    sell: false,
+                    token: TOKEN,
+                    trader,
+                    amount: tokens.to_be_bytes(),
+                    quote: paid.to_be_bytes(),
+                    remaining: now.remaining.to_be_bytes(),
+                    raised: (now.quote_reserve - start.quote_reserve).to_be_bytes(),
+                });
+                s.record(RecordKind::Canonical, &p, 1, None);
+            };
+            for b in 101..=104u64 {
+                feed(&mut s, block_payload(b, &HASH, (b - 100) * 750));
+                buy(&mut s, &mut real, b, [b as u8; 20], 20_000_000_000_000_000);
+            }
+            feed(&mut s, block_payload(105, &HASH, 5 * 750));
+            assert_eq!(s.counters.passed, 1);
+            let actions = s.take_actions();
+            assert_eq!(
+                actions,
+                [StrategyAction::Buy {
+                    token: TOKEN,
+                    creator: CREATOR,
+                    curve: StrategyCurve::Four(real),
+                    input_wei: config().input_wei,
+                    decided_ns: 1,
+                }]
+            );
+            // Filled at the end of 106: the exit sells the position's
+            // tokens on the shadow.
+            feed(&mut s, block_payload(106, &HASH, 6 * 750));
+            feed(&mut s, block_payload(107, &HASH, 7 * 750));
+            let tokens = s.engine.position_tokens(&TOKEN).unwrap();
+            assert_eq!(tokens, real.buy(config().input_wei).unwrap().0);
+            assert_eq!(
+                s.exit_action(TOKEN, 9),
+                Some(StrategyAction::Exit {
+                    token: TOKEN,
+                    tokens,
+                    curve: StrategyCurve::Four(real.shifted(tokens).unwrap()),
+                    decided_ns: 9,
+                })
+            );
+            let _ = j.finish();
+            std::fs::remove_dir_all(&base).unwrap();
         }
     }
 }

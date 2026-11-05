@@ -74,6 +74,44 @@ pub struct Config {
     pub gas_price_wei: U256,
 }
 
+/// A6: why a Strategy C configuration is refused before it runs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ConfigError {
+    /// `ratio_places` names no scale of the net multiples.
+    Places,
+    /// The stop multiple is negative or not below 1x.
+    StopNotBelowOne,
+    /// The target multiple is not above 1x.
+    TargetNotAboveOne,
+}
+
+impl core::fmt::Display for ConfigError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(match self {
+            Self::Places => "the ratio places name no scale",
+            Self::StopNotBelowOne => "the stop net multiple must be at least 0 and below 1x",
+            Self::TargetNotAboveOne => "the target net multiple must be above 1x",
+        })
+    }
+}
+
+impl Config {
+    /// A6: the one native check of the exit multiples (net, at
+    /// `ratio_places`), for the runtime, the owner and the controls alike:
+    /// `0 <= stop < 1x < target`. The multiples themselves and the net
+    /// profit factor's computation are unchanged.
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        let one = super::fixed::scale(self.ratio_places).ok_or(ConfigError::Places)?;
+        if !(0..one).contains(&self.stop_net_multiple) {
+            return Err(ConfigError::StopNotBelowOne);
+        }
+        if self.target_net_multiple <= one {
+            return Err(ConfigError::TargetNotAboveOne);
+        }
+        Ok(())
+    }
+}
+
 /// The exact curve a Strategy C intent is admitted and signed on
 /// ([`Engine::curve_of`]): a Flap token's validated terms with its reserve
 /// and circulating supply, or (SC4) a Four.meme venue's exact curve.
@@ -328,16 +366,19 @@ impl Engine {
     }
 
     /// The exact curve a PAPER intent of `token` is admitted on (Phase I):
-    /// its validated terms, reserve and circulating supply, on the
-    /// position's shadow curve once one is open. `None` when the token is
-    /// not followed or no longer tracked, or (SC4) its Four.meme curve has
-    /// no execution path yet.
+    /// its validated terms, reserve and circulating supply, or (SC4) its
+    /// Four.meme venue curve; on the position's shadow curve once one is
+    /// open. `None` when the token is not followed or no longer tracked.
     pub fn curve_of(&self, token: &[u8; 20]) -> Option<StrategyCurve> {
         let t = self.tokens.values().find(|t| t.token == *token)?;
         let book = match &t.stage {
             Stage::Open { shadow, .. } | Stage::Exiting { shadow, .. } => shadow.as_ref(),
             Stage::Observing(_) | Stage::Entering { .. } | Stage::Held { .. } => &t.book,
         };
+        if let Some(curve) = book.four {
+            book.status.ok()?;
+            return Some(StrategyCurve::Four(curve));
+        }
         Some(StrategyCurve::Flap {
             terms: book.priced().ok()?,
             reserve: book.reserve,

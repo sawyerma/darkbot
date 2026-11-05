@@ -185,7 +185,9 @@ fn every_executed_buy_and_sell_is_the_quote_with_the_words_tax() {
         let helper = quote_buy(&c, &fee(f[8], f[9], 0), u(f[10])).unwrap();
         assert_ne!(helper.amount, b.amount);
     }
-    assert_eq!((priced_rows, g01_rows, other), (29, 2, 3));
+    // SC4: 9 rows of the Strategy C input (0.01 BNB) more; SC4 c (B2): 16
+    // on moved curves.
+    assert_eq!((priced_rows, g01_rows, other), (38 + 16, 2, 3));
     assert_eq!(oldest, CLASSIC_PROFILES[0].tax_witnessed_blocks);
 }
 
@@ -264,7 +266,8 @@ fn every_launch_curve_and_priced_creator_purchase_is_reproduced() {
         assert_eq!((b.after.offers, b.cost), (offers, funds), "{token}");
         purchases += 1;
     }
-    assert_eq!((curves, purchases), (40, 31));
+    // SC4 c (B2): seven launches of moved curves more.
+    assert_eq!((curves, purchases), (40 + 7, 31 + 7));
 }
 
 /// A priced launch names its token (CREATE2 under its word's pair) and the
@@ -288,7 +291,7 @@ fn a_priced_launch_names_its_token_and_state_before_execution() {
             }
         }
     }
-    assert_eq!((priced_launches, refused), (31, 9));
+    assert_eq!((priced_launches, refused), (31 + 7, 9));
 }
 
 /// The executed direct BUYs and SELLs (tokens without a tax): the state
@@ -628,7 +631,9 @@ fn every_witnessed_block_names_its_implementation() {
             n += 1;
         }
     }
-    assert_eq!(n, 40 + 34 + 29 + 39 + 23 + 15);
+    // SC4: the 9 PROBE rows of 0.01 BNB.
+    // SC4 c (B2): 7 launches, 16 probes and their 16 SELL minimums more.
+    assert_eq!(n, 40 + 34 + 29 + 39 + 23 + 15 + 9 + 7 + 16 + 16);
 }
 
 fn decoded_template(f: &[&str]) -> B256 {
@@ -688,7 +693,8 @@ fn the_admitted_launch_buy_is_the_executed_one() {
         );
         n += 1;
     }
-    assert_eq!(n, 6);
+    // SC4: 3 launch-block states of 0.01 BNB more.
+    assert_eq!(n, 9);
 }
 
 #[test]
@@ -820,7 +826,8 @@ fn every_executed_probe_sell_is_the_admitted_sell_of_the_held_state() {
         );
         n += 1;
     }
-    assert_eq!(n, 29);
+    // SC4 c (B2): 16 held states on moved curves, beyond the R12 tax age too.
+    assert_eq!(n, 38 + 16);
 }
 
 /// R12c-3: a held token is priced only as the launches are and only while
@@ -1011,5 +1018,227 @@ fn the_sells_minimum_is_bound_to_its_gross_as_executed() {
         );
         n += 1;
     }
-    assert_eq!(n, 29);
+    assert_eq!(n, 29 + 16);
+}
+
+/// SC4: Strategy C's BUY on a tracked state. On every state a probe
+/// executed the Strategy C input (0.01 BNB) on, the admission of the curve
+/// the sold tokens name (the offers read there) yields exactly the tokens
+/// and wei the probe's BUY took; another code generation, other venue fee
+/// terms or an unqualified input are refused.
+#[test]
+fn a_tracked_state_admits_the_executed_strategy_buy() {
+    let v = validated();
+    let input = U256::from(10_000_000_000_000_000u64);
+    let mut n = 0;
+    for f in rows("PROBE").filter(|f| f[10] == "10000000000000000") {
+        let offers = u(f[7]);
+        let curve = ClassicCurve {
+            k: u(f[5]),
+            t: u(f[6]),
+            offers,
+            sold: WITNESSED_MAX_OFFERS - offers,
+        };
+        let fee = ClassicFee {
+            rate_bps: f[8].parse().unwrap(),
+            min_fee: u(f[9]),
+            tax_bps: 1_000,
+        };
+        let token: Address = f[2].parse().unwrap();
+        let state =
+            QualifiedClassicState::tracked(&v, token, curve, fee, snapshot(B256::ZERO)).unwrap();
+        let a = admit_classic_buy(&state, &policy(input, 100)).unwrap();
+        assert_eq!(
+            (a.expected_tokens(), a.spent(), a.token()),
+            (u(f[11]), u(f[12]), token),
+            "{f:?}"
+        );
+        assert!(a.min_tokens() < a.expected_tokens());
+        n += 1;
+    }
+    // Six fresh profile states and three launch-block states (R12), sixteen
+    // states third-party trades moved (B2).
+    assert_eq!(n, 9 + 16);
+    // B2: the bound is the deepest executed state; one gwei of tokens deeper
+    // is refused.
+    let deepest = rows("PROBE")
+        .filter(|f| CLASSIC_PROFILES[0].template == word(&format!("0x{}", f[3])))
+        .map(|f| u(f[7]))
+        .min()
+        .unwrap();
+    assert_eq!(deepest, QUALIFIED_CLASSIC_MIN_OFFERS);
+    let f = rows("PROBE")
+        .find(|f| u(f[7]) == deepest && f[10] == "10000000000000000")
+        .unwrap();
+    let deeper = |offers: U256| ClassicCurve {
+        k: u(f[5]),
+        t: u(f[6]) - (deepest - offers),
+        offers,
+        sold: WITNESSED_MAX_OFFERS - offers,
+    };
+    let fee = ClassicFee {
+        rate_bps: 100,
+        min_fee: u(f[9]),
+        tax_bps: 1_000,
+    };
+    assert!(
+        QualifiedClassicState::tracked(
+            &v,
+            Address::ZERO,
+            deeper(deepest),
+            fee,
+            snapshot(B256::ZERO)
+        )
+        .is_ok()
+    );
+    let gwei = U256::from(1_000_000_000u64);
+    assert_eq!(
+        QualifiedClassicState::tracked(
+            &v,
+            Address::ZERO,
+            deeper(deepest - gwei),
+            fee,
+            snapshot(B256::ZERO)
+        ),
+        Err(ClassicAdmissionError::Unwitnessed)
+    );
+    // An exit is not bounded by it (its minFunds refuses an unnamed SELL).
+    assert!(
+        QualifiedClassicHolding::tracked(
+            &v,
+            Address::ZERO,
+            deeper(deepest - gwei),
+            fee,
+            snapshot(B256::ZERO)
+        )
+        .is_ok()
+    );
+    let f = rows("PROBE")
+        .find(|f| f[10] == "10000000000000000")
+        .unwrap();
+    let curve = ClassicCurve {
+        k: u(f[5]),
+        t: u(f[6]),
+        offers: u(f[7]),
+        sold: WITNESSED_MAX_OFFERS - u(f[7]),
+    };
+    let fee = ClassicFee {
+        rate_bps: 100,
+        min_fee: u(f[9]),
+        tax_bps: 1_000,
+    };
+    let other_generation = crate::chain_state::SnapshotId {
+        codehash_generation: 2,
+        ..snapshot(B256::ZERO)
+    };
+    assert_eq!(
+        QualifiedClassicState::tracked(&v, Address::ZERO, curve, fee, other_generation),
+        Err(ClassicAdmissionError::GenerationMismatch)
+    );
+    let other_fee = ClassicFee {
+        rate_bps: 101,
+        ..fee
+    };
+    assert_eq!(
+        QualifiedClassicState::tracked(&v, Address::ZERO, curve, other_fee, snapshot(B256::ZERO)),
+        Err(ClassicAdmissionError::TermsMismatch)
+    );
+    assert_eq!(
+        QualifiedClassicHolding::tracked(&v, Address::ZERO, curve, other_fee, snapshot(B256::ZERO)),
+        Err(ClassicAdmissionError::TermsMismatch)
+    );
+    let state = QualifiedClassicState::tracked(&v, Address::ZERO, curve, fee, snapshot(B256::ZERO))
+        .unwrap();
+    assert_eq!(
+        admit_classic_buy(&state, &policy(U256::from(20_000_000_000_000_000u64), 100)),
+        Err(ClassicAdmissionError::UnqualifiedAmount)
+    );
+    // Review M1: a tracked state admits only the inputs executed on moved
+    // curves (0.01 BNB); 0.001 and 0.1 BNB were executed on launch states.
+    let moved: std::collections::BTreeSet<Address> =
+        rows("MOVE").map(|f| f[2].parse().unwrap()).collect();
+    let tracked_inputs: std::collections::BTreeSet<u64> = rows("PROBE")
+        .filter(|f| moved.contains(&f[2].parse::<Address>().unwrap()))
+        .map(|f| f[10].parse().unwrap())
+        .collect();
+    assert_eq!(
+        tracked_inputs,
+        QUALIFIED_CLASSIC_TRACKED_INPUTS_WEI.into_iter().collect()
+    );
+    for input in [1_000_000_000_000_000u64, 100_000_000_000_000_000] {
+        assert!(QUALIFIED_CLASSIC_INPUTS_WEI.contains(&input));
+        assert_eq!(
+            admit_classic_buy(&state, &policy(U256::from(input), 100)),
+            Err(ClassicAdmissionError::UnqualifiedAmount)
+        );
+    }
+    // Review L3: a tax other than a priced word's is refused.
+    let untaxed = ClassicFee { tax_bps: 0, ..fee };
+    assert_eq!(
+        QualifiedClassicState::tracked(&v, Address::ZERO, curve, untaxed, snapshot(B256::ZERO)),
+        Err(ClassicAdmissionError::TermsMismatch)
+    );
+    assert_eq!(
+        QualifiedClassicHolding::tracked(&v, Address::ZERO, curve, untaxed, snapshot(B256::ZERO)),
+        Err(ClassicAdmissionError::TermsMismatch)
+    );
+}
+
+/// SC4 c (B2): every state third-party trades moved a priced-word curve to
+/// (MOVE rows: _tokenInfos at the block's end) is the token's launch curve
+/// (its LAUNCH row, classified) after the reported sale: the same `T`, and
+/// the raised funds checked; on it the executed Strategy C input (PROBE
+/// rows at or after the move, before the next) is the quote to the unit,
+/// its SELL the quote's funds, inside and beyond the R12 tax age.
+#[test]
+fn every_moved_state_is_the_launch_curve_after_its_sale() {
+    use crate::strategy::book::{FourCurve, FourPost};
+    let v = validated();
+    let launches = launches();
+    let mut moves: Vec<(Address, u64, ClassicCurve)> = Vec::new();
+    let (mut buys, mut sells) = (0, 0);
+    for f in rows("MOVE") {
+        let token: Address = f[2].parse().unwrap();
+        let (_, l) = launches.iter().find(|(t, _)| *t == token).unwrap();
+        let c = classify_classic_launch(&v, &decoded(l), l.value, l.tx).unwrap();
+        let launch = FourCurve::classic_at(c.curve(), c.fee()).unwrap();
+        let post = FourPost {
+            remaining: u(f[5]),
+            raised: u(f[6]),
+        };
+        let Some(FourCurve::Classic { now, .. }) = launch.after(post) else {
+            panic!("{f:?}")
+        };
+        assert_eq!((now.t, now.offers), (u(f[7]), u(f[5])), "{f:?}");
+        match f[3] {
+            "BUY" => buys += 1,
+            _ => sells += 1,
+        }
+        moves.push((token, f[1].parse().unwrap(), now));
+    }
+    assert_eq!((buys, sells), (10, 1));
+    let mut probed = 0;
+    for f in rows("PROBE") {
+        let token: Address = f[2].parse().unwrap();
+        let block: u64 = f[1].parse().unwrap();
+        let Some((_, _, now)) = moves
+            .iter()
+            .filter(|(t, b, _)| *t == token && *b <= block)
+            .max_by_key(|(_, b, _)| *b)
+        else {
+            continue;
+        };
+        assert_eq!(
+            (now.k, now.t, now.offers),
+            (u(f[5]), u(f[6]), u(f[7])),
+            "{f:?}"
+        );
+        let terms = fee(f[8], f[9], CLASSIC_PROFILES[0].tax_bps);
+        let b = quote_buy(now, &terms, u(f[10])).unwrap();
+        assert_eq!((b.amount, b.spent), (u(f[11]), u(f[12])), "{f:?}");
+        let sold = quote_sell(&b.after, &terms, b.amount).unwrap();
+        assert_eq!(sold.funds, u(f[13]), "{f:?}");
+        probed += 1;
+    }
+    assert_eq!(probed, 16);
 }

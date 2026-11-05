@@ -1502,11 +1502,18 @@ pub mod runtime_status {
         /// v5 (Phase I gate L4): decisions without an exact curve or
         /// position when their block was complete (never executed).
         pub const PAPER_UNPRICED: u16 = 31;
+        /// v6 (SC4 c, B5): the cancelled entries by reason: the creator sold
+        /// before the fill, the curve not tracked, the venue's quote refused,
+        /// the network cost not priced (no qualified gas class).
+        pub const CANCELLED_CREATOR_SOLD: u16 = 32;
+        pub const CANCELLED_NOT_TRACKED: u16 = 33;
+        pub const CANCELLED_QUOTE: u16 = 34;
+        pub const CANCELLED_COST: u16 = 35;
 
         pub const SCHEMA: Schema = Schema {
             name: "darkbot.bsc.runtime-status.strategy",
             record_type: 0,
-            schema_version: 5,
+            schema_version: 6,
             fields: &[
                 Field::req(STATE, "state", Text),
                 Field::opt(REASON, "reason", Text),
@@ -1539,6 +1546,10 @@ pub mod runtime_status {
                 Field::req(OPEN, "open", U64),
                 Field::req(PAPER_UNARMED, "paper_unarmed", U64),
                 Field::req(PAPER_UNPRICED, "paper_unpriced", U64),
+                Field::req(CANCELLED_CREATOR_SOLD, "cancelled_creator_sold", U64),
+                Field::req(CANCELLED_NOT_TRACKED, "cancelled_not_tracked", U64),
+                Field::req(CANCELLED_QUOTE, "cancelled_quote", U64),
+                Field::req(CANCELLED_COST, "cancelled_cost", U64),
             ],
         };
     }
@@ -1836,8 +1847,9 @@ pub mod runtime_status {
         // `canonical.evicted`, `canonical.four_evicted`. v26 (BSC3-036):
         // `canonical.endpoint`, `canonical.failovers`, `canonical.stalls`.
         // v27 (BSC3-056): `canonical.confirm_*`. v28 (Audit E 3.1/3.3):
-        // `status_stale_intervals`, `buy_attempts_total_max`.
-        schema_version: 28,
+        // `status_stale_intervals`, `buy_attempts_total_max`. v29 (SC4 c,
+        // B5): strategy v6, the cancelled entries by reason.
+        schema_version: 29,
         fields: &[
             Field::req(GENERATION, "generation", U64),
             Field::nested(SOURCES, "sources", Presence::Repeated, &source::SCHEMA),

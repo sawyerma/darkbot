@@ -179,7 +179,9 @@ pub struct ClassicSellQuote {
     pub after: ClassicCurve,
 }
 
-fn floor_gwei(x: U256) -> U256 {
+/// `x` in whole gwei token units (every witnessed Classic trade's amount
+/// is; SC4: a Strategy C SELL sells that much of what it holds).
+pub fn floor_gwei(x: U256) -> U256 {
     let g = U256::from(GWEI);
     x / g * g
 }
@@ -351,10 +353,15 @@ pub fn quote_sell(
     })
 }
 
-/// The BUY amounts admitted on a fresh launch: the funds the probes
-/// executed on the state directly after witnessed launches (the PROBE rows
-/// at their launch blocks), in wei.
-pub const QUALIFIED_CLASSIC_INPUTS_WEI: [u64; 2] = [1_000_000_000_000_000, 100_000_000_000_000_000];
+/// The BUY amounts admitted: the funds the probes executed on the state
+/// directly after witnessed launches and (SC4: Strategy C's tracked states)
+/// on later states of the priced profile (the PROBE rows; SC4 0.01 BNB on
+/// both), in wei.
+pub const QUALIFIED_CLASSIC_INPUTS_WEI: [u64; 3] = [
+    1_000_000_000_000_000,
+    10_000_000_000_000_000,
+    100_000_000_000_000_000,
+];
 
 /// Why a Classic BUY is not admissible.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -375,6 +382,11 @@ pub enum ClassicAdmissionError {
     /// R12c-3: a SELL of a token amount that is not whole gwei units (every
     /// witnessed trade's is).
     UnalignedAmount,
+    /// SC4: a tracked curve's fee terms are not the validated deployment's.
+    TermsMismatch,
+    /// SC4 c (B2): a tracked state further along its curve than any state
+    /// a BUY was executed from ([`QUALIFIED_CLASSIC_MIN_OFFERS`]).
+    Unwitnessed,
     Quote(ClassicQuoteError),
     Slippage(SlippageError),
 }
@@ -393,6 +405,12 @@ impl core::fmt::Display for ClassicAdmissionError {
             Self::UnalignedAmount => {
                 f.write_str("classic admission: amount not in whole gwei units")
             }
+            Self::TermsMismatch => {
+                f.write_str("classic admission: fee terms not the validated deployment's")
+            }
+            Self::Unwitnessed => {
+                f.write_str("classic admission: state deeper on its curve than any executed BUY's")
+            }
             Self::Quote(e) => write!(f, "classic admission: {e}"),
             Self::Slippage(e) => write!(f, "classic admission: {e}"),
         }
@@ -409,6 +427,9 @@ pub struct QualifiedClassicState {
     curve: ClassicCurve,
     fee: ClassicFee,
     snapshot: SnapshotId,
+    /// SC4 c: a tracked (moved) state, not a launch's: its BUY only of
+    /// [`QUALIFIED_CLASSIC_TRACKED_INPUTS_WEI`].
+    tracked: bool,
 }
 
 impl QualifiedClassicState {
@@ -433,6 +454,31 @@ impl QualifiedClassicState {
             curve: classified.curve(),
             fee: classified.fee(),
             snapshot,
+            tracked: false,
+        })
+    }
+
+    /// SC4: binds a token's curve as Strategy C tracks it exactly (the state
+    /// its reported trades name, its launch's classified fee terms) to
+    /// `snapshot`, on the `validated` deployment the BUY is armed on: its
+    /// code generation the snapshot's, its venue fee the curve's.
+    pub fn tracked(
+        validated: &crate::venues::fourmeme::deployment::ValidatedFourDeployment,
+        token: Address,
+        curve: ClassicCurve,
+        fee: ClassicFee,
+        snapshot: SnapshotId,
+    ) -> Result<Self, ClassicAdmissionError> {
+        tracked_terms(validated, &fee, &snapshot)?;
+        if curve.offers < QUALIFIED_CLASSIC_MIN_OFFERS {
+            return Err(ClassicAdmissionError::Unwitnessed);
+        }
+        Ok(Self {
+            token,
+            curve,
+            fee,
+            snapshot,
+            tracked: true,
         })
     }
 
@@ -445,6 +491,45 @@ impl QualifiedClassicState {
     pub fn snapshot(&self) -> SnapshotId {
         self.snapshot
     }
+}
+
+/// SC4 c (B2, review M1): the inputs a BUY was executed with on states
+/// third-party trades moved (fixture PROBE rows of moved curves): only the
+/// Strategy C input; a tracked BUY of another input is not admitted (0.001
+/// and 0.1 BNB were executed on launch states only).
+pub const QUALIFIED_CLASSIC_TRACKED_INPUTS_WEI: [u64; 1] = [10_000_000_000_000_000];
+
+/// SC4 c (B2): the offers still for sale of the deepest Classic state a
+/// BUY of the priced word was executed from (fixture PROBE rows on curves
+/// third-party BUYs and SELLs moved; the newest 6000 tokens held none
+/// deeper and none near sell-out): a tracked BUY further along its curve is
+/// not admitted. Exits are not bounded by it (their `minFunds` refuses a
+/// SELL the quote does not name).
+pub const QUALIFIED_CLASSIC_MIN_OFFERS: U256 =
+    U256::from_limbs([5_532_986_722_337_444_864, 42_068_846, 0, 0]);
+
+/// SC4: a tracked curve's generation and venue fee against the validated
+/// deployment.
+fn tracked_terms(
+    validated: &crate::venues::fourmeme::deployment::ValidatedFourDeployment,
+    fee: &ClassicFee,
+    snapshot: &SnapshotId,
+) -> Result<(), ClassicAdmissionError> {
+    if validated.codehash_generation() != snapshot.codehash_generation {
+        return Err(ClassicAdmissionError::GenerationMismatch);
+    }
+    let venue = validated.venue_fee();
+    if (venue.rate_bps, venue.min_fee) != (fee.rate_bps, fee.min_fee) {
+        return Err(ClassicAdmissionError::TermsMismatch);
+    }
+    // Review L3: its tax a priced word's (the launch's classification).
+    if !crate::venues::fourmeme::profile::CLASSIC_PROFILES
+        .iter()
+        .any(|p| p.tax_bps == fee.tax_bps)
+    {
+        return Err(ClassicAdmissionError::TermsMismatch);
+    }
+    Ok(())
 }
 
 /// A Classic BUY that passed admission: only [`admit_classic_buy`] creates
@@ -515,10 +600,11 @@ pub fn admit_classic_buy(
         return Err(ClassicAdmissionError::PolicyGenerationMismatch);
     }
     let funds = policy.input_amount();
-    if !QUALIFIED_CLASSIC_INPUTS_WEI
-        .iter()
-        .any(|w| U256::from(*w) == funds)
-    {
+    let inputs: &[u64] = match state.tracked {
+        true => &QUALIFIED_CLASSIC_TRACKED_INPUTS_WEI,
+        false => &QUALIFIED_CLASSIC_INPUTS_WEI,
+    };
+    if !inputs.iter().any(|w| U256::from(*w) == funds) {
         return Err(ClassicAdmissionError::UnqualifiedAmount);
     }
     let quote = quote_buy(&state.curve, &state.fee, funds).map_err(ClassicAdmissionError::Quote)?;
@@ -562,6 +648,25 @@ impl QualifiedClassicHolding {
             token: classified.token(),
             curve: classified.curve(),
             fee: classified.fee(),
+            snapshot,
+        })
+    }
+
+    /// SC4: a PAPER position's token on the curve Strategy C tracks
+    /// exactly, bound to `snapshot` on the `validated` deployment (as
+    /// [`QualifiedClassicState::tracked`]).
+    pub fn tracked(
+        validated: &crate::venues::fourmeme::deployment::ValidatedFourDeployment,
+        token: Address,
+        curve: ClassicCurve,
+        fee: ClassicFee,
+        snapshot: SnapshotId,
+    ) -> Result<Self, ClassicAdmissionError> {
+        tracked_terms(validated, &fee, &snapshot)?;
+        Ok(Self {
+            token,
+            curve,
+            fee,
             snapshot,
         })
     }

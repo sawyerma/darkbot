@@ -1238,6 +1238,8 @@ pub(crate) mod tests {
             input_wei: 1_000_000_000_000_000,
             slippage_bps: 100,
             gas_limit: 1_000_000,
+            approve_gas_limit: 100_000,
+            sell_gas_limit: 350_000,
         }
     }
 
@@ -1290,6 +1292,8 @@ pub(crate) mod tests {
             input_wei: 1_000_000_000_000_000,
             slippage_bps: 100,
             gas_limit: 2_000_000,
+            approve_gas_limit: 100_000,
+            sell_gas_limit: 750_000,
         }
     }
 

@@ -98,7 +98,8 @@ pub fn exec_gas_covered(config: &RuntimeConfig) -> Result<(), String> {
 /// its class in `gas`: the BUY's of a BUY (any, and one in its token's
 /// launch block, the C3 path's shape), the SELL's and the APPROVE's; R12c:
 /// a configured Four Classic BUY's of the Classic BUYs; R12d: a configured
-/// OpenFour BUY's of the OpenFour BUYs.
+/// OpenFour BUY's of the OpenFour BUYs; SC4 c (B1): each family's exit
+/// approval and SELL of its APPROVE and SELL receipts.
 pub fn gas_limits_cover(
     exec: &crate::paper_exec::ExecConfig,
     gas: &darkbot_bsc_trading::economics::network::GasEvidence,
@@ -109,23 +110,37 @@ pub fn gas_limits_cover(
             .map_or(0, |c| c.gas_used_max)
     };
     let buys = &[Action::Buy, Action::BuyInLaunchBlock][..];
-    let four = exec.four.map(|f| {
-        (
+    // A configured Four.meme family's BUY of its BUYs; SC4 c (B1) its exits'
+    // approval and SELL of its APPROVE and SELL receipts.
+    let family =
+        |f: Option<crate::paper_exec::FourExecConfig>, keys: [&'static str; 3], venue: Venue| {
+            f.into_iter().flat_map(move |f| {
+                [
+                    (keys[0], f.gas_limit, venue, buys),
+                    (keys[1], f.approve_gas_limit, venue, &[Action::Approve][..]),
+                    (keys[2], f.sell_gas_limit, venue, &[Action::Sell][..]),
+                ]
+            })
+        };
+    let four = family(
+        exec.four,
+        [
             "BSC_EXEC_FOUR_GAS_LIMIT",
-            f.gas_limit,
-            Venue::FourClassic,
-            buys,
-        )
-    });
-    // R12d: a configured OpenFour BUY's of the OpenFour BUYs.
-    let openfour = exec.openfour.map(|f| {
-        (
+            "BSC_EXEC_FOUR_APPROVE_GAS_LIMIT",
+            "BSC_EXEC_FOUR_SELL_GAS_LIMIT",
+        ],
+        Venue::FourClassic,
+    );
+    // R12d: a configured OpenFour family's likewise.
+    let openfour = family(
+        exec.openfour,
+        [
             "BSC_EXEC_OPENFOUR_GAS_LIMIT",
-            f.gas_limit,
-            Venue::OpenFour,
-            buys,
-        )
-    });
+            "BSC_EXEC_OPENFOUR_APPROVE_GAS_LIMIT",
+            "BSC_EXEC_OPENFOUR_SELL_GAS_LIMIT",
+        ],
+        Venue::OpenFour,
+    );
     for (name, limit, venue, actions) in [
         ("BSC_EXEC_GAS_LIMIT", exec.gas_limit, Venue::Flap, buys),
         (
@@ -323,21 +338,32 @@ fn refused_g07_accounts(accounts: Vec<[u8; 20]>) -> Result<Vec<[u8; 20]>, String
 }
 
 /// R12c/R12d: a Four.meme BUY's keys (`<prefix>_INPUT_WEI`, `_SLIPPAGE_BPS`,
-/// `_GAS_LIMIT`), all three or none.
+/// `_GAS_LIMIT`), SC4 c (B1) its exits' `_APPROVE_GAS_LIMIT` and
+/// `_SELL_GAS_LIMIT`: all five or none.
 fn four_exec(
     venue: crate::paper_exec::FourVenue,
-    keys: [Option<&str>; 3],
+    keys: [Option<&str>; 5],
 ) -> Result<Option<crate::paper_exec::FourExecConfig>, String> {
     let p = venue.keys();
+    let gas = |key: &str, value: &str| bounded(&format!("{p}_{key}"), value, 21_000, 100_000_000);
     match keys {
-        [None, None, None] => Ok(None),
-        [Some(input), Some(slippage), Some(gas)] => Ok(Some(crate::paper_exec::FourExecConfig {
+        [None, None, None, None, None] => Ok(None),
+        [
+            Some(input),
+            Some(slippage),
+            Some(buy),
+            Some(approve),
+            Some(sell),
+        ] => Ok(Some(crate::paper_exec::FourExecConfig {
             input_wei: u128::from(bounded(&format!("{p}_INPUT_WEI"), input, 1, u64::MAX)?),
             slippage_bps: bounded(&format!("{p}_SLIPPAGE_BPS"), slippage, 0, 9_999)? as u16,
-            gas_limit: bounded(&format!("{p}_GAS_LIMIT"), gas, 21_000, 100_000_000)?,
+            gas_limit: gas("GAS_LIMIT", buy)?,
+            approve_gas_limit: gas("APPROVE_GAS_LIMIT", approve)?,
+            sell_gas_limit: gas("SELL_GAS_LIMIT", sell)?,
         })),
         _ => Err(format!(
-            "{p}_INPUT_WEI, {p}_SLIPPAGE_BPS and {p}_GAS_LIMIT go together"
+            "{p}_INPUT_WEI, {p}_SLIPPAGE_BPS, {p}_GAS_LIMIT, {p}_APPROVE_GAS_LIMIT and \
+             {p}_SELL_GAS_LIMIT go together"
         )),
     }
 }
@@ -389,17 +415,22 @@ impl RuntimeConfig {
             values.remove(crate::sources::OwnerLimits::KEEP_GENERATIONS),
         )?;
         let sender_paths = values.remove("BSC_EXEC_SENDER_PATHS");
-        // R12c: the Four Classic BUY of the C3 path, all three or none.
+        // R12c: the Four Classic BUY of the C3 path, SC4 c its exits' gas
+        // limits: all five or none.
         let four_keys = [
             values.remove("BSC_EXEC_FOUR_INPUT_WEI"),
             values.remove("BSC_EXEC_FOUR_SLIPPAGE_BPS"),
             values.remove("BSC_EXEC_FOUR_GAS_LIMIT"),
+            values.remove("BSC_EXEC_FOUR_APPROVE_GAS_LIMIT"),
+            values.remove("BSC_EXEC_FOUR_SELL_GAS_LIMIT"),
         ];
-        // R12d: the OpenFour BUY of the C3 path, all three or none.
+        // R12d: the OpenFour BUY of the C3 path, likewise.
         let openfour_keys = [
             values.remove("BSC_EXEC_OPENFOUR_INPUT_WEI"),
             values.remove("BSC_EXEC_OPENFOUR_SLIPPAGE_BPS"),
             values.remove("BSC_EXEC_OPENFOUR_GAS_LIMIT"),
+            values.remove("BSC_EXEC_OPENFOUR_APPROVE_GAS_LIMIT"),
+            values.remove("BSC_EXEC_OPENFOUR_SELL_GAS_LIMIT"),
         ];
         let exit_slippage = values.remove("BSC_EXEC_EXIT_SLIPPAGE_BPS");
         let operator_exit = values.remove("BSC_EXEC_LIVE_OPERATOR_EXIT");
@@ -1107,6 +1138,13 @@ impl RuntimeConfig {
             },
             source_sha256: darkbot_bsc_record::sha256(text.as_bytes()),
         };
+        // A6: the exit multiples, by the strategy's own check.
+        config.strategy.engine.validate().map_err(|e| {
+            format!(
+                "BSC_STRATEGY_C_TARGET_NET_MULTIPLE/BSC_STRATEGY_C_STOP_NET_MULTIPLE: {e} \
+                 (0 <= stop < 1x < target)"
+            )
+        })?;
         config
             .wss
             .validate()

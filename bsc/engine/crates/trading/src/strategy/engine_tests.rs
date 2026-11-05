@@ -1090,6 +1090,20 @@ mod four {
         assert!(kinds.contains(&format!("entered {}", 107 + 6)), "{kinds:?}");
     }
 
+    /// SC4 c: a followed Four.meme token's intent curve is its exact Four
+    /// curve while tracked, none once its tracking ended (a refused log).
+    #[test]
+    fn a_four_tokens_curve_is_given_only_while_tracked() {
+        let mut c = FourChain::new(config("buy_count:3:,unique_buyers:3:"));
+        c.passing_launch();
+        assert_eq!(
+            c.engine.curve_of(&FOUR_TOKEN),
+            Some(StrategyCurve::Four(c.real))
+        );
+        c.feed(Input::FourIncomplete);
+        assert_eq!(c.engine.curve_of(&FOUR_TOKEN), None);
+    }
+
     /// A refused Four.meme log ends the Four.meme curves' tracking only; the
     /// vault leaving its trading phase leaves an open position unresolved;
     /// an unclassified launch is not tracked, with its reason.
@@ -1138,4 +1152,35 @@ mod four {
             ["decided 105 NotTracked(Unsupported(\"preset\"))"]
         );
     }
+}
+
+/// A6: the exit multiples' one check, at the configured places:
+/// `0 <= stop < 1x < target`; the bounds themselves are refused.
+#[test]
+fn the_exit_multiples_need_stop_below_one_below_target() {
+    let one = super::fixed::scale(config("").ratio_places).unwrap();
+    let with = |target: i128, stop: i128| Config {
+        target_net_multiple: target,
+        stop_net_multiple: stop,
+        ..config("")
+    };
+    assert_eq!(with(one + 1, one - 1).validate(), Ok(()));
+    assert_eq!(with(one + 1, 0).validate(), Ok(()));
+    assert_eq!(
+        with(one + 1, one).validate(),
+        Err(ConfigError::StopNotBelowOne)
+    );
+    assert_eq!(
+        with(one + 1, -1).validate(),
+        Err(ConfigError::StopNotBelowOne)
+    );
+    assert_eq!(with(one, 0).validate(), Err(ConfigError::TargetNotAboveOne));
+    assert_eq!(
+        Config {
+            ratio_places: 39,
+            ..with(one + 1, 0)
+        }
+        .validate(),
+        Err(ConfigError::Places)
+    );
 }

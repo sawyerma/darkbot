@@ -490,6 +490,9 @@ pub struct LiveRuntime {
     exit_deciders: Option<ExitDeciders>,
     /// Strategy C BUYs refused because the grant names no STRATEGY_C.
     strategy_buys_refused: u64,
+    /// SC4 c (review M2): Strategy C BUYs on a Four.meme curve, which has no
+    /// LIVE path yet (VENUE_UNARMED).
+    strategy_buys_venue_unarmed: u64,
     /// REV.1.0 R2: the providers' answers read and not yet journaled (here,
     /// not in the end: a disarm between a poll and the runtime's take drops
     /// none).
@@ -672,6 +675,7 @@ impl LiveRuntime {
             sources_live: Vec::new(),
             exit_deciders: None,
             strategy_buys_refused: 0,
+            strategy_buys_venue_unarmed: 0,
             answers: Vec::new(),
             block_launches: Vec::new(),
             block_buys: Vec::new(),
@@ -3031,6 +3035,16 @@ impl LiveRuntime {
             .strategies
             .strategy_c();
         self.poll_responses(clock);
+        // SC4: a Four.meme curve has no LIVE path until its qualification
+        // (Four d): refused before any lease, budget or nonce is touched.
+        let (crate::runtime_strategy::StrategyAction::Buy { curve, .. }
+        | crate::runtime_strategy::StrategyAction::Exit { curve, .. }) = *action;
+        if let crate::paper_exec::StrategyCurve::Four(_) = curve {
+            if matches!(action, crate::runtime_strategy::StrategyAction::Buy { .. }) {
+                self.strategy_buys_venue_unarmed += 1;
+            }
+            return Some((Vec::new(), Some(Refusal::VenueUnarmed)));
+        }
         let next = self.free_nonce(owner);
         if let crate::runtime_strategy::StrategyAction::Buy { input_wei, .. } = *action {
             // 01.11. (R1): Strategy C decides every lot's exits; its own
@@ -3624,6 +3638,10 @@ impl LiveRuntime {
             ("SOURCE_PUBLIC_ONLY", self.public_only_refused),
             ("SOURCE_UNHEALTHY", self.source_unhealthy),
             ("STRATEGY_BUYS_NOT_GRANTED", self.strategy_buys_refused),
+            (
+                "STRATEGY_BUYS_VENUE_UNARMED",
+                self.strategy_buys_venue_unarmed,
+            ),
             ("EXIT_FIRST", self.exit_first),
             ("BUYS_CLOSED", self.buys_refused),
             ("BUYS_UNFUNDED", self.unfunded_refused),

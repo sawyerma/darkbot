@@ -756,7 +756,8 @@ mod tests {
                 assert_eq!(c.after(wrong), None);
                 n += 1;
             }
-            assert_eq!(n, 2);
+            // R12d 2, SC4 4 later states.
+            assert_eq!(n, 6);
         }
 
         /// A position's shadow is the real curve with its tokens sold: the

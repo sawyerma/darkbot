@@ -121,7 +121,8 @@ fn the_largest_amount_within_a_limit_is_the_executed_one() {
         assert!(more.pay > limit, "{f:?}");
         n += 1;
     }
-    assert_eq!(n, 8);
+    // R12d 8 at two states, SC4 12 of 0.01 BNB at six.
+    assert_eq!(n, 20);
 }
 
 /// `Core.buyByBudget` is documented, not priced: it bought fewer tokens
@@ -352,7 +353,8 @@ pub(crate) mod admission {
             assert!(call.proof.is_empty());
             n += 1;
         }
-        assert_eq!(n, 4);
+        // R12d 0.001/0.1 BNB, SC4 0.01 BNB.
+        assert_eq!(n, 6);
         assert_eq!(
             admit_openfour_buy(&state, &policy(2_000_000_000_000_000, 100)),
             Err(OpenFourAdmissionError::UnqualifiedAmount)
@@ -511,5 +513,99 @@ pub(crate) mod admission {
             ),
             Err(OpenFourAdmissionError::GenerationMismatch)
         );
+    }
+
+    /// SC4: Strategy C's BUY on a tracked state. On every state the
+    /// executed admission of the Strategy C input (0.01 BNB) ran on (the
+    /// launch state and five later, distinct ones), the admission of the tracked
+    /// curve buys exactly its amount for exactly its payment; another code
+    /// generation or other fee terms are refused.
+    #[test]
+    fn a_tracked_state_admits_the_executed_strategy_buy() {
+        let v = validated(1);
+        let token: Address = launch_row()[4].parse().unwrap();
+        let mut n = 0;
+        for f in rows("OFADMIT").filter(|f| f[3] == "10000000000000000") {
+            let curve = snapshot_curve(f[1]);
+            let state =
+                QualifiedOpenFourState::tracked(&v, token, curve, FEE, snapshot(B256::ZERO, 1))
+                    .unwrap();
+            let a = admit_openfour_buy(
+                &state,
+                &policy(10_000_000_000_000_000, f[4].parse().unwrap()),
+            )
+            .unwrap();
+            assert_eq!(
+                (a.amount(), a.pay(), f[8]),
+                (u(f[6]), u(f[7]), "OK"),
+                "{f:?}"
+            );
+            n += 1;
+        }
+        assert_eq!(n, 12);
+        let curve = snapshot_curve("131615000");
+        assert_eq!(
+            QualifiedOpenFourState::tracked(&v, token, curve, FEE, snapshot(B256::ZERO, 2)),
+            Err(OpenFourAdmissionError::GenerationMismatch)
+        );
+        let other = OpenFourFee {
+            protocol_bps: 60,
+            dev_bps: 40,
+        };
+        assert_eq!(
+            QualifiedOpenFourState::tracked(&v, token, curve, other, snapshot(B256::ZERO, 1)),
+            Err(OpenFourAdmissionError::TermsMismatch)
+        );
+        assert_eq!(
+            QualifiedOpenFourHolding::tracked(&v, token, curve, other, snapshot(B256::ZERO, 1)),
+            Err(OpenFourAdmissionError::TermsMismatch)
+        );
+        // SC4 c (B2): the bound is the deepest state a BUY was executed from;
+        // a curve one token further along is refused, its exit is not.
+        let deepest = rows("OFADMIT")
+            .map(|f| snapshot_curve(f[1]).remaining)
+            .min()
+            .unwrap();
+        assert_eq!(deepest, QUALIFIED_OPENFOUR_MIN_REMAINING);
+        let at = rows("OFADMIT")
+            .map(|f| snapshot_curve(f[1]))
+            .find(|c| c.remaining == deepest)
+            .unwrap();
+        let one = U256::from(1u64);
+        let deeper = OpenFourCurve {
+            token_reserve: at.token_reserve - one,
+            remaining: at.remaining - one,
+            ..at
+        };
+        assert!(
+            QualifiedOpenFourState::tracked(&v, token, at, FEE, snapshot(B256::ZERO, 1)).is_ok()
+        );
+        assert_eq!(
+            QualifiedOpenFourState::tracked(&v, token, deeper, FEE, snapshot(B256::ZERO, 1)),
+            Err(OpenFourAdmissionError::Unwitnessed)
+        );
+        assert!(
+            QualifiedOpenFourHolding::tracked(&v, token, deeper, FEE, snapshot(B256::ZERO, 1))
+                .is_ok()
+        );
+        // Review M1: a tracked state admits only the inputs executed at the
+        // deepest one (0.01 BNB); 0.001 and 0.1 BNB were executed above it.
+        let at_deepest: std::collections::BTreeSet<u64> = rows("OFADMIT")
+            .filter(|f| snapshot_curve(f[1]).remaining == deepest)
+            .map(|f| f[3].parse().unwrap())
+            .collect();
+        assert_eq!(
+            at_deepest,
+            QUALIFIED_OPENFOUR_TRACKED_INPUTS_WEI.into_iter().collect()
+        );
+        let state =
+            QualifiedOpenFourState::tracked(&v, token, at, FEE, snapshot(B256::ZERO, 1)).unwrap();
+        for input in [1_000_000_000_000_000u64, 100_000_000_000_000_000] {
+            assert!(QUALIFIED_OPENFOUR_INPUTS_WEI.contains(&input));
+            assert_eq!(
+                admit_openfour_buy(&state, &policy(input, 100)),
+                Err(OpenFourAdmissionError::UnqualifiedAmount)
+            );
+        }
     }
 }

@@ -73,7 +73,7 @@ pub const CLASSIC_PROFILES: &[ClassicTemplateProfile] = &[ClassicTemplateProfile
     template: b256!("0665608cae7fb160a2bb9f169e1a0ccd6ff4aaac0000000000640a0a00002400"),
     pair: 0,
     tax_bps: 1_000,
-    tax_witnessed_blocks: 461_245,
+    tax_witnessed_blocks: 697_605,
     creator_values: &[U256::from_limbs([1_780_000_000_000, 0, 0, 0])],
 }];
 

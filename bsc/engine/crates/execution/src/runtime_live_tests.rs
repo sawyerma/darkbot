@@ -2522,6 +2522,32 @@ fn an_exit_refused_for_the_nonce_order_continues_once_it_may() {
     let wait = Duration::from_secs(2);
     let silent = Duration::from_millis(300);
     let (a, b) = ([0xA1; 20], [0xB2; 20]);
+    // SC4 c: a Four.meme curve has no LIVE path yet: its BUY is refused
+    // first (counted), nothing is sent and the nonce stays A's.
+    let (four, four_token, _) = crate::paper_exec::tests::openfour_strategy_state("131615000");
+    let (not_granted, unarmed) = (x.strategy_buys_refused, x.strategy_buys_venue_unarmed);
+    let (out, refused) = x
+        .on_strategy(
+            &StrategyAction::Buy {
+                token: four_token,
+                creator: [0; 20],
+                curve: StrategyCurve::Four(four),
+                input_wei: input,
+                decided_ns: 0,
+            },
+            &c2,
+            &clock,
+            now_ms,
+        )
+        .unwrap();
+    assert_eq!((out.len(), refused), (0, Some(Refusal::VenueUnarmed)));
+    // Review M2: counted as its own reason, not as an ungranted strategy.
+    assert_eq!(
+        (x.strategy_buys_refused, x.strategy_buys_venue_unarmed),
+        (not_granted, unarmed + 1)
+    );
+    assert!(refused_for(&x, "STRATEGY_BUYS_VENUE_UNARMED"));
+    assert!(r.requests.recv_timeout(silent).is_err());
     // A: bought at nonce 0 and included.
     let (out, refused) = x.on_strategy(&buy(a), &c2, &clock, now_ms).unwrap();
     assert_eq!((out.len(), refused), (1, None));

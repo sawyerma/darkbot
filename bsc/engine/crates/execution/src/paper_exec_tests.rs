@@ -999,6 +999,545 @@ fn a_strategy_entry_and_exit_reach_the_sink() {
     fs::remove_dir_all(&d).unwrap();
 }
 
+/// SC4: the OpenFour token's curve at a witnessed later state (its OFSNAP
+/// row) as Strategy C tracks it, its token and the executed 0.01 BNB
+/// admission's amount there at 100 bps (its OFADMIT row).
+pub(crate) fn openfour_strategy_state(
+    block: &str,
+) -> (
+    darkbot_bsc_trading::strategy::book::FourCurve,
+    [u8; 20],
+    U256,
+) {
+    use darkbot_bsc_trading::economics::four_classic::LaunchTerms;
+    use darkbot_bsc_trading::economics::openfour::{OpenFourFee, launch_curve};
+    use darkbot_bsc_trading::strategy::book::{FourCurve, FourPost};
+    const FIXTURE: &str =
+        include_str!("../../trading/fixtures/fourmeme/openfour_parity_20261104.txt");
+    let rows = |kind: &'static str| {
+        FIXTURE
+            .lines()
+            .map(|l| l.split(' ').collect::<Vec<_>>())
+            .filter(move |f| f[0] == kind)
+    };
+    let u = |s: &str| U256::from_str_radix(s, 10).unwrap();
+    let l = rows("OFLAUNCH").next().unwrap();
+    let start = launch_curve(&LaunchTerms {
+        total_supply: u(l[8]),
+        max_offers: u(l[9]),
+        max_raising: u(l[10]),
+    })
+    .unwrap();
+    let fee = OpenFourFee {
+        protocol_bps: 50,
+        dev_bps: 50,
+    };
+    let snap = rows("OFSNAP").find(|f| f[1] == block).unwrap();
+    let curve = FourCurve::openfour(start, fee)
+        .after(FourPost {
+            remaining: u(snap[7]),
+            raised: u(snap[8]),
+        })
+        .unwrap();
+    let token: [u8; 20] = hex::decode(&snap[2][2..]).unwrap().try_into().unwrap();
+    let admit = rows("OFADMIT")
+        .find(|f| f[1] == block && f[3] == "10000000000000000" && f[4] == "100")
+        .unwrap();
+    assert_eq!(admit[8], "OK");
+    (curve, token, u(admit[6]))
+}
+
+/// SC4: a Strategy C PASS on an OpenFour token: without the OpenFour arm
+/// VENUE_UNARMED; armed, the exact-amount BUY its tracked curve admits
+/// (the amount the executed admission bought at that state, 0.01 BNB as
+/// value and `maxPay`), then its exit: approve(Core) and `Core.sell` of
+/// those tokens at the next nonces, the minimum the slippage floor of the
+/// exact net proceeds on the shadow curve.
+#[test]
+fn a_strategy_entry_and_exit_on_an_openfour_curve_reach_the_sink() {
+    use crate::runtime::exec::tests::{four_observation, openfour_config};
+    use darkbot_bsc_trading::economics::slippage::min_output;
+    use darkbot_bsc_trading::venues::flap::abi::decode_approve;
+    use darkbot_bsc_trading::venues::fourmeme::deployment::bsc_mainnet_r12d_131608421;
+    use darkbot_bsc_trading::venues::fourmeme::recognize::{
+        decode_openfour_buy, decode_openfour_sell,
+    };
+    // Room for one OpenFour BUY (input and 2M gas) in the session cap.
+    let mut cfg = config(2, 4);
+    cfg.strategy_lanes = 4;
+    cfg.openfour = Some(openfour_config());
+    let (mut exec, d) = armed("strategy-openfour", cfg.clone());
+    let (curve, token, amount) = openfour_strategy_state("131615000");
+    let input = U256::from(10_000_000_000_000_000u64);
+    let buy = |e: &mut PaperExecutor| {
+        e.on_strategy_buy(
+            token,
+            [0; 20],
+            StrategyCurve::Four(curve),
+            input,
+            &strategy_c2(Some(HEAD)),
+            &clock(500, 3),
+            500,
+        )
+    };
+    assert_eq!(buy(&mut exec).err(), Some(Refusal::VenueUnarmed));
+    let four = bsc_mainnet_r12d_131608421();
+    exec.arm_openfour(
+        four.validate(&four_observation(&four).observed, CODEHASH_GENERATION)
+            .unwrap(),
+    )
+    .unwrap();
+    let bought = buy(&mut exec).unwrap();
+    let signed = decode_signed(&bought.raw).unwrap();
+    assert_eq!(
+        (
+            signed.tx.to,
+            signed.tx.value,
+            signed.tx.gas_limit,
+            signed.tx.nonce
+        ),
+        (four.openfour_core, input, openfour_config().gas_limit, 0)
+    );
+    let call = decode_openfour_buy(signed.tx.input).unwrap();
+    assert_eq!(
+        (call.token.into_array(), call.amount, call.max_pay_amount),
+        (token, amount, input)
+    );
+    let shadow = curve.shifted(amount).unwrap();
+    // Review L5: the position's exit on a Classic curve has no Classic arm
+    // here: VENUE_UNARMED before any lane.
+    let classic = darkbot_bsc_trading::strategy::book::FourCurve::classic_at(
+        darkbot_bsc_trading::economics::four_classic::ClassicCurve {
+            k: U256::from(1u64),
+            t: U256::from(2u64),
+            offers: U256::from(3u64),
+            sold: U256::from(4u64),
+        },
+        darkbot_bsc_trading::economics::four_classic::ClassicFee {
+            rate_bps: 100,
+            min_fee: U256::ZERO,
+            tax_bps: 1_000,
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        exec.on_strategy_exit(
+            token,
+            amount,
+            StrategyCurve::Four(classic),
+            &strategy_c2(Some(HEAD)),
+            &clock(800, 3),
+            800,
+        ),
+        (Vec::new(), Some(Refusal::VenueUnarmed))
+    );
+    // Review L5: a re-priced exit is signed at its price and the venue's
+    // limits.
+    let repriced = 2 * cfg.gas_price_wei;
+    let c2 = CanonicalContext {
+        exit_gas_price_wei: Some(repriced),
+        ..strategy_c2(Some(HEAD))
+    };
+    let (exits, refused) = exec.on_strategy_exit(
+        token,
+        amount,
+        StrategyCurve::Four(shadow),
+        &c2,
+        &clock(900, 3),
+        900,
+    );
+    assert_eq!(refused, None);
+    let [approve, sell]: [PaperIntent; 2] = exits.try_into().unwrap();
+    let a = decode_signed(&approve.raw).unwrap();
+    assert_eq!(
+        (approve.kind, a.tx.nonce, a.tx.to.into_array(), a.tx.value),
+        (IntentKind::Approve, 1, token, U256::ZERO)
+    );
+    // B1: signed at the OpenFour exits' own gas limits (re-priced).
+    let s = decode_signed(&sell.raw).unwrap();
+    assert_eq!(
+        (a.tx.gas_limit, s.tx.gas_limit),
+        (
+            openfour_config().approve_gas_limit,
+            openfour_config().sell_gas_limit
+        )
+    );
+    assert_eq!((a.tx.gas_price, s.tx.gas_price), (repriced, repriced));
+    assert_eq!(
+        decode_approve(a.tx.input).unwrap(),
+        (four.openfour_core, amount)
+    );
+    let s = decode_signed(&sell.raw).unwrap();
+    assert_eq!(
+        (sell.kind, s.tx.nonce, s.tx.to, s.tx.value),
+        (IntentKind::Sell, 2, four.openfour_core, U256::ZERO)
+    );
+    let call = decode_openfour_sell(s.tx.input).unwrap();
+    let received = shadow.sell(amount).unwrap();
+    assert_eq!(
+        (
+            call.token.into_array(),
+            call.amount,
+            call.min_receive_amount
+        ),
+        (
+            token,
+            amount,
+            min_output(received, cfg.exit_slippage_bps).unwrap()
+        )
+    );
+    exec.disarm().unwrap();
+    fs::remove_dir_all(&d).unwrap();
+}
+
+/// SC4: a Strategy C PASS on a Classic token at a witnessed state third-party
+/// trades moved (its PROBE row of 0.01 BNB, the deepest executed one):
+/// `buyTokenAMAP` of the input, its minimum the slippage floor of the tokens
+/// the probe received there; one gwei of tokens deeper is not admitted (B2);
+/// its exit sells the minimum in whole gwei units (as every witnessed
+/// Classic trade), at the Classic exits' gas limits (B1).
+#[test]
+fn a_strategy_entry_and_exit_on_a_classic_curve_reach_the_sink() {
+    use crate::runtime::exec::tests::{four_config, four_observation};
+    use darkbot_bsc_trading::economics::four_classic::{ClassicCurve, ClassicFee, floor_gwei};
+    use darkbot_bsc_trading::economics::slippage::min_output;
+    use darkbot_bsc_trading::strategy::book::FourCurve;
+    use darkbot_bsc_trading::venues::fourmeme::deployment::bsc_mainnet_r12d_131608421;
+    use darkbot_bsc_trading::venues::fourmeme::profile::WITNESSED_MAX_OFFERS;
+    use darkbot_bsc_trading::venues::fourmeme::recognize::{
+        decode_classic_buy_amap, decode_classic_sell_min_funds,
+    };
+    const FIXTURE: &str =
+        include_str!("../../trading/fixtures/fourmeme/classic_parity_20261104.txt");
+    let u = |s: &str| U256::from_str_radix(s, 10).unwrap();
+    // PROBE block token template feeSetting K T offers rate minFee funds tokens ...
+    let f: Vec<&str> = FIXTURE
+        .lines()
+        .map(|l| l.split(' ').collect::<Vec<_>>())
+        .find(|f| f[0] == "PROBE" && f[1] == "131139373" && f[10] == "10000000000000000")
+        .unwrap();
+    let four = bsc_mainnet_r12d_131608421();
+    let validated = four
+        .validate(&four_observation(&four).observed, CODEHASH_GENERATION)
+        .unwrap();
+    let offers = u(f[7]);
+    let curve = FourCurve::classic_at(
+        ClassicCurve {
+            k: u(f[5]),
+            t: u(f[6]),
+            offers,
+            sold: WITNESSED_MAX_OFFERS - offers,
+        },
+        ClassicFee {
+            rate_bps: validated.venue_fee().rate_bps,
+            min_fee: validated.venue_fee().min_fee,
+            // The priced word's tax (10 %).
+            tax_bps: 1_000,
+        },
+    )
+    .unwrap();
+    let token: [u8; 20] = hex::decode(&f[2][2..]).unwrap().try_into().unwrap();
+    let input = U256::from(10_000_000_000_000_000u64);
+    let mut cfg = config(2, 2);
+    // Two positions: BUY, approval, SELL; BUY, SELL.
+    cfg.strategy_lanes = 6;
+    cfg.four = Some(four_config());
+    let (mut exec, d) = armed("strategy-classic", cfg.clone());
+    exec.arm_four(validated).unwrap();
+    // Fee terms other than the validated deployment's are refused.
+    let FourCurve::Classic { now, fee, .. } = curve else {
+        panic!()
+    };
+    let other = FourCurve::classic_at(
+        now,
+        ClassicFee {
+            rate_bps: fee.rate_bps + 1,
+            ..fee
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        exec.on_strategy_buy(
+            token,
+            [0; 20],
+            StrategyCurve::Four(other),
+            input,
+            &strategy_c2(Some(HEAD)),
+            &clock(300, 3),
+            300,
+        )
+        .err(),
+        Some(Refusal::Admission)
+    );
+    // B2: a state one gwei of tokens deeper than the deepest executed one.
+    let gwei = U256::from(1_000_000_000u64);
+    let deeper = FourCurve::classic_at(
+        ClassicCurve {
+            k: now.k,
+            t: now.t - gwei,
+            offers: now.offers - gwei,
+            sold: now.sold + gwei,
+        },
+        fee,
+    )
+    .unwrap();
+    assert_eq!(
+        exec.on_strategy_buy(
+            token,
+            [0; 20],
+            StrategyCurve::Four(deeper),
+            input,
+            &strategy_c2(Some(HEAD)),
+            &clock(350, 3),
+            350,
+        )
+        .err(),
+        Some(Refusal::Admission)
+    );
+    // The Classic arm is no OpenFour one.
+    let (openfour, other, _) = openfour_strategy_state("131615000");
+    assert_eq!(
+        exec.on_strategy_buy(
+            other,
+            [0; 20],
+            StrategyCurve::Four(openfour),
+            input,
+            &strategy_c2(Some(HEAD)),
+            &clock(400, 3),
+            400,
+        )
+        .err(),
+        Some(Refusal::VenueUnarmed)
+    );
+    let bought = exec
+        .on_strategy_buy(
+            token,
+            [0; 20],
+            StrategyCurve::Four(curve),
+            input,
+            &strategy_c2(Some(HEAD)),
+            &clock(500, 3),
+            500,
+        )
+        .unwrap();
+    let signed = decode_signed(&bought.raw).unwrap();
+    assert_eq!(
+        (signed.tx.to, signed.tx.value),
+        (four.token_manager2, input)
+    );
+    let call = decode_classic_buy_amap(signed.tx.input).unwrap();
+    let tokens = u(f[11]);
+    assert_eq!(
+        (call.token.into_array(), call.funds, call.min_amount),
+        (
+            token,
+            input,
+            min_output(tokens, four_config().slippage_bps).unwrap()
+        )
+    );
+    let held = call.min_amount;
+    let shadow = curve.shifted(tokens).unwrap();
+    let (exits, refused) = exec.on_strategy_exit(
+        token,
+        tokens,
+        StrategyCurve::Four(shadow),
+        &strategy_c2(Some(HEAD)),
+        &clock(900, 3),
+        900,
+    );
+    assert_eq!(refused, None);
+    let [approve, sell]: [PaperIntent; 2] = exits.try_into().unwrap();
+    let a = decode_signed(&approve.raw).unwrap();
+    assert_eq!((a.tx.to.into_array(), a.tx.nonce), (token, 1));
+    let amount = floor_gwei(held);
+    assert_eq!(
+        darkbot_bsc_trading::venues::flap::abi::decode_approve(a.tx.input).unwrap(),
+        (four.token_manager2, amount)
+    );
+    let s = decode_signed(&sell.raw).unwrap();
+    assert_eq!((s.tx.to, s.tx.nonce), (four.token_manager2, 2));
+    assert_eq!(
+        (a.tx.gas_limit, s.tx.gas_limit),
+        (
+            four_config().approve_gas_limit,
+            four_config().sell_gas_limit
+        )
+    );
+    let call = decode_classic_sell_min_funds(s.tx.input).unwrap();
+    assert_eq!(call.amount, amount);
+    assert!(amount < held || held == amount);
+    // minFunds: the slippage floor of the SELL's GROSS on the shadow
+    // (TokenManager2 compares it before the fee and the tax).
+    let FourCurve::Classic { now, fee, .. } = shadow else {
+        panic!()
+    };
+    let gross = darkbot_bsc_trading::economics::four_classic::quote_sell(&now, &fee, amount)
+        .unwrap()
+        .gross;
+    assert_eq!(
+        call.min_funds,
+        min_output(gross, cfg.exit_slippage_bps).unwrap()
+    );
+    // Review L5: a second moved token whose approval is already out (of an
+    // amount in no whole gwei): its exit is the SELL alone, of the approved
+    // amount floored to whole gwei.
+    let g: Vec<&str> = FIXTURE
+        .lines()
+        .map(|l| l.split(' ').collect::<Vec<_>>())
+        .find(|f| f[0] == "PROBE" && f[1] == "131743981" && f[10] == "10000000000000000")
+        .unwrap();
+    let offers = u(g[7]);
+    let second = FourCurve::classic_at(
+        ClassicCurve {
+            k: u(g[5]),
+            t: u(g[6]),
+            offers,
+            sold: WITNESSED_MAX_OFFERS - offers,
+        },
+        fee,
+    )
+    .unwrap();
+    let token: [u8; 20] = hex::decode(&g[2][2..]).unwrap().try_into().unwrap();
+    let bought = exec
+        .on_strategy_buy(
+            token,
+            [0; 20],
+            StrategyCurve::Four(second),
+            input,
+            &strategy_c2(Some(HEAD)),
+            &clock(1_000, 3),
+            1_000,
+        )
+        .unwrap();
+    let held = decode_classic_buy_amap(decode_signed(&bought.raw).unwrap().tx.input)
+        .unwrap()
+        .min_amount;
+    let approved = held - U256::from(123u64);
+    exec.adopt_approval(token, approved);
+    let tokens = u(g[11]);
+    let (exits, refused) = exec.on_strategy_exit(
+        token,
+        tokens,
+        StrategyCurve::Four(second.shifted(tokens).unwrap()),
+        &strategy_c2(Some(HEAD)),
+        &clock(1_100, 3),
+        1_100,
+    );
+    assert_eq!(refused, None);
+    let [sell]: [PaperIntent; 1] = exits.try_into().unwrap();
+    let s = decode_signed(&sell.raw).unwrap();
+    assert_eq!(sell.kind, IntentKind::Sell);
+    assert_eq!(
+        decode_classic_sell_min_funds(s.tx.input).unwrap().amount,
+        floor_gwei(approved)
+    );
+    assert_ne!(floor_gwei(approved), approved);
+    exec.disarm().unwrap();
+    fs::remove_dir_all(&d).unwrap();
+}
+
+/// Review L5: a Four BUY's cap check keeps room for its own venue's exit
+/// (the OpenFour approval and SELL, not the Flap one's): at exactly the BUY
+/// and that exit it goes, one wei less is SESSION_CAP.
+#[test]
+fn a_four_buys_cap_keeps_room_for_its_venues_exit() {
+    use crate::runtime::exec::tests::{four_observation, openfour_config};
+    use darkbot_bsc_trading::venues::fourmeme::deployment::bsc_mainnet_r12d_131608421;
+    let of = openfour_config();
+    let input = 10_000_000_000_000_000u128;
+    let (curve, token, _) = openfour_strategy_state("131615000");
+    for (slack, admitted) in [(0u128, true), (1, false)] {
+        let mut cfg = config(2, 4);
+        cfg.strategy_lanes = 4;
+        cfg.openfour = Some(of);
+        assert!(of.sell_gas_limit < cfg.sell_gas_limit);
+        let gas = |g: u64| u128::from(cfg.gas_price_wei) * u128::from(g);
+        let exact = input + gas(of.gas_limit) + gas(of.approve_gas_limit) + gas(of.sell_gas_limit);
+        cfg.strategy_session_cap_wei = exact - slack;
+        let (mut exec, d) = armed(&format!("strategy-four-cap-{slack}"), cfg.clone());
+        let four = bsc_mainnet_r12d_131608421();
+        exec.arm_openfour(
+            four.validate(&four_observation(&four).observed, CODEHASH_GENERATION)
+                .unwrap(),
+        )
+        .unwrap();
+        let got = exec.on_strategy_buy(
+            token,
+            [0; 20],
+            StrategyCurve::Four(curve),
+            U256::from(input),
+            &strategy_c2(Some(HEAD)),
+            &clock(100, 3),
+            100,
+        );
+        match admitted {
+            true => assert!(got.is_ok(), "{:?}", got.err()),
+            false => assert_eq!(got.err(), Some(Refusal::SessionCap)),
+        }
+        exec.disarm().unwrap();
+        fs::remove_dir_all(&d).unwrap();
+    }
+}
+
+/// SC4 c (B1): the exit reserve is each open position's own venue's: a Flap
+/// and an OpenFour position reserve the Flap and the OpenFour approval and
+/// SELL at the signing price (the counted reserve is the scan's, asserted
+/// at every change); the OpenFour approval out leaves its SELL reserved.
+#[test]
+fn the_exit_reserve_is_each_positions_venues() {
+    use crate::runtime::exec::tests::{four_observation, openfour_config};
+    use darkbot_bsc_trading::venues::fourmeme::deployment::bsc_mainnet_r12d_131608421;
+    let mut cfg = config(2, 4);
+    cfg.strategy_lanes = 8;
+    cfg.openfour = Some(openfour_config());
+    let (mut exec, d) = armed("strategy-reserve", cfg.clone());
+    let four = bsc_mainnet_r12d_131608421();
+    exec.arm_openfour(
+        four.validate(&four_observation(&four).observed, CODEHASH_GENERATION)
+            .unwrap(),
+    )
+    .unwrap();
+    let price = U256::from(cfg.gas_price_wei);
+    let wei = |gas: u64| price * U256::from(gas);
+    let (flap_approve, flap_sell) = (cfg.approve_gas_limit, cfg.sell_gas_limit);
+    let of = openfour_config();
+    assert_ne!(
+        (of.approve_gas_limit, of.sell_gas_limit),
+        (flap_approve, flap_sell)
+    );
+    assert_eq!(exec.held_exit_reserve(), U256::ZERO);
+    let flap = curve_after(1_000_000_000_000_000_000);
+    exec.on_strategy_buy(
+        [0xF1; 20],
+        [0; 20],
+        flap,
+        U256::from(10_000_000_000_000_000u64),
+        &strategy_c2(Some(HEAD)),
+        &clock(100, 3),
+        100,
+    )
+    .unwrap();
+    assert_eq!(exec.held_exit_reserve(), wei(flap_approve) + wei(flap_sell));
+    let (curve, token, amount) = openfour_strategy_state("131615000");
+    exec.on_strategy_buy(
+        token,
+        [0; 20],
+        StrategyCurve::Four(curve),
+        U256::from(10_000_000_000_000_000u64),
+        &strategy_c2(Some(HEAD)),
+        &clock(200, 3),
+        200,
+    )
+    .unwrap();
+    let both =
+        wei(flap_approve) + wei(flap_sell) + wei(of.approve_gas_limit) + wei(of.sell_gas_limit);
+    assert_eq!(exec.held_exit_reserve(), both);
+    exec.adopt_approval(token, amount);
+    assert_eq!(exec.held_exit_reserve(), both - wei(of.approve_gas_limit));
+    exec.disarm().unwrap();
+    fs::remove_dir_all(&d).unwrap();
+}
+
 /// Phase I: without a coherent canonical snapshot or a head nothing is
 /// admitted; an entry above the strategy's session cap is refused.
 #[test]
