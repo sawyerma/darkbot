@@ -158,6 +158,8 @@ Code `b72bf2ed`…`4b0139ee` (Owner `sources.rs`, Projektion, `darkbot.bsc.v1`, 
 
 Gate = Workspace im T63-Umfang (`--workspace --all-features --no-fail-fast`, `bsc/engine`) + T62 (8 Werkzeugtests) + Clippy (Workspace, alle Features/Targets, `-D warnings`) + F0-VAR (ab T82 zusätzlich Clippy der Release-Feature-Sätze aus `ops/darkbotctl`), alles auf demselben unveränderten Baum. Ein Lastflake zählt nur mit grünem Wiederholungslauf der betroffenen Suite auf identischem Baum.
 
+**Ab 05.11.2026 ([Gesamtauftrag](AUFTRAG_20261105_REV1_FERTIGSTELLUNG.md) §3):** Abnahme ausschließlich lokal auf dem Betriebs-Mac; GitHub-CI ist optional, nie Abschlussblocker und nie als PASS fingiert. Ältere Zeilen mit „CI unverifiziert“ sind damit lokal abgenommen; seit `c73d7870` starteten die GitHub-Läufe nicht (Billing).
+
 | Test-ID | Paket, SHA | Workspace PASS/FAIL/ignored | Werkzeugtests / Clippy / F0-VAR | Zusätzlich | Status |
 |---|---|---|---|---|---|
 | T69 | R4a `424116f7` | 1.671/0/27 | 8/8 / 0 / PASS | – | **LOCAL_PASS** |

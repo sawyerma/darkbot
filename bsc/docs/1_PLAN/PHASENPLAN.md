@@ -1,7 +1,15 @@
 # BSC PHASENPLAN — DarkBot Gate-0 First
 
 Status: **ACTIVE AUTHORITATIVE ROADMAP**
-Updated: 2026-11-04 (Schnellstrategie-/Frontend-Nachtrag; historische Versionen und bestehende LIVE-Code-Priorität bleiben erhalten)
+Updated: 2026-11-05 (Gesamtauftrag REV.1.0-Fertigstellung, lokale macOS-Abnahme statt GitHub-CI; historische Versionen und bestehende LIVE-Code-Priorität bleiben erhalten)
+
+## GESAMTAUFTRAG REV.1.0-FERTIGSTELLUNG (05.11.2026) — VORRANG
+
+**Volltext (verbindlich):** [AUFTRAG_20261105_REV1_FERTIGSTELLUNG.md](AUFTRAG_20261105_REV1_FERTIGSTELLUNG.md). Er ersetzt die einzelnen Fertigstellungs-Ergänzungen; dieser Plan bleibt fachlich maßgeblich.
+
+**Abnahmeregel (ersetzt jede GitHub-CI-Pflicht dieses Plans, der Handoffs, des Messplans und von R14):** Abnahme = vollständiges **lokales macOS-Gate** auf dem Betriebs-Mac (Rust-/Go-Tests, Native-/Release-Builds, `cargo fmt --check`, Clippy `-D warnings`, kritische Mutanten, Native-/Protobuf-/Gateway-/Frontend-/Browser-/Prozess-E2E, Replay/Journal, Crash/Restart/Recovery/Reorg/UNKNOWN/Idempotenz, Wallet/Budget/Nonce/Position, read-only Marktdaten-/Economics-Proben, Performance/Last/Dauerbetrieb, unabhängiges Review), mindestens in der fachlichen Tiefe des bisherigen Gesamtsystem-Gates. GitHub = nur Versionsverwaltung (Commit, Push auf `origin/main`, SHA-Abgleich, sauberer Baum). GitHub-CI ist optional, wird nie als PASS fingiert und blockiert keinen Abschluss.
+
+**Reihenfolge:** Strategy C Four c (A5 verhaltensneutraler `StrategyCurve`-Schnitt als eigener Commit zuerst; A6, B1–B4) → Four d LIVE (A4, A1, B5) → R13 FOREIGN_AUTO → Frontend Strategy C → R14 (A2, A3, Rebaseline, Gesamtabnahme). Befundregister A1–A6/B1–B5 in `STATUS.md`. Abschluss = **TECHNISCH FERTIG** (§10 des Auftrags), keine wirtschaftliche LIVE-Freigabe.
 
 ## STRATEGY C — VERBINDLICHE FRONTEND-KONFIGURATION (04.11.2026)
 

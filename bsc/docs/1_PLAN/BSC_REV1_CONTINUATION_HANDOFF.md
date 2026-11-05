@@ -222,7 +222,7 @@ Quellen:
 | R11 | Harnesses: Mock-WSS-Runtime (A02–A16), run()-Matrix B01–B16, G0.7-Runner-Verhalten (C08–C11, C16), echter Prozess-LIVE-Loopback-E2E mit Stand-in-Builder, Kill/Crash, Disk-full-Image, C10/R5, Mutationsskript, §9.5/§3b-D-Register, C17/C20, Läufe nach 03.11. | NOT_STARTED | – |
 | R12 | Four Classic/OpenFour Economics und Ausführung | NOT_STARTED | – |
 | R13 | FOREIGN_AUTO-Profile | NOT_STARTED | – |
-| R14 | fmt/clippy in der CI (Repo-weit `cargo fmt --check` mit Exit 1, 355 Hunks in 38 Dateien auf `9d5ed3a0`), Läufe nach 03.11., STATUS-/Runbook-/Messplan-Rebaseline, Gesamtabnahme | NOT_STARTED (Läufe nach 03.11.: EXTERNAL_BLOCKED durch die Kampagne) | – |
+| R14 | lokales macOS-Gesamtgate statt CI (Gesamtauftrag 05.11.; Repo-weit `cargo fmt --check` mit Exit 1, 355 Hunks in 38 Dateien auf `9d5ed3a0`), Läufe nach 03.11., STATUS-/Runbook-/Messplan-Rebaseline, Gesamtabnahme | NOT_STARTED (Läufe nach 03.11.: EXTERNAL_BLOCKED durch die Kampagne) | – |
 | E1–E11 | Audit-E-Befunde, siehe §8 | IN_PROGRESS (E-A fertig) | E-A `8a9584d9`…`f6156fa0` |
 
 Abhängigkeiten:
