@@ -29,6 +29,7 @@ use darkbot_bsc_record::schema::bsc_census::verdict as gv;
 use darkbot_bsc_record::schema::bsc_economics::economics_snapshot;
 use darkbot_bsc_record::schema::bsc_flap_freeze::flap_freeze as ff;
 use darkbot_bsc_record::schema::bsc_flap_impl_parity::flap_impl_parity as fp;
+use darkbot_bsc_record::schema::bsc_four_freeze::four_freeze as qf;
 use darkbot_bsc_record::schema::bsc_runtime::live_qualification as lq;
 use darkbot_bsc_record::schema::{g06a, g07, g08};
 use darkbot_bsc_record::{Draft, Record, Schema, decode};
@@ -36,6 +37,9 @@ use darkbot_bsc_trading::submission_policy::capability::CapabilityId;
 use darkbot_bsc_trading::submission_policy::qualification::{AdapterQualification, Finding};
 use darkbot_bsc_trading::venues::flap::deployment::{
     FlapDeployment, behaviour_reference, bsc_mainnet_v5_27_2,
+};
+use darkbot_bsc_trading::venues::fourmeme::deployment::{
+    FourDeployment, bsc_mainnet_r12d_131608421,
 };
 use std::fs;
 use std::path::{Component, Path};
@@ -75,6 +79,10 @@ pub struct Verified {
 /// upgrade check) and, for an implementation without verified source, its
 /// behaviour parity with the source-verified one (BSC3-065).
 const VENUE_EVIDENCE: &[&Schema] = &[&ff::V2, &fp::SCHEMA];
+/// SC4 d: a Four.meme venue's: the freeze (v3) of the contracts the build
+/// pins (TokenManager2, or the OpenFour Core) and the economics snapshot of
+/// this build (its executed BUY and SELL parity rows bound in it).
+const FOUR_VENUE_EVIDENCE: &[&Schema] = &[&qf::V3, &economics_snapshot::SCHEMA];
 /// A source's: the G0.4 verdict (v3, with the rated census's sources).
 const SOURCE_EVIDENCE: &[&Schema] = &[&gv::SCHEMA];
 /// The acquisition: the G0.8 result, and the G0.7 attempt it rates; an
@@ -148,6 +156,86 @@ fn verified_all(
 
 fn re(x: darkbot_bsc_record::RecordError) -> String {
     x.0
+}
+
+/// SC4 d: a Four.meme freeze binds the venue's contract as the build pins it
+/// (`bsc_mainnet_r12d_131608421`): its chain, and the TokenManager2 (Classic)
+/// or the OpenFour Core with their implementation and its code.
+fn four_freeze_binds(f: &Record, venue: VenueId, pin: &FourDeployment) -> Result<(), String> {
+    use darkbot_bsc_record::schema::bsc_four_freeze::four_freeze::contract as c;
+    let e = |x: darkbot_bsc_record::RecordError| x.to_string();
+    if f.u64(qf::CHAIN_ID).map_err(e)? != pin.chain_id {
+        return Err("a freeze of another chain".into());
+    }
+    let (role, address, implementation, code) = match venue {
+        VenueId::FourClassic => (
+            "TokenManager2",
+            pin.token_manager2,
+            pin.token_manager2_implementation,
+            pin.token_manager2_implementation_runtime_keccak256,
+        ),
+        VenueId::OpenFour => (
+            "OpenFourCore",
+            pin.openfour_core,
+            pin.openfour_core_implementation,
+            pin.openfour_core_implementation_runtime_keccak256,
+        ),
+        VenueId::Flap => return Err("not a Four.meme venue".into()),
+    };
+    for row in f.nested_all(qf::CONTRACTS).map_err(e)? {
+        if row.text(c::ROLE).map_err(e)? != role {
+            continue;
+        }
+        let bound = row.address(c::ADDRESS).map_err(e)? == address.into_array()
+            && row.opt_address(c::IMPLEMENTATION).map_err(e)? == Some(implementation.into_array())
+            && row.opt_b256(c::IMPLEMENTATION_CODE_KECCAK256).map_err(e)? == Some(code.0);
+        return match bound {
+            true => Ok(()),
+            false => Err(format!("the freeze's {role} is not the pinned one")),
+        };
+    }
+    Err(format!("the freeze names no {role}"))
+}
+
+/// SC4 d: the economics snapshot hash of the tree at `root` (its bound
+/// files, `economics::snapshot::BOUND_FILES`), taken once per process
+/// (review L6: not at every verification; a bound file changed under a
+/// running process does not change what it runs on).
+pub(crate) fn snapshot_of(root: &Path) -> Result<[u8; 32], String> {
+    use std::sync::Mutex;
+    static TAKEN: Mutex<Vec<(std::path::PathBuf, [u8; 32])>> = Mutex::new(Vec::new());
+    let mut taken = TAKEN
+        .lock()
+        .map_err(|_| "snapshot cache poisoned".to_string())?;
+    if let Some((_, sha)) = taken.iter().find(|(r, _)| r == root) {
+        return Ok(*sha);
+    }
+    let sha = snapshot_read(root)?;
+    taken.push((root.to_path_buf(), sha));
+    Ok(sha)
+}
+
+/// [`snapshot_of`] read from the files.
+fn snapshot_read(root: &Path) -> Result<[u8; 32], String> {
+    use darkbot_bsc_trading::economics::snapshot::{BOUND_FILES, manifest};
+    let files = BOUND_FILES
+        .iter()
+        .map(|p| {
+            std::fs::read(root.join(p))
+                .map(|b| (*p, darkbot_bsc_record::sha256(&b)))
+                .map_err(|e| format!("{p}: {e}"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(darkbot_bsc_record::sha256(manifest(&files).as_bytes()))
+}
+
+/// SC4 d: an economics snapshot binds when it is this build's.
+fn snapshot_binds(f: &Record, build: &[u8; 32]) -> Result<(), String> {
+    let e = |x: darkbot_bsc_record::RecordError| x.to_string();
+    match f.b256(economics_snapshot::SNAPSHOT_SHA256).map_err(e)? == *build {
+        true => Ok(()),
+        false => Err("an economics snapshot of another build".into()),
+    }
 }
 
 /// A G0.1 freeze of `pin`: its chain, Portal and version, the pin read
@@ -448,11 +536,33 @@ pub fn verify(root: &Path, bytes: &[u8]) -> Result<Verified, String> {
         match row.text(k::KIND).map_err(e)? {
             "VENUE" => {
                 let venue = VenueId::parse(id).ok_or(format!("unknown venue {id}"))?;
-                if venue != VenueId::Flap {
-                    return Err(format!("{id} has no execution path to qualify"));
-                }
                 if view.venues.contains(&venue) {
                     return Err(format!("{id} is qualified twice"));
+                }
+                if venue != VenueId::Flap {
+                    let (mut freezes, mut snapshots) = (0, 0);
+                    let build = snapshot_of(root)?;
+                    for f in verified_all(root, &row, k::EVIDENCE, Some(FOUR_VENUE_EVIDENCE))? {
+                        seen(&f);
+                        let bound = if f.schema().name == qf::V3.name {
+                            freezes += 1;
+                            four_freeze_binds(&f, venue, &bsc_mainnet_r12d_131608421())
+                        } else {
+                            snapshots += 1;
+                            snapshot_binds(&f, &build)
+                        };
+                        bound.map_err(|why| format!("{id}: {why}"))?;
+                    }
+                    if freezes == 0 {
+                        return Err(format!("{id}: no freeze of the pinned Four.meme contracts"));
+                    }
+                    if snapshots == 0 {
+                        return Err(format!(
+                            "{id}: no economics snapshot of this build (its executed parity)"
+                        ));
+                    }
+                    view.venues.push(venue);
+                    continue;
                 }
                 let (mut freezes, mut parities) = (0, 0);
                 let reference = behaviour_reference(&pin);
@@ -764,7 +874,13 @@ pub fn build(root: &Path, spec: &Spec, now_ms: u64) -> Result<Vec<u8>, String> {
     let items = spec
         .venues
         .iter()
-        .map(|(v, p)| ("VENUE", v.name(), p, Some(VENUE_EVIDENCE)))
+        .map(|(v, p)| {
+            let allowed = match v {
+                VenueId::Flap => VENUE_EVIDENCE,
+                VenueId::FourClassic | VenueId::OpenFour => FOUR_VENUE_EVIDENCE,
+            };
+            ("VENUE", v.name(), p, Some(allowed))
+        })
         .chain(
             spec.sources
                 .iter()
@@ -1094,6 +1210,185 @@ pub(crate) mod tests {
         root
     }
 
+    /// SC4 d: a Four.meme venue is qualified by the freeze of the contracts
+    /// the build pins (R12b's records: the TokenManager2 for Classic, the
+    /// OpenFour Core for OpenFour) and the economics snapshot of the build
+    /// (its executed parity rows bound in it); the other family's freeze or
+    /// another build's snapshot qualifies nothing.
+    #[test]
+    fn a_four_venue_is_qualified_by_its_freeze_and_this_builds_snapshot() {
+        let root = fixture("four", "PASS");
+        let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../..");
+        for p in darkbot_bsc_trading::economics::snapshot::BOUND_FILES {
+            fs::create_dir_all(root.join(p).parent().unwrap()).unwrap();
+            fs::copy(repo.join(p), root.join(p)).unwrap();
+        }
+        let frozen = repo.join("bsc/native/evidence/g01/four_freeze_20261104T052604Z");
+        fs::copy(
+            frozen.join("classic.dbrec"),
+            root.join("ev/four_classic.dbrec"),
+        )
+        .unwrap();
+        fs::copy(
+            frozen.join("openfour.dbrec"),
+            root.join("ev/four_openfour.dbrec"),
+        )
+        .unwrap();
+        let snapshot = |sha: [u8; 32]| {
+            let mut d = filled(&economics_snapshot::SCHEMA);
+            d.set(economics_snapshot::CHAIN_ID, 56u64).set(
+                economics_snapshot::SNAPSHOT_SHA256,
+                darkbot_bsc_record::Value::B256(sha),
+            );
+            d.encode().unwrap()
+        };
+        let this = snapshot_of(&root).unwrap();
+        fs::write(root.join("ev/snapshot.dbrec"), snapshot(this)).unwrap();
+        fs::write(root.join("ev/other.dbrec"), snapshot([7; 32])).unwrap();
+        let four = |venues: Vec<(VenueId, Vec<&str>)>| {
+            let mut s = spec();
+            s.venues = venues
+                .into_iter()
+                .map(|(v, p)| (v, p.into_iter().map(String::from).collect()))
+                .collect();
+            build(&root, &s, 1)
+        };
+        let ok = four(vec![
+            (
+                VenueId::FourClassic,
+                vec!["ev/four_classic.dbrec", "ev/snapshot.dbrec"],
+            ),
+            (
+                VenueId::OpenFour,
+                vec!["ev/four_openfour.dbrec", "ev/snapshot.dbrec"],
+            ),
+        ])
+        .unwrap();
+        let v = verify(&root, &ok).unwrap();
+        assert_eq!(v.view.venues, [VenueId::FourClassic, VenueId::OpenFour]);
+        for (venues, why) in [
+            (
+                vec![(
+                    VenueId::FourClassic,
+                    vec!["ev/four_openfour.dbrec", "ev/snapshot.dbrec"],
+                )],
+                "the freeze names no TokenManager2",
+            ),
+            (
+                vec![(
+                    VenueId::OpenFour,
+                    vec!["ev/four_openfour.dbrec", "ev/other.dbrec"],
+                )],
+                "an economics snapshot of another build",
+            ),
+            (
+                vec![(VenueId::FourClassic, vec!["ev/snapshot.dbrec"])],
+                "no freeze of the pinned Four.meme contracts",
+            ),
+            (
+                vec![(VenueId::OpenFour, vec!["ev/four_openfour.dbrec"])],
+                "no economics snapshot of this build",
+            ),
+        ] {
+            let e = four(venues).unwrap_err();
+            assert!(e.contains(why), "{why}: {e}");
+        }
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// SC4 d review L6: a root's economics snapshot is its bound files',
+    /// taken once per process: another root's files are another snapshot;
+    /// a bound file changed under the process does not change it.
+    #[test]
+    fn a_roots_snapshot_is_taken_once() {
+        use darkbot_bsc_trading::economics::snapshot::BOUND_FILES;
+        let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../..");
+        let tree = |tag: &str| {
+            let root = std::env::temp_dir().join(format!("bsc-snap-{tag}-{}", std::process::id()));
+            let _ = fs::remove_dir_all(&root);
+            for p in BOUND_FILES {
+                fs::create_dir_all(root.join(p).parent().unwrap()).unwrap();
+                fs::copy(repo.join(p), root.join(p)).unwrap();
+            }
+            root
+        };
+        let (a, b) = (tree("a"), tree("b"));
+        let edit = |root: &std::path::Path| {
+            let file = root.join(BOUND_FILES[0]);
+            let mut bytes = fs::read(&file).unwrap();
+            bytes.push(b'\n');
+            fs::write(&file, bytes).unwrap();
+        };
+        edit(&b);
+        let first = snapshot_of(&a).unwrap();
+        assert_ne!(snapshot_of(&b).unwrap(), first);
+        edit(&a);
+        assert_eq!(snapshot_of(&a).unwrap(), first);
+        assert_ne!(snapshot_read(&a).unwrap(), first);
+        fs::remove_dir_all(&a).unwrap();
+        fs::remove_dir_all(&b).unwrap();
+    }
+
+    /// SC4 d: a freeze binds a Four.meme venue only to the pinned contract
+    /// as frozen: its address, its implementation and that code's keccak
+    /// each the pin's (another of any of them is not the pinned one).
+    #[test]
+    fn a_four_freeze_binds_only_the_pinned_contract() {
+        use alloy_primitives::{Address, B256};
+        let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../..");
+        let frozen = repo.join("bsc/native/evidence/g01/four_freeze_20261104T052604Z");
+        let read = |name: &str| {
+            darkbot_bsc_record::decode(&qf::V3, &fs::read(frozen.join(name)).unwrap()).unwrap()
+        };
+        let pin = bsc_mainnet_r12d_131608421();
+        let (other, code) = (Address::repeat_byte(7), B256::repeat_byte(7));
+        for (venue, file, drifts) in [
+            (
+                VenueId::FourClassic,
+                "classic.dbrec",
+                [
+                    FourDeployment {
+                        token_manager2: other,
+                        ..pin
+                    },
+                    FourDeployment {
+                        token_manager2_implementation: other,
+                        ..pin
+                    },
+                    FourDeployment {
+                        token_manager2_implementation_runtime_keccak256: code,
+                        ..pin
+                    },
+                ],
+            ),
+            (
+                VenueId::OpenFour,
+                "openfour.dbrec",
+                [
+                    FourDeployment {
+                        openfour_core: other,
+                        ..pin
+                    },
+                    FourDeployment {
+                        openfour_core_implementation: other,
+                        ..pin
+                    },
+                    FourDeployment {
+                        openfour_core_implementation_runtime_keccak256: code,
+                        ..pin
+                    },
+                ],
+            ),
+        ] {
+            let f = read(file);
+            assert_eq!(four_freeze_binds(&f, venue, &pin), Ok(()));
+            for drift in drifts {
+                let e = four_freeze_binds(&f, venue, &drift).unwrap_err();
+                assert!(e.contains("is not the pinned one"), "{venue:?}: {e}");
+            }
+        }
+    }
+
     /// The qualification spec of the fixture's evidence.
     pub(crate) fn acquisition() -> Option<(String, String)> {
         Some(("ev/g08.dbrec".into(), "ev/g07.dbrec".into()))
@@ -1234,15 +1529,14 @@ pub(crate) mod tests {
                 .unwrap_err()
                 .contains("not an acquisition PASS")
         );
-        // Four has no execution path; a path leaving the root; no author.
+        // SC4 d: a Four.meme venue is qualified by its own evidence (its
+        // freeze, the build's economics snapshot), not a Flap freeze; a path
+        // leaving the root; no author.
         let root2 = fixture("scope", "PASS");
         let mut four = spec();
         four.venues = vec![(VenueId::FourClassic, venue_evidence())];
-        assert!(
-            build(&root2, &four, 1)
-                .unwrap_err()
-                .contains("no execution path")
-        );
+        let e = build(&root2, &four, 1).unwrap_err();
+        assert!(e.contains("is no record this role takes"), "{e}");
         let mut escape = spec();
         escape.sources = vec![(SourceId::Drpc, vec!["../outside.dbrec".into()])];
         assert!(build(&root2, &escape, 1).is_err());

@@ -63,6 +63,7 @@ fn fact(kind: FactKind, tx: [u8; 32], tok: [u8; 20]) -> Fact {
         attempt: None,
         operator: None,
         source: None,
+        venue: None,
     }
 }
 

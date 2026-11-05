@@ -689,8 +689,57 @@ pub mod live_ledger {
     /// block confirmed by the second source) or `NONCE` (`REPLACED`: no
     /// receipt, the sender's confirmed nonce past it).
     pub const SOURCE: u16 = 32;
+    /// v5 (SC4 d): the venue its transaction trades on (`BSC_VENUE_*`);
+    /// absent: Flap (every fact before it).
+    pub const VENUE: u16 = 33;
 
     pub const SCHEMA: Schema = Schema {
+        name: "darkbot.bsc.live-ledger.v1",
+        record_type: 68,
+        schema_version: 5,
+        fields: &[
+            Field::req(KIND, "kind", Text),
+            Field::req(TX_HASH, "tx_hash", B256),
+            Field::req(PROVENANCE_TOOL, "_provenance.tool", Text),
+            Field::req(
+                PROVENANCE_OBSERVED_UNIX_MS,
+                "_provenance.observed_unix_ms",
+                U64,
+            ),
+            Field::req(INTENT, "intent", Text),
+            Field::req(COMPONENT, "component", Text),
+            Field::req(TOKEN, "token", Address),
+            Field::req(NONCE, "nonce", U64),
+            Field::req(GRANT_GENERATION, "grant_generation", U64),
+            Field::opt(INPUT_WEI, "input_wei", U256),
+            Field::opt(MAX_WEI, "max_wei", U256),
+            Field::opt(BLOCK_NUMBER, "block_number", U64),
+            Field::opt(BLOCK_HASH, "block_hash", B256),
+            Field::opt(BLOCK_MS, "block_ms", U64),
+            Field::opt(GAS_WEI, "gas_wei", U256),
+            Field::opt(TOKENS, "tokens", U256),
+            Field::opt(ETH_WEI, "eth_wei", U256),
+            Field::opt(MAX_BLOCK, "max_block", U64),
+            Field::opt(BY_TX_HASH, "by_tx_hash", B256),
+            Field::opt(RESPONSE, "response", Text),
+            Field::opt(SENDER, "sender", Address),
+            Field::opt(CHAIN_ID, "chain_id", U64),
+            Field::opt(LAUNCHER, "launcher", Address),
+            Field::opt(PLACEMENT, "placement", Text),
+            Field::opt(LAUNCH_INDEX, "launch_index", U64),
+            Field::opt(OWN_INDEX, "own_index", U64),
+            Field::opt(BUYS_BEFORE, "buys_before", U64),
+            Field::opt(ATTEMPT, "attempt", B256),
+            Field::opt(REQUEST_ID, "request_id", Text),
+            Field::opt(DECIDED_BY, "decided_by", Text),
+            Field::opt(EVIDENCE_SHA256, "evidence_sha256", B256),
+            Field::opt(SOURCE, "source", Text),
+            Field::opt(VENUE, "venue", Text),
+        ],
+    };
+
+    /// v4 (no venue: every fact Flap's), kept readable.
+    pub const V4: Schema = Schema {
         name: "darkbot.bsc.live-ledger.v1",
         record_type: 68,
         schema_version: 4,
@@ -2581,6 +2630,7 @@ pub const ALL: &[&Schema] = &[
     &live_spend::SCHEMA,
     &live_spend::V1,
     &live_ledger::SCHEMA,
+    &live_ledger::V4,
     &live_ledger::V3,
     &live_ledger::V2,
     &live_ledger::V1,

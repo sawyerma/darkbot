@@ -20,8 +20,8 @@ import { SourceActions } from "../SourceActions";
 /** What each venue's mode does at the native owner (plan v9 §2.3). */
 const VENUE_HINTS: Record<string, string> = {
   BSC_VENUE_FLAP: "SHADOW admits Flap launches to the C3 PAPER path and Strategy C (with BSC_EXEC / BSC_STRATEGY_C SHADOW); OFF admits none; LIVE only under the owner's LIVE gate, for a grant that names it (LIVE tab)",
-  BSC_VENUE_FOUR_CLASSIC: "SHADOW admits Four.meme Classic launches to the C3 PAPER path (with BSC_EXEC SHADOW and BSC_EXEC_FOUR_* set: the pinned TokenManager2 and its fee terms probed, the witnessed Classic BUY economics) and to Strategy C's ledger (on the drift guard's validated deployment); OFF admits none; no LIVE path yet (FOUR_EXECUTION_PATH_MISSING)",
-  BSC_VENUE_OPENFOUR: "SHADOW admits OpenFour launches to the C3 PAPER path (with BSC_EXEC SHADOW and BSC_EXEC_OPENFOUR_* set: the pinned Core, its executed bonding preset and modules probed, the exact-amount BUY economics of that preset only) and to Strategy C's ledger; OFF admits none; no LIVE path yet (FOUR_EXECUTION_PATH_MISSING)",
+  BSC_VENUE_FOUR_CLASSIC: "SHADOW admits Four.meme Classic launches to the C3 PAPER path (with BSC_EXEC SHADOW and BSC_EXEC_FOUR_* set: the pinned TokenManager2 and its fee terms probed, the witnessed Classic BUY economics) and to Strategy C's ledger (on the drift guard's validated deployment, PAPER BUY and exit); OFF admits none; LIVE only under a grant naming it, with its qualification (the pinned contracts' freeze, this build's economics snapshot) and the LIVE gates",
+  BSC_VENUE_OPENFOUR: "SHADOW admits OpenFour launches to the C3 PAPER path (with BSC_EXEC SHADOW and BSC_EXEC_OPENFOUR_* set: the pinned Core, its executed bonding preset and modules probed, the exact-amount BUY economics of that preset only) and to Strategy C's ledger (PAPER BUY and exit); OFF admits none; LIVE only under a grant naming it, with its qualification (the pinned Core's freeze, this build's economics snapshot) and the LIVE gates",
 };
 
 /** Monitoring in the fixed §13 order: sources → venues → builder → G0.7 → G0.8 → chain → timing. */

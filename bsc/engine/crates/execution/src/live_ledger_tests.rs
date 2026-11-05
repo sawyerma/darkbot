@@ -24,7 +24,45 @@ fn released(n: u8, intent: LiveIntentKind, token: u8, input: u64, most: u64) -> 
         attempt: None,
         operator: None,
         source: None,
+        venue: None,
     }
+}
+
+/// SC4 d: a released fact keeps the venue its transaction trades on and
+/// reads it back; its lot is that venue's; a lot of a fact before it is
+/// Flap's.
+#[test]
+fn a_fact_keeps_its_venue_and_its_lot_is_that_venues() {
+    let dir = std::env::temp_dir().join(format!("bsc-live-ledger-venue-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    let ledger = Ledger::open(&dir);
+    let four = Fact {
+        venue: Some(crate::sources::VenueId::OpenFour),
+        ..released(1, LiveIntentKind::Buy, 0xA, 1_000, 1_300)
+    };
+    let older = released(2, LiveIntentKind::Buy, 0xB, 1_000, 1_300);
+    for f in [&four, &older] {
+        ledger.append(f, 1).unwrap();
+    }
+    let book = fold(&ledger.facts().unwrap());
+    assert_eq!(
+        book.tx(&four.tx_hash).map(|t| t.released.venue),
+        Some(Some(crate::sources::VenueId::OpenFour))
+    );
+    let venue = |token: u8| {
+        book.positions
+            .iter()
+            .find(|p| p.token == [token; 20])
+            .map(|p| p.venue)
+    };
+    assert_eq!(
+        (venue(0xA), venue(0xB)),
+        (
+            Some(crate::sources::VenueId::OpenFour),
+            Some(crate::sources::VenueId::Flap)
+        )
+    );
+    fs::remove_dir_all(&dir).unwrap();
 }
 
 /// Budget fix: a fact names its nonce's sender and chain and reads them
@@ -599,6 +637,13 @@ fn a_v4_fact_keeps_its_attempt_operator_and_source_and_a_v3_entry_still_reads() 
         (None, &None, None)
     );
     fs::remove_file(v3).unwrap();
+    // SC4 d review H1: a v4 fact (before the venue) reads as Flap's.
+    let v4 = raw(3, &k::V4, "RELEASED", &|d| {
+        d.set(k::ATTEMPT, Value::B256([4; 32]));
+    });
+    let facts = Ledger::open(&dir).facts().unwrap();
+    assert_eq!((facts[3].attempt, facts[3].venue), (Some([4; 32]), None));
+    fs::remove_file(v4).unwrap();
     type Case<'a> = (&'a str, &'a dyn Fn(&mut Draft), &'a str);
     let refused: [Case<'_>; 6] = [
         (

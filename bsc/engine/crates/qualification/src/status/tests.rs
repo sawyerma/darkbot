@@ -1852,6 +1852,7 @@ fn a_dex_routed_sells_proceeds_show_as_unknown() {
         attempt: None,
         operator: None,
         source: None,
+        venue: None,
     };
     let (buy, sell) = (
         fact(1, LiveIntentKind::Buy, 1_000),
@@ -1978,6 +1979,7 @@ fn the_live_tab_shows_the_exit_deciders_the_recovery_and_the_quarantine() {
         attempt: None,
         operator: None,
         source: None,
+        venue: None,
     };
     let ledger = Ledger::open(&dir);
     let block = Some((90, [9; 32], 1_000));
@@ -2434,6 +2436,7 @@ fn the_live_tab_projects_the_gate_grant_and_ledger() {
         attempt: None,
         operator: None,
         source: None,
+        venue: None,
     };
     Ledger::open(&dir).append(&buy, now).unwrap();
     let config = super::live::runtime_config(&root);
@@ -2581,7 +2584,15 @@ fn the_live_tab_offers_the_owners_grant_choices() {
     let _ = fs::remove_dir_all(&root);
     fs::create_dir_all(root.join("run")).unwrap();
     let s = projection::project(&root, &root.join("run"));
-    assert_eq!(s.live.grant_venues, ["BSC_VENUE_FLAP"]);
+    // SC4 d: Four.meme venues too (each live only with its qualification).
+    assert_eq!(
+        s.live.grant_venues,
+        [
+            "BSC_VENUE_FLAP",
+            "BSC_VENUE_FOUR_CLASSIC",
+            "BSC_VENUE_OPENFOUR"
+        ]
+    );
     assert_eq!(
         s.live.grant_venues,
         LIVE_VENUES.iter().map(|v| v.name()).collect::<Vec<_>>()

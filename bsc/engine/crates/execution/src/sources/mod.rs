@@ -478,8 +478,8 @@ impl Generation {
     /// The effective mode of any entity as it holds now: a requested LIVE
     /// is `LIVE` only when the gate is clear ([`Generation::live_blockers`])
     /// and the grant's scope names the entity; otherwise `BLOCKED` with the
-    /// first reason. Four has no execution path whatever is granted. Every
-    /// other request reads as [`Generation::effective_now`].
+    /// first reason. Every other request reads as
+    /// [`Generation::effective_now`].
     pub fn effective_live_now(&self, entity: Entity, ctx: &LiveContext<'_>) -> Effective {
         self.live_effective(entity, ctx, false)
     }
@@ -541,9 +541,6 @@ impl Generation {
         let stored = self.effective_now(entity, ctx.boot);
         if self.requested_of(entity) != Mode::Live {
             return stored;
-        }
-        if let Entity::Venue(VenueId::FourClassic | VenueId::OpenFour) = entity {
-            return Effective::Blocked(FOUR_EXECUTION_PATH_MISSING);
         }
         let blockers = if exit {
             self.exit_blockers(ctx)

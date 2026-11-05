@@ -150,21 +150,21 @@ struct Validated {
 /// Which Four.meme BUYs the path probes and arms: each with its venue
 /// admitted and its keys configured.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-struct FourScope {
-    classic: bool,
+pub(crate) struct FourScope {
+    pub(crate) classic: bool,
     /// R12d.
-    openfour: bool,
+    pub(crate) openfour: bool,
 }
 
 impl FourScope {
-    fn any(self) -> bool {
+    pub(crate) fn any(self) -> bool {
         self.classic || self.openfour
     }
 
     /// The Four.meme pin the scope probes and validates: the OpenFour
     /// bonding preset (its modules, fee router and fee terms) only with the
     /// OpenFour BUY, so that its drift does not end a Classic-only path.
-    fn pin(self) -> FourDeployment {
+    pub(crate) fn pin(self) -> FourDeployment {
         let pin = bsc_mainnet_r12d_131608421();
         FourDeployment {
             openfour_bonding: pin.openfour_bonding.filter(|_| self.openfour),
@@ -173,16 +173,26 @@ impl FourScope {
     }
 }
 
+/// Why a Four.meme probe does not validate (each runtime ends its path on
+/// it with its own phase).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum FourRefused {
+    Drift(String),
+    DecodeOnly(String),
+    Terms(String),
+}
+
 /// The Four.meme arms' deployment, validated against the refrozen pin at
 /// `generation` (the Flap path's), its OpenFour presets and their modules
 /// included: a drift ends the path as the Flap one does; for the Classic
 /// BUY decode-only economics or other fee terms too (the OpenFour arm
-/// refuses a pin without its executed bonding preset itself).
-fn validate_four(
+/// refuses a pin without its executed bonding preset itself). The PAPER
+/// path and (SC4 d) the LIVE one.
+pub(crate) fn validate_four(
     f: &FourObservation,
     generation: u64,
     scope: FourScope,
-) -> Result<ValidatedFourDeployment, Phase> {
+) -> Result<ValidatedFourDeployment, FourRefused> {
     let seen = format!(
         "observed TokenManager2 implementation {} at block {}",
         f.observed.token_manager2_implementation, f.block_number
@@ -190,17 +200,27 @@ fn validate_four(
     let v = scope
         .pin()
         .validate(&f.observed, generation)
-        .map_err(|e| Phase::DeploymentDrift(format!("{e}: {seen}")))?;
+        .map_err(|e| FourRefused::Drift(format!("{e}: {seen}")))?;
     if scope.classic && !v.classic_economics_witnessed() {
-        return Err(Phase::EconomicsUnqualified(format!(
+        return Err(FourRefused::DecodeOnly(format!(
             "four: {seen} is decode-only"
         )));
     }
     // The fee terms it is armed on are the witnessed ones, at every probe.
     if scope.classic && v.venue_fee() != WITNESSED_VENUE_FEE {
-        return Err(Phase::TermsDrift(format!("four: {:?}", v.venue_fee())));
+        return Err(FourRefused::Terms(format!("four: {:?}", v.venue_fee())));
     }
     Ok(v)
+}
+
+impl From<FourRefused> for Phase {
+    fn from(r: FourRefused) -> Self {
+        match r {
+            FourRefused::Drift(why) => Self::DeploymentDrift(why),
+            FourRefused::DecodeOnly(why) => Self::EconomicsUnqualified(why),
+            FourRefused::Terms(why) => Self::TermsDrift(why),
+        }
+    }
 }
 
 /// Where the PAPER path stands.
@@ -462,7 +482,7 @@ impl ExecRuntime {
                     .transpose()
                 {
                     Ok(four) => four,
-                    Err(phase) => return self.stop(phase),
+                    Err(refused) => return self.stop(refused.into()),
                 };
                 // An armed path stays on its validated deployments (the
                 // same fingerprints); a first probe validates them.

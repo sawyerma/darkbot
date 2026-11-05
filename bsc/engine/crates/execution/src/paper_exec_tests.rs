@@ -1534,6 +1534,24 @@ fn the_exit_reserve_is_each_positions_venues() {
     assert_eq!(exec.held_exit_reserve(), both);
     exec.adopt_approval(token, amount);
     assert_eq!(exec.held_exit_reserve(), both - wei(of.approve_gas_limit));
+    // SC4 d: a lot re-read at its venue owes that venue's exit; one of an
+    // unconfigured venue (Classic here) the Flap one.
+    exec.adopt(
+        [0xA0; 20],
+        U256::from(5u8),
+        crate::sources::VenueId::OpenFour,
+    );
+    let adopted = both + wei(of.sell_gas_limit);
+    assert_eq!(exec.held_exit_reserve(), adopted);
+    exec.adopt(
+        [0xA1; 20],
+        U256::from(5u8),
+        crate::sources::VenueId::FourClassic,
+    );
+    assert_eq!(
+        exec.held_exit_reserve(),
+        adopted + wei(flap_approve) + wei(flap_sell)
+    );
     exec.disarm().unwrap();
     fs::remove_dir_all(&d).unwrap();
 }
@@ -1748,14 +1766,14 @@ fn the_open_exits_are_counted_as_the_positions_change() {
         U256::from(2u8) * (approval + sell) + sell,
         "foreign approval",
     );
-    exec.adopt([9; 20], U256::from(5u8));
+    exec.adopt([9; 20], U256::from(5u8), crate::sources::VenueId::Flap);
     same(
         &exec,
         U256::from(2u8) * (approval + sell + sell),
         "position adopted",
     );
     // Adopted again: still one position.
-    exec.adopt([9; 20], U256::from(6u8));
+    exec.adopt([9; 20], U256::from(6u8), crate::sources::VenueId::Flap);
     same(
         &exec,
         U256::from(2u8) * (approval + sell + sell),

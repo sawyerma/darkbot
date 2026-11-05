@@ -271,6 +271,9 @@ pub struct Fact {
     pub operator: Option<Operator>,
     /// v4: a chain fact not from the follower's block.
     pub source: Option<FactSource>,
+    /// v5 (SC4 d): the venue its transaction trades on (a released one's;
+    /// none: Flap, every fact before it).
+    pub venue: Option<crate::sources::VenueId>,
 }
 
 impl Fact {
@@ -329,6 +332,7 @@ impl Fact {
             attempt: None,
             operator: None,
             source: None,
+            venue: None,
         })
     }
 }
@@ -446,7 +450,8 @@ impl Ledger {
                     .and_then(|o| o.evidence)
                     .map(Value::B256),
             )
-            .set_opt(k::SOURCE, fact.source.map(FactSource::name));
+            .set_opt(k::SOURCE, fact.source.map(FactSource::name))
+            .set_opt(k::VENUE, fact.venue.map(crate::sources::VenueId::name));
         let bytes = d.encode().map_err(|e| e.to_string())?;
         let e = |err: std::io::Error| format!("{}: {err}", self.dir.display());
         fs::DirBuilder::new()
@@ -859,6 +864,7 @@ impl Ledger {
         let bad = |why: &str| format!("{}: {why}", path.display());
         let bytes = fs::read(path).map_err(|e| bad(&e.to_string()))?;
         let r = decode(&k::SCHEMA, &bytes)
+            .or_else(|_| decode(&k::V4, &bytes))
             .or_else(|_| decode(&k::V3, &bytes))
             .or_else(|_| decode(&k::V2, &bytes))
             .or_else(|_| decode(&k::V1, &bytes))
@@ -959,6 +965,10 @@ impl Ledger {
             attempt: r.opt_b256(k::ATTEMPT).map_err(e)?,
             operator,
             source,
+            venue: match r.opt_text(k::VENUE).map_err(e)? {
+                None => None,
+                Some(v) => Some(crate::sources::VenueId::parse(v).ok_or_else(|| bad("venue"))?),
+            },
         };
         Ok((fact, r.u64(k::PROVENANCE_OBSERVED_UNIX_MS).map_err(e)?))
     }
@@ -1083,6 +1093,9 @@ pub struct Position {
     pub proceeds_unknown: bool,
     /// Proceeds − input − gas, once closed (failed: − gas).
     pub pnl_wei: Option<i128>,
+    /// SC4 d: the venue its BUY traded on (its exit's and its re-read's;
+    /// Flap for a lot before it).
+    pub venue: crate::sources::VenueId,
 }
 
 /// The fold of the ledger.
@@ -1362,6 +1375,7 @@ pub fn fold(facts: &[Fact]) -> Book {
                     approved: false,
                     proceeds_unknown: false,
                     pnl_wei: None,
+                    venue: t.released.venue.unwrap_or(crate::sources::VenueId::Flap),
                 });
                 book.positions.len() - 1
             }
@@ -1376,7 +1390,14 @@ pub fn fold(facts: &[Fact]) -> Book {
             (LiveIntentKind::Buy, FactKind::Included) => {
                 p.state = PositionState::Open;
                 p.tokens = inclusion.and_then(|f| f.tokens).unwrap_or_default();
-                p.input_wei = t.released.input_wei.unwrap_or_default();
+                // SC4 d: a Four.meme BUY refunds what it did not spend: its
+                // input is its trade's spend (unknown: its whole value).
+                p.input_wei = match (p.venue, inclusion.and_then(|f| f.eth_wei)) {
+                    (crate::sources::VenueId::Flap, _) | (_, None) => {
+                        t.released.input_wei.unwrap_or_default()
+                    }
+                    (_, Some(spent)) => spent,
+                };
                 p.opened_ms = inclusion.and_then(|f| f.block).map(|b| b.2);
             }
             (LiveIntentKind::Buy, FactKind::Reverted) => {
@@ -1872,6 +1893,8 @@ impl Ledger {
                 at_ms: now_ms,
             }),
             source: None,
+            // The G0.7 BUY: a Flap launch's.
+            venue: Some(crate::sources::VenueId::Flap),
         };
         self.append(&fact, now_ms).map(Some)
     }

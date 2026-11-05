@@ -801,9 +801,10 @@ fn the_venues_are_switchable_in_shadow() {
         let r = s
             .request(&format!("v-live-{i}"), v, Mode::Live, 3 + i as u64, 2)
             .unwrap();
+        // SC4 d: a Four.meme venue's LIVE is the LIVE gate's, as Flap's.
         assert_eq!(
             (r.outcome, r.effective),
-            ("APPLIED", Effective::Blocked(FOUR_EXECUTION_PATH_MISSING)),
+            ("APPLIED", Effective::Blocked(ECONOMIC_LIVE_DISABLED)),
             "{v:?}"
         );
     }
@@ -1316,6 +1317,10 @@ pub(crate) fn live_ready_limited(
     req(ComponentId::StrategyC.into(), Mode::Live);
     req(ComponentId::StateC2.into(), Mode::Live);
     req(VenueId::Flap.into(), Mode::Live);
+    // SC4 d: a Four.meme grant's venue (its Flap lots exit on Flap's).
+    if grant.venue != VenueId::Flap {
+        req(grant.venue.into(), Mode::Live);
+    }
     req(SourceId::PublicNode.into(), Mode::Live);
     req(Entity::BuyLimit, Mode::PerDay(per_day));
     req(Entity::BuyTotal, Mode::PerDay(in_total));
@@ -1389,9 +1394,10 @@ fn live_is_effective_only_when_every_condition_holds() {
         wider.effective_live_now(SourceId::Drpc.into(), &ctx),
         Effective::Blocked(LIVE_NOT_IN_SCOPE)
     );
+    // SC4 d: a venue the grant does not name is out of its scope.
     assert_eq!(
         wider.effective_live_now(VenueId::FourClassic.into(), &ctx),
-        Effective::Blocked(FOUR_EXECUTION_PATH_MISSING)
+        Effective::Blocked(LIVE_NOT_IN_SCOPE)
     );
     // Each switch alone.
     for (id, reason) in [
@@ -1741,12 +1747,23 @@ fn a_live_grant_needs_its_confirmed_scope_and_ends_with_revoke_or_restart() {
         .grant_live("g1", grant.clone(), [0; 32], 0, now)
         .unwrap_err();
     assert!(e.contains("is not this grant's scope"), "{e}");
+    // SC4 d: a grant may name a Four.meme venue (live only with its
+    // qualification).
     let mut four = grant.clone();
     four.venue = VenueId::FourClassic;
-    let e = s
-        .grant_live("g1", four.clone(), four.scope_sha256(), 0, now)
+    // Review M3: Strategy C's alone (C3 BUYs a Flap launch).
+    for strategies in [LiveStrategies::C3, LiveStrategies::Both] {
+        let e = LiveGrant {
+            strategies,
+            ..four.clone()
+        }
+        .validate()
         .unwrap_err();
-    assert!(e.contains(FOUR_EXECUTION_PATH_MISSING), "{e}");
+        assert!(e.contains("takes STRATEGY_C alone"), "{e}");
+    }
+    four.strategies = LiveStrategies::StrategyC;
+    four.validate().unwrap();
+    assert_ne!(four.risk_scope_sha256(), grant.risk_scope_sha256());
     let mut twice = grant.clone();
     twice.sources.push(SourceId::PublicNode);
     let mut many = grant.clone();

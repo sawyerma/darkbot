@@ -49,14 +49,15 @@ use crate::live_ledger::{Book, Fact, FactKind, FactSource, Ledger, PositionState
 use crate::live_qualification;
 use crate::paper_exec::{Arming, ExecBuy, ExecIntent, Executor, NonceEvidence, Refusal};
 use crate::runtime::exec::{ExecSetup, Prober, launch_to, live_probe, strategy_to};
+use crate::runtime::exec::{FourProber, FourRefused, FourScope, live_four_probe, validate_four};
 use crate::runtime::state::{LaneEvidence, StateOwner};
 use crate::sources::{
     ComponentId, LiveAdapter, LiveIntentKind, LiveStrategies, NonceCosts, NonceKey, NonceOrigin,
-    SourceId, Store,
+    SourceId, Store, VenueId,
 };
 use crate::submission::tls::{AuthorizationToken, Q5A_TLS_POLICY, TlsSetup};
 use crate::submission::transport::Clock;
-use crate::venue_probe::VenueObservation;
+use crate::venue_probe::{FourObservation, VenueObservation};
 use alloy_primitives::{Address, U256};
 use darkbot_bsc_record::Draft;
 use darkbot_bsc_record::schema::bsc_runtime::runtime_status::live as l;
@@ -65,6 +66,9 @@ use darkbot_bsc_trading::economics::flap::native_curve20::{
 };
 use darkbot_bsc_trading::intent::IntentState;
 use darkbot_bsc_trading::venues::flap::deployment::{ValidatedDeployment, bsc_mainnet_v5_27_2};
+use darkbot_bsc_trading::venues::fourmeme::deployment::{
+    ValidatedFourDeployment, bsc_mainnet_r12d_131608421,
+};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, TryRecvError, channel};
 use std::thread;
@@ -289,14 +293,37 @@ fn risk_refusal(
     let Some(risk) = grant.risk else {
         return Some(crate::sources::LIVE_GRANT_RISK_MISSING.into());
     };
+    // SC4 d: the granted venue's BUY as signed; its exits and the Flap ones
+    // (a Flap lot exits under any grant) at the larger limits.
+    let (buy_slippage_bps, buy_gas_limit, approve, sell) = match grant.venue {
+        VenueId::Flap => (x.slippage_bps, x.gas_limit, 0, 0),
+        VenueId::FourClassic | VenueId::OpenFour => {
+            let four = match grant.venue {
+                VenueId::FourClassic => x.four,
+                _ => x.openfour,
+            };
+            let Some(f) = four else {
+                return Some(format!(
+                    "{}: its BSC_EXEC_* BUY is not configured",
+                    grant.venue.name()
+                ));
+            };
+            (
+                f.slippage_bps,
+                f.gas_limit,
+                f.approve_gas_limit,
+                f.sell_gas_limit,
+            )
+        }
+    };
     risk.admits(
         &crate::sources::SignedRisk {
-            buy_slippage_bps: x.slippage_bps,
+            buy_slippage_bps,
             exit_slippage_bps: x.exit_slippage_bps,
             gas_price_wei: x.gas_price_wei,
-            buy_gas_limit: x.gas_limit,
-            approve_gas_limit: x.approve_gas_limit,
-            sell_gas_limit: x.sell_gas_limit,
+            buy_gas_limit,
+            approve_gas_limit: x.approve_gas_limit.max(approve),
+            sell_gas_limit: x.sell_gas_limit.max(sell),
         },
         grant.exit_only,
     )
@@ -429,6 +456,77 @@ impl Awaiting {
     }
 }
 
+/// SC4 d: the wei of the buyer's own Four.meme trade `t`: a BUY's spend (the
+/// curve's quote, the event's, with the venue's fee and (Classic) the
+/// token's tax), a SELL's proceeds (the quote less them), on the pinned
+/// deployment's witnessed terms (the ones every arm validates; review M2:
+/// not the arm's, which a stop or a restart takes); none on others.
+fn four_trade_wei(t: &crate::chain_follower::CanonicalFourTrade) -> Option<U256> {
+    use crate::canonical_join::Venue;
+    use darkbot_bsc_trading::economics::four_classic::{ClassicFee, purchase_spent, sale_funds};
+    use darkbot_bsc_trading::venues::fourmeme::profile::{CLASSIC_PROFILES, WITNESSED_VENUE_FEE};
+    // Review L5: the one priced Classic profile's tax; a second profile
+    // needs the traded token's own (this does not build until then).
+    const _: () = assert!(CLASSIC_PROFILES.len() == 1);
+    let quote = U256::from_be_bytes(t.quote);
+    match t.venue {
+        Venue::Four => {
+            let fee = ClassicFee {
+                rate_bps: WITNESSED_VENUE_FEE.rate_bps,
+                min_fee: WITNESSED_VENUE_FEE.min_fee,
+                tax_bps: CLASSIC_PROFILES[0].tax_bps,
+            };
+            match t.sell {
+                true => sale_funds(&fee, quote).ok(),
+                false => purchase_spent(&fee, quote).ok(),
+            }
+        }
+        Venue::OpenFour => {
+            let fee = bsc_mainnet_r12d_131608421().openfour_bonding?.fee;
+            let charged = darkbot_bsc_trading::economics::openfour::charged(&fee, quote).ok()?;
+            match t.sell {
+                true => quote.checked_sub(charged),
+                false => quote.checked_add(charged),
+            }
+        }
+        Venue::Flap => None,
+    }
+}
+
+/// The venue of a strategy curve.
+fn venue_of_curve(curve: &crate::paper_exec::StrategyCurve) -> VenueId {
+    use darkbot_bsc_trading::strategy::book::FourCurve;
+    match curve {
+        crate::paper_exec::StrategyCurve::Flap { .. } => VenueId::Flap,
+        crate::paper_exec::StrategyCurve::Four(FourCurve::Classic { .. }) => VenueId::FourClassic,
+        crate::paper_exec::StrategyCurve::Four(FourCurve::OpenFour { .. }) => VenueId::OpenFour,
+    }
+}
+
+/// SC4 d: an exit's gas limits on `venue` (approval, SELL).
+fn exit_limits(x: &crate::paper_exec::ExecConfig, venue: VenueId) -> (u64, u64) {
+    let (_, _, approve, sell) = x.on_venue(venue);
+    (approve, sell)
+}
+
+/// One probe round of the LIVE path: the Flap deployment, terms and the
+/// buyer's balance, and (SC4 d) the Four.meme deployment when the grant
+/// names a Four venue (probed only after the Flap probe succeeded).
+type LiveProbed = (
+    Result<VenueObservation, String>,
+    Option<Result<FourObservation, String>>,
+);
+
+impl From<FourRefused> for Phase {
+    fn from(r: FourRefused) -> Self {
+        match r {
+            FourRefused::Drift(why) => Self::DeploymentDrift(why),
+            FourRefused::DecodeOnly(why) => Self::EconomicsUnqualified(why),
+            FourRefused::Terms(why) => Self::TermsDrift(why),
+        }
+    }
+}
+
 pub struct LiveRuntime {
     setup: LiveSetup,
     exec: ExecSetup,
@@ -438,9 +536,16 @@ pub struct LiveRuntime {
     /// The PAPER identity's address: never the LIVE key.
     paper_sender: Option<[u8; 20]>,
     phase: Phase,
-    probe: Option<Receiver<Result<VenueObservation, String>>>,
+    probe: Option<Receiver<LiveProbed>>,
     observation: Option<VenueObservation>,
     validated: Option<(ValidatedDeployment, VenueBuyTerms)>,
+    /// SC4 d: the Four.meme BUY the grant names (its venue): probed after
+    /// the Flap path, validated against the refrozen pin and armed with it.
+    four_scope: FourScope,
+    /// SC4 d: the venue the grant BUYs on (Flap without a grant).
+    grant_venue: VenueId,
+    four_validated: Option<ValidatedFourDeployment>,
+    four_prober: FourProber,
     executor: Option<Executor<LiveEnd>>,
     /// BSC3-025: an end whose connections are being established, and since
     /// when: kept across passes for at most [`connecting_hold`] (a closed
@@ -490,8 +595,8 @@ pub struct LiveRuntime {
     exit_deciders: Option<ExitDeciders>,
     /// Strategy C BUYs refused because the grant names no STRATEGY_C.
     strategy_buys_refused: u64,
-    /// SC4 c (review M2): Strategy C BUYs on a Four.meme curve, which has no
-    /// LIVE path yet (VENUE_UNARMED).
+    /// SC4 c (review M2): Strategy C BUYs on a venue the armed path does
+    /// not BUY on (VENUE_UNARMED).
     strategy_buys_venue_unarmed: u64,
     /// REV.1.0 R2: the providers' answers read and not yet journaled (here,
     /// not in the end: a disarm between a poll and the runtime's take drops
@@ -653,6 +758,10 @@ impl LiveRuntime {
             probe: None,
             observation: None,
             validated: None,
+            four_scope: FourScope::default(),
+            grant_venue: VenueId::Flap,
+            four_validated: None,
+            four_prober: live_four_probe,
             executor: None,
             codehash_generation: 0,
             arms: 0,
@@ -1221,6 +1330,19 @@ impl LiveRuntime {
                 }
                 Vec::new()
             }
+            // SC4 d: the buyer's own Four.meme trade: its tokens and, for a
+            // SELL, the funds it paid on the armed deployment's terms (a
+            // BUY: the curve's cost, at most what it spent).
+            CanonicalEvent::FourTrade(t) if t.origin == buyer => {
+                let eth = four_trade_wei(t);
+                if let Some(s) = self.seen.iter_mut().find(|s| s.tx_hash == t.tx_hash) {
+                    s.tokens = Some(U256::from_be_bytes(t.amount));
+                    s.eth_wei = eth;
+                    s.token = Some(t.token);
+                    s.bought = !t.sell && t.trader == buyer;
+                }
+                Vec::new()
+            }
             // REV.1.0 R2: another trader's BUY of a token launched in this
             // block (a C3 BUY's placement counts it, when it came first).
             CanonicalEvent::FlapTrade(t)
@@ -1514,7 +1636,7 @@ impl LiveRuntime {
                 continue;
             }
             if let Some(x) = self.executor.as_mut() {
-                x.adopt(p.token, p.tokens);
+                x.adopt(p.token, p.tokens, p.venue);
             }
             self.opened.push((p.token, p.lot));
             changes.push(PositionChange::Opened {
@@ -1627,6 +1749,13 @@ impl LiveRuntime {
     /// The ledger's fold now.
     pub fn book(&self) -> &Book {
         &self.book
+    }
+
+    /// SC4 d: the Four.meme deployment as `prober` sees it.
+    #[cfg(test)]
+    pub(crate) fn four_probing(mut self, prober: FourProber) -> Self {
+        self.four_prober = prober;
+        self
     }
 
     /// The same path in a fixed boot session and wall clock (tests).
@@ -1776,6 +1905,7 @@ impl LiveRuntime {
         self.disarm();
         self.connecting = None;
         self.validated = None;
+        self.four_validated = None;
         self.phase = phase;
     }
 
@@ -1784,11 +1914,15 @@ impl LiveRuntime {
         let endpoint = endpoint.to_string();
         let limits = *limits;
         let prober = self.prober;
+        let (four_prober, scope) = (self.four_prober, self.four_scope);
         let caller = Address::from(self.setup.buyer);
         let spawned = thread::Builder::new()
             .name("bsc-live-probe".into())
             .spawn(move || {
-                let _ = tx.send(prober(&endpoint, &limits, &bsc_mainnet_v5_27_2(), caller));
+                let flap = prober(&endpoint, &limits, &bsc_mainnet_v5_27_2(), caller);
+                let four = (scope.any() && flap.is_ok())
+                    .then(|| four_prober(&endpoint, &limits, &scope.pin()));
+                let _ = tx.send((flap, four));
             });
         match spawned {
             Ok(_) => {
@@ -1800,10 +1934,33 @@ impl LiveRuntime {
         }
     }
 
-    /// One BUY's most: the configured input and its gas at the signed price.
+    /// SC4 d: the Four.meme venues a grant names now (`scope`). An arm
+    /// under the earlier grant ends as any grant change ends it
+    /// (`LIVE_GRANT_CHANGED`); before an arm, a probe or validation of the
+    /// earlier scope is not this one's: the next arm probes anew.
+    fn rescope(&mut self, scope: FourScope) {
+        if scope == self.four_scope {
+            return;
+        }
+        self.four_scope = scope;
+        if self.executor.is_none() {
+            self.probe = None;
+            self.validated = None;
+            self.four_validated = None;
+        }
+    }
+
+    /// SC4 d: the venue the grant BUYs on.
+    fn granted_venue(&self) -> VenueId {
+        self.grant_venue
+    }
+
+    /// One BUY's most: the configured input and its gas at the signed price
+    /// (SC4 d: the granted venue's).
     fn one_buy(&self) -> U256 {
         let x = &self.exec.exec;
-        U256::from(x.input_wei) + U256::from(x.gas_price_wei) * U256::from(x.gas_limit)
+        let (input, gas, _, _) = x.on_venue(self.granted_venue());
+        U256::from(input) + U256::from(x.gas_price_wei) * U256::from(gas)
     }
 
     /// The most an exit step may go at: the signed gas price, or with the
@@ -1824,20 +1981,23 @@ impl LiveRuntime {
     /// One position's exit at the most it may go at ([`Self::exit_price`]):
     /// its approval's gas and its SELL's.
     fn exit_gas(&self) -> (U256, U256) {
-        let x = &self.exec.exec;
+        self.exit_gas_of(self.granted_venue())
+    }
+
+    /// SC4 d: [`Self::exit_gas`] of a lot on `venue`.
+    fn exit_gas_of(&self, venue: VenueId) -> (U256, U256) {
+        let (approve, sell) = exit_limits(&self.exec.exec, venue);
         let price = U256::from(self.exit_price());
-        (
-            price * U256::from(x.approve_gas_limit),
-            price * U256::from(x.sell_gas_limit),
-        )
+        (price * U256::from(approve), price * U256::from(sell))
     }
 
     /// What the executor's own count of a new BUY's exit (at the signed
     /// price) leaves out of [`Self::exit_gas`] (R5: a re-priced exit).
     fn own_exit_excess(&self) -> U256 {
         let x = &self.exec.exec;
+        let (approve, sell) = exit_limits(x, self.granted_venue());
         let excess = U256::from(self.exit_price() - x.gas_price_wei);
-        excess * U256::from(x.approve_gas_limit) + excess * U256::from(x.sell_gas_limit)
+        excess * U256::from(approve) + excess * U256::from(sell)
     }
 
     /// The most the exits of the ledger's lots may still cost
@@ -1856,7 +2016,6 @@ impl LiveRuntime {
     /// covers that nonce's pending lots. An exiting lot's SELL is out (it
     /// counts in what was spent). None counted: the sum overflows.
     fn exit_reserve_besides(&self, besides: Option<NonceKey>) -> U256 {
-        let (approval, sell) = self.exit_gas();
         let mut reserve = NonceCosts::default();
         for p in self
             .book
@@ -1887,6 +2046,8 @@ impl LiveRuntime {
                         FactKind::Released | FactKind::Unknown | FactKind::Included
                     )
             });
+            // SC4 d: at its venue's exit limits.
+            let (approval, sell) = self.exit_gas_of(p.venue);
             let wei = match approved {
                 true => sell,
                 false => approval + sell,
@@ -1921,12 +2082,23 @@ impl LiveRuntime {
         })
     }
 
-    fn observed(&mut self, result: Result<VenueObservation, String>) {
+    fn observed(&mut self, (result, four): LiveProbed) {
         let observation = match result {
             Ok(o) => o,
             Err(e) => return self.stop(Phase::ProbeFailed(e)),
         };
         let generation = self.codehash_generation + 1;
+        // SC4 d: the Four.meme deployment the grant's venue trades on, at
+        // every probe (a drift ends the path as the Flap one's does).
+        let four = match (self.four_scope.any(), four) {
+            (false, _) => None,
+            (true, None) => return self.stop(Phase::ProbeFailed("four: no probe".into())),
+            (true, Some(Err(e))) => return self.stop(Phase::ProbeFailed(format!("four: {e}"))),
+            (true, Some(Ok(f))) => match validate_four(&f, generation, self.four_scope) {
+                Ok(v) => Some(v),
+                Err(refused) => return self.stop(refused.into()),
+            },
+        };
         let validated = bsc_mainnet_v5_27_2().validate(&observation.deployment(), generation);
         let terms = observation.terms;
         let balance = observation.caller_balance_wei;
@@ -1985,6 +2157,7 @@ impl LiveRuntime {
                 if self.executor.is_none() {
                     self.codehash_generation = generation;
                     self.validated = Some((v, terms));
+                    self.four_validated = four;
                 }
             }
         }
@@ -2068,13 +2241,20 @@ impl LiveRuntime {
         if let Some(why) = invalid {
             return self.close(format!("LIVE_QUALIFICATION_INVALID: {why}"));
         }
-        let (strategies, generation) = match store.current() {
+        let (strategies, generation, venue) = match store.current() {
             Ok(g) => (
-                g.live.map(|grant| grant.strategies),
+                g.live.as_ref().map(|grant| grant.strategies),
                 g.live_set_by.map(|by| by.generation),
+                g.live.map(|grant| grant.venue),
             ),
             Err(e) => return self.close(format!("owner state: {e}")),
         };
+        // SC4 d: the Four.meme BUY the grant's venue names.
+        self.grant_venue = venue.unwrap_or(VenueId::Flap);
+        self.rescope(FourScope {
+            classic: venue == Some(VenueId::FourClassic),
+            openfour: venue == Some(VenueId::OpenFour),
+        });
         let Some(strategies) = strategies else {
             return self.close(crate::sources::LIVE_GRANT_MISSING.into());
         };
@@ -2443,6 +2623,20 @@ impl LiveRuntime {
             },
         );
         self.arms += 1;
+        // SC4 d: the grant's Four.meme venue armed on the validated
+        // deployment (its policy and gas limits, `BSC_EXEC_FOUR_*` /
+        // `BSC_EXEC_OPENFOUR_*`).
+        let armed = armed.and_then(|mut x| {
+            if let Some(v) = self.four_validated {
+                if self.four_scope.classic {
+                    x.arm_four(v)?;
+                }
+                if self.four_scope.openfour {
+                    x.arm_openfour(v)?;
+                }
+            }
+            Ok(x)
+        });
         match armed {
             Ok(mut executor) => {
                 // Positions open from before (a restart, an earlier grant)
@@ -2453,7 +2647,7 @@ impl LiveRuntime {
                     .iter()
                     .filter(|p| matches!(p.state, PositionState::Open | PositionState::Exiting))
                 {
-                    executor.adopt(p.token, p.tokens);
+                    executor.adopt(p.token, p.tokens, p.venue);
                     // Its lot's approval the chain included: no second one
                     // (an earlier lot's went with its SELL, BSC3-047).
                     if p.approved {
@@ -2598,14 +2792,8 @@ impl LiveRuntime {
         owner: &StateOwner,
         clock: &dyn Clock,
     ) -> Option<ExecBuy<LiveHandoff>> {
-        let granted = self
-            .executor
-            .as_ref()?
-            .end()
-            .armed()
-            .grant()
-            .sources
-            .contains(&source);
+        let grant = self.executor.as_ref()?.end().armed().grant();
+        let granted = grant.sources.contains(&source);
         if !self.sources_live.contains(&source) {
             // BSC3-075: neither its BUY nor a block for the granted
             // sources: the first of them that sees it still triggers.
@@ -3035,12 +3223,22 @@ impl LiveRuntime {
             .strategies
             .strategy_c();
         self.poll_responses(clock);
-        // SC4: a Four.meme curve has no LIVE path until its qualification
-        // (Four d): refused before any lease, budget or nonce is touched.
+        // SC4 d: the armed path BUYs on the granted venue alone and exits
+        // on the venues it is armed for (Flap always, a Four.meme one with
+        // its grant): another is refused before any lease, budget or nonce
+        // is touched.
         let (crate::runtime_strategy::StrategyAction::Buy { curve, .. }
         | crate::runtime_strategy::StrategyAction::Exit { curve, .. }) = *action;
-        if let crate::paper_exec::StrategyCurve::Four(_) = curve {
-            if matches!(action, crate::runtime_strategy::StrategyAction::Buy { .. }) {
+        let venue = venue_of_curve(&curve);
+        let x = self.executor.as_ref()?;
+        let buy = matches!(action, crate::runtime_strategy::StrategyAction::Buy { .. });
+        let unarmed = match venue {
+            VenueId::Flap => false,
+            VenueId::FourClassic => !x.four_armed(),
+            VenueId::OpenFour => !x.openfour_armed(),
+        };
+        if unarmed || (buy && venue != x.end().armed().grant().venue) {
+            if buy {
                 self.strategy_buys_venue_unarmed += 1;
             }
             return Some((Vec::new(), Some(Refusal::VenueUnarmed)));
@@ -3054,7 +3252,8 @@ impl LiveRuntime {
                 return Some((Vec::new(), Some(Refusal::Owner)));
             }
             let x = &self.exec.exec;
-            let most = input_wei + U256::from(x.gas_price_wei) * U256::from(x.gas_limit);
+            let (_, gas, _, _) = x.on_venue(venue);
+            let most = input_wei + U256::from(x.gas_price_wei) * U256::from(gas);
             if let Some(refusal) = self.buy_refused(most, Some(owner), next) {
                 return Some((Vec::new(), Some(refusal)));
             }
@@ -3267,9 +3466,10 @@ impl LiveRuntime {
                     && t.window_over(head)
             })
             .filter_map(|t| {
+                let (approve, sell) = exit_limits(x, t.released.venue.unwrap_or(VenueId::Flap));
                 let limit = U256::from(match t.released.intent {
-                    LiveIntentKind::Approve => x.approve_gas_limit,
-                    _ => x.sell_gas_limit,
+                    LiveIntentKind::Approve => approve,
+                    _ => sell,
                 });
                 let paid = t
                     .released
@@ -3459,9 +3659,10 @@ impl LiveRuntime {
                     .released
                     .max_wei
                     .map(|m| m.saturating_sub(t.released.input_wei.unwrap_or_default()));
+                let (approve, sell) = exit_limits(exec, t.released.venue.unwrap_or(VenueId::Flap));
                 let limit = match t.released.intent {
-                    LiveIntentKind::Approve => exec.approve_gas_limit,
-                    _ => exec.sell_gas_limit,
+                    LiveIntentKind::Approve => approve,
+                    _ => sell,
                 };
                 let now = U256::from(exec.gas_price_wei) * U256::from(limit);
                 matches!((used, most), (Some(used), Some(most)) if used >= most && now <= most)

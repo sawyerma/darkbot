@@ -408,10 +408,15 @@ impl Engine {
     /// it prices (tracked, every term in the priced scope): its exit is
     /// decided here.
     pub fn holds(&self, token: &[u8; 20]) -> bool {
-        // SC4: a Four.meme curve gets its exit actions with its execution
-        // path; until then its real position is not held here.
+        // SC4 d: a Four.meme curve tracked exactly holds its real position
+        // too (its exit actions on its venue's armed path).
         self.tokens.values().any(|t| {
-            t.token == *token && matches!(t.stage, Stage::Held { .. }) && t.book.priced().is_ok()
+            t.token == *token
+                && matches!(t.stage, Stage::Held { .. })
+                && match t.book.four {
+                    Some(_) => t.book.status.is_ok(),
+                    None => t.book.priced().is_ok(),
+                }
         })
     }
 

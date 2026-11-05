@@ -1905,6 +1905,68 @@ impl Rig {
         }
     }
 
+    /// SC4 d: [`Rig::new`] under a grant of the Four.meme venue `venue`,
+    /// qualified by the r12d freeze and this build's economics snapshot,
+    /// its BUY and exit configured (`BSC_EXEC_FOUR_*`/`OPENFOUR_*`, 0.01
+    /// BNB as tracked).
+    fn four(tag: &str, strategies: LiveStrategies, venue: VenueId) -> Rig {
+        use crate::live_qualification::tests::filled;
+        use darkbot_bsc_record::schema::bsc_economics::economics_snapshot as es;
+        let grant = |now| LiveGrant {
+            venue,
+            ..rig_grant(now, strategies)
+        };
+        let (freeze, config) = match venue {
+            VenueId::FourClassic => ("classic", crate::runtime::exec::tests::four_config()),
+            _ => ("openfour", crate::runtime::exec::tests::openfour_config()),
+        };
+        let mut r = Rig::granting(tag, strategies, |now| grant(now + 3_600_000));
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../..");
+        for p in darkbot_bsc_trading::economics::snapshot::BOUND_FILES {
+            fs::create_dir_all(r.root.join(p).parent().unwrap()).unwrap();
+            fs::copy(repo.join(p), r.root.join(p)).unwrap();
+        }
+        fs::copy(
+            repo.join(format!(
+                "bsc/native/evidence/g01/four_freeze_20261104T052604Z/{freeze}.dbrec"
+            )),
+            r.root.join("ev/four.dbrec"),
+        )
+        .unwrap();
+        let mut snapshot = filled(&es::SCHEMA);
+        snapshot.set(es::CHAIN_ID, 56u64).set(
+            es::SNAPSHOT_SHA256,
+            darkbot_bsc_record::Value::B256(
+                crate::live_qualification::snapshot_of(&r.root).unwrap(),
+            ),
+        );
+        fs::write(r.root.join("ev/snapshot.dbrec"), snapshot.encode().unwrap()).unwrap();
+        let mut spec = rig_spec_for(
+            Some(crate::live_qualification::running_build().unwrap()),
+            grant(0).risk_scope_sha256(),
+        );
+        spec.venues.push((
+            venue,
+            vec!["ev/four.dbrec".into(), "ev/snapshot.dbrec".into()],
+        ));
+        fs::write(
+            r.root.join(LIVE_QUALIFICATION_PATH),
+            build(&r.root, &spec, 1).unwrap(),
+        )
+        .unwrap();
+        let config = Some(crate::paper_exec::FourExecConfig {
+            input_wei: 10_000_000_000_000_000,
+            ..config
+        });
+        match venue {
+            VenueId::FourClassic => r.exec.exec.four = config,
+            _ => r.exec.exec.openfour = config,
+        }
+        r.exec.exec.session_cap_wei = 100_000_000_000_000_000;
+        r.exec.exec.strategy_session_cap_wei = 100_000_000_000_000_000;
+        r
+    }
+
     /// [`Rig::new`] whose builder stand-in answers with `answers`.
     fn answering(
         tag: &str,
@@ -1996,6 +2058,450 @@ impl Rig {
         fs::remove_dir_all(self.root).unwrap();
         fs::remove_dir_all(self.state).unwrap();
     }
+}
+
+/// SC4 d: the pinned Four.meme deployment as the probe sees it.
+fn four_pinned(
+    _: &str,
+    _: &FollowerLimits,
+    d: &darkbot_bsc_trading::venues::fourmeme::deployment::FourDeployment,
+) -> Result<crate::venue_probe::FourObservation, String> {
+    Ok(crate::runtime::exec::tests::four_observation(d))
+}
+
+/// SC4 d: one tracked Four.meme BUY and its exit as the chain reports
+/// them: the strategy's curve, the token, the tokens bought, the BUY
+/// event's quote and what the BUY spent, the curve the exit sells on, the
+/// SELL event's quote and what the seller received.
+struct FourRound {
+    curve: darkbot_bsc_trading::strategy::book::FourCurve,
+    token: [u8; 20],
+    tokens: U256,
+    buy_quote: U256,
+    spent: U256,
+    held: darkbot_bsc_trading::strategy::book::FourCurve,
+    sell_quote: U256,
+    received: U256,
+}
+
+/// SC4 d: the executed probe of a 0.01 BNB BUY and its SELL on a priced
+/// Classic curve (block 131139373): what it lost and what the SELL paid.
+fn classic_round() -> FourRound {
+    use darkbot_bsc_trading::economics::four_classic::{
+        ClassicCurve, ClassicFee, quote_buy, quote_sell,
+    };
+    use darkbot_bsc_trading::strategy::book::FourCurve;
+    use darkbot_bsc_trading::venues::fourmeme::profile::WITNESSED_MAX_OFFERS;
+    const FIXTURE: &str =
+        include_str!("../../trading/fixtures/fourmeme/classic_parity_20261104.txt");
+    let u = |s: &str| U256::from_str_radix(s, 10).unwrap();
+    // PROBE block token template feeSetting K T offers rate minFee funds
+    // tokens spent soldFor ...
+    let f: Vec<&str> = FIXTURE
+        .lines()
+        .map(|l| l.split(' ').collect::<Vec<_>>())
+        .find(|f| f[0] == "PROBE" && f[1] == "131139373" && f[10] == "10000000000000000")
+        .unwrap();
+    let offers = u(f[7]);
+    let curve = FourCurve::classic_at(
+        ClassicCurve {
+            k: u(f[5]),
+            t: u(f[6]),
+            offers,
+            sold: WITNESSED_MAX_OFFERS - offers,
+        },
+        ClassicFee {
+            rate_bps: f[8].parse().unwrap(),
+            min_fee: u(f[9]),
+            // The priced word's tax (10 %).
+            tax_bps: 1_000,
+        },
+    )
+    .unwrap();
+    let FourCurve::Classic { start, now, fee } = curve else {
+        unreachable!()
+    };
+    let bought = quote_buy(&now, &fee, u(f[10])).unwrap();
+    assert_eq!((bought.amount, bought.spent), (u(f[11]), u(f[12])));
+    let sold = quote_sell(&bought.after, &fee, bought.amount).unwrap();
+    assert_eq!(sold.funds, u(f[13]));
+    FourRound {
+        curve,
+        token: hex::decode(&f[2][2..]).unwrap().try_into().unwrap(),
+        tokens: bought.amount,
+        buy_quote: bought.cost,
+        spent: u(f[12]),
+        held: FourCurve::Classic {
+            start,
+            now: bought.after,
+            fee,
+        },
+        sell_quote: sold.gross,
+        received: u(f[13]),
+    }
+}
+
+/// SC4 d: the executed admission of an OpenFour BUY (block 131615000)
+/// and the SELL of its tokens.
+fn openfour_round() -> FourRound {
+    use darkbot_bsc_trading::economics::openfour::{quote_buy_amount, quote_sell};
+    use darkbot_bsc_trading::strategy::book::FourCurve;
+    let (curve, token, tokens) = crate::paper_exec::tests::openfour_strategy_state("131615000");
+    let FourCurve::OpenFour { start, now, fee } = curve else {
+        unreachable!()
+    };
+    let bought = quote_buy_amount(&now, &fee, tokens).unwrap();
+    let sold = quote_sell(&bought.after, &fee, tokens).unwrap();
+    FourRound {
+        curve,
+        token,
+        tokens,
+        buy_quote: bought.cost,
+        spent: bought.pay,
+        held: FourCurve::OpenFour {
+            start,
+            now: bought.after,
+            fee,
+        },
+        sell_quote: sold.gross,
+        received: sold.received,
+    }
+}
+
+/// SC4 d review M2: a Four trade's wei are the pinned deployment's
+/// witnessed terms' (no arm needed: one stopped or not yet probed after a
+/// restart attributes the same): a BUY its spend, a SELL its proceeds.
+#[test]
+fn a_four_trades_wei_need_no_arm() {
+    use crate::canonical_join::Venue;
+    for (venue, round) in [
+        (Venue::Four, classic_round()),
+        (Venue::OpenFour, openfour_round()),
+    ] {
+        let trade = |sell, quote: U256| crate::chain_follower::CanonicalFourTrade {
+            venue,
+            block_number: HEAD,
+            block_hash: [0xb1; 32],
+            tx_index: 0,
+            tx_hash: [1; 32],
+            log_index: 0,
+            origin: [2; 20],
+            sell,
+            token: round.token,
+            trader: [2; 20],
+            amount: round.tokens.to_be_bytes(),
+            quote: quote.to_be_bytes(),
+            remaining: [0; 32],
+            raised: [0; 32],
+        };
+        assert_eq!(
+            four_trade_wei(&trade(false, round.buy_quote)),
+            Some(round.spent),
+            "{venue:?}"
+        );
+        assert_eq!(
+            four_trade_wei(&trade(true, round.sell_quote)),
+            Some(round.received),
+            "{venue:?}"
+        );
+    }
+}
+
+/// SC4 d: a Four Classic grant arms its venue on its probe and BUYs
+/// there alone; the position holds what the executed probe spent and
+/// closes at what its SELL paid.
+#[test]
+fn a_classic_grant_arms_its_venue_and_buys_there_alone() {
+    four_grant_round("live-classic", VenueId::FourClassic, classic_round());
+}
+
+/// SC4 d: [`a_classic_grant_arms_its_venue_and_buys_there_alone`] on
+/// OpenFour.
+#[test]
+fn an_openfour_grant_arms_its_venue_and_buys_there_alone() {
+    four_grant_round("live-openfour", VenueId::OpenFour, openfour_round());
+}
+
+/// SC4 d: a grant of the Four.meme venue `venue` arms it on its probe and
+/// BUYs there alone: a Flap BUY and a C3 launch (a Flap BUY) are refused
+/// (each counted), nothing sent for them; the strategy's BUY of `round`
+/// leaves, its receipt and trade open the position at the BUY's spend (the
+/// event's quote with the venue's fee and tax; the rest refunded), its exit
+/// (approval, SELL) closes it at the SELL's proceeds (the quote less
+/// them); the grant's venue changed ends the arm.
+fn four_grant_round(tag: &str, venue: VenueId, round: FourRound) {
+    use crate::paper_exec::{Refusal, StrategyCurve};
+    use crate::runtime_strategy::StrategyAction;
+    let r = Rig::four(tag, LiveStrategies::StrategyC, venue);
+    let mut x = r.runtime("boot-1").four_probing(four_pinned);
+    let mut c2 = c2_at(&r.d, r.buyer, 0);
+    settle(&mut x, &c2);
+    assert!(x.armed(), "{:?}", reason(&x));
+    let armed = x.executor.as_ref().unwrap();
+    let classic = venue == VenueId::FourClassic;
+    assert_eq!(
+        (armed.four_armed(), armed.openfour_armed()),
+        (classic, !classic)
+    );
+    // One BUY's most: the venue's input and gas limit.
+    let price = U256::from(x.exec.exec.gas_price_wei);
+    let most =
+        |(input, gas, _, _): (u128, u64, u64, u64)| U256::from(input) + price * U256::from(gas);
+    assert_eq!(x.one_buy(), most(x.exec.exec.on_venue(venue)));
+    assert_ne!(x.one_buy(), most(x.exec.exec.on_venue(VenueId::Flap)));
+    let silent = Duration::from_millis(300);
+    let t = Cell::new(5_000_000_000u64);
+    let clock = FnClock {
+        id: 1,
+        now: || {
+            t.set(t.get() + 3);
+            t.get()
+        },
+    };
+    let input = U256::from(10_000_000_000_000_000u64);
+    // A Flap BUY: not the grant's venue.
+    let flap = StrategyAction::Buy {
+        token: [0xF1; 20],
+        creator: [0; 20],
+        curve: StrategyCurve::Flap {
+            terms: darkbot_bsc_trading::economics::flap::native_curve20::PricedToken::new(
+                &darkbot_bsc_trading::economics::flap::native_curve20::profile_terms(100, 100),
+            )
+            .unwrap(),
+            reserve: U256::ZERO,
+            circulating: U256::ZERO,
+        },
+        input_wei: input,
+        decided_ns: 0,
+    };
+    let (out, refused) = x.on_strategy(&flap, &c2, &clock, DECIDED_MS).unwrap();
+    assert_eq!((out.len(), refused), (0, Some(Refusal::VenueUnarmed)));
+    assert_eq!(x.strategy_buys_venue_unarmed, 1);
+    assert!(r.requests.recv_timeout(silent).is_err());
+    // A Flap launch: no C3 BUY under a Strategy C grant.
+    let (hash, raw, launcher) = launch();
+    c2.pending(hash, launcher, 3, 0, 10);
+    assert!(
+        x.on_launch(
+            SourceId::PublicNode,
+            hash,
+            [0; 20],
+            &raw,
+            10,
+            &c2,
+            &a_clock()
+        )
+        .is_none()
+    );
+    assert!(r.requests.recv_timeout(silent).is_err());
+    // The venue's BUY leaves.
+    let FourRound {
+        curve,
+        token,
+        tokens: amount,
+        ..
+    } = round;
+    let buy = StrategyAction::Buy {
+        token,
+        creator: [0; 20],
+        curve: StrategyCurve::Four(curve),
+        input_wei: input,
+        decided_ns: 0,
+    };
+    let (out, refused) = x.on_strategy(&buy, &c2, &clock, DECIDED_MS).unwrap();
+    assert_eq!((out.len(), refused), (1, None));
+    let sent = String::from_utf8(r.requests.recv_timeout(Duration::from_secs(2)).unwrap()).unwrap();
+    assert!(sent.contains("eth_sendBundle"), "{sent}");
+    let released = &x.book().unresolved().next().unwrap().released;
+    assert_eq!((released.token, released.venue), (token, Some(venue)));
+    let buy_tx = out[0].handoff.tx_hash;
+    // Its receipt and its trade: the position holds the tokens at what
+    // the BUY spent (its quote with the fee and tax, below the value).
+    assert!(round.spent > round.buy_quote && round.spent < input);
+    let buyer = r.buyer;
+    let tx = |hash, nonce, gas: u64| crate::chain_follower::CanonicalTx {
+        hash,
+        index: 0,
+        sender: buyer,
+        nonce,
+        succeeded: true,
+        cost: Some(crate::chain_follower::TxCost {
+            gas_used: gas,
+            effective_gas_price: 50_000_000,
+        }),
+    };
+    let block = |n: u64, h: u8, parent: u8, txs| CanonicalEvent::Block {
+        number: n,
+        hash: [h; 32],
+        parent_hash: [parent; 32],
+        timestamp_s: 1_793_000_000 + (n - HEAD),
+        timestamp_ms: 1_793_000_000_000 + (n - HEAD) * 1_000,
+        observed: Instant::now(),
+        observed_unix_ms: None,
+        txs,
+    };
+    let trade = |hash, n: u64, h: u8, sell, amount: U256, quote: U256| {
+        CanonicalEvent::FourTrade(crate::chain_follower::CanonicalFourTrade {
+            venue: match classic {
+                true => crate::canonical_join::Venue::Four,
+                false => crate::canonical_join::Venue::OpenFour,
+            },
+            block_number: n,
+            block_hash: [h; 32],
+            tx_index: 0,
+            tx_hash: hash,
+            log_index: 0,
+            origin: buyer,
+            sell,
+            token,
+            trader: buyer,
+            amount: amount.to_be_bytes(),
+            quote: quote.to_be_bytes(),
+            remaining: [0; 32],
+            raised: [0; 32],
+        })
+    };
+    let complete = |n: u64, h: u8| CanonicalEvent::BlockComplete {
+        number: n,
+        hash: [h; 32],
+    };
+    let apply = |x: &mut LiveRuntime, c2: &mut StateOwner, events: Vec<CanonicalEvent>| {
+        let mut changes = Vec::new();
+        for e in &events {
+            c2.canonical(e);
+            let evidence = c2.take_evidence();
+            let _ = x.apply_evidence(&evidence);
+            changes.extend(x.on_canonical(e));
+        }
+        changes
+    };
+    let gas = |used: u64| U256::from(used * 50_000_000);
+    let changes = apply(
+        &mut x,
+        &mut c2,
+        vec![
+            block(HEAD + 1, 0xb2, 0xb1, vec![tx(buy_tx, 0, 200_000)]),
+            trade(buy_tx, HEAD + 1, 0xb2, false, amount, round.buy_quote),
+            complete(HEAD + 1, 0xb2),
+        ],
+    );
+    assert_eq!(
+        changes,
+        vec![PositionChange::Opened {
+            token,
+            tokens: amount,
+            spent_wei: round.spent + gas(200_000),
+            filled_ms: 1_793_000_001_000,
+        }]
+    );
+    // The lot's exit is reserved at its venue's limits, under a grant of
+    // another venue too.
+    let (_, _, approve, sell) = x.exec.exec.on_venue(venue);
+    let price = U256::from(x.exit_price());
+    let lot = price * U256::from(approve) + price * U256::from(sell);
+    assert_eq!(x.exit_reserve(), lot);
+    x.grant_venue = VenueId::Flap;
+    assert_eq!(x.exit_reserve(), lot);
+    x.grant_venue = venue;
+    // Its exit on the venue's arm: the approval, then the SELL.
+    let reconnect = |x: &mut LiveRuntime| {
+        let failed = x
+            .executor
+            .as_mut()
+            .unwrap()
+            .end_mut()
+            .connect(Duration::from_secs(2));
+        assert!(failed.is_empty());
+    };
+    let exit = StrategyAction::Exit {
+        token,
+        tokens: amount,
+        curve: StrategyCurve::Four(round.held),
+        decided_ns: 0,
+    };
+    reconnect(&mut x);
+    let (out, refused) = x.on_strategy(&exit, &c2, &clock, DECIDED_MS).unwrap();
+    assert_eq!((out.len(), refused), (1, None));
+    let approve_tx = out[0].handoff.tx_hash;
+    r.requests.recv_timeout(Duration::from_secs(2)).unwrap();
+    apply(
+        &mut x,
+        &mut c2,
+        vec![
+            block(HEAD + 2, 0xb3, 0xb2, vec![tx(approve_tx, 1, 50_000)]),
+            complete(HEAD + 2, 0xb3),
+        ],
+    );
+    reconnect(&mut x);
+    let (out, refused) = x.on_strategy(&exit, &c2, &clock, DECIDED_MS).unwrap();
+    assert_eq!((out.len(), refused), (1, None));
+    let sell_tx = out[0].handoff.tx_hash;
+    r.requests.recv_timeout(Duration::from_secs(2)).unwrap();
+    // The SELL's trade reports the curve's gross: the position closes at
+    // what the seller received (the gross less the fee and tax).
+    assert!(round.received < round.sell_quote);
+    let changes = apply(
+        &mut x,
+        &mut c2,
+        vec![
+            block(HEAD + 3, 0xb4, 0xb3, vec![tx(sell_tx, 2, 150_000)]),
+            trade(sell_tx, HEAD + 3, 0xb4, true, amount, round.sell_quote),
+            complete(HEAD + 3, 0xb4),
+        ],
+    );
+    assert_eq!(changes, vec![PositionChange::Ended { token }]);
+    let p = &x.book().positions[0];
+    let spent = i128::try_from(round.spent + gas(200_000 + 50_000 + 150_000)).unwrap();
+    assert_eq!(
+        (p.venue, p.pnl_wei),
+        (venue, Some(i128::try_from(round.received).unwrap() - spent))
+    );
+    // The operator grants Flap instead: the Four.meme arm ends.
+    r.authorize("boot-1", "to-flap");
+    x.tick(
+        Some(&c2),
+        Some(("https://probe.invalid", &limits())),
+        7,
+        NOW,
+    );
+    assert!(
+        !x.executor
+            .as_ref()
+            .is_some_and(|x| x.four_armed() || x.openfour_armed())
+    );
+    r.clean();
+}
+
+/// SC4 d: a grant of another venue seen before the path armed drops the
+/// probe and the validation of the earlier one (the next arm probes the
+/// new scope); an armed path keeps its arm here (the grant change ends it).
+#[test]
+fn a_new_venue_before_the_arm_probes_anew() {
+    use crate::runtime::exec::FourScope;
+    let r = Rig::new("live-rescope", LiveStrategies::StrategyC);
+    let mut x = r.runtime("boot-1").four_probing(four_pinned);
+    let c2 = c2_at(&r.d, r.buyer, 0);
+    x.tick(
+        Some(&c2),
+        Some(("https://probe.invalid", &limits())),
+        7,
+        NOW,
+    );
+    assert!(x.probe.is_some() && !x.armed());
+    let openfour = FourScope {
+        classic: false,
+        openfour: true,
+    };
+    x.rescope(openfour);
+    assert!(x.probe.is_none() && x.validated.is_none() && x.four_validated.is_none());
+    assert_eq!(x.four_scope, openfour);
+    x.rescope(FourScope::default());
+    settle(&mut x, &c2);
+    assert!(x.armed(), "{:?}", reason(&x));
+    x.rescope(openfour);
+    assert!(x.armed() && x.validated.is_some());
+    x.shutdown();
+    r.clean();
 }
 
 /// REV.1.0 R2: the canonical launch of `token` by `creator` at `index`
@@ -3799,6 +4305,7 @@ fn an_unknown_window_keeps_the_arm_blocked() {
                 attempt: None,
                 operator: None,
                 source: None,
+                venue: None,
             },
             1,
         )
@@ -3869,6 +4376,7 @@ fn a_nonce_burn_takes_the_nonce_of_a_transaction_that_may_still_land() {
         attempt: None,
         operator: None,
         source: None,
+        venue: None,
     };
     ledger.append(&target, 1).unwrap();
     assert_eq!(
@@ -4428,6 +4936,7 @@ fn unknown_window(hash: [u8; 32], nonce: u64, component: ComponentId) -> Fact {
         attempt: None,
         operator: None,
         source: None,
+        venue: None,
     }
 }
 
@@ -4979,6 +5488,7 @@ fn a_buyer_short_of_the_exits_buys_nothing() {
         attempt: None,
         operator: None,
         source: None,
+        venue: None,
     };
     ledger.append(&buy, 1).unwrap();
     let included = crate::live_ledger::Fact {
@@ -5326,6 +5836,7 @@ fn an_exit_only_grant_arms_for_the_exits_of_open_positions_only() {
         attempt: None,
         operator: None,
         source: None,
+        venue: None,
     };
     ledger.append(&buy, 1).unwrap();
     let included = crate::live_ledger::Fact {
@@ -5443,6 +5954,7 @@ fn what_a_later_block_included_is_not_paid_in_the_probed_balance() {
         attempt: None,
         operator: None,
         source: None,
+        venue: None,
     };
     ledger.append(&buy, 1).unwrap();
     let included = crate::live_ledger::Fact {
@@ -5777,6 +6289,7 @@ fn alt_buy(n: u8, buyer: [u8; 20], nonce: u64, most: u64) -> Fact {
         attempt: None,
         operator: None,
         source: None,
+        venue: None,
     }
 }
 
@@ -6242,6 +6755,105 @@ fn a_stalled_canonical_source_releases_nothing() {
     );
     x.shutdown();
     r.clean();
+}
+
+/// SC4 d: a Four.meme venue's grant is held to what that venue signs: its
+/// BUY's slippage and gas limit, its exits' limits and the Flap ones (a
+/// Flap lot exits under any grant), each the larger; a family not
+/// configured admits nothing. The LIVE path's per-venue limits are these.
+#[test]
+fn a_four_grant_is_held_to_what_its_venue_signs() {
+    use crate::paper_exec::StrategyCurve;
+    use crate::sources::{GrantRisk, tests::TEST_RISK};
+    let mut x = setup(
+        std::path::PathBuf::from("unused.key"),
+        Duration::from_secs(1),
+    )
+    .exec;
+    let four = crate::paper_exec::FourExecConfig {
+        input_wei: 1_000_000_000_000_000,
+        slippage_bps: 150,
+        gas_limit: 1_000_000,
+        approve_gas_limit: 120_000,
+        sell_gas_limit: 350_000,
+    };
+    x.four = Some(four);
+    let grant = |risk: GrantRisk| LiveGrant {
+        risk: Some(risk),
+        venue: VenueId::FourClassic,
+        ..grant_of(NOW + 3_600_000, LiveStrategies::StrategyC)
+    };
+    let wide = GrantRisk {
+        max_buy_slippage_bps: 150,
+        max_approve_gas_limit: 120_000,
+        ..TEST_RISK
+    };
+    assert_eq!(risk_refusal(&grant(wide), &x), None);
+    for (risk, named) in [
+        (
+            GrantRisk {
+                max_buy_slippage_bps: 149,
+                ..wide
+            },
+            "buy_slippage_bps 150 above 149",
+        ),
+        // The Four approval's 120000 above the Flap one's 100000.
+        (
+            GrantRisk {
+                max_approve_gas_limit: 119_999,
+                ..wide
+            },
+            "approve_gas_limit 120000 above 119999",
+        ),
+        // The Flap SELL's 1500000 above the Four one's 350000.
+        (
+            GrantRisk {
+                max_sell_gas_limit: 1_499_999,
+                ..wide
+            },
+            "sell_gas_limit 1500000 above 1499999",
+        ),
+    ] {
+        assert_eq!(
+            risk_refusal(&grant(risk), &x),
+            Some(format!(
+                "{}: {named}",
+                crate::sources::LIVE_RISK_OUTSIDE_GRANT
+            ))
+        );
+    }
+    let openfour = LiveGrant {
+        venue: VenueId::OpenFour,
+        ..grant(wide)
+    };
+    assert!(risk_refusal(&openfour, &x).is_some_and(|w| w.contains("not configured")));
+    // The per-venue limits of the LIVE path.
+    assert_eq!(
+        exit_limits(&x, VenueId::Flap),
+        (x.approve_gas_limit, x.sell_gas_limit)
+    );
+    assert_eq!(exit_limits(&x, VenueId::FourClassic), (120_000, 350_000));
+    assert_eq!(
+        exit_limits(&x, VenueId::OpenFour),
+        (x.approve_gas_limit, x.sell_gas_limit)
+    );
+    assert_eq!(
+        (x.on_venue(VenueId::Flap), x.on_venue(VenueId::FourClassic)),
+        (
+            (
+                x.input_wei,
+                x.gas_limit,
+                x.approve_gas_limit,
+                x.sell_gas_limit
+            ),
+            (1_000_000_000_000_000, 1_000_000, 120_000, 350_000)
+        )
+    );
+    let (curve, _, _) = crate::paper_exec::tests::openfour_strategy_state("131615000");
+    assert_eq!(
+        venue_of_curve(&StrategyCurve::Four(curve)),
+        VenueId::OpenFour
+    );
 }
 
 /// BSC3-069: each bound of the granted risk one below what the
@@ -7298,6 +7910,7 @@ fn closed_position(
         attempt: None,
         operator: None,
         source: None,
+        venue: None,
     };
     let b = released(buy, LiveIntentKind::Buy, 1);
     let s = released(sell, LiveIntentKind::Sell, 2);
@@ -7430,6 +8043,7 @@ fn an_open_position_on_chain_counts_against_the_bound() {
         attempt: None,
         operator: None,
         source: None,
+        venue: None,
     };
     let ledger = Ledger::open(&r.state);
     ledger.append(&buy, NOW).unwrap();
@@ -8201,6 +8815,7 @@ fn a_c3_grants_lots_are_exited_by_strategy_c_and_its_buys_refused() {
         attempt: None,
         operator: None,
         source: None,
+        venue: None,
     };
     let ledger = Ledger::open(&r.state);
     ledger.append(&buy, NOW).unwrap();
@@ -8393,6 +9008,7 @@ fn the_runtime_holds_an_earlier_processs_open_lots_again() {
             attempt: None,
             operator: None,
             source: None,
+            venue: None,
         };
         ledger.append(&buy, NOW).unwrap();
         let included = Fact {
@@ -8722,6 +9338,7 @@ fn unresolved_transactions_are_recovered_from_final_confirmed_blocks() {
             attempt: Some(hash),
             operator: None,
             source: None,
+            venue: None,
         };
         ledger.append(&buy, NOW).unwrap();
     }
@@ -8963,6 +9580,7 @@ fn the_recovery_names_what_it_never_asks_and_resolves_reverts_takers_and_orphans
         attempt: None,
         operator: None,
         source: None,
+        venue: None,
     };
     let other = Some(NonceOrigin {
         chain_id: crate::wss::BSC_MAINNET_CHAIN_ID,
@@ -9475,6 +10093,7 @@ fn a_lost_bundle_never_blocks_the_buy_that_takes_its_nonce() {
             attempt: None,
             operator: None,
             source: None,
+            venue: None,
         };
         Ledger::open(&r.state).append(&lost, NOW).unwrap();
         let c2 = c2_at(&r.d, r.buyer, 5);
@@ -10036,6 +10655,7 @@ fn r3_fact(n: u8, intent: LiveIntentKind, token: [u8; 20], nonce: u64) -> crate:
         attempt: None,
         operator: None,
         source: None,
+        venue: None,
     }
 }
 

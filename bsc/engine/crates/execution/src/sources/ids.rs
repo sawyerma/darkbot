@@ -363,9 +363,6 @@ impl VenueId {
 /// LIVE gate (as the LIVE view reads it).
 pub fn venue_effective(venue: VenueId, requested: Mode, live: LiveGate) -> Effective {
     match (venue, requested) {
-        (VenueId::FourClassic | VenueId::OpenFour, Mode::Live) => {
-            Effective::Blocked(FOUR_EXECUTION_PATH_MISSING)
-        }
         (_, Mode::Live) => live.blocked(),
         // R12c/R12d: the Four.meme BUYs have their PAPER path (C3).
         (VenueId::Flap | VenueId::FourClassic | VenueId::OpenFour, Mode::Shadow) => {

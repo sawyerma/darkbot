@@ -121,9 +121,10 @@ impl LiveAdapter {
     }
 }
 
-/// The venues a LIVE grant can name: Flap alone (Four has no LIVE execution
-/// path, `FOUR_EXECUTION_PATH_MISSING`). Audit E 4.9: the projection's list.
-pub const LIVE_VENUES: [VenueId; 1] = [VenueId::Flap];
+/// The venues a LIVE grant can name: Flap and (SC4 d) the Four.meme venues,
+/// each live only with its qualification (`LIVE_VENUE_UNQUALIFIED`
+/// otherwise). Audit E 4.9: the projection's list.
+pub const LIVE_VENUES: [VenueId; 3] = [VenueId::Flap, VenueId::FourClassic, VenueId::OpenFour];
 
 /// The operator's LIVE grant (plan 28.10., `0a647175`): the one economic
 /// approval of a LIVE scope with its limits. It is approved by its scope
@@ -384,15 +385,21 @@ impl LiveGrant {
         Ok(())
     }
 
-    /// Refused unless the scope can be live at all: Flap (Four has no
-    /// execution path), at least one source and adapter, each named once,
+    /// Refused unless the scope can be live at all: a live venue (SC4 d: a
+    /// Four.meme one for Strategy C alone, C3 BUYs a Flap launch), at least
+    /// one source and adapter, each named once,
     /// positive limits, an input within the spend, at least one attempt (a
     /// grant on file stays readable when the maximum is lowered; the
     /// campaign's total bounds its attempts).
     pub fn validate(&self) -> Result<(), String> {
         if !LIVE_VENUES.contains(&self.venue) {
+            return Err(format!("{} can not be live", self.venue.name()));
+        }
+        // SC4 d review M3: no C3 lease, attempt or launch BUY under a grant
+        // that can never take one.
+        if self.venue != VenueId::Flap && self.strategies != LiveStrategies::StrategyC {
             return Err(format!(
-                "{}: {FOUR_EXECUTION_PATH_MISSING}, only BSC_VENUE_FLAP can be live",
+                "{} takes STRATEGY_C alone (C3 BUYs a Flap launch)",
                 self.venue.name()
             ));
         }
@@ -458,8 +465,33 @@ impl LiveGrant {
                         .collect::<String>()
                 )
             }
-            // No execution path: nothing pinned.
-            VenueId::FourClassic | VenueId::OpenFour => "none".into(),
+            // SC4 d: the Four.meme code the build pins (the refrozen
+            // deployment): the TokenManager2 implementation, or the OpenFour
+            // Core's and its executed bonding preset's token implementation.
+            VenueId::FourClassic => {
+                let pin =
+                    darkbot_bsc_trading::venues::fourmeme::deployment::bsc_mainnet_r12d_131608421();
+                format!(
+                    "{}:{}",
+                    pin.token_manager2_implementation,
+                    pin.token_manager2_implementation_runtime_keccak256
+                )
+            }
+            VenueId::OpenFour => {
+                let pin =
+                    darkbot_bsc_trading::venues::fourmeme::deployment::bsc_mainnet_r12d_131608421();
+                let preset = pin.openfour_bonding.map_or("none".to_string(), |b| {
+                    format!(
+                        "{}:{}",
+                        b.preset_id, b.token_implementation_runtime_keccak256
+                    )
+                });
+                format!(
+                    "{}:{}:{preset}",
+                    pin.openfour_core_implementation,
+                    pin.openfour_core_implementation_runtime_keccak256
+                )
+            }
         };
         self.text("darkbot.bsc.live-risk-scope.v1", false) + &format!("venue_code={code}\n")
     }

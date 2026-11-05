@@ -1242,3 +1242,48 @@ fn every_moved_state_is_the_launch_curve_after_its_sale() {
     }
     assert_eq!(probed, 16);
 }
+
+/// SC4 d: a BUY's spend is its curve cost (a TokenPurchase's `cost`) with
+/// the trading fee and the token's tax: the wei each executed probe of the
+/// priced word lost from its cost; each launch receipt's trading fee from
+/// its cost (the tax is its template's; a launch row names none).
+#[test]
+fn a_purchases_spend_is_its_cost_with_fee_and_tax() {
+    let tax_bps = CLASSIC_PROFILES[0].tax_bps;
+    let mut n = 0;
+    for f in rows("PROBE") {
+        let template = word(&format!("0x{}", f[3]));
+        if !CLASSIC_PROFILES.iter().any(|p| p.template == template) {
+            continue;
+        }
+        let terms = fee(f[8], f[9], tax_bps);
+        let b = quote_buy(&curve(f[5], f[6], f[7]), &terms, u(f[10])).unwrap();
+        assert_eq!(purchase_spent(&terms, b.cost).unwrap(), u(f[12]), "{f:?}");
+        n += 1;
+    }
+    assert!(n > 0);
+    let mut launches = 0;
+    for f in rows("LAUNCH").filter(|f| f[8] != "-") {
+        let (fee_wei, _, _) = split_purchase(&fee("100", "0", tax_bps), u(f[9])).unwrap();
+        assert_eq!(fee_wei, u(f[10]), "{f:?}");
+        launches += 1;
+    }
+    assert!(launches > 0);
+}
+
+/// SC4 d: a LIVE SELL's funds from its TokenSale's gross (`cost`): every
+/// executed SELL of the probes (SELLMIN rows: the gross and the funds the
+/// seller received) is `sale_funds` of its gross under the priced terms.
+#[test]
+fn a_sales_funds_are_its_gross_less_fee_and_tax() {
+    let mut n = 0;
+    for f in rows("SELLMIN") {
+        let probe = rows("PROBE")
+            .find(|p| p[1] == f[1] && p[2] == f[2] && p[10] == f[3])
+            .unwrap();
+        let terms = fee(probe[8], probe[9], CLASSIC_PROFILES[0].tax_bps);
+        assert_eq!(sale_funds(&terms, u(f[6])).unwrap(), u(f[5]), "{f:?}");
+        n += 1;
+    }
+    assert_eq!(n, 29 + 16);
+}

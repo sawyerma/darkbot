@@ -1150,6 +1150,23 @@ mod four {
         assert!(kinds.contains(&format!("entered {}", 107 + 6)), "{kinds:?}");
     }
 
+    /// SC4 d: a real position on a Four.meme curve tracked exactly is held
+    /// (its exits are the strategy's), not once its tracking ended.
+    #[test]
+    fn a_real_four_position_is_held_while_its_curve_is_tracked() {
+        let mut c = FourChain::new(config("buy_count:3:,unique_buyers:3:"));
+        c.passing_launch();
+        c.feed(Input::Hold {
+            token: FOUR_TOKEN,
+            tokens: U256::from(1_000u64),
+            spent_wei: U256::from(2_000u64),
+            filled_ms: 0,
+        });
+        assert!(c.engine.holds(&FOUR_TOKEN));
+        c.feed(Input::FourIncomplete);
+        assert!(!c.engine.holds(&FOUR_TOKEN));
+    }
+
     /// SC4 c: a followed Four.meme token's intent curve is its exact Four
     /// curve while tracked, none once its tracking ended (a refused log).
     #[test]

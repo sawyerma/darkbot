@@ -294,9 +294,7 @@ pub fn quote_buy(
     if cost.is_zero() {
         return Err(ClassicQuoteError::ZeroOutput);
     }
-    let fee_wei = part(cost, fee.rate_bps)?;
-    let tax = part(cost, fee.tax_bps)?;
-    let spent = add(add(cost, fee_wei)?, tax)?;
+    let (fee_wei, tax, spent) = split_purchase(fee, cost)?;
     if spent > funds {
         return Err(ClassicQuoteError::InvalidState);
     }
@@ -313,6 +311,36 @@ pub fn quote_buy(
             sold: add(curve.sold, amount)?,
         },
     })
+}
+
+/// A BUY's curve `cost` with what TokenManager2 charges on it: the trading
+/// fee, the token's tax and the buyer's spend.
+fn split_purchase(fee: &ClassicFee, cost: U256) -> Result<(U256, U256, U256), ClassicQuoteError> {
+    let fee_wei = part(cost, fee.rate_bps)?;
+    let tax = part(cost, fee.tax_bps)?;
+    Ok((fee_wei, tax, add(add(cost, fee_wei)?, tax)?))
+}
+
+/// SC4 d: what a BUY whose curve cost `cost` (a TokenPurchase's `cost`)
+/// spent under `fee`, as [`quote_buy`] charges it.
+pub fn purchase_spent(fee: &ClassicFee, cost: U256) -> Result<U256, ClassicQuoteError> {
+    charged_bps(fee)?;
+    Ok(split_purchase(fee, cost)?.2)
+}
+
+/// A SELL's `gross` (the curve's wei) split as TokenManager2 pays it: the
+/// trading fee, the token's tax and the seller's funds.
+fn split_sale(fee: &ClassicFee, gross: U256) -> Result<(U256, U256, U256), ClassicQuoteError> {
+    let fee_wei = part(gross, fee.rate_bps)?;
+    let tax = part(gross, fee.tax_bps)?;
+    Ok((fee_wei, tax, sub(gross, add(fee_wei, tax)?)?))
+}
+
+/// SC4 d: the funds a SELL whose curve paid `gross` (a TokenSale's `cost`)
+/// pays the seller under `fee`, as [`quote_sell`] splits it.
+pub fn sale_funds(fee: &ClassicFee, gross: U256) -> Result<U256, ClassicQuoteError> {
+    charged_bps(fee)?;
+    Ok(split_sale(fee, gross)?.2)
 }
 
 /// The SELL of `amount` tokens (`sellToken(token, amount)`): at most what
@@ -333,9 +361,7 @@ pub fn quote_sell(
     let y = virtual_quote(curve)?;
     let t = add(curve.t, amount)?;
     let gross = sub(y, mul_div_down(curve.k, U256::from(ONE), t)?)?;
-    let fee_wei = part(gross, fee.rate_bps)?;
-    let tax = part(gross, fee.tax_bps)?;
-    let funds = sub(gross, add(fee_wei, tax)?)?;
+    let (fee_wei, tax, funds) = split_sale(fee, gross)?;
     if funds.is_zero() {
         return Err(ClassicQuoteError::ZeroOutput);
     }

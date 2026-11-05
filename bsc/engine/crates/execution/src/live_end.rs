@@ -828,6 +828,7 @@ impl End for LiveEnd {
                 attempt: None,
                 operator: None,
                 source: None,
+                venue: None,
             };
             let (Some(transport), Some(buffer), Some(frame)) =
                 (bound, slot.buffer.as_mut(), released.frames.get_mut(index))
@@ -921,6 +922,20 @@ impl End for LiveEnd {
                 LiveIntentKind::Sell
             }
             ExpectedTx::Burn(_) => LiveIntentKind::Burn,
+        };
+        // SC4 d: the venue its transaction trades on, kept with its fact (a
+        // lot's exit and re-read after a restart are its venue's).
+        let venue = match expected {
+            ExpectedTx::Buy(_) | ExpectedTx::Approve(_) | ExpectedTx::Sell(_) => {
+                Some(crate::sources::VenueId::Flap)
+            }
+            ExpectedTx::ClassicBuy(_)
+            | ExpectedTx::ClassicApprove(_)
+            | ExpectedTx::ClassicSell(_) => Some(crate::sources::VenueId::FourClassic),
+            ExpectedTx::OpenFourBuy(_)
+            | ExpectedTx::OpenFourApprove(_)
+            | ExpectedTx::OpenFourSell(_) => Some(crate::sources::VenueId::OpenFour),
+            ExpectedTx::Burn(_) => None,
         };
         // BSC3-036: a canonical head older than the bound: the canonical
         // source is stalled or cut off; nothing is planned on it (before
@@ -1232,6 +1247,7 @@ impl End for LiveEnd {
                 .then(|| lease.as_ref().map_or(tx_hash, |l| l.attempt)),
             operator: None,
             source: None,
+            venue,
         };
         let written = match self.ledger.append(&fact, (self.wall_ms)()) {
             Ok(_) => {

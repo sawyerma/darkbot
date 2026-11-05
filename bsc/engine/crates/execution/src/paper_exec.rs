@@ -295,6 +295,34 @@ pub struct ExecConfig {
 }
 
 impl ExecConfig {
+    /// SC4 d: a BUY's and an exit's limits on `venue`: input, BUY gas,
+    /// approval gas, SELL gas (`BSC_EXEC_*`, a Four.meme family's own; a
+    /// family not configured is never armed, its lots count at Flap's).
+    pub fn on_venue(&self, venue: crate::sources::VenueId) -> (u128, u64, u64, u64) {
+        use crate::sources::VenueId;
+        let four = match venue {
+            VenueId::Flap => None,
+            VenueId::FourClassic => self.four,
+            VenueId::OpenFour => self.openfour,
+        };
+        four.map_or(
+            (
+                self.input_wei,
+                self.gas_limit,
+                self.approve_gas_limit,
+                self.sell_gas_limit,
+            ),
+            |f| {
+                (
+                    f.input_wei,
+                    f.gas_limit,
+                    f.approve_gas_limit,
+                    f.sell_gas_limit,
+                )
+            },
+        )
+    }
+
     /// The cross-key rules: an armed path must be able to admit a BUY.
     pub fn validate(&self) -> Result<(), String> {
         if let Some(four) = &self.four {
@@ -2425,6 +2453,14 @@ impl<E: End> Executor<E> {
         (self.config.approve_gas_limit, self.config.sell_gas_limit)
     }
 
+    /// SC4 d: the exit gas limits of a lot on `venue` (its family's
+    /// configured ones; one not configured is never armed, its lot at
+    /// Flap's).
+    fn venue_exit_gas(&self, venue: crate::sources::VenueId) -> (u64, u64) {
+        let (_, _, approve, sell) = self.config.on_venue(venue);
+        (approve, sell)
+    }
+
     /// SC4 c (B1): the exit gas limits of an admitted BUY's venue; a Four
     /// BUY is admitted only on its venue's arm.
     fn exit_gas_of(&self, admitted: &BuyAdmitted) -> Result<(u64, u64), Refusal> {
@@ -3220,19 +3256,19 @@ impl<E: End> Executor<E> {
     /// before a restart) becomes exitable the same way as a Strategy C one.
     /// Its input is not this arm's strategy exposure (no strategy BUY of
     /// this arm charged it): its SELL releases none (BSC3-072).
-    pub fn adopt(&mut self, token: [u8; 20], tokens: U256) {
+    pub fn adopt(&mut self, token: [u8; 20], tokens: U256, venue: crate::sources::VenueId) {
         match self.strategy_bought.iter_mut().find(|h| h.token == token) {
             Some(h) => h.min_tokens = tokens,
             None => {
                 let before = self.exit_state(&token);
-                // The LIVE positions it adopts are Flap ones (a Four.meme
-                // LIVE BUY is refused until its LIVE path).
+                // SC4 d: its exit at its venue's limits.
+                let exit_gas = self.venue_exit_gas(venue);
                 self.strategy_bought.push(Held {
                     released: false,
                     token,
                     min_tokens: tokens,
                     input_wei: U256::ZERO,
-                    exit_gas: self.flap_exit_gas(),
+                    exit_gas,
                 });
                 self.recount(&token, before);
             }

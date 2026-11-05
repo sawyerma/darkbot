@@ -855,12 +855,9 @@ fn unqualified_and_live_requested_sources_connect_nothing() {
                 .find_map(|w| w.strip_prefix("block_reason="))
                 .filter(|_| line.contains("effective=BLOCKED"));
             got.push(format!("{id} {econ_live} {blocked:?}"));
-            // Four has no execution path; else the economic switch, then
-            // the missing grant (plan 28.10.: LIVE only with a grant).
+            // The economic switch, then the missing grant (plan 28.10.:
+            // LIVE only with a grant; SC4 d: the Four.meme venues too).
             let reason = match (*id, econ_live) {
-                ("BSC_VENUE_FOUR_CLASSIC" | "BSC_VENUE_OPENFOUR", _) => {
-                    "FOUR_EXECUTION_PATH_MISSING"
-                }
                 (_, "DISABLED") => "ECONOMIC_LIVE_DISABLED",
                 _ => "LIVE_GRANT_MISSING",
             };
