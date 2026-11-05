@@ -209,6 +209,10 @@ impl Chain {
                 Output::Unresolved { block, reason, .. } => {
                     format!("unresolved {block} {reason:?}")
                 }
+                Output::Superseded { block, paper, .. } => format!(
+                    "superseded {block} {}",
+                    if paper.is_some() { "paper" } else { "waiting" }
+                ),
             })
             .collect()
     }
@@ -541,12 +545,68 @@ fn a_held_real_position_exits_by_the_same_rules_once() {
     c.next_block();
     c.next_block();
     assert_eq!(c.kinds(), ["trigger 105 Target"]);
+    // A4: held again (a restart's or a recovery's Hold): its trigger stays,
+    // the exit is not decided twice.
+    c.feed(Input::Hold {
+        token: TOKEN,
+        tokens: q.output_amount,
+        spent_wei: U256::from(input + 30_000_000_000_000),
+        filled_ms: 0,
+    });
+    c.next_block();
+    assert_eq!(c.kinds(), ["trigger 105 Target"]);
     let Some(StrategyCurve::Flap { reserve, .. }) = c.engine.curve_of(&TOKEN) else {
         panic!("a Flap curve")
     };
     assert_eq!(reserve, c.book(TOKEN).reserve, "the real curve");
     c.feed(Input::Unhold { token: TOKEN });
     assert_eq!((c.engine.held_positions(), c.engine.followed()), (0, 0));
+}
+
+/// A4: a real position never takes a PAPER one's place silently: the PAPER
+/// position waiting for its fill or open is superseded with a trace (its
+/// entry once filled); a real BUY of a token the strategy only observes
+/// supersedes nothing.
+#[test]
+fn a_real_position_supersedes_the_paper_one_with_a_trace() {
+    let hold = |c: &mut Chain| {
+        c.feed(Input::Hold {
+            token: TOKEN,
+            tokens: U256::from(1_000u64),
+            spent_wei: U256::from(2_000u64),
+            filled_ms: 0,
+        })
+    };
+    let mut c = Chain::new(config("buy_count:3:,unique_buyers:3:"));
+    c.passing_launch(TOKEN);
+    hold(&mut c);
+    assert_eq!(c.kinds()[1..], ["superseded 105 waiting"]);
+    assert_eq!(c.engine.held_positions(), 1);
+    let mut c = Chain::new(config("buy_count:3:,unique_buyers:3:"));
+    c.passing_launch(TOKEN);
+    c.next_block();
+    c.next_block(); // 106 filled at its end
+    let Some(Output::Entered { entry, .. }) = c.out.last().cloned() else {
+        panic!("{:?}", c.kinds())
+    };
+    hold(&mut c);
+    assert_eq!(
+        c.out.last(),
+        Some(&Output::Superseded {
+            token: TOKEN,
+            block: 107,
+            paper: Some(entry),
+        })
+    );
+    assert_eq!(
+        (c.engine.held_positions(), c.engine.open_positions()),
+        (1, 0)
+    );
+    let mut c = Chain::new(config("buy_count:100:"));
+    c.launch(TOKEN, 5_000_000_000_000_000);
+    hold(&mut c);
+    assert!(c.kinds().is_empty(), "{:?}", c.kinds());
+    assert_eq!(c.engine.held_positions(), 1);
 }
 
 /// The terms the test chain's tokens carry, as `getTokenV8Safe` would read
@@ -1182,5 +1242,44 @@ fn the_exit_multiples_need_stop_below_one_below_target() {
         }
         .validate(),
         Err(ConfigError::Places)
+    );
+}
+
+/// A1 measurement (release, `--ignored`): the cost of a block's end with
+/// many observed tokens (each with its buyers' observation), the per-block
+/// work every followed launch costs.
+#[test]
+#[ignore = "A1 measurement; run in release"]
+fn end_of_block_cost_with_many_observed_tokens() {
+    let mut c = Chain::new(Config {
+        observation_ms: u64::MAX / 4,
+        ..config("buy_count:1000000:")
+    });
+    let tokens: Vec<[u8; 20]> = (0..400u32)
+        .map(|i| {
+            let mut t = [0x11; 20];
+            t[..4].copy_from_slice(&i.to_be_bytes());
+            t
+        })
+        .collect();
+    for (i, token) in tokens.iter().enumerate() {
+        c.launch(*token, 5_000_000_000_000_000);
+        for b in 1..=40u8 {
+            let mut trader = [b; 20];
+            trader[19] = i as u8;
+            c.buy(*token, trader, 1_000_000_000_000_000);
+        }
+    }
+    assert_eq!(c.engine.followed(), tokens.len());
+    let blocks = 2_000u32;
+    let start = std::time::Instant::now();
+    for _ in 0..blocks {
+        c.next_block();
+    }
+    let per_block = start.elapsed().as_nanos() / u128::from(blocks);
+    assert!(c.kinds().is_empty(), "{:?}", c.kinds());
+    println!(
+        "block end with {} observed tokens: {per_block} ns",
+        tokens.len()
     );
 }

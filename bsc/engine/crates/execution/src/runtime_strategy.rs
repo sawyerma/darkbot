@@ -540,6 +540,9 @@ const CANCELLED: u8 = 3;
 const TRIGGERED: u8 = 4;
 const EXITED: u8 = 5;
 const UNRESOLVED: u8 = 6;
+/// A4: a PAPER position the real one took the place of (its entry, code 1;
+/// 0 while it waited for its fill).
+const SUPERSEDED: u8 = 7;
 
 pub const OUTPUT_LEN: usize = 1 + 1 + 8 + 20 + 1 + 1 + 4 * 32;
 
@@ -721,6 +724,20 @@ pub fn output_payload(o: &Output) -> Vec<u8> {
             0,
             [U256::ZERO; 4],
         ),
+        Output::Superseded {
+            token,
+            block,
+            paper,
+        } => (
+            SUPERSEDED,
+            *block,
+            *token,
+            u8::from(paper.is_some()),
+            0,
+            paper.map_or([U256::ZERO; 4], |e| {
+                [e.tokens, e.input_wei, e.network_fee_wei, e.spent_wei]
+            }),
+        ),
     };
     let mut out = Vec::with_capacity(OUTPUT_LEN);
     out.push(b'Y');
@@ -768,6 +785,8 @@ pub struct Counters {
     /// Phase I gate L4: decisions whose token had no exact curve (or no
     /// position) when the block was complete: counted, never executed.
     pub paper_unpriced: u64,
+    /// A4: PAPER positions a real one took the place of.
+    pub superseded: u64,
     /// SC4 c (B5): `cancelled` by reason.
     pub cancelled_creator_sold: u64,
     pub cancelled_not_tracked: u64,
@@ -913,7 +932,8 @@ pub fn status_draft(
     .set(st::CANCELLED_CREATOR_SOLD, c.cancelled_creator_sold)
     .set(st::CANCELLED_NOT_TRACKED, c.cancelled_not_tracked)
     .set(st::CANCELLED_QUOTE, c.cancelled_quote)
-    .set(st::CANCELLED_COST, c.cancelled_cost);
+    .set(st::CANCELLED_COST, c.cancelled_cost)
+    .set(st::SUPERSEDED, c.superseded);
     if let (None, Some(why)) = (strategy, refused) {
         d.set(st::REASON, why);
     }
@@ -1148,6 +1168,7 @@ impl StrategyRuntime {
                 }
             }
             Output::Unresolved { .. } => c.unresolved += 1,
+            Output::Superseded { .. } => c.superseded += 1,
         }
     }
 }
@@ -1423,6 +1444,7 @@ fn add(sum: &mut Counters, c: &Counters) {
         (&mut sum.cancelled_not_tracked, c.cancelled_not_tracked),
         (&mut sum.cancelled_quote, c.cancelled_quote),
         (&mut sum.cancelled_cost, c.cancelled_cost),
+        (&mut sum.superseded, c.superseded),
         (&mut sum.exits_creator_sell, c.exits_creator_sell),
         (&mut sum.exits_target, c.exits_target),
         (&mut sum.exits_stop, c.exits_stop),
@@ -1710,6 +1732,42 @@ mod tests {
 
     fn runtime() -> StrategyRuntime {
         StrategyRuntime::new(config(), gas(), StrategyVenues::FLAP)
+    }
+
+    /// A4: a PAPER position the real one took the place of is journaled (its
+    /// entry, code 1; 0 while it waited for its fill), counted and in the
+    /// status.
+    #[test]
+    fn a_superseded_paper_position_is_journaled_counted_and_shown() {
+        use darkbot_bsc_record::Value;
+        use darkbot_bsc_record::schema::bsc_runtime::runtime_status::strategy as st;
+        use darkbot_bsc_trading::economics::flap::position::Entry;
+        let entry = Entry {
+            tokens: U256::from(7u64),
+            input_wei: U256::from(8u64),
+            network_fee_wei: U256::from(9u64),
+            spent_wei: U256::from(17u64),
+        };
+        let mut s = runtime();
+        let mut payloads = Vec::new();
+        for paper in [Some(entry), None] {
+            let o = Output::Superseded {
+                token: TOKEN,
+                block: 42,
+                paper,
+            };
+            s.count(&o);
+            payloads.push(output_payload(&o));
+        }
+        assert_eq!(s.counters.superseded, 2);
+        let [with, waiting] = payloads.try_into().unwrap();
+        assert_eq!((with.len(), waiting.len()), (OUTPUT_LEN, OUTPUT_LEN));
+        assert_eq!((with[0], with[1], with[30], waiting[30]), (b'Y', 7, 1, 0));
+        assert_eq!(&with[32..64], &U256::from(7u64).to_be_bytes::<32>());
+        assert_eq!(&with[128..160], &U256::from(17u64).to_be_bytes::<32>());
+        assert!(waiting[32..].iter().all(|b| *b == 0));
+        let d = status_draft(Some(&s), None, &config());
+        assert_eq!(d.values(st::SUPERSEDED), [Value::U64(2)]);
     }
 
     /// SC4 c (B5): a cancelled entry counts under its reason, and the status

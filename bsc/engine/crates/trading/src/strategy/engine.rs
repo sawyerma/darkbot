@@ -279,6 +279,14 @@ pub enum Output {
         block: u64,
         reason: Untracked,
     },
+    /// A4: the real position (`Input::Hold`, `Input::Reheld`) took the
+    /// place of the token's PAPER one: its entry (`None` while it waited
+    /// for its fill). Its valuation ends here, unvalued.
+    Superseded {
+        token: [u8; 20],
+        block: u64,
+        paper: Option<Entry>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -505,17 +513,27 @@ impl Engine {
                 spent_wei,
                 filled_ms,
             } => {
+                let entry = Entry {
+                    tokens,
+                    input_wei: spent_wei,
+                    network_fee_wei: U256::ZERO,
+                    spent_wei,
+                };
+                let block = self.block.map_or(0, |(n, _)| n);
                 if let Some(t) = self.token_mut(&token) {
+                    let (superseded, triggered) = Self::held_over(&t.stage);
                     t.stage = Stage::Held {
-                        entry: Entry {
-                            tokens,
-                            input_wei: spent_wei,
-                            network_fee_wei: U256::ZERO,
-                            spent_wei,
-                        },
+                        entry,
                         filled_ms,
-                        triggered: false,
+                        triggered,
                     };
+                    if let Some(paper) = superseded {
+                        out.push(Output::Superseded {
+                            token,
+                            block,
+                            paper,
+                        });
+                    }
                 }
             }
             Input::Unhold { token } => {
@@ -549,12 +567,30 @@ impl Engine {
                     filled_ms,
                     triggered: false,
                 };
+                let block = self.block.map_or(0, |(n, _)| n);
                 match self.token_mut(&token) {
                     Some(t) => {
+                        let (superseded, triggered) = Self::held_over(&t.stage);
                         t.book = book;
-                        t.stage = stage;
+                        t.stage = match stage {
+                            Stage::Held {
+                                entry, filled_ms, ..
+                            } => Stage::Held {
+                                entry,
+                                filled_ms,
+                                triggered,
+                            },
+                            other => other,
+                        };
                         if let Some(b) = sold {
                             t.creator_sold.get_or_insert(b);
+                        }
+                        if let Some(paper) = superseded {
+                            out.push(Output::Superseded {
+                                token,
+                                block,
+                                paper,
+                            });
                         }
                     }
                     None => {
@@ -579,6 +615,18 @@ impl Engine {
             }
         }
         out
+    }
+
+    /// A4: what a real position taking `stage`'s place supersedes (a PAPER
+    /// position, `Some(None)` while it waited for its fill) and whether its
+    /// exit stays triggered (a position held again keeps its trigger).
+    fn held_over(stage: &Stage) -> (Option<Option<Entry>>, bool) {
+        match stage {
+            Stage::Observing(_) => (None, false),
+            Stage::Entering { .. } => (Some(None), false),
+            Stage::Open { entry, .. } | Stage::Exiting { entry, .. } => (Some(Some(*entry)), false),
+            Stage::Held { triggered, .. } => (None, *triggered),
+        }
     }
 
     /// A launch at the current block, its token on `book`.
@@ -798,7 +846,22 @@ impl Engine {
     }
 
     fn end_of_block(&mut self, number: u64, time_ms: u64, out: &mut Vec<Output>) {
-        let keys: Vec<(u64, u64)> = self.tokens.keys().copied().collect();
+        // A1: only the tokens this block acts on are taken (in launch order,
+        // as before); an observed, waiting or triggered one is not copied.
+        let keys: Vec<(u64, u64)> = self
+            .tokens
+            .iter()
+            .filter(|(_, t)| match t.stage {
+                Stage::Observing(_)
+                | Stage::Held {
+                    triggered: true, ..
+                } => false,
+                Stage::Entering { fill_block, .. } => fill_block <= number,
+                Stage::Exiting { exit_block, .. } => exit_block <= number,
+                Stage::Open { .. } | Stage::Held { .. } => true,
+            })
+            .map(|(k, _)| *k)
+            .collect();
         for key in keys {
             let Some(t) = self.tokens.get(&key).cloned() else {
                 continue;
