@@ -3902,7 +3902,16 @@ fn dex_exit(on: bool) {
             now_ms,
         )
         .unwrap();
-    assert_eq!((out.len(), refused), (0, Some(Refusal::Admission)));
+    assert_eq!(
+        (out.len(), refused),
+        (
+            0,
+            Some(Refusal::Admission(
+                crate::paper_exec::AdmissionCause::Unwitnessed
+            ))
+        )
+    );
+    assert!(refused_for(x, "ADMISSION_UNWITNESSED"));
     let amount = x.dex_exit_amount(&a).unwrap();
     let (out, refused) = x
         .on_dex_exit(a, amount, quoted, owner.as_ref().unwrap(), &clock, now_ms)

@@ -3952,13 +3952,13 @@ impl LiveRuntime {
         for (why, n) in &self.limit_refused {
             d.push(l::REFUSALS, format!("{why}={n}").as_str());
         }
-        for (r, n) in x.into_iter().flat_map(|x| {
-            x.counters()
-                .refusals
-                .iter()
-                .chain(x.strategy_counters().refusals.iter())
-        }) {
-            d.push(l::REFUSALS, format!("{}={n}", r.name()).as_str());
+        // B5: by code (an admission's with its cause), C3 and strategy
+        // together, each code once.
+        if let Some(x) = x {
+            let refusals = x.counters().refusals.iter();
+            for coded in crate::paper_exec::coded(refusals.chain(&x.strategy_counters().refusals)) {
+                d.push(l::REFUSALS, coded.as_str());
+            }
         }
         for (name, n) in x.map(|x| x.end().responses().named()).unwrap_or_default() {
             if n > 0 {

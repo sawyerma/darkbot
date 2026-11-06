@@ -811,13 +811,13 @@ impl ExecRuntime {
             e::STRATEGY_SPENT_WEI,
             darkbot_bsc_record::Value::U256(strategy_spent.to_be_bytes()),
         );
-        for (r, n) in strategy.iter().flat_map(|c| c.refusals.iter()) {
-            d.push(e::STRATEGY_REFUSALS, format!("{}={n}", r.name()).as_str());
+        for coded in strategy.iter().flat_map(|c| c.coded()) {
+            d.push(e::STRATEGY_REFUSALS, coded.as_str());
         }
         // Gate M2: the paths that take the sender, and every C3 refusal.
         d.set(e::SENDER_PATHS, self.setup.exec.sender_paths.name());
-        for (r, n) in counters.iter().flat_map(|c| c.refusals.iter()) {
-            d.push(e::REFUSALS, format!("{}={n}", r.name()).as_str());
+        for coded in counters.iter().flat_map(|c| c.coded()) {
+            d.push(e::REFUSALS, coded.as_str());
         }
         let latencies = self.executor.as_ref().map(PaperExecutor::latencies);
         d.set(e::LATENCY_SAMPLES, latencies.map_or(0, |l| l.len() as u64));

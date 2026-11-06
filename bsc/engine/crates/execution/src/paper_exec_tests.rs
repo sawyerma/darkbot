@@ -1267,7 +1267,7 @@ fn a_strategy_entry_and_exit_on_a_classic_curve_reach_the_sink() {
             300,
         )
         .err(),
-        Some(Refusal::Admission)
+        Some(Refusal::Admission(AdmissionCause::Terms))
     );
     // B2: a state one gwei of tokens deeper than the deepest executed one.
     let gwei = U256::from(1_000_000_000u64);
@@ -1292,8 +1292,13 @@ fn a_strategy_entry_and_exit_on_a_classic_curve_reach_the_sink() {
             350,
         )
         .err(),
-        Some(Refusal::Admission)
+        Some(Refusal::Admission(AdmissionCause::Unwitnessed))
     );
+    // B5: each admission refusal counted under its cause.
+    let coded = exec.strategy_counters().coded();
+    for code in ["ADMISSION_TERMS=1", "ADMISSION_UNWITNESSED=1"] {
+        assert!(coded.iter().any(|c| c == code), "{coded:?}");
+    }
     // The Classic arm is no OpenFour one.
     let (openfour, other, _) = openfour_strategy_state("131615000");
     assert_eq!(
@@ -2289,4 +2294,48 @@ fn what_an_end_consumed_decides_nonce_and_exposure() {
     unknown.disarm().unwrap();
     fs::remove_dir_all(d1).unwrap();
     fs::remove_dir_all(d2).unwrap();
+}
+
+/// B5: refusals by code: an admission's with its cause, every other
+/// refusal's by its name (each profile reason one PROFILE), each code once
+/// with its sum, in first-seen order.
+#[test]
+fn refusals_are_coded_by_their_cause() {
+    use darkbot_bsc_trading::venues::fourmeme::profile::UnsupportedClassicLaunch;
+    let refusals = [
+        (Refusal::Admission(AdmissionCause::Quote), 2),
+        (Refusal::FourProfile(UnsupportedClassicLaunch::Layout), 1),
+        (Refusal::Admission(AdmissionCause::Terms), 1),
+        (
+            Refusal::FourProfile(UnsupportedClassicLaunch::TotalSupply),
+            3,
+        ),
+        (Refusal::Admission(AdmissionCause::Quote), 4),
+        (Refusal::SessionCap, 1),
+    ];
+    assert_eq!(
+        crate::paper_exec::coded(refusals.iter()),
+        [
+            "ADMISSION_QUOTE=6",
+            "PROFILE=4",
+            "ADMISSION_TERMS=1",
+            "SESSION_CAP=1"
+        ]
+    );
+    for (cause, code) in [
+        (AdmissionCause::Stale, "ADMISSION_STALE"),
+        (AdmissionCause::Terms, "ADMISSION_TERMS"),
+        (AdmissionCause::Unwitnessed, "ADMISSION_UNWITNESSED"),
+        (AdmissionCause::Quote, "ADMISSION_QUOTE"),
+        (AdmissionCause::Slippage, "ADMISSION_SLIPPAGE"),
+        (AdmissionCause::Policy, "ADMISSION_POLICY"),
+    ] {
+        assert_eq!(
+            (
+                Refusal::Admission(cause).code(),
+                Refusal::Admission(cause).name()
+            ),
+            (code, "ADMISSION")
+        );
+    }
 }

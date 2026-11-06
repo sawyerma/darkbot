@@ -458,8 +458,9 @@ pub enum Refusal {
     OpenFourProfile(UnsupportedOpenFourLaunch),
     /// C2 holds no coherent snapshot for this candidate, or no head.
     NoSnapshot,
-    /// The fresh-launch state or the admission refused.
-    Admission,
+    /// The fresh-launch or tracked state or the admission refused (B5: its
+    /// cause).
+    Admission(AdmissionCause),
     /// This session already bought the token.
     DuplicateToken,
     /// REV.1.0 R6: another launch transaction predicts a token this arm
@@ -530,13 +531,110 @@ pub enum Refusal {
     Unconfirmed,
 }
 
+/// B5: what refused an admission, one cause across the venues.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AdmissionCause {
+    /// Not this arm's state: another code or policy generation, another
+    /// launch, a read at another block.
+    Stale,
+    /// The token's or the venue's terms are not the priced, validated ones.
+    Terms,
+    /// Beyond what execution witnessed: a state not fresh, an amount, a
+    /// curve deeper than any executed BUY, a token amount not whole gwei, a
+    /// quote of another amount.
+    Unwitnessed,
+    /// The quote failed.
+    Quote,
+    /// No admissible minimum output.
+    Slippage,
+    /// The configured values form no BUY policy.
+    Policy,
+}
+
+impl AdmissionCause {
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::Stale => "ADMISSION_STALE",
+            Self::Terms => "ADMISSION_TERMS",
+            Self::Unwitnessed => "ADMISSION_UNWITNESSED",
+            Self::Quote => "ADMISSION_QUOTE",
+            Self::Slippage => "ADMISSION_SLIPPAGE",
+            Self::Policy => "ADMISSION_POLICY",
+        }
+    }
+}
+
+impl From<darkbot_bsc_trading::economics::flap::AdmissionError> for AdmissionCause {
+    fn from(e: darkbot_bsc_trading::economics::flap::AdmissionError) -> Self {
+        use darkbot_bsc_trading::economics::flap::AdmissionError as E;
+        match e {
+            E::GenerationMismatch | E::CandidateMismatch | E::PolicyGenerationMismatch => {
+                Self::Stale
+            }
+            E::Unpriced(_) | E::VenueTerms => Self::Terms,
+            E::StateNotFresh | E::UnqualifiedAmount => Self::Unwitnessed,
+            E::Quote(_) => Self::Quote,
+            E::Slippage(_) => Self::Slippage,
+        }
+    }
+}
+
+impl From<darkbot_bsc_trading::economics::four_classic::ClassicAdmissionError> for AdmissionCause {
+    fn from(e: darkbot_bsc_trading::economics::four_classic::ClassicAdmissionError) -> Self {
+        use darkbot_bsc_trading::economics::four_classic::ClassicAdmissionError as E;
+        match e {
+            E::GenerationMismatch
+            | E::CandidateMismatch
+            | E::PolicyGenerationMismatch
+            | E::StaleRead => Self::Stale,
+            E::TermsMismatch => Self::Terms,
+            E::StateNotFresh | E::UnqualifiedAmount | E::UnalignedAmount | E::Unwitnessed => {
+                Self::Unwitnessed
+            }
+            E::Quote(_) => Self::Quote,
+            E::Slippage(_) => Self::Slippage,
+        }
+    }
+}
+
+impl From<darkbot_bsc_trading::economics::openfour::OpenFourAdmissionError> for AdmissionCause {
+    fn from(e: darkbot_bsc_trading::economics::openfour::OpenFourAdmissionError) -> Self {
+        use darkbot_bsc_trading::economics::openfour::OpenFourAdmissionError as E;
+        match e {
+            E::GenerationMismatch
+            | E::CandidateMismatch
+            | E::PolicyGenerationMismatch
+            | E::StaleRead => Self::Stale,
+            E::TermsMismatch => Self::Terms,
+            E::StateNotFresh | E::UnqualifiedAmount | E::Unwitnessed => Self::Unwitnessed,
+            E::Quote(_) => Self::Quote,
+            E::Slippage(_) => Self::Slippage,
+        }
+    }
+}
+
+impl From<darkbot_bsc_trading::economics::policy::PolicyError> for AdmissionCause {
+    fn from(_: darkbot_bsc_trading::economics::policy::PolicyError) -> Self {
+        Self::Policy
+    }
+}
+
 impl Refusal {
+    /// B5: the code a status names it by: an admission's with its cause,
+    /// every other refusal's its [`Self::name`].
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::Admission(cause) => cause.code(),
+            other => other.name(),
+        }
+    }
+
     pub fn name(self) -> &'static str {
         match self {
             Self::NotDecoded => "NOT_DECODED",
             Self::Profile(_) | Self::FourProfile(_) | Self::OpenFourProfile(_) => "PROFILE",
             Self::NoSnapshot => "NO_SNAPSHOT",
-            Self::Admission => "ADMISSION",
+            Self::Admission(_) => "ADMISSION",
             Self::DuplicateToken => "DUPLICATE_TOKEN",
             Self::TokenConflict => "TOKEN_CONFLICT",
             Self::SessionCap => "SESSION_CAP",
@@ -922,6 +1020,12 @@ impl ExecCounters {
         }
     }
 
+    /// B5: the refusals by [`Refusal::code`], each code once with its sum,
+    /// in first-seen order (`CODE=n`).
+    pub fn coded(&self) -> Vec<String> {
+        coded(self.refusals.iter())
+    }
+
     /// Refusals of one stage, all profile reasons together.
     pub fn refused(&self, name: &str) -> u64 {
         self.refusals
@@ -930,6 +1034,19 @@ impl ExecCounters {
             .map(|(_, n)| n)
             .sum()
     }
+}
+
+/// B5: `refusals` by [`Refusal::code`], each code once with its sum, in
+/// first-seen order (`CODE=n`).
+pub fn coded<'a>(refusals: impl Iterator<Item = &'a (Refusal, u64)>) -> Vec<String> {
+    let mut out: Vec<(&'static str, u64)> = Vec::new();
+    for (r, n) in refusals {
+        match out.iter_mut().find(|(c, _)| *c == r.code()) {
+            Some((_, sum)) => *sum += n,
+            None => out.push((r.code(), *n)),
+        }
+    }
+    out.into_iter().map(|(c, n)| format!("{c}={n}")).collect()
 }
 
 /// The latest `capacity` ingress→sink latencies (ns), for quantiles.
@@ -1953,8 +2070,9 @@ impl<E: End> Executor<E> {
         let head = c2.head.ok_or(Refusal::NoSnapshot)?;
         // A pending launch: no trade of its token precedes it.
         let state = QualifiedNativeState::fresh_launch(&classified, &self.terms, 0, snapshot)
-            .map_err(|_| Refusal::Admission)?;
-        let admitted = admit_native_buy(&state, &self.policy).map_err(|_| Refusal::Admission)?;
+            .map_err(|e| Refusal::Admission(e.into()))?;
+        let admitted =
+            admit_native_buy(&state, &self.policy).map_err(|e| Refusal::Admission(e.into()))?;
         Ok(C3Admitted {
             token: admitted.token().into_array(),
             intent: BuyAdmitted::Flap(admitted),
@@ -1999,8 +2117,9 @@ impl<E: End> Executor<E> {
         let head = c2.head.ok_or(Refusal::NoSnapshot)?;
         // A pending launch: no trade of its token precedes it.
         let state = QualifiedClassicState::fresh_launch(&classified, 0, snapshot)
-            .map_err(|_| Refusal::Admission)?;
-        let admitted = admit_classic_buy(&state, &four.policy).map_err(|_| Refusal::Admission)?;
+            .map_err(|e| Refusal::Admission(e.into()))?;
+        let admitted =
+            admit_classic_buy(&state, &four.policy).map_err(|e| Refusal::Admission(e.into()))?;
         Ok(C3Admitted {
             token: admitted.token().into_array(),
             intent: BuyAdmitted::Classic(admitted),
@@ -2052,8 +2171,9 @@ impl<E: End> Executor<E> {
         let head = c2.head.ok_or(Refusal::NoSnapshot)?;
         // A pending launch: no trade of its token precedes it.
         let state = QualifiedOpenFourState::fresh_launch(&classified, 0, snapshot)
-            .map_err(|_| Refusal::Admission)?;
-        let admitted = admit_openfour_buy(&state, &arm.policy).map_err(|_| Refusal::Admission)?;
+            .map_err(|e| Refusal::Admission(e.into()))?;
+        let admitted =
+            admit_openfour_buy(&state, &arm.policy).map_err(|e| Refusal::Admission(e.into()))?;
         Ok(C3Admitted {
             token: admitted.token().into_array(),
             intent: BuyAdmitted::OpenFour(admitted),
@@ -2734,7 +2854,7 @@ impl<E: End> Executor<E> {
             self.config.gas_price_wei,
             gas_limit,
         )
-        .map_err(|_| Refusal::Admission)?;
+        .map_err(|e| Refusal::Admission(e.into()))?;
         let snapshot =
             (c2.snapshot)(self.config.policy_generation, generation).ok_or(Refusal::NoSnapshot)?;
         let head = c2.fresh_head(self.config.strategy_max_head_age_ms)?;
@@ -2749,23 +2869,21 @@ impl<E: End> Executor<E> {
                 _,
             ) => BuyAdmitted::Flap(
                 CurveState::tracked(at, terms, reserve, circulating, &self.terms, snapshot)
-                    .map_err(|_| Refusal::Admission)
-                    .and_then(|s| admit_curve_buy(&s, &policy).map_err(|_| Refusal::Admission))?,
+                    .and_then(|s| admit_curve_buy(&s, &policy))
+                    .map_err(|e| Refusal::Admission(e.into()))?,
             ),
             (StrategyCurve::Four(FourCurve::Classic { now, fee, .. }), Some(arm)) => {
                 BuyAdmitted::Classic(
                     QualifiedClassicState::tracked(&arm.validated, at, now, fee, snapshot)
-                        .ok()
-                        .and_then(|s| admit_classic_buy(&s, &policy).ok())
-                        .ok_or(Refusal::Admission)?,
+                        .and_then(|s| admit_classic_buy(&s, &policy))
+                        .map_err(|e| Refusal::Admission(e.into()))?,
                 )
             }
             (StrategyCurve::Four(FourCurve::OpenFour { now, fee, .. }), Some(arm)) => {
                 BuyAdmitted::OpenFour(
                     QualifiedOpenFourState::tracked(&arm.validated, at, now, fee, snapshot)
-                        .ok()
-                        .and_then(|s| admit_openfour_buy(&s, &policy).ok())
-                        .ok_or(Refusal::Admission)?,
+                        .and_then(|s| admit_openfour_buy(&s, &policy))
+                        .map_err(|e| Refusal::Admission(e.into()))?,
                 )
             }
             (StrategyCurve::Four(_), None) => return Err(Refusal::VenueUnarmed),
@@ -2951,15 +3069,13 @@ impl<E: End> Executor<E> {
                 match curve {
                     FourCurve::Classic { now, fee, .. } => SellAdmitted::Classic(
                         QualifiedClassicHolding::tracked(&arm.validated, at, now, fee, snapshot)
-                            .ok()
-                            .and_then(|h| admit_classic_sell(&h, amount, &exit_policy).ok())
-                            .ok_or(Refusal::Admission)?,
+                            .and_then(|h| admit_classic_sell(&h, amount, &exit_policy))
+                            .map_err(|e| Refusal::Admission(e.into()))?,
                     ),
                     FourCurve::OpenFour { now, fee, .. } => SellAdmitted::OpenFour(
                         QualifiedOpenFourHolding::tracked(&arm.validated, at, now, fee, snapshot)
-                            .ok()
-                            .and_then(|h| admit_openfour_sell(&h, amount, &exit_policy).ok())
-                            .ok_or(Refusal::Admission)?,
+                            .and_then(|h| admit_openfour_sell(&h, amount, &exit_policy))
+                            .map_err(|e| Refusal::Admission(e.into()))?,
                     ),
                 }
             }
@@ -2969,15 +3085,14 @@ impl<E: End> Executor<E> {
                 circulating,
             }) => SellAdmitted::Curve(
                 CurveState::tracked(at, terms, reserve, circulating, &self.terms, snapshot)
-                    .map_err(|_| Refusal::Admission)
-                    .and_then(|state| {
-                        admit_curve_sell(&state, amount, &exit_policy)
-                            .map_err(|_| Refusal::Admission)
-                    })?,
+                    .and_then(|state| admit_curve_sell(&state, amount, &exit_policy))
+                    .map_err(|e| Refusal::Admission(e.into()))?,
             ),
             // R5: a migrated token: the Portal's quote at the snapshot, of
             // exactly the tokens sold (else its minimum is another amount's).
-            ExitSale::Quoted(_) if amount != tokens => return Err(Refusal::Admission),
+            ExitSale::Quoted(_) if amount != tokens => {
+                return Err(Refusal::Admission(AdmissionCause::Unwitnessed));
+            }
             ExitSale::Quoted(quoted) => SellAdmitted::Quoted(quoted),
         };
         let admitted_ns = clock.now_ns();
