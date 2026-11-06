@@ -2,7 +2,7 @@ import { TopicId } from "@/core/realtime";
 import { useTopic } from "@/core/realtime/hooks";
 import { Line } from "@/shared/ui/graphite/Rows";
 import { Notice } from "@/shared/ui/graphite/Notice";
-import { selectLive, useBscStore } from "../store/bscStore";
+import { selectLive, selectStatus, useBscStore } from "../store/bscStore";
 import { ValueState } from "./EvidenceRows";
 import { PlacedSection } from "./PlacedSection";
 import { useNativeRecords } from "./useNativeRecords";
@@ -11,7 +11,8 @@ import { buyLimitRow, switchRow } from "../model/switches";
 import { formatNative } from "../model/format";
 import { BuyLimitActions } from "../BuyLimitActions";
 import { SwitchActions } from "../SwitchActions";
-import { LIVE_BURN, LIVE_LOT, LIVE_QUARANTINE, LiveBurnAction, LiveGrantActions, LiveLotActions, LiveQuarantineAction, LiveRevokeActions, Receipt, ScopeLiveActions, TotalLimitActions } from "../LiveActions";
+import { LIVE_BURN, LIVE_LOT, LIVE_QUARANTINE, LiveBurnAction, LiveGrantActions, LiveLotActions, LiveQuarantineAction, LiveRevokeActions, Receipt, ScopeLiveActions, StrategySettingsActions, TotalLimitActions } from "../LiveActions";
+import { strategySettingsView } from "../model/strategySettings";
 import { LiveCampaign } from "./LiveCampaign";
 
 const wei = (v: string | undefined) => v === undefined || v === "" ? "—" : /^[0-9]+$/.test(v) ? formatNative(v, "wei") : v;
@@ -20,6 +21,7 @@ const wei = (v: string | undefined) => v === undefined || v === "" ? "—" : /^[
  *  activation, attempts, spend, the runtime's LIVE path, positions, receipts and PnL. */
 export function LivePanel() {
   const quality = useTopic(TopicId.BSC_LIVE_STATE);
+  useTopic(TopicId.BSC_MONITORING_STATE); // the Strategy C settings and the runtime status (section 10)
   const { projection: l } = useBscStore(selectLive);
   const records = useNativeRecords();
   const conditions = conditionRows(l);
@@ -32,6 +34,8 @@ export function LivePanel() {
   const age = qualificationAgeText(l);
   const divergence = divergenceText(l);
   const presence = presenceText(l);
+  const { projection: status } = useBscStore(selectStatus);
+  const strategy = strategySettingsView(records, status?.warnings ?? []);
   return <>
     <Line label="LIVE source quality" value={<ValueState state={quality} />} hint="bsc.live.state transport" />
     <PlacedSection panel="live" section={1} records={records}>
@@ -128,6 +132,13 @@ export function LivePanel() {
       <Line label="Realized PnL" value={l ? signedBnb(l.realizedPnlWei) : "—"} hint="Proceeds − input − all gas of closed positions; failed BUYs' gas" />
       <Line label="Gas paid" value={wei(l?.gasWei)} />
       {l?.ledgerError ? <Line label="Runtime ledger read" value={l.ledgerError} hint="The runtime could not read the LIVE ledger: its counters above do not count" /> : null}
+    </PlacedSection>
+    <PlacedSection panel="live" section={10} records={records}>
+      <Line label="Strategy C" value={<ValueState state={strategy.state} />} hint={strategy.stateReason || "the runtime status of the running strategy"} />
+      <Line label="Settings generation" value={`${strategy.generation.toString()} stored${strategy.running ? ` · ${strategy.startedGeneration?.toString() ?? "?"} in effect` : ""}`}
+        hint={strategy.available ? `stored now, effective at the next start of Strategy C (its switch on, a runtime restart)${strategy.requestId ? ` · last request ${strategy.requestId}` : ""}` : strategy.reason} />
+      <StrategySettingsActions view={strategy} />
+      <Line label="Team-sell exit" value="NOT IMPLEMENTED" hint="nicht implementiert: no sale of a creator's team ends a position" />
     </PlacedSection>
     <Notice>LIVE is the native owner's decision: effective only while every condition above holds, for the confirmed scope until its expiry, in this boot session. Every LIVE intent is admitted again at its dispatch (switches, daily and campaign limits, the grant's budget, the verified qualification); nothing is retried, and an intent whose handoff did not complete stays UNKNOWN until the chain decides.</Notice>
   </>;

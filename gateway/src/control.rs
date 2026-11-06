@@ -112,6 +112,25 @@ const BSC_LIVE_NONCE_BURN: &str = "bsc.live.nonce_burn";
 const BSC_LIVE_QUARANTINE: &str = "bsc.live.ledger.quarantine";
 const BSC_LIVE_DECISIONS: [&str; 3] = [BSC_LIVE_LOT, BSC_LIVE_NONCE_BURN, BSC_LIVE_QUARANTINE];
 
+/// Frontend package (06.11.): the operator's Strategy C settings at their native owner
+/// (`darkbotctl bsc strategy set`, `bsc_runtime strategy set`): `<KEY>:<VALUE>` with a key from
+/// the fixed set the LIVE tab sets and the settings generation of the displayed state as
+/// `profile_version` CAS. Only the shape is checked here (one word of printable ASCII, or
+/// nothing); the runtime configuration's own parser decides the value, its refusal is the
+/// receipt. Effective at the strategy's next start; never a signature or send.
+const BSC_STRATEGY_SET: &str = "bsc.strategy.set";
+const BSC_STRATEGY_KEYS: [&str; 9] = [
+    "BSC_STRATEGY_C_OBSERVATION_MS",
+    "BSC_STRATEGY_C_FILTERS",
+    "BSC_STRATEGY_C_INPUT_WEI",
+    "BSC_STRATEGY_C_TARGET_NET_MULTIPLE",
+    "BSC_STRATEGY_C_STOP_NET_MULTIPLE",
+    "BSC_STRATEGY_C_HOLD_MS",
+    "BSC_STRATEGY_C_MAX_OPEN",
+    "BSC_STRATEGY_C_CREATOR_SOLD_BEFORE_FILL",
+    "BSC_STRATEGY_C_CREATOR_SELL_EXIT",
+];
+
 const BSC_OWNER_ACTIONS: [&str; 8] = [
     BSC_SOURCE,
     BSC_VENUE,
@@ -420,6 +439,7 @@ fn allowed(project: i32, action: &str) -> bool {
             || PROVIDER_ACTIONS.contains(&action)))
         || (project == ProjectId::Bsc as i32
             && ([BSC_START, BSC_STOP, BSC_CANDIDATE, BSC_LIVE_GRANT].contains(&action)
+                || action == BSC_STRATEGY_SET
                 || BSC_OWNER_ACTIONS.contains(&action)
                 || BSC_LIVE_DECISIONS.contains(&action)))
 }
@@ -473,6 +493,30 @@ fn source_request(req: &CommandRequest) -> Option<(&'static str, String, u64)> {
             | BSC_ATTEMPT_TOTAL | BSC_LIVE_REVOKE,
             expected_version::Version::ConfigVersion(g),
         ) => Some((id, mode, g)),
+        _ => None,
+    }
+}
+
+/// The only accepted Strategy C setting: `<KEY>:<VALUE>` (see [`BSC_STRATEGY_SET`]) with the
+/// `profile_version` generation and no parameters; the arguments of `darkbotctl bsc strategy set`
+/// without the request id.
+fn strategy_request(req: &CommandRequest) -> Option<Vec<String>> {
+    if req.action != BSC_STRATEGY_SET || !req.params.is_empty() {
+        return None;
+    }
+    let (id, value) = req.resource_id.split_once(':')?;
+    let id = BSC_STRATEGY_KEYS.iter().copied().find(|k| *k == id)?;
+    if !value.bytes().all(|b| b.is_ascii_graphic()) {
+        return None;
+    }
+    match req.expected.as_ref()?.version? {
+        expected_version::Version::ProfileVersion(g) => Some(
+            ["bsc", "strategy", "set", id, value]
+                .into_iter()
+                .map(String::from)
+                .chain([g.to_string()])
+                .collect(),
+        ),
         _ => None,
     }
 }
@@ -1640,6 +1684,18 @@ impl Control {
                         CommandStatus::Rejected,
                         CommandRejectReason::InvalidParams,
                         "LIVE grant takes exactly the resource BSC_LIVE_GRANT, a BscLiveGrantCommand (venue, strategies, ingress sources and builder adapters from the fixed sets, plain decimal wei amounts, the execution risk and the limits, the confirmed scope SHA-256; every bound is the native owner's to decide) and the config_version generation",
+                    );
+                }
+            }
+        } else if req.action == BSC_STRATEGY_SET {
+            match strategy_request(req) {
+                Some(args) => Some(args),
+                None => {
+                    return reply(
+                        id,
+                        CommandStatus::Rejected,
+                        CommandRejectReason::InvalidParams,
+                        "Strategy C setting takes exactly <BSC_STRATEGY_C_OBSERVATION_MS|FILTERS|INPUT_WEI|TARGET_NET_MULTIPLE|STOP_NET_MULTIPLE|HOLD_MS|MAX_OPEN|CREATOR_SOLD_BEFORE_FILL|CREATOR_SELL_EXIT>:<value, printable ASCII without spaces> and the profile_version generation; the runtime configuration decides the value",
                     );
                 }
             }
@@ -4906,6 +4962,143 @@ mod tests {
                 .phase,
             CommandPhase::Failed as i32
         );
+        fs::remove_dir_all(dir).unwrap();
+    }
+    /// Frontend package (06.11.): a Strategy C setting is exactly `<KEY>:<VALUE>` with a key from
+    /// the fixed set, a value of printable ASCII without spaces (or none) and the displayed
+    /// settings generation as `profile_version`; it reaches `darkbotctl bsc strategy set` with the
+    /// request id, and the owner's receipt line is the detail (a refused value fails).
+    #[tokio::test]
+    async fn a_strategy_setting_reaches_the_native_owner_with_its_value() {
+        let request = |id: &str, resource: &str, expected: Option<expected_version::Version>| {
+            CommandRequest {
+                project: ProjectId::Bsc as i32,
+                request_id: id.into(),
+                action: BSC_STRATEGY_SET.into(),
+                resource_id: resource.into(),
+                expected: expected.map(|v| crate::proto::ExpectedVersion { version: Some(v) }),
+                params: Default::default(),
+                issued_at_unix_ns: crate::overview::unix_ns_now(),
+            }
+        };
+        let profile = |g| Some(expected_version::Version::ProfileVersion(g));
+        let args = |v: &[&str]| Some(v.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+        assert_eq!(
+            strategy_request(&request(
+                "x",
+                "BSC_STRATEGY_C_FILTERS:buy_count:3:,unique_buyers:2:",
+                profile(4)
+            )),
+            args(&[
+                "bsc",
+                "strategy",
+                "set",
+                "BSC_STRATEGY_C_FILTERS",
+                "buy_count:3:,unique_buyers:2:",
+                "4"
+            ])
+        );
+        assert_eq!(
+            strategy_request(&request("x", "BSC_STRATEGY_C_FILTERS:", profile(0))),
+            args(&["bsc", "strategy", "set", "BSC_STRATEGY_C_FILTERS", "", "0"])
+        );
+        for (resource, expected) in [
+            ("BSC_STRATEGY_C_MAX_OPEN", profile(4)),
+            ("BSC_STRATEGY_C_GAS_PRICE_WEI:1", profile(4)),
+            ("BSC_EXEC_INPUT_WEI:1", profile(4)),
+            ("BSC_STRATEGY_C_MAX_OPEN:3 4", profile(4)),
+            ("BSC_STRATEGY_C_MAX_OPEN:3\n", profile(4)),
+            ("BSC_STRATEGY_C_MAX_OPEN:3", None),
+            (
+                "BSC_STRATEGY_C_MAX_OPEN:3",
+                Some(expected_version::Version::ConfigVersion(4)),
+            ),
+        ] {
+            assert_eq!(
+                strategy_request(&request("x", resource, expected)),
+                None,
+                "{resource}"
+            );
+        }
+        let mut with_params = request("x", "BSC_STRATEGY_C_MAX_OPEN:3", profile(4));
+        with_params.params = vec![1].into();
+        assert_eq!(strategy_request(&with_params), None);
+        assert!(allowed(ProjectId::Bsc as i32, BSC_STRATEGY_SET));
+        assert!(!allowed(ProjectId::Project0 as i32, BSC_STRATEGY_SET));
+
+        let dir = std::env::temp_dir().join(format!("gw-strategy-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("run")).unwrap();
+        let ctl = dir.join("darkbotctl");
+        let log = dir.join("argv");
+        // The owner applies generation 4 and refuses the value 0.
+        executable(
+            &ctl,
+            &format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\n[ \"$5\" = 0 ] && {{ echo \"outcome=REJECTED_INVALID id=$4 value=$5 generation=4 request_id=$7 reason=out of range\"; exit 2; }}\necho \"outcome=APPLIED id=$4 value=$5 generation=5 request_id=$7\"\n",
+                log.display()
+            ),
+        );
+        let control = Control::new(
+            Some(Paths {
+                ctl,
+                rundir: dir.join("run"),
+                logdir: dir.clone(),
+                label: "test.capture".into(),
+                launchctl: absent_launchctl(&dir),
+            }),
+            &Limits::default(),
+        );
+        let set = request(
+            "42345678-1234-1234-1234-123456789abc",
+            "BSC_STRATEGY_C_MAX_OPEN:3",
+            profile(4),
+        );
+        let r = control.execute(&set).await;
+        assert_eq!(
+            (r.status, r.phase),
+            (
+                CommandStatus::Accepted as i32,
+                CommandPhase::Completed as i32
+            ),
+            "{}",
+            r.detail
+        );
+        assert!(
+            r.detail
+                .starts_with("outcome=APPLIED id=BSC_STRATEGY_C_MAX_OPEN value=3"),
+            "{}",
+            r.detail
+        );
+        assert_eq!(
+            fs::read_to_string(&log).unwrap(),
+            "bsc\nstrategy\nset\nBSC_STRATEGY_C_MAX_OPEN\n3\n4\n42345678-1234-1234-1234-123456789abc\n"
+        );
+        let refused = request(
+            "52345678-1234-1234-1234-123456789abc",
+            "BSC_STRATEGY_C_MAX_OPEN:0",
+            profile(4),
+        );
+        let r = control.execute(&refused).await;
+        assert_eq!(
+            (r.status, r.phase),
+            (CommandStatus::Accepted as i32, CommandPhase::Failed as i32),
+            "{}",
+            r.detail
+        );
+        assert!(
+            r.detail.starts_with("outcome=REJECTED_INVALID"),
+            "{}",
+            r.detail
+        );
+        let r = control
+            .execute(&request(
+                "62345678-1234-1234-1234-123456789abc",
+                "BSC_STRATEGY_C_MAX_OPEN:3",
+                None,
+            ))
+            .await;
+        assert_eq!(r.status, CommandStatus::Rejected as i32, "{}", r.detail);
         fs::remove_dir_all(dir).unwrap();
     }
     /// Order V2 §5: a BSC source request is exactly `<SOURCE_ID>:<MODE>` from the fixed sets with

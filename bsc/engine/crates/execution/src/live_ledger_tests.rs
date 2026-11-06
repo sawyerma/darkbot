@@ -25,6 +25,7 @@ fn released(n: u8, intent: LiveIntentKind, token: u8, input: u64, most: u64) -> 
         operator: None,
         source: None,
         venue: None,
+        exits: None,
     }
 }
 
@@ -62,6 +63,81 @@ fn a_fact_keeps_its_venue_and_its_lot_is_that_venues() {
             Some(crate::sources::VenueId::Flap)
         )
     );
+    fs::remove_dir_all(&dir).unwrap();
+}
+
+/// Decision 06.11. (review M1): a Strategy C BUY's release keeps its
+/// entry's exit rules (v6) and reads them back; a v5 fact reads without
+/// them; rules named in part, refused by the strategy's check, or on
+/// another fact than a Strategy C BUY refuse the ledger.
+#[test]
+fn a_strategy_buy_keeps_its_exit_rules() {
+    use darkbot_bsc_trading::strategy::engine::ExitTerms;
+    let dir = std::env::temp_dir().join(format!("bsc-live-ledger-exits-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    let rules = ExitTerms {
+        ratio_places: 4,
+        target_net_multiple: 20_000,
+        stop_net_multiple: 5_000,
+        hold_ms: 600_000,
+        creator_sell_exit: false,
+    };
+    let buy = Fact {
+        exits: Some(rules),
+        ..released(1, LiveIntentKind::Buy, 0xA, 1_000, 1_300)
+    };
+    Ledger::open(&dir).append(&buy, 1).unwrap();
+    let book = fold(&Ledger::open(&dir).facts().unwrap());
+    assert_eq!(book.tx(&buy.tx_hash).unwrap().released.exits, Some(rules));
+    // Its inclusion names none; the lot keeps its release's.
+    assert_eq!(Fact::about(&buy, FactKind::Included).exits, None);
+    let raw = |seq: u64,
+               schema: &'static darkbot_bsc_record::Schema,
+               intent: &str,
+               more: &dyn Fn(&mut Draft)| {
+        let mut d = Draft::new(schema);
+        d.set(k::KIND, "RELEASED")
+            .set(k::TX_HASH, Value::B256([seq as u8; 32]))
+            .set(k::PROVENANCE_TOOL, "t")
+            .set(k::PROVENANCE_OBSERVED_UNIX_MS, 1u64)
+            .set(k::INTENT, intent)
+            .set(k::COMPONENT, "BSC_STRATEGY_C")
+            .set(k::TOKEN, Value::Address([0xB; 20]))
+            .set(k::NONCE, seq)
+            .set(k::GRANT_GENERATION, 7u64);
+        more(&mut d);
+        let path = dir.join("live-ledger").join(format!("{seq:020}.dbrec"));
+        fs::write(&path, d.encode().unwrap()).unwrap();
+        path
+    };
+    let all = |d: &mut Draft, stop: u128| {
+        d.set(k::EXIT_RATIO_PLACES, 4u64)
+            .set(k::EXIT_TARGET_NET_MULTIPLE, Value::u128(20_000))
+            .set(k::EXIT_STOP_NET_MULTIPLE, Value::u128(stop))
+            .set(k::EXIT_HOLD_MS, 600_000u64)
+            .set(k::EXIT_CREATOR_SELL, false);
+    };
+    let v5 = raw(1, &k::V5, "BUY", &|_| {});
+    assert_eq!(Ledger::open(&dir).facts().unwrap()[1].exits, None);
+    fs::remove_file(v5).unwrap();
+    type Refused<'a> = (&'a dyn Fn(&mut Draft), &'a str, &'a str);
+    let refused: [Refused<'_>; 3] = [
+        (
+            &|d| {
+                d.set(k::EXIT_HOLD_MS, 1u64);
+            },
+            "BUY",
+            "named whole",
+        ),
+        (&|d| all(d, 10_000), "BUY", "below 1x"),
+        (&|d| all(d, 5_000), "SELL", "only on a Strategy C BUY"),
+    ];
+    for (more, intent, why) in refused {
+        let path = raw(1, &k::SCHEMA, intent, more);
+        let e = Ledger::open(&dir).facts().unwrap_err();
+        assert!(e.contains(why), "{why}: {e}");
+        fs::remove_file(path).unwrap();
+    }
     fs::remove_dir_all(&dir).unwrap();
 }
 

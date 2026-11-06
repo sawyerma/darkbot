@@ -274,6 +274,9 @@ pub struct Fact {
     /// v5 (SC4 d): the venue its transaction trades on (a released one's;
     /// none: Flap, every fact before it).
     pub venue: Option<crate::sources::VenueId>,
+    /// v6 (decision 06.11.): a Strategy C BUY's exit rules from its entry,
+    /// its lot's across restarts and new settings (none: the strategy's).
+    pub exits: Option<darkbot_bsc_trading::strategy::engine::ExitTerms>,
 }
 
 impl Fact {
@@ -301,6 +304,7 @@ impl Fact {
             response: None,
             operator: None,
             source: None,
+            exits: None,
             ..of.clone()
         }
     }
@@ -334,6 +338,9 @@ impl Fact {
             source: None,
             // Review L4: its venue as admitted.
             venue: a.venue,
+            // Its release's fact names them (a recovered one: none, its
+            // strategy's).
+            exits: None,
         })
     }
 }
@@ -452,7 +459,25 @@ impl Ledger {
                     .map(Value::B256),
             )
             .set_opt(k::SOURCE, fact.source.map(FactSource::name))
-            .set_opt(k::VENUE, fact.venue.map(crate::sources::VenueId::name));
+            .set_opt(k::VENUE, fact.venue.map(crate::sources::VenueId::name))
+            .set_opt(
+                k::EXIT_RATIO_PLACES,
+                fact.exits.map(|x| u64::from(x.ratio_places)),
+            )
+            .set_opt(
+                k::EXIT_TARGET_NET_MULTIPLE,
+                fact.exits
+                    .and_then(|x| multiple_word(x.target_net_multiple)),
+            )
+            .set_opt(
+                k::EXIT_STOP_NET_MULTIPLE,
+                fact.exits.and_then(|x| multiple_word(x.stop_net_multiple)),
+            )
+            .set_opt(k::EXIT_HOLD_MS, fact.exits.map(|x| x.hold_ms))
+            .set_opt(
+                k::EXIT_CREATOR_SELL,
+                fact.exits.map(|x| x.creator_sell_exit),
+            );
         let bytes = d.encode().map_err(|e| e.to_string())?;
         let e = |err: std::io::Error| format!("{}: {err}", self.dir.display());
         fs::DirBuilder::new()
@@ -865,6 +890,7 @@ impl Ledger {
         let bad = |why: &str| format!("{}: {why}", path.display());
         let bytes = fs::read(path).map_err(|e| bad(&e.to_string()))?;
         let r = decode(&k::SCHEMA, &bytes)
+            .or_else(|_| decode(&k::V5, &bytes))
             .or_else(|_| decode(&k::V4, &bytes))
             .or_else(|_| decode(&k::V3, &bytes))
             .or_else(|_| decode(&k::V2, &bytes))
@@ -942,6 +968,30 @@ impl Ledger {
         if source.is_some() && !chain {
             return Err(bad("a source is named only on a chain fact"));
         }
+        // v6: a Strategy C BUY's exit rules, whole and as its strategy's
+        // check takes them.
+        let exits = match (
+            r.opt_u64(k::EXIT_RATIO_PLACES).map_err(e)?,
+            u(k::EXIT_TARGET_NET_MULTIPLE)?,
+            u(k::EXIT_STOP_NET_MULTIPLE)?,
+            r.opt_u64(k::EXIT_HOLD_MS).map_err(e)?,
+            r.opt_bool(k::EXIT_CREATOR_SELL).map_err(e)?,
+        ) {
+            (None, None, None, None, None) => None,
+            (Some(places), Some(target), Some(stop), Some(hold_ms), Some(creator_sell_exit)) => {
+                let multiple = |w: U256| i128::try_from(w).map_err(|_| bad("an exit multiple"));
+                let x = darkbot_bsc_trading::strategy::engine::ExitTerms {
+                    ratio_places: u32::try_from(places).map_err(|_| bad("the exit places"))?,
+                    target_net_multiple: multiple(target)?,
+                    stop_net_multiple: multiple(stop)?,
+                    hold_ms,
+                    creator_sell_exit,
+                };
+                x.validate().map_err(|why| bad(&why.to_string()))?;
+                Some(x)
+            }
+            _ => return Err(bad("exit rules are named whole or not at all")),
+        };
         let fact = Fact {
             kind,
             tx_hash: r.b256(k::TX_HASH).map_err(e)?,
@@ -970,9 +1020,21 @@ impl Ledger {
                 None => None,
                 Some(v) => Some(crate::sources::VenueId::parse(v).ok_or_else(|| bad("venue"))?),
             },
+            exits,
         };
+        if fact.exits.is_some()
+            && (fact.intent != LiveIntentKind::Buy || fact.component != ComponentId::StrategyC)
+        {
+            return Err(bad("exit rules are named only on a Strategy C BUY"));
+        }
         Ok((fact, r.u64(k::PROVENANCE_OBSERVED_UNIX_MS).map_err(e)?))
     }
+}
+
+/// A non-negative net multiple as its ledger word (a negative one is no
+/// strategy's: [`ExitTerms::validate`](darkbot_bsc_trading::strategy::engine::ExitTerms::validate)).
+fn multiple_word(m: i128) -> Option<Value> {
+    u128::try_from(m).ok().map(Value::u128)
 }
 
 /// Where a transaction stands after the ledger's facts.
@@ -1896,6 +1958,7 @@ impl Ledger {
             source: None,
             // The G0.7 BUY: a Flap launch's.
             venue: Some(crate::sources::VenueId::Flap),
+            exits: None,
         };
         self.append(&fact, now_ms).map(Some)
     }

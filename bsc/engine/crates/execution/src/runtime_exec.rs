@@ -905,9 +905,10 @@ pub fn strategy_to<E: End>(
             curve,
             input_wei,
             decided_ns,
-        } => match executor
-            .on_strategy_buy(token, creator, curve, input_wei, &c2, clock, decided_ns)
-        {
+            exits,
+        } => match executor.on_strategy_buy(
+            token, creator, curve, input_wei, &c2, clock, decided_ns, exits,
+        ) {
             Ok(i) => (vec![i], None),
             Err(r) => (Vec::new(), Some(r)),
         },
@@ -1538,6 +1539,7 @@ pub(crate) mod tests {
             curve,
             input_wei: U256::from(10_000_000_000_000_000u64),
             decided_ns: 0,
+            exits: None,
         };
         let exit = StrategyAction::Exit {
             token: [0xAB; 20],

@@ -5,7 +5,7 @@
 **Origin of truth:** `bsc/docs/1_PLAN/PHASENPLAN.md` v9.1 (§5a, v8/v9/v9.1), `bsc/docs/1_PLAN/GATE0_TESTPLAN_SHORT.md`, `bsc/docs/1_PLAN/BSC_PRODUCTION_BUILD_MASTER_PLAN.md`, `frontend/docs/FRONTEND_PHASENPLAN.md`, `frontend/docs/GATEWAY_WIRE_PROTOCOL_V1_3.md`, `frontend/docs/GOVERNANCE_UND_SICHERHEIT.md`, `protocol/schemas/darkbot/{control,bsc}/v1/*.proto`, native implementation and reporter.
 
 ## BSC-LIVE-ERGÄNZUNG (28.10.2026)
-`BscLiveState` (Topic 34 `bsc.live.state`) aus nativem Owner/Runtime/Ledger, Reiter LIVE (9 Abschnitte), Gateway `bsc.live.grant` (BscLiveGrantCommand + Scope-SHA-256), `bsc.live.revoke`, `bsc.attempt.total.set`; F0-VAR `IST_CONNECTED`.
+`BscLiveState` (Topic 34 `bsc.live.state`) aus nativem Owner/Runtime/Ledger, Reiter LIVE (9 Abschnitte), Gateway `bsc.live.grant` (BscLiveGrantCommand + Scope-SHA-256), `bsc.live.revoke`, `bsc.attempt.total.set`; F0-VAR `IST_CONNECTED`. Strategy-C-Settings (06.11.): LIVE §10 aus `darkbot.bsc.strategy-settings.v1` + Runtime-Status `strategy[].settings*`, Gateway `bsc.strategy.set` (`profile_version`), wirksam ab nächstem Start.
 REV.1.0 R3b (Audit A): Betreiberentscheidungen im LIVE-Reiter `bsc.live.lot` (`0x<lot>:RESUME|WRITE_OFF|EXIT_NOW`), `bsc.live.nonce_burn` (`0x<tx>`): `config_version` = Ledger-Version (`BscLiveState.ledger_version`); `bsc.live.ledger.quarantine` (`<seq>` = `first_unreadable`): `config_version` = Owner-Generation; EXIT_NOW/Burn gesperrt ohne `operator_exit`/`nonce_burn` = true.
 
 ## BSC-CONTROL-ERGÄNZUNG (27.10.2026) — zwei Wallets und schaltbare Wirtschaftsmodi

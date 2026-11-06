@@ -1341,6 +1341,19 @@ pub fn project(root: &Path, rundir: &Path) -> Snapshot {
             Err(_) => warnings.push("OWNER_SETTINGS_INVALID".into()),
         }
     }
+    // Frontend package (06.11.): the operator's Strategy C settings as
+    // stored (effective at the strategy's next start; the runtime status
+    // names the ones the running strategy took).
+    match darkbot_bsc_execution::strategy_settings::current_file(&sources) {
+        Ok((_, None)) => {}
+        Ok((_, Some(path))) => match read(&path)
+            .map(|b| record::decode(&schema::bsc_runtime::strategy_settings::SCHEMA, &b))
+        {
+            Some(Ok(r)) => monitoring.records.push(native_record(rundir, &path, &r)),
+            _ => warnings.push("STRATEGY_SETTINGS_INVALID".into()),
+        },
+        Err(_) => warnings.push("STRATEGY_SETTINGS_INVALID".into()),
+    }
     // The running runtime's own status (health and counters per source).
     let runtime_status = rundir.join("bsc-runtime/status.dbrec");
     if let Some(bytes) = read(&runtime_status) {

@@ -990,6 +990,7 @@ fn a_strategy_entry_and_exit_reach_the_sink() {
             &strategy_c2(Some(HEAD)),
             &clock(500, 3),
             500,
+            None,
         )
         .unwrap();
     assert_eq!((buy.kind, buy.token), (IntentKind::Buy, token));
@@ -1013,7 +1014,8 @@ fn a_strategy_entry_and_exit_reach_the_sink() {
             input,
             &strategy_c2(Some(HEAD)),
             &clock(600, 3),
-            600
+            600,
+            None,
         ),
         Err(Refusal::DuplicateToken)
     );
@@ -1179,6 +1181,7 @@ fn a_strategy_entry_and_exit_on_an_openfour_curve_reach_the_sink() {
             &strategy_c2(Some(HEAD)),
             &clock(500, 3),
             500,
+            None,
         )
     };
     assert_eq!(buy(&mut exec).err(), Some(Refusal::VenueUnarmed));
@@ -1366,6 +1369,7 @@ fn a_strategy_entry_and_exit_on_a_classic_curve_reach_the_sink() {
             &strategy_c2(Some(HEAD)),
             &clock(300, 3),
             300,
+            None,
         )
         .err(),
         Some(Refusal::Admission(AdmissionCause::Terms))
@@ -1391,6 +1395,7 @@ fn a_strategy_entry_and_exit_on_a_classic_curve_reach_the_sink() {
             &strategy_c2(Some(HEAD)),
             &clock(350, 3),
             350,
+            None,
         )
         .err(),
         Some(Refusal::Admission(AdmissionCause::Unwitnessed))
@@ -1411,6 +1416,7 @@ fn a_strategy_entry_and_exit_on_a_classic_curve_reach_the_sink() {
             &strategy_c2(Some(HEAD)),
             &clock(400, 3),
             400,
+            None,
         )
         .err(),
         Some(Refusal::VenueUnarmed)
@@ -1424,6 +1430,7 @@ fn a_strategy_entry_and_exit_on_a_classic_curve_reach_the_sink() {
             &strategy_c2(Some(HEAD)),
             &clock(500, 3),
             500,
+            None,
         )
         .unwrap();
     let signed = decode_signed(&bought.raw).unwrap();
@@ -1513,6 +1520,7 @@ fn a_strategy_entry_and_exit_on_a_classic_curve_reach_the_sink() {
             &strategy_c2(Some(HEAD)),
             &clock(1_000, 3),
             1_000,
+            None,
         )
         .unwrap();
     let held = decode_classic_buy_amap(decode_signed(&bought.raw).unwrap().tx.input)
@@ -1575,6 +1583,7 @@ fn a_four_buys_cap_keeps_room_for_its_venues_exit() {
             &strategy_c2(Some(HEAD)),
             &clock(100, 3),
             100,
+            None,
         );
         match admitted {
             true => assert!(got.is_ok(), "{:?}", got.err()),
@@ -1621,6 +1630,7 @@ fn the_exit_reserve_is_each_positions_venues() {
         &strategy_c2(Some(HEAD)),
         &clock(100, 3),
         100,
+        None,
     )
     .unwrap();
     assert_eq!(exec.held_exit_reserve(), wei(flap_approve) + wei(flap_sell));
@@ -1633,6 +1643,7 @@ fn the_exit_reserve_is_each_positions_venues() {
         &strategy_c2(Some(HEAD)),
         &clock(200, 3),
         200,
+        None,
     )
     .unwrap();
     let both =
@@ -1680,7 +1691,7 @@ fn a_strategy_entry_needs_a_snapshot_and_room_in_its_cap() {
         exit_gas_price_wei: None,
     };
     assert_eq!(
-        exec.on_strategy_buy([1; 20], [0; 20], curve, input, &none, &clock(1, 1), 1),
+        exec.on_strategy_buy([1; 20], [0; 20], curve, input, &none, &clock(1, 1), 1, None),
         Err(Refusal::NoSnapshot)
     );
     assert_eq!(
@@ -1691,7 +1702,8 @@ fn a_strategy_entry_needs_a_snapshot_and_room_in_its_cap() {
             input,
             &strategy_c2(None),
             &clock(1, 1),
-            1
+            1,
+            None,
         ),
         Err(Refusal::NoSnapshot)
     );
@@ -1706,7 +1718,7 @@ fn a_strategy_entry_needs_a_snapshot_and_room_in_its_cap() {
         exit_gas_price_wei: None,
     };
     assert_eq!(
-        exec.on_strategy_buy([1; 20], [0; 20], curve, input, &late, &clock(1, 1), 1),
+        exec.on_strategy_buy([1; 20], [0; 20], curve, input, &late, &clock(1, 1), 1, None),
         Err(Refusal::StaleHead)
     );
     // Input plus gas is above the cap.
@@ -1718,7 +1730,8 @@ fn a_strategy_entry_needs_a_snapshot_and_room_in_its_cap() {
             input,
             &strategy_c2(Some(HEAD)),
             &clock(1, 1),
-            1
+            1,
+            None,
         ),
         Err(Refusal::SessionCap)
     );
@@ -1758,6 +1771,7 @@ fn a_buy_leaves_room_in_the_cap_for_its_exit() {
         &strategy_c2(Some(HEAD)),
         &clock(500, 3),
         500,
+        None,
     );
     assert_eq!(bought.err(), Some(Refusal::SessionCap));
     assert_eq!(exec.strategy_counters().handoffs, 0);
@@ -1774,6 +1788,7 @@ fn a_buy_leaves_room_in_the_cap_for_its_exit() {
             &strategy_c2(Some(HEAD)),
             &clock(500, 3),
             500,
+            None,
         )
         .unwrap();
     let tokens = decode_swap_exact_input_native(decode_signed(&bought.raw).unwrap().tx.input)
@@ -1825,6 +1840,7 @@ fn the_open_exits_are_counted_as_the_positions_change() {
                 &strategy_c2(Some(HEAD)),
                 &clock(500, 3),
                 500,
+                None,
             )
             .unwrap();
         let tokens = decode_swap_exact_input_native(decode_signed(&bought.raw).unwrap().tx.input)
@@ -1964,6 +1980,7 @@ fn c3_and_the_strategy_share_one_nonce_sequence() {
             &strategy_c2(Some(HEAD)),
             &clock(500, 3),
             500,
+            None,
         )
         .unwrap();
     assert_eq!(nonce(&buy.raw), 1);
@@ -1983,6 +2000,7 @@ fn c3_and_the_strategy_share_one_nonce_sequence() {
             &strategy_c2(Some(HEAD)),
             &clock(500, 3),
             500,
+            None,
         )
         .unwrap();
     assert_eq!(nonce(&buy.raw), 0);
@@ -2011,7 +2029,8 @@ fn a_path_left_out_does_not_take_the_sender() {
             input,
             &strategy_c2(Some(HEAD)),
             &clock(1, 1),
-            1
+            1,
+            None,
         ),
         Err(Refusal::PathOff)
     );
@@ -2062,7 +2081,7 @@ fn a_refused_sell_after_its_approval_can_still_close_the_position() {
     let c2 = strategy_c2(Some(HEAD));
     let nonce = |raw: &[u8]| decode_signed(raw).unwrap().tx.nonce;
     let buy = exec
-        .on_strategy_buy([1; 20], [0; 20], curve, input, &c2, &clock(1, 1), 1)
+        .on_strategy_buy([1; 20], [0; 20], curve, input, &c2, &clock(1, 1), 1, None)
         .unwrap();
     let after_buy = exec.strategy_lanes().3;
     let tokens = decode_swap_exact_input_native(decode_signed(&buy.raw).unwrap().tx.input)
@@ -2136,7 +2155,7 @@ fn a_nonce_is_taken_again_only_when_nothing_was_disclosed() {
     let c2 = strategy_c2(Some(HEAD));
     let nonce = |raw: &[u8]| decode_signed(raw).unwrap().tx.nonce;
     let a = exec
-        .on_strategy_buy([1; 20], [0; 20], curve, input, &c2, &clock(1, 1), 1)
+        .on_strategy_buy([1; 20], [0; 20], curve, input, &c2, &clock(1, 1), 1, None)
         .unwrap();
     assert_eq!(nonce(&a.raw), 0);
     let late = 2_000_000;
@@ -2148,7 +2167,8 @@ fn a_nonce_is_taken_again_only_when_nothing_was_disclosed() {
             input,
             &c2,
             &clock_jump(1, 1, 7, late),
-            1
+            1,
+            None,
         ),
         Err(Refusal::Deadline)
     );
@@ -2184,12 +2204,13 @@ fn a_nonce_is_taken_again_only_when_nothing_was_disclosed() {
             input,
             &c2,
             &clock_jump(1, 1, 8, late),
-            1
+            1,
+            None,
         ),
         Err(Refusal::Dispatch)
     );
     assert_eq!(
-        exec.on_strategy_buy([4; 20], [0; 20], curve, input, &c2, &clock(1, 1), 1),
+        exec.on_strategy_buy([4; 20], [0; 20], curve, input, &c2, &clock(1, 1), 1, None),
         Err(Refusal::NonceGap)
     );
     let (_, left, next_nonce, _, gap) = exec.strategy_lanes();
@@ -2343,6 +2364,7 @@ fn the_one_path_reaches_any_end() {
             &strategy_c2(Some(HEAD)),
             &clock(500, 3),
             500,
+            None,
         )
         .unwrap();
     let seen = &other.end().seen;
@@ -2375,6 +2397,7 @@ fn what_an_end_consumed_decides_nonce_and_exposure() {
             &strategy_c2(Some(HEAD)),
             &clock(500, 3),
             500,
+            None,
         )
     };
     let (mut clean, d1) = recording("end-clean", Some(false));

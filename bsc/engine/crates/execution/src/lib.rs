@@ -121,6 +121,10 @@ pub mod runtime;
 /// Phase H: Strategy C on the journaled canonical records (PAPER).
 #[cfg(feature = "runtime")]
 pub mod runtime_strategy;
+/// Frontend package (06.11.): the native owner of the operator's Strategy C
+/// settings, effective at the strategy's next start.
+#[cfg(feature = "runtime")]
+pub mod strategy_settings;
 /// The native canonical chain follower: G0.4 launches from canonical receipts.
 #[cfg(feature = "runtime")]
 pub mod chain_follower;

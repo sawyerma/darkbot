@@ -243,7 +243,7 @@ pub(crate) fn read_private(path: &Path, owner: u32) -> std::io::Result<Vec<u8>> 
 
 /// Creates `d` (0700) unless it exists; a new directory is made durable in
 /// its parent, so a slot or generation written into it survives power loss.
-pub(super) fn create_durable_dir(d: &Path) -> Result<(), String> {
+pub(crate) fn create_durable_dir(d: &Path) -> Result<(), String> {
     match fs::DirBuilder::new().mode(0o700).create(d) {
         Ok(()) => d
             .parent()

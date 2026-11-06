@@ -1853,6 +1853,7 @@ fn a_dex_routed_sells_proceeds_show_as_unknown() {
         operator: None,
         source: None,
         venue: None,
+        exits: None,
     };
     let (buy, sell) = (
         fact(1, LiveIntentKind::Buy, 1_000),
@@ -1980,6 +1981,7 @@ fn the_live_tab_shows_the_exit_deciders_the_recovery_and_the_quarantine() {
         operator: None,
         source: None,
         venue: None,
+        exits: None,
     };
     let ledger = Ledger::open(&dir);
     let block = Some((90, [9; 32], 1_000));
@@ -2437,6 +2439,7 @@ fn the_live_tab_projects_the_gate_grant_and_ledger() {
         operator: None,
         source: None,
         venue: None,
+        exits: None,
     };
     Ledger::open(&dir).append(&buy, now).unwrap();
     let config = super::live::runtime_config(&root);

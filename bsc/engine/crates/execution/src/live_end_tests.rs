@@ -449,6 +449,7 @@ fn live_intents_leave_through_the_release_only_as_the_owner_admits_them() {
             &strategy_c2_next(Some(HEAD), 1),
             &clock(500, 3),
             500,
+            None,
         )
         .unwrap();
     let request = String::from_utf8(requests.recv_timeout(wait).unwrap()).unwrap();
@@ -528,6 +529,7 @@ fn live_intents_leave_through_the_release_only_as_the_owner_admits_them() {
         &strategy_c2_next(Some(HEAD), 4),
         &clock(1_000, 3),
         1_000,
+        None,
     );
     assert_eq!(refused.unwrap_err(), Refusal::Owner);
     assert_eq!(exec.end().last_refusal(), Some(LIVE_GRANT_CHANGED));
@@ -690,6 +692,7 @@ fn one_sender_releases_one_nonce_after_the_other() {
             &strategy_c2_next(Some(HEAD), next),
             &clock(500, 3),
             500,
+            None,
         )
     };
     // Nonce 0 is not canonical yet: nonce 1 does not go.
@@ -880,6 +883,7 @@ fn a_late_intent_takes_no_attempt_and_a_miss_after_its_admission_counts() {
         &strategy_c2_next(Some(HEAD), 0),
         &after,
         500,
+        None,
     );
     assert_eq!(refused.unwrap_err(), Refusal::Deadline);
     assert!(requests.recv_timeout(silent).is_err());
@@ -1109,6 +1113,7 @@ fn a_token_is_bought_once_by_one_sender() {
         &strategy_c2_next(Some(HEAD), 1),
         &clock(500, 3),
         500,
+        None,
     );
     assert_eq!(again.err(), Some(Refusal::DuplicateToken));
     assert!(requests.recv_timeout(silent).is_err());
@@ -1220,6 +1225,7 @@ fn a_providers_answer_is_read_bound_and_recorded_apart_from_the_chain() {
                 &strategy_c2_next(Some(HEAD), 1),
                 &clock(500, 3),
                 500,
+                None,
             );
             match answer {
                 Answer::Ack => {
@@ -1280,6 +1286,7 @@ fn an_end_whose_fact_was_not_written_hands_nothing_more_over() {
         &strategy_c2_next(Some(HEAD), 1),
         &clock(500, 3),
         500,
+        None,
     );
     assert_eq!(next.err(), Some(Refusal::Owner));
     assert!(

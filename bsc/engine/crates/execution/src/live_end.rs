@@ -830,6 +830,7 @@ impl End for LiveEnd {
                 operator: None,
                 source: None,
                 venue: None,
+                exits: None,
             };
             let (Some(transport), Some(buffer), Some(frame)) =
                 (bound, slot.buffer.as_mut(), released.frames.get_mut(index))
@@ -904,6 +905,7 @@ impl End for LiveEnd {
             config,
             exit_reserve_wei,
             launcher,
+            exit_terms,
         } = h;
         // BSC3-045: a fact the ledger did not take may be missing from the
         // book: nothing more is handed over (before the owner's admission:
@@ -1250,6 +1252,8 @@ impl End for LiveEnd {
             operator: None,
             source: None,
             venue,
+            // Decision 06.11.: a Strategy C BUY's exit rules, its lot's.
+            exits: exit_terms,
         };
         let written = match self.ledger.append(&fact, (self.wall_ms)()) {
             Ok(_) => {

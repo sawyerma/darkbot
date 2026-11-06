@@ -320,8 +320,30 @@ bsc_source_request() {
     --expect-generation "$3" --request-id "$4" --state "$RUNDIR/bsc-sources" --root "$BSC_ROOT" \
     --rundir "$RUNDIR" --config "$BSC_CONFIG"
 }
+# Frontend package (06.11.): the operator's Strategy C settings (the keys the
+# LIVE tab sets): the native owner checks a value with the runtime
+# configuration's own parser on the snapshot's configuration, applies or
+# refuses it with its generation as the CAS and prints the receipt. Effective
+# at the strategy's next start (its switch on, a runtime restart).
+BSC_STRATEGY_USAGE="bsc strategy set <BSC_STRATEGY_C_KEY> <value> <generation> <request_id>; bsc strategy show"
+bsc_strategy_set() {
+  [ "$#" -eq 4 ] || die "$BSC_STRATEGY_USAGE"
+  case "$1" in BSC_STRATEGY_C_*) ;; *) die "unknown Strategy C setting" ;; esac
+  case "$3" in ''|*[!0-9]*) die "generation must be an unsigned integer" ;; esac
+  case "$4" in ''|-*|*[!$BSC_ID_CHARS]*) die "the request id is letters, digits and hyphens" ;; esac
+  [ "${#4}" -le 64 ] || die "the request id is letters, digits and hyphens"
+  [ -x "$APP_HOME/current/bsc_runtime" ] || die "BSC runtime nicht deployed"
+  /usr/bin/env -i PATH=/usr/bin:/bin "$APP_HOME/current/bsc_runtime" strategy set "$1" "$2" \
+    --expect-generation "$3" --request-id "$4" --state "$RUNDIR/bsc-sources" --config "$BSC_CONFIG"
+}
 cmd_bsc() {
   case "${1:-}" in
+    strategy) case "${2:-}" in
+      set) locked bsc_strategy_set "${@:3}" ;;
+      show) [ -x "$APP_HOME/current/bsc_runtime" ] || die "BSC runtime nicht deployed"
+        /usr/bin/env -i PATH=/usr/bin:/bin "$APP_HOME/current/bsc_runtime" strategy show --state "$RUNDIR/bsc-sources" --config "$BSC_CONFIG" ;;
+      *) die "$BSC_STRATEGY_USAGE" ;;
+    esac ;;
     source) case "${2:-}" in
       request) locked bsc_source_request "${@:3}" ;;
       show) [ -x "$APP_HOME/current/bsc_runtime" ] || die "BSC runtime nicht deployed"
@@ -348,7 +370,7 @@ cmd_bsc() {
     config-check) [ -x "$APP_HOME/current/bsc_runtime" ] || die "BSC runtime nicht deployed"
       bsc_config_check "$APP_HOME/current/bsc_runtime" ;;
     status) bsc_status ;;
-    *) die "bsc readiness start | stop | status; bsc reporter; bsc status; bsc config-check; bsc candidate request; bsc source request | show; $BSC_LIVE_USAGE" ;;
+    *) die "bsc readiness start | stop | status; bsc reporter; bsc status; bsc config-check; bsc candidate request; bsc source request | show; $BSC_STRATEGY_USAGE; $BSC_LIVE_USAGE" ;;
   esac
 }
 

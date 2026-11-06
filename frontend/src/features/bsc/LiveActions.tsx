@@ -1,7 +1,8 @@
 import "@/shared/ui/graphite/control-dialog.css";
 import { useState } from "react";
 import * as AlertDialog from "@radix-ui/react-alert-dialog";
-import { liveDecisionCommand, liveGrantCommand, ownerCommand, useSourceControl, type LiveGrantScope, type LotDecision } from "@/core/realtime/bscControl";
+import { liveDecisionCommand, liveGrantCommand, ownerCommand, strategySettingCommand, useSourceControl, type LiveGrantScope, type LotDecision } from "@/core/realtime/bscControl";
+import type { StrategySettingsView } from "./model/strategySettings";
 import { formAdapters, formSources, formStrategies, grantScope, liveRequestOf, scopeSha256, scopeText, totalInputOk, type DecisionLock, type GrantChoices, type GrantForm } from "./model/live";
 import type { ControlSwitchView } from "./model/types";
 // The LIVE tab's requests (plan 28.10.), each the same request a terminal sends with `darkbotctl bsc
@@ -215,5 +216,41 @@ export function LiveQuarantineAction({ seq, generation, available }: { seq: bigi
       onConfirm={() => { if (target) void liveDecisionCommand(LIVE_QUARANTINE, { action: "bsc.live.ledger.quarantine", ...target }); }}>
       <p>Der Eintrag, der nicht dekodiert, wird mit seinem Record verschoben; das Ledger liest wieder, wenn kein weiterer unlesbar ist. Was er sagte, ist die Rekonstruktion des Betreibers: BUYs aller Freigaben bis Generation {target?.generation.toString()} bleiben gesperrt, kein Slot geht mehr zurück.</p>
     </Confirm>
+  </>;
+}
+
+export const STRATEGY = "bsc-live-strategy";
+/** Frontend package (06.11.): Strategy C's settings as stored and as the running strategy took
+ *  them; a new value goes to the native owner at the shown generation, which checks it with the
+ *  runtime configuration and stores it at once. Effective at the next start of Strategy C. */
+export function StrategySettingsActions({ view }: { view: StrategySettingsView }) {
+  const { busy } = useSourceControl();
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [target, setTarget] = useState<{ id: string; label: string; value: string; generation: bigint } | null>(null);
+  return <>
+    <table className="bsc-table" data-testid={`${STRATEGY}-settings`}><tbody>
+      {view.rows.map(r => {
+        const value = values[r.id] ?? "";
+        const edit = (v: string) => setValues({ ...values, [r.id]: v });
+        return <tr key={r.id} data-testid={`${STRATEGY}-${r.id}`}>
+          <td>{r.label}<br /><span className="g-muted">{r.id}</span></td>
+          <td data-testid={`${STRATEGY}-${r.id}-stored`}>{r.stored === undefined ? "— (configuration file)" : r.stored === "" ? "(empty)" : r.stored}</td>
+          <td data-testid={`${STRATEGY}-${r.id}-effective`}>{!view.running ? "— (not running)" : r.effective === undefined ? "—" : r.effective === "" ? "(empty)" : r.effective}{r.pending ? " · stored value effective at the next start" : ""}</td>
+          <td>{r.choices
+            ? <select aria-label={`New ${r.label}`} value={value} onChange={e => edit(e.target.value)} disabled={!view.available || busy} data-testid={`${STRATEGY}-${r.id}-input`}>
+              <option value="">choose…</option>{r.choices.map(c => <option key={c} value={c}>{c}</option>)}</select>
+            : <input aria-label={`New ${r.label}`} value={value} onChange={e => edit(e.target.value.trim())} disabled={!view.available || busy} data-testid={`${STRATEGY}-${r.id}-input`} />}
+            <button className="g-secondary" aria-label={`Set ${r.label}`} disabled={!view.available || busy || (!!r.choices && value === "")}
+              title={view.available ? `Set at generation ${view.generation.toString()}` : view.reason} data-testid={`${STRATEGY}-${r.id}-set`}
+              onClick={() => setTarget({ id: r.id, label: r.label, value, generation: view.generation })}>Set</button></td>
+        </tr>;
+      })}
+    </tbody></table>
+    <Confirm open={!!target} testId={STRATEGY} title={`${target?.label ?? ""} auf „${target?.value ?? ""}“ setzen?`} onClose={() => setTarget(null)}
+      onConfirm={() => { if (target) void strategySettingCommand(STRATEGY, target.id, target.value, target.generation); }}>
+      <p>Die native Verwaltung prüft den Wert mit der Runtime-Konfiguration und speichert ihn sofort; wirksam wird er beim nächsten Start von Strategy C (Einschalten oder Neustart der Runtime). Echte Positionen, die Strategy C selbst gekauft hat, behalten die Exit-Werte ihres Einstiegs (Ziel, Stop, Haltedauer, Creator-Sell-Exit), auch über Neustarts; andere echte Lots (C3, übernommen, ohne gespeicherte Einstiegswerte) entscheidet Strategy C nach den Werten ihres jeweiligen Starts; PAPER-Positionen enden mit jedem Stopp oder Neustart der Strategie. Ein leerer Wert ist ein Wert, keine Rückkehr zur Konfigurationsdatei. Generation {target?.generation.toString()}.</p>
+      <p><code data-testid={`${STRATEGY}-request`}>{target ? `${target.id}=${target.value}` : ""}</code></p>
+    </Confirm>
+    <Receipt testId={STRATEGY} />
   </>;
 }

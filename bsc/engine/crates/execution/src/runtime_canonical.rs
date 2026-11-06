@@ -214,13 +214,16 @@ fn hold_read_lots(
                 continue;
             }
         };
-        let Some((tokens, spent_wei, filled_ms)) = open.iter().find_map(|p| match *p {
+        // Decision 06.11.: held again with its entry's exit rules (its BUY's
+        // in the ledger).
+        let Some((tokens, spent_wei, filled_ms, exits)) = open.iter().find_map(|p| match *p {
             live::PositionChange::Opened {
                 token,
                 tokens,
                 spent_wei,
                 filled_ms,
-            } if token == r.token => Some((tokens, spent_wei, filled_ms)),
+                exits,
+            } if token == r.token => Some((tokens, spent_wei, filled_ms, exits)),
             _ => None,
         }) else {
             continue;
@@ -256,6 +259,7 @@ fn hold_read_lots(
                             tokens,
                             spent_wei,
                             filled_ms,
+                            exits,
                         },
                         at,
                         journal,
@@ -292,6 +296,7 @@ fn hold_read_lots(
                 tokens,
                 spent_wei,
                 filled_ms,
+                exits,
             },
             at,
             journal,
@@ -538,7 +543,8 @@ fn tell_strategy(
                 tokens,
                 spent_wei,
                 filled_ms,
-            } => s.hold(token, tokens, spent_wei, filled_ms, at, journal),
+                exits,
+            } => s.hold(token, tokens, spent_wei, filled_ms, exits, at, journal),
             live::PositionChange::Ended { token } => s.unhold(token, at, journal),
         }
     }
@@ -807,10 +813,16 @@ pub(super) struct Canonical {
     /// Phase H: Strategy C, fed from these records while `BSC_STRATEGY_C`
     /// runs (SHADOW).
     pub(super) strategy: Option<crate::runtime_strategy::StrategyRuntime>,
-    /// The strategy's configuration while its component is on, and why it
-    /// cannot run (a refused gas evidence).
+    /// The strategy's configuration while its component is on (the one
+    /// it started with), and why it cannot run: its state
+    /// (`GAS_EVIDENCE_REFUSED`, `SETTINGS_REFUSED`) and reason.
     pub(super) strategy_config: Option<darkbot_bsc_trading::strategy::engine::Config>,
-    pub(super) strategy_refused: Option<String>,
+    pub(super) strategy_refused: Option<(&'static str, String)>,
+    /// Frontend package (06.11.): the operator's settings it started with
+    /// (every settable key as it took it), and as set (a restart for other
+    /// venues starts it with them again).
+    pub(super) strategy_settings: Option<crate::strategy_settings::Settings>,
+    pub(super) strategy_taken: Option<crate::strategy_settings::Settings>,
     pub(super) blocks_skipped: u64,
     pub(super) blocks: u64,
     pub(super) reorgs: u64,
@@ -1263,6 +1275,8 @@ impl Canonical {
             strategy: None,
             strategy_config: None,
             strategy_refused: None,
+            strategy_settings: None,
+            strategy_taken: None,
             blocks_skipped: 0,
             blocks: 0,
             reorgs: 0,

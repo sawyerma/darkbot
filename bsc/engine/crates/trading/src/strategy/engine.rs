@@ -71,6 +71,10 @@ pub struct Config {
     pub input_wei: U256,
     pub fill_delay_blocks: u64,
     pub creator_sold_before_fill: CreatorSoldBeforeFill,
+    /// Frontend package (06.11., plan 04.11.): whether a creator's sale
+    /// exits an open position (`BSC_STRATEGY_C_CREATOR_SELL_EXIT`, ENABLED as
+    /// before); off, its target, stop and hold decide alone.
+    pub creator_sell_exit: bool,
     pub gas_price_wei: U256,
 }
 
@@ -95,11 +99,21 @@ impl core::fmt::Display for ConfigError {
     }
 }
 
-impl Config {
-    /// A6: the one native check of the exit multiples (net, at
-    /// `ratio_places`), for the runtime, the owner and the controls alike:
-    /// `0 <= stop < 1x < target`. The multiples themselves and the net
-    /// profit factor's computation are unchanged.
+/// Decision 06.11. (review M1): the exit rules a real position keeps from
+/// its entry (the configuration of the strategy that bought it), across a
+/// restart and new settings: its net multiples at their own places, its
+/// hold time and whether a creator's sale exits it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ExitTerms {
+    pub ratio_places: u32,
+    pub target_net_multiple: i128,
+    pub stop_net_multiple: i128,
+    pub hold_ms: u64,
+    pub creator_sell_exit: bool,
+}
+
+impl ExitTerms {
+    /// The rule of [`Config::validate`]: `0 <= stop < 1x < target`.
     pub fn validate(&self) -> Result<(), ConfigError> {
         let one = super::fixed::scale(self.ratio_places).ok_or(ConfigError::Places)?;
         if !(0..one).contains(&self.stop_net_multiple) {
@@ -109,6 +123,27 @@ impl Config {
             return Err(ConfigError::TargetNotAboveOne);
         }
         Ok(())
+    }
+}
+
+impl Config {
+    /// The exit rules a position entered under this configuration keeps.
+    pub fn exits(&self) -> ExitTerms {
+        ExitTerms {
+            ratio_places: self.ratio_places,
+            target_net_multiple: self.target_net_multiple,
+            stop_net_multiple: self.stop_net_multiple,
+            hold_ms: self.hold_ms,
+            creator_sell_exit: self.creator_sell_exit,
+        }
+    }
+
+    /// A6: the one native check of the exit multiples (net, at
+    /// `ratio_places`), for the runtime, the owner and the controls alike:
+    /// `0 <= stop < 1x < target`. The multiples themselves and the net
+    /// profit factor's computation are unchanged.
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        self.exits().validate()
     }
 }
 
@@ -176,12 +211,15 @@ pub enum Input {
     /// tracked (the Flap ones are not concerned).
     FourIncomplete,
     /// Plan 28.10.: a real LIVE position on `token`, its BUY included at
-    /// `filled_ms`: `tokens` received for `spent_wei` (input and gas).
+    /// `filled_ms`: `tokens` received for `spent_wei` (input and gas);
+    /// `exits` its entry's (none: a position held before, else this
+    /// configuration's).
     Hold {
         token: [u8; 20],
         tokens: U256,
         spent_wei: U256,
         filled_ms: u64,
+        exits: Option<ExitTerms>,
     },
     /// The real position's SELL was included: it ends.
     Unhold {
@@ -213,6 +251,8 @@ pub struct Reheld {
     pub tokens: U256,
     pub spent_wei: U256,
     pub filled_ms: u64,
+    /// Its entry's exit rules (none: as [`Input::Hold`]).
+    pub exits: Option<ExitTerms>,
 }
 
 /// SC4 d: the curve a position is held again on, as read.
@@ -326,12 +366,13 @@ enum Stage {
         exit_block: u64,
         reason: ExitReason,
     },
-    /// Plan 28.10.: a real LIVE position, valued on the real book;
-    /// `triggered` once its exit was called for.
+    /// Plan 28.10.: a real LIVE position, valued on the real book by its
+    /// entry's exit rules; `triggered` once its exit was called for.
     Held {
         entry: Entry,
         filled_ms: u64,
         triggered: bool,
+        exits: ExitTerms,
     },
 }
 
@@ -432,6 +473,11 @@ impl Engine {
     }
 
     /// The creator of `token`'s launch, as the engine follows it.
+    /// The exit rules a position this engine enters keeps (decision 06.11.).
+    pub fn exits(&self) -> ExitTerms {
+        self.cfg.exits()
+    }
+
     pub fn creator_of(&self, token: &[u8; 20]) -> Option<[u8; 20]> {
         self.tokens
             .values()
@@ -528,6 +574,7 @@ impl Engine {
                 tokens,
                 spent_wei,
                 filled_ms,
+                exits,
             } => {
                 let entry = Entry {
                     tokens,
@@ -536,12 +583,14 @@ impl Engine {
                     spent_wei,
                 };
                 let block = self.block.map_or(0, |(n, _)| n);
+                let ours = self.cfg.exits();
                 if let Some(t) = self.token_mut(&token) {
                     let (superseded, triggered) = Self::held_over(&t.stage);
                     t.stage = Stage::Held {
                         entry,
                         filled_ms,
                         triggered,
+                        exits: exits.or(Self::held_exits(&t.stage)).unwrap_or(ours),
                     };
                     if let Some(paper) = superseded {
                         out.push(Output::Superseded {
@@ -563,6 +612,7 @@ impl Engine {
                 tokens,
                 spent_wei,
                 filled_ms,
+                exits,
             }) => {
                 let known = self.held_creators.remove(&token);
                 let creator = match known {
@@ -587,19 +637,25 @@ impl Engine {
                     },
                     filled_ms,
                     triggered: false,
+                    exits: exits.unwrap_or(self.cfg.exits()),
                 };
                 let block = self.block.map_or(0, |(n, _)| n);
                 match self.token_mut(&token) {
                     Some(t) => {
                         let (superseded, triggered) = Self::held_over(&t.stage);
+                        let before = Self::held_exits(&t.stage);
                         t.book = book;
                         t.stage = match stage {
                             Stage::Held {
-                                entry, filled_ms, ..
+                                entry,
+                                filled_ms,
+                                exits: own,
+                                ..
                             } => Stage::Held {
                                 entry,
                                 filled_ms,
                                 triggered,
+                                exits: exits.or(before).unwrap_or(own),
                             },
                             other => other,
                         };
@@ -647,6 +703,14 @@ impl Engine {
             Stage::Entering { .. } => (Some(None), false),
             Stage::Open { entry, .. } | Stage::Exiting { entry, .. } => (Some(Some(*entry)), false),
             Stage::Held { triggered, .. } => (None, *triggered),
+        }
+    }
+
+    /// The exit rules of a position held in `stage` (none: not held).
+    fn held_exits(stage: &Stage) -> Option<ExitTerms> {
+        match stage {
+            Stage::Held { exits, .. } => Some(*exits),
+            _ => None,
         }
     }
 
@@ -849,13 +913,23 @@ impl Engine {
     /// cost`, so a stop of 0 still fires once the value is not positive),
     /// or neither; `None` when the position cannot be quoted.
     fn valuation(&self, shadow: &TokenBook, e: &Entry) -> Option<(bool, bool)> {
+        self.valuation_by(shadow, e, &self.cfg.exits())
+    }
+
+    /// [`Self::valuation`] by the exit rules `exits` (a held position's).
+    fn valuation_by(
+        &self,
+        shadow: &TokenBook,
+        e: &Entry,
+        exits: &ExitTerms,
+    ) -> Option<(bool, bool)> {
         let x = self.exit_on(shadow, e)?;
-        let one = U512::from(u128::try_from(scale(self.cfg.ratio_places)?).ok()?);
+        let one = U512::from(u128::try_from(scale(exits.ratio_places)?).ok()?);
         let spent = U512::from(e.spent_wei);
         let multiple = |m: i128| Some(U512::from(u128::try_from(m).ok()?) * spent);
         let (target, stop) = (
-            multiple(self.cfg.target_net_multiple)?,
-            multiple(self.cfg.stop_net_multiple)?,
+            multiple(exits.target_net_multiple)?,
+            multiple(exits.stop_net_multiple)?,
         );
         Some(if x.proceeds_wei >= x.network_fee_wei {
             let value = U512::from(x.proceeds_wei - x.network_fee_wei) * one;
@@ -950,7 +1024,7 @@ impl Engine {
                     // Any sale of the creator latches once the position is
                     // open (one before the decision rejected it; one before
                     // the fill under TX_LANDS counts here).
-                    if t.creator_sold.is_some() {
+                    if self.cfg.creator_sell_exit && t.creator_sold.is_some() {
                         reasons.push(ExitReason::CreatorSell);
                     }
                     if let Some((target, stop)) = self.valuation(&shadow, &e) {
@@ -984,6 +1058,7 @@ impl Engine {
                     entry: e,
                     filled_ms,
                     triggered: false,
+                    exits,
                 } => {
                     if let Err(why) = t.book.status {
                         out.push(Output::Unresolved {
@@ -1002,19 +1077,19 @@ impl Engine {
                         continue;
                     }
                     let mut reasons = Vec::new();
-                    if t.creator_sold.is_some() {
+                    if exits.creator_sell_exit && t.creator_sold.is_some() {
                         reasons.push(ExitReason::CreatorSell);
                     }
                     // The real curve holds the real BUY: it is the one the
-                    // position is valued and sold on.
-                    if let Some((target, stop)) = self.valuation(&t.book, &e) {
+                    // position is valued and sold on, by its entry's rules.
+                    if let Some((target, stop)) = self.valuation_by(&t.book, &e, &exits) {
                         if target {
                             reasons.push(ExitReason::Target);
                         } else if stop {
                             reasons.push(ExitReason::Stop);
                         }
                     }
-                    if time_ms >= filled_ms.saturating_add(self.cfg.hold_ms) {
+                    if time_ms >= filled_ms.saturating_add(exits.hold_ms) {
                         reasons.push(ExitReason::Timeout);
                     }
                     if let Some(reason) = reasons.into_iter().min() {
@@ -1028,6 +1103,7 @@ impl Engine {
                                 entry: e,
                                 filled_ms,
                                 triggered: true,
+                                exits,
                             };
                         }
                     }

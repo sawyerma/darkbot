@@ -724,8 +724,69 @@ pub mod live_ledger {
     /// v5 (SC4 d): the venue its transaction trades on (`BSC_VENUE_*`);
     /// absent: Flap (every fact before it).
     pub const VENUE: u16 = 33;
+    /// v6 (decision 06.11.): a Strategy C BUY's exit rules from its entry
+    /// (its strategy's configuration), its lot's across restarts and new
+    /// settings: the net multiples at their places, the hold time, whether
+    /// a creator's sale exits it; all or none (none: the strategy's).
+    pub const EXIT_RATIO_PLACES: u16 = 34;
+    pub const EXIT_TARGET_NET_MULTIPLE: u16 = 35;
+    pub const EXIT_STOP_NET_MULTIPLE: u16 = 36;
+    pub const EXIT_HOLD_MS: u16 = 37;
+    pub const EXIT_CREATOR_SELL: u16 = 38;
 
     pub const SCHEMA: Schema = Schema {
+        name: "darkbot.bsc.live-ledger.v1",
+        record_type: 68,
+        schema_version: 6,
+        fields: &[
+            Field::req(KIND, "kind", Text),
+            Field::req(TX_HASH, "tx_hash", B256),
+            Field::req(PROVENANCE_TOOL, "_provenance.tool", Text),
+            Field::req(
+                PROVENANCE_OBSERVED_UNIX_MS,
+                "_provenance.observed_unix_ms",
+                U64,
+            ),
+            Field::req(INTENT, "intent", Text),
+            Field::req(COMPONENT, "component", Text),
+            Field::req(TOKEN, "token", Address),
+            Field::req(NONCE, "nonce", U64),
+            Field::req(GRANT_GENERATION, "grant_generation", U64),
+            Field::opt(INPUT_WEI, "input_wei", U256),
+            Field::opt(MAX_WEI, "max_wei", U256),
+            Field::opt(BLOCK_NUMBER, "block_number", U64),
+            Field::opt(BLOCK_HASH, "block_hash", B256),
+            Field::opt(BLOCK_MS, "block_ms", U64),
+            Field::opt(GAS_WEI, "gas_wei", U256),
+            Field::opt(TOKENS, "tokens", U256),
+            Field::opt(ETH_WEI, "eth_wei", U256),
+            Field::opt(MAX_BLOCK, "max_block", U64),
+            Field::opt(BY_TX_HASH, "by_tx_hash", B256),
+            Field::opt(RESPONSE, "response", Text),
+            Field::opt(SENDER, "sender", Address),
+            Field::opt(CHAIN_ID, "chain_id", U64),
+            Field::opt(LAUNCHER, "launcher", Address),
+            Field::opt(PLACEMENT, "placement", Text),
+            Field::opt(LAUNCH_INDEX, "launch_index", U64),
+            Field::opt(OWN_INDEX, "own_index", U64),
+            Field::opt(BUYS_BEFORE, "buys_before", U64),
+            Field::opt(ATTEMPT, "attempt", B256),
+            Field::opt(REQUEST_ID, "request_id", Text),
+            Field::opt(DECIDED_BY, "decided_by", Text),
+            Field::opt(EVIDENCE_SHA256, "evidence_sha256", B256),
+            Field::opt(SOURCE, "source", Text),
+            Field::opt(VENUE, "venue", Text),
+            Field::opt(EXIT_RATIO_PLACES, "exit_ratio_places", U64),
+            Field::opt(EXIT_TARGET_NET_MULTIPLE, "exit_target_net_multiple", U256),
+            Field::opt(EXIT_STOP_NET_MULTIPLE, "exit_stop_net_multiple", U256),
+            Field::opt(EXIT_HOLD_MS, "exit_hold_ms", U64),
+            Field::opt(EXIT_CREATOR_SELL, "exit_creator_sell", Bool),
+        ],
+    };
+
+    /// v5 (no exit rules: a lot is exited by its strategy's), kept
+    /// readable.
+    pub const V5: Schema = Schema {
         name: "darkbot.bsc.live-ledger.v1",
         record_type: 68,
         schema_version: 5,
@@ -1098,6 +1159,89 @@ pub mod source_mode_receipt {
             Field::req(GENERATION, "generation", U64),
             Field::req(EFFECTIVE, "effective", Text),
             Field::opt(BLOCK_REASON, "block_reason", Text),
+            Field::req(OBSERVED_UNIX_MS, "observed_unix_ms", U64),
+        ],
+    };
+}
+
+/// Frontend package (06.11., plan 04.11.): the operator's Strategy C settings
+/// at the native owner, one generation each (its number the next request's
+/// compare-and-swap, `profile_version`): every key the operator set with the
+/// value the runtime configuration takes for it; a key not set is the
+/// configuration file's. Effective at the next start of Strategy C.
+pub mod strategy_settings {
+    use super::*;
+
+    /// One set key.
+    pub mod setting {
+        use super::*;
+
+        /// `BSC_STRATEGY_C_*`.
+        pub const ID: u16 = 1;
+        pub const VALUE: u16 = 2;
+
+        pub const SCHEMA: Schema = Schema {
+            name: "darkbot.bsc.strategy-setting",
+            record_type: 0,
+            schema_version: 1,
+            fields: &[Field::req(ID, "id", Text), Field::req(VALUE, "value", Text)],
+        };
+    }
+
+    pub const GENERATION: u16 = 1;
+    /// The request that wrote this generation.
+    pub const REQUEST_ID: u16 = 2;
+    pub const PROVENANCE_TOOL: u16 = crate::schema::PROVENANCE_TOOL;
+    pub const PROVENANCE_OBSERVED_UNIX_MS: u16 = crate::schema::PROVENANCE_OBSERVED_UNIX_MS;
+    pub const SETTINGS: u16 = 5;
+
+    pub const SCHEMA: Schema = Schema {
+        name: "darkbot.bsc.strategy-settings.v1",
+        record_type: 77,
+        schema_version: 1,
+        fields: &[
+            Field::req(GENERATION, "generation", U64),
+            Field::req(REQUEST_ID, "request_id", Text),
+            Field::req(PROVENANCE_TOOL, "_provenance.tool", Text),
+            Field::req(
+                PROVENANCE_OBSERVED_UNIX_MS,
+                "_provenance.observed_unix_ms",
+                U64,
+            ),
+            Field::nested(SETTINGS, "settings", Presence::Repeated, &setting::SCHEMA),
+        ],
+    };
+}
+
+/// Frontend package (06.11.): the outcome of one Strategy C setting request.
+pub mod strategy_setting_receipt {
+    use super::*;
+
+    pub const REQUEST_ID: u16 = 1;
+    /// The key the request was for and the value it asked.
+    pub const ID: u16 = 2;
+    pub const VALUE: u16 = 3;
+    pub const EXPECTED_GENERATION: u16 = 4;
+    /// `APPLIED`, `REJECTED_STALE` or `REJECTED_INVALID` (the runtime
+    /// configuration refuses the value: `REASON`).
+    pub const OUTCOME: u16 = 5;
+    /// The generation now current (the new one when applied).
+    pub const GENERATION: u16 = 6;
+    pub const REASON: u16 = 7;
+    pub const OBSERVED_UNIX_MS: u16 = 8;
+
+    pub const SCHEMA: Schema = Schema {
+        name: "darkbot.bsc.strategy-setting-receipt.v1",
+        record_type: 78,
+        schema_version: 1,
+        fields: &[
+            Field::req(REQUEST_ID, "request_id", Text),
+            Field::req(ID, "id", Text),
+            Field::req(VALUE, "value", Text),
+            Field::req(EXPECTED_GENERATION, "expected_generation", U64),
+            Field::req(OUTCOME, "outcome", Text),
+            Field::req(GENERATION, "generation", U64),
+            Field::opt(REASON, "reason", Text),
             Field::req(OBSERVED_UNIX_MS, "observed_unix_ms", U64),
         ],
     };
@@ -1536,7 +1680,8 @@ pub mod runtime_status {
     pub mod strategy {
         use super::*;
 
-        /// `SHADOW`, or `GAS_EVIDENCE_REFUSED` with its reason.
+        /// `SHADOW`, or `GAS_EVIDENCE_REFUSED` / (v8) `SETTINGS_REFUSED`
+        /// with its reason.
         pub const STATE: u16 = 1;
         pub const REASON: u16 = 2;
         /// Tokens followed now (observing, entering, open or exiting).
@@ -1593,11 +1738,32 @@ pub mod runtime_status {
         /// v7 (A4): PAPER positions a real one (held, re-held) took the
         /// place of.
         pub const SUPERSEDED: u16 = 36;
+        /// v8 (frontend package 06.11.): the operator's settings generation
+        /// the running strategy started with (0: none set), and every
+        /// settable key as it took it (`setting`).
+        pub const SETTINGS_GENERATION: u16 = 37;
+        pub const SETTINGS: u16 = 38;
+
+        /// One settable key as the running strategy took it.
+        pub mod setting {
+            use super::*;
+
+            /// `BSC_STRATEGY_C_*`.
+            pub const ID: u16 = 1;
+            pub const VALUE: u16 = 2;
+
+            pub const SCHEMA: Schema = Schema {
+                name: "darkbot.bsc.runtime-status.strategy-setting",
+                record_type: 0,
+                schema_version: 1,
+                fields: &[Field::req(ID, "id", Text), Field::req(VALUE, "value", Text)],
+            };
+        }
 
         pub const SCHEMA: Schema = Schema {
             name: "darkbot.bsc.runtime-status.strategy",
             record_type: 0,
-            schema_version: 7,
+            schema_version: 8,
             fields: &[
                 Field::req(STATE, "state", Text),
                 Field::opt(REASON, "reason", Text),
@@ -1635,6 +1801,8 @@ pub mod runtime_status {
                 Field::req(CANCELLED_QUOTE, "cancelled_quote", U64),
                 Field::req(CANCELLED_COST, "cancelled_cost", U64),
                 Field::req(SUPERSEDED, "superseded", U64),
+                Field::opt(SETTINGS_GENERATION, "settings_generation", U64),
+                Field::nested(SETTINGS, "settings", Presence::Repeated, &setting::SCHEMA),
             ],
         };
     }
@@ -1934,8 +2102,9 @@ pub mod runtime_status {
         // v27 (BSC3-056): `canonical.confirm_*`. v28 (Audit E 3.1/3.3):
         // `status_stale_intervals`, `buy_attempts_total_max`. v29 (SC4 c,
         // B5): strategy v6, the cancelled entries by reason. v30 (A4):
-        // strategy v7, `superseded`.
-        schema_version: 30,
+        // strategy v7, `superseded`. v31 (frontend package 06.11.):
+        // strategy v8, the settings it started with.
+        schema_version: 31,
         fields: &[
             Field::req(GENERATION, "generation", U64),
             Field::nested(SOURCES, "sources", Presence::Repeated, &source::SCHEMA),
@@ -2657,12 +2826,15 @@ pub const ALL: &[&Schema] = &[
     &source_modes::SCHEMA_V2,
     &source_modes::SCHEMA_V1,
     &source_mode_receipt::SCHEMA,
+    &strategy_settings::SCHEMA,
+    &strategy_setting_receipt::SCHEMA,
     &buy_attempt_slot::SCHEMA,
     &buy_attempt_total_slot::SCHEMA,
     &live_spend::SCHEMA,
     &live_spend::V2,
     &live_spend::V1,
     &live_ledger::SCHEMA,
+    &live_ledger::V5,
     &live_ledger::V4,
     &live_ledger::V3,
     &live_ledger::V2,

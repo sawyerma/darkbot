@@ -48,6 +48,7 @@ fn config(rules: &str) -> Config {
         input_wei: U256::from(10_000_000_000_000_000u64),
         fill_delay_blocks: 1,
         creator_sold_before_fill: CreatorSoldBeforeFill::FreeCancel,
+        creator_sell_exit: true,
         gas_price_wei: U256::from(100_000_000u64),
     }
 }
@@ -302,6 +303,157 @@ fn a_creator_sale_after_the_fill_exits_first() {
     );
 }
 
+/// Frontend package (06.11.): with the creator-sell exit DISABLED a
+/// creator's sale ends no position, open or held: its target, stop and hold
+/// decide alone.
+#[test]
+fn a_creator_sale_exits_nothing_with_the_exit_disabled() {
+    let mut cfg = config("");
+    cfg.creator_sell_exit = false;
+    cfg.hold_ms = 1_500;
+    let mut c = Chain::new(cfg);
+    c.passing_launch(TOKEN);
+    c.next_block();
+    c.next_block(); // 107
+    c.sell(TOKEN, CREATOR, 10_000);
+    for _ in 0..3 {
+        c.next_block();
+    }
+    assert_eq!(
+        c.kinds()[1..],
+        [
+            "entered 106",
+            "trigger 108 Timeout",
+            "exited 109 Timeout loss"
+        ]
+    );
+    for exit in [true, false] {
+        let mut cfg = config("buy_count:100:");
+        cfg.creator_sell_exit = exit;
+        let mut c = Chain::new(cfg);
+        c.launch(TOKEN, 5_000_000_000_000_000);
+        let input = 10_000_000_000_000_000u64;
+        let before = c.book(TOKEN).clone();
+        let q = quote_native_buy(&before.buy_inputs(U256::from(input)).unwrap()).unwrap();
+        c.buy(TOKEN, [0xEE; 20], input);
+        c.feed(Input::Hold {
+            token: TOKEN,
+            tokens: q.output_amount,
+            spent_wei: U256::from(input + 30_000_000_000_000),
+            filled_ms: 0,
+            exits: None,
+        });
+        c.next_block();
+        c.sell(TOKEN, CREATOR, 10_000);
+        c.next_block();
+        c.next_block();
+        assert_eq!(
+            c.kinds().iter().any(|k| k.contains("CreatorSell")),
+            exit,
+            "{:?}",
+            c.kinds()
+        );
+    }
+}
+
+/// Decision 06.11. (review M1): a real position exits by the rules of its
+/// entry, never the configuration's of the strategy holding it now (a
+/// restart with new settings); held again without rules, it keeps them.
+#[test]
+fn a_held_position_exits_by_its_entrys_rules() {
+    let cfg = config("buy_count:100:");
+    // Its entry's: no creator-sell exit, a hold of 2 blocks.
+    let entry = ExitTerms {
+        hold_ms: 2 * BLOCK_MS,
+        creator_sell_exit: false,
+        ..cfg.exits()
+    };
+    let mut c = Chain::new(cfg);
+    c.launch(TOKEN, 5_000_000_000_000_000);
+    let input = 10_000_000_000_000_000u64;
+    let before = c.book(TOKEN).clone();
+    let q = quote_native_buy(&before.buy_inputs(U256::from(input)).unwrap()).unwrap();
+    c.buy(TOKEN, [0xEE; 20], input);
+    let hold = |exits| Input::Hold {
+        token: TOKEN,
+        tokens: q.output_amount,
+        spent_wei: U256::from(input + 30_000_000_000_000),
+        filled_ms: 0,
+        exits,
+    };
+    c.feed(hold(Some(entry)));
+    c.sell(TOKEN, CREATOR, 10_000);
+    // Held again without rules (a recovery): it keeps its entry's.
+    c.feed(hold(None));
+    for _ in 0..3 {
+        c.next_block();
+    }
+    assert_eq!(c.kinds(), ["trigger 102 Timeout"], "{:?}", c.kinds());
+    // The same position under the configuration's rules exits on the sale.
+    let mut c = Chain::new(config("buy_count:100:"));
+    c.launch(TOKEN, 5_000_000_000_000_000);
+    c.buy(TOKEN, [0xEE; 20], input);
+    c.feed(hold(None));
+    c.sell(TOKEN, CREATOR, 10_000);
+    c.next_block();
+    assert_eq!(c.kinds(), ["trigger 100 CreatorSell"], "{:?}", c.kinds());
+    // Its entry's target, not the configuration's (1.5x): at 100x the
+    // pump below triggers nothing; held again on its read curve by an
+    // engine that never saw its launch (a restart), the same.
+    for again in [false, true] {
+        let far = ExitTerms {
+            target_net_multiple: 1_000_000,
+            ..cfg_exits()
+        };
+        let mut c = Chain::new(config("buy_count:100:"));
+        c.launch(TOKEN, 5_000_000_000_000_000);
+        c.buy(TOKEN, [0xEE; 20], input);
+        match again {
+            false => c.feed(hold(Some(far))),
+            true => {
+                let mut restarted = Chain::new(config("buy_count:100:"));
+                restarted.books = c.books.clone();
+                restarted.block = c.block;
+                c = restarted;
+                let book = c.book(TOKEN).clone();
+                c.feed(Input::Reheld(Reheld {
+                    token: TOKEN,
+                    creator: CREATOR,
+                    curve: HeldCurve::Flap {
+                        terms: read_terms(&book),
+                        reserve: book.reserve,
+                        circulating: book.circulating,
+                    },
+                    tokens: q.output_amount,
+                    spent_wei: U256::from(input + 30_000_000_000_000),
+                    filled_ms: 0,
+                    exits: Some(far),
+                }));
+            }
+        }
+        for i in 10..30u8 {
+            c.buy(TOKEN, [i; 20], 200_000_000_000_000_000);
+        }
+        c.next_block();
+        c.next_block();
+        assert!(c.kinds().is_empty(), "{again}: {:?}", c.kinds());
+        assert!(c.engine.holds(&TOKEN));
+    }
+    // A rule the strategy's check refuses is no rule.
+    assert!(
+        ExitTerms {
+            stop_net_multiple: 10_000,
+            ..entry
+        }
+        .validate()
+        .is_err()
+    );
+}
+
+fn cfg_exits() -> ExitTerms {
+    config("").exits()
+}
+
 /// Without a move the position times out; a crash hits the stop.
 #[test]
 fn timeout_and_stop() {
@@ -530,6 +682,7 @@ fn a_held_real_position_exits_by_the_same_rules_once() {
         tokens: q.output_amount,
         spent_wei: U256::from(input + 30_000_000_000_000),
         filled_ms: 0,
+        exits: None,
     });
     assert_eq!(c.engine.held_positions(), 1);
     assert_eq!(c.engine.position_tokens(&TOKEN), Some(q.output_amount));
@@ -552,6 +705,7 @@ fn a_held_real_position_exits_by_the_same_rules_once() {
         tokens: q.output_amount,
         spent_wei: U256::from(input + 30_000_000_000_000),
         filled_ms: 0,
+        exits: None,
     });
     c.next_block();
     assert_eq!(c.kinds(), ["trigger 105 Target"]);
@@ -575,6 +729,7 @@ fn a_real_position_supersedes_the_paper_one_with_a_trace() {
             tokens: U256::from(1_000u64),
             spent_wei: U256::from(2_000u64),
             filled_ms: 0,
+            exits: None,
         })
     };
     let mut c = Chain::new(config("buy_count:3:,unique_buyers:3:"));
@@ -643,6 +798,7 @@ fn a_position_held_again_on_its_read_curve_exits_by_the_same_rules() {
         tokens: q.output_amount,
         spent_wei: spent,
         filled_ms: 0,
+        exits: None,
     });
     assert!(c.engine.holds(&TOKEN));
     c.feed(Input::Incomplete);
@@ -662,6 +818,7 @@ fn a_position_held_again_on_its_read_curve_exits_by_the_same_rules() {
             tokens: q.output_amount,
             spent_wei: spent,
             filled_ms: 0,
+            exits: None,
         }));
     };
     held(&mut c, TOKEN, CREATOR);
@@ -711,6 +868,7 @@ fn a_position_held_again_on_its_read_curve_exits_by_the_same_rules() {
         tokens: q.output_amount,
         spent_wei: spent,
         filled_ms: 0,
+        exits: None,
     }));
     assert!(migrated.engine.curve_of(&other).is_none());
     migrated.next_block();
@@ -732,6 +890,7 @@ fn a_position_held_again_after_a_gap_keeps_its_creator_rule() {
         tokens: q.output_amount,
         spent_wei: spent,
         filled_ms: 0,
+        exits: None,
     });
     c.feed(Input::Incomplete);
     c.next_block();
@@ -748,6 +907,7 @@ fn a_position_held_again_after_a_gap_keeps_its_creator_rule() {
         tokens: q.output_amount,
         spent_wei: spent,
         filled_ms: 0,
+        exits: None,
     }));
     assert!(c.engine.holds(&TOKEN));
     c.out.clear();
@@ -769,6 +929,7 @@ fn a_held_position_on_an_untracked_curve_is_not_held() {
         tokens: U256::from(1_000u64),
         spent_wei: U256::from(10_000u64),
         filled_ms: 0,
+        exits: None,
     });
     assert!(c.engine.holds(&TOKEN));
     // A BUY whose amounts the quote does not reproduce: TradeMismatch.
@@ -807,6 +968,7 @@ fn a_creator_sale_while_a_position_waits_to_be_held_again_still_counts() {
         tokens: q.output_amount,
         spent_wei: spent,
         filled_ms: 0,
+        exits: None,
     });
     c.feed(Input::Incomplete);
     c.next_block();
@@ -826,6 +988,7 @@ fn a_creator_sale_while_a_position_waits_to_be_held_again_still_counts() {
         tokens: q.output_amount,
         spent_wei: spent,
         filled_ms: 0,
+        exits: None,
     }));
     c.out.clear();
     c.next_block();
@@ -848,6 +1011,7 @@ fn a_held_position_without_its_terms_is_not_held() {
         tokens: U256::from(1_000u64),
         spent_wei: U256::from(10_000u64),
         filled_ms: 0,
+        exits: None,
     });
     assert!(!c.engine.holds(&TOKEN), "no priced curve, no decided exit");
 }
@@ -1169,6 +1333,7 @@ mod four {
             tokens: U256::from(1_000u64),
             spent_wei: U256::from(2_000u64),
             filled_ms: 0,
+            exits: None,
         });
         assert!(c.engine.holds(&FOUR_TOKEN));
         c.feed(Input::FourIncomplete);
@@ -1189,6 +1354,7 @@ mod four {
             tokens: U256::from(1_000u64),
             spent_wei: U256::from(2_000u64),
             filled_ms: 0,
+            exits: None,
         }));
         assert!(c.engine.holds(&FOUR_TOKEN));
         assert_eq!(

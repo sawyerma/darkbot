@@ -210,6 +210,8 @@ pub enum PositionChange {
         tokens: U256,
         spent_wei: U256,
         filled_ms: u64,
+        /// Decision 06.11.: its BUY's exit rules (none: the strategy's).
+        exits: Option<crate::runtime_strategy::ExitTerms>,
     },
     /// Its SELL was included, or its BUY reverted or left the chain.
     Ended { token: [u8; 20] },
@@ -984,6 +986,7 @@ impl LiveRuntime {
                     tokens: p.tokens,
                     spent_wei: p.input_wei + p.gas_wei,
                     filled_ms: p.opened_ms.unwrap_or_default(),
+                    exits: self.book.tx(&p.lot).and_then(|t| t.released.exits),
                 });
             }
         }
@@ -1687,6 +1690,7 @@ impl LiveRuntime {
                 tokens: p.tokens,
                 spent_wei: p.input_wei + p.gas_wei,
                 filled_ms: p.opened_ms.unwrap_or_default(),
+                exits: self.book.tx(&p.lot).and_then(|t| t.released.exits),
             });
         }
         changes

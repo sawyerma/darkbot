@@ -1111,16 +1111,26 @@ fn a_real_position_opens_closes_and_is_accounted() {
         reserve: fresh.reserve_after,
         circulating: fresh.supply_after,
     };
+    // Decision 06.11.: the deciding strategy's exit rules go with the BUY.
+    let rules = darkbot_bsc_trading::strategy::engine::ExitTerms {
+        ratio_places: 4,
+        target_net_multiple: 30_000,
+        stop_net_multiple: 2_500,
+        hold_ms: 90_000,
+        creator_sell_exit: false,
+    };
     let buy = StrategyAction::Buy {
         token,
         creator: [0; 20],
         curve,
         input_wei: input,
         decided_ns: 0,
+        exits: Some(rules),
     };
     let (intents, refused) = x.on_strategy(&buy, &c2, &clock, now_ms).unwrap();
     assert_eq!((intents.len(), refused), (1, None));
     let buy_tx = intents[0].handoff.tx_hash;
+    assert_eq!(x.book().tx(&buy_tx).unwrap().released.exits, Some(rules));
     requests.recv_timeout(Duration::from_secs(2)).unwrap();
     assert_eq!(x.book().unresolved().count(), 1);
     // Its receipt: included with its gas and the Portal's trade.
@@ -1185,6 +1195,7 @@ fn a_real_position_opens_closes_and_is_accounted() {
         tokens,
         spent_wei: input + U256::from(200_000u64 * 50_000_000),
         filled_ms: 1_793_000_001_000,
+        exits: Some(rules),
     };
     let changes = apply(
         &mut x,
@@ -1477,6 +1488,7 @@ fn reverted_exit_steps(tag: &str, reverts_max: u64, sell_out_of_gas: bool) {
         curve,
         input_wei: input,
         decided_ns: 0,
+        exits: None,
     };
     let (intents, refused) = x.on_strategy(&buy, &c2, &clock, now_ms).unwrap();
     assert_eq!((intents.len(), refused), (1, None));
@@ -1545,6 +1557,7 @@ fn reverted_exit_steps(tag: &str, reverts_max: u64, sell_out_of_gas: bool) {
         tokens,
         spent_wei: input + U256::from(200_000u64 * 50_000_000),
         filled_ms: 1_793_000_001_000,
+        exits: None,
     };
     let changes = apply(
         &mut x,
@@ -1680,6 +1693,7 @@ fn reverted_exit_steps(tag: &str, reverts_max: u64, sell_out_of_gas: bool) {
             curve,
             input_wei: input,
             decided_ns: 0,
+            exits: None,
         };
         let (out, refused) = x.on_strategy(&other, &c2, &clock, now_ms).unwrap();
         assert_eq!((out.len(), refused), (0, Some(Refusal::ExitStopped)));
@@ -2211,6 +2225,7 @@ fn a_four_lot_under_a_flap_grant_is_armed_for_its_exit() {
         operator: None,
         source: None,
         venue: Some(VenueId::OpenFour),
+        exits: None,
     };
     ledger.append(&buy, 1).unwrap();
     ledger
@@ -2258,6 +2273,7 @@ fn a_four_lot_under_a_flap_grant_is_armed_for_its_exit() {
         curve: StrategyCurve::Four(round.curve),
         input_wei: input,
         decided_ns: 0,
+        exits: None,
     };
     let (out, refused) = x.on_strategy(&other, &c2, &clock, DECIDED_MS).unwrap();
     assert_eq!((out.len(), refused), (0, Some(Refusal::VenueUnarmed)));
@@ -2388,6 +2404,7 @@ fn four_grant_round(tag: &str, venue: VenueId, round: FourRound) {
         },
         input_wei: input,
         decided_ns: 0,
+        exits: None,
     };
     let (out, refused) = x.on_strategy(&flap, &c2, &clock, DECIDED_MS).unwrap();
     assert_eq!((out.len(), refused), (0, Some(Refusal::VenueUnarmed)));
@@ -2422,6 +2439,7 @@ fn four_grant_round(tag: &str, venue: VenueId, round: FourRound) {
         curve: StrategyCurve::Four(curve),
         input_wei: input,
         decided_ns: 0,
+        exits: None,
     };
     let (out, refused) = x.on_strategy(&buy, &c2, &clock, DECIDED_MS).unwrap();
     assert_eq!((out.len(), refused), (1, None));
@@ -2514,6 +2532,7 @@ fn four_grant_round(tag: &str, venue: VenueId, round: FourRound) {
             tokens: amount,
             spent_wei: round.spent + gas(200_000),
             filled_ms: 1_793_000_001_000,
+            exits: None,
         }]
     );
     // The lot's exit is reserved at its venue's limits, under a grant of
@@ -3102,6 +3121,7 @@ fn an_exit_refused_for_the_nonce_order_continues_once_it_may() {
         curve,
         input_wei: input,
         decided_ns: 0,
+        exits: None,
     };
     let exit = |token| StrategyAction::Exit {
         token,
@@ -3162,6 +3182,7 @@ fn an_exit_refused_for_the_nonce_order_continues_once_it_may() {
                 curve: StrategyCurve::Four(four),
                 input_wei: input,
                 decided_ns: 0,
+                exits: None,
             },
             &c2,
             &clock,
@@ -3322,6 +3343,7 @@ impl Sc {
             curve: self.curve,
             input_wei: self.input,
             decided_ns: 0,
+            exits: None,
         }
     }
 
@@ -4437,6 +4459,7 @@ fn an_unknown_window_keeps_the_arm_blocked() {
                 operator: None,
                 source: None,
                 venue: None,
+                exits: None,
             },
             1,
         )
@@ -4508,6 +4531,7 @@ fn a_nonce_burn_takes_the_nonce_of_a_transaction_that_may_still_land() {
         operator: None,
         source: None,
         venue: None,
+        exits: None,
     };
     ledger.append(&target, 1).unwrap();
     assert_eq!(
@@ -5068,6 +5092,7 @@ fn unknown_window(hash: [u8; 32], nonce: u64, component: ComponentId) -> Fact {
         operator: None,
         source: None,
         venue: None,
+        exits: None,
     }
 }
 
@@ -5620,6 +5645,7 @@ fn a_buyer_short_of_the_exits_buys_nothing() {
         operator: None,
         source: None,
         venue: None,
+        exits: None,
     };
     ledger.append(&buy, 1).unwrap();
     let included = crate::live_ledger::Fact {
@@ -5968,6 +5994,7 @@ fn an_exit_only_grant_arms_for_the_exits_of_open_positions_only() {
         operator: None,
         source: None,
         venue: None,
+        exits: None,
     };
     ledger.append(&buy, 1).unwrap();
     let included = crate::live_ledger::Fact {
@@ -6086,6 +6113,7 @@ fn what_a_later_block_included_is_not_paid_in_the_probed_balance() {
         operator: None,
         source: None,
         venue: None,
+        exits: None,
     };
     ledger.append(&buy, 1).unwrap();
     let included = crate::live_ledger::Fact {
@@ -6421,6 +6449,7 @@ fn alt_buy(n: u8, buyer: [u8; 20], nonce: u64, most: u64) -> Fact {
         operator: None,
         source: None,
         venue: None,
+        exits: None,
     }
 }
 
@@ -7469,6 +7498,7 @@ fn a_strategy_buy_starts_within_its_deadline_after_its_admission() {
             },
             input_wei: U256::from(10_000_000_000_000_000u64),
             decided_ns: clock.now_ns(),
+            exits: None,
         };
         // The decision's wall clock: half a second after C2's head.
         let now_ms = 1_793_000_000_500;
@@ -7658,6 +7688,7 @@ fn the_c3_lease_yields_its_nonce_and_goes_back_with_the_arm() {
         },
         input_wei: U256::from(10_000_000_000_000_000u64),
         decided_ns: 0,
+        exits: None,
     };
     let (intents, refused) = x.on_strategy(&buy, &c2, &clock, 1_793_000_000_500).unwrap();
     assert_eq!((intents.len(), refused), (1, None));
@@ -8065,6 +8096,7 @@ fn fresh_buy(token: [u8; 20]) -> crate::runtime_strategy::StrategyAction {
         },
         input_wei: U256::from(10_000_000_000_000_000u64),
         decided_ns: 0,
+        exits: None,
     }
 }
 
@@ -8104,6 +8136,7 @@ fn closed_position(
         operator: None,
         source: None,
         venue: None,
+        exits: None,
     };
     let b = released(buy, LiveIntentKind::Buy, 1);
     let s = released(sell, LiveIntentKind::Sell, 2);
@@ -8237,6 +8270,7 @@ fn an_open_position_on_chain_counts_against_the_bound() {
         operator: None,
         source: None,
         venue: None,
+        exits: None,
     };
     let ledger = Ledger::open(&r.state);
     ledger.append(&buy, NOW).unwrap();
@@ -9009,6 +9043,7 @@ fn a_c3_grants_lots_are_exited_by_strategy_c_and_its_buys_refused() {
         operator: None,
         source: None,
         venue: None,
+        exits: None,
     };
     let ledger = Ledger::open(&r.state);
     ledger.append(&buy, NOW).unwrap();
@@ -9168,6 +9203,15 @@ fn the_runtime_holds_an_earlier_processs_open_lots_again() {
             output: U256::from(1u8),
         })
     };
+    // Decision 06.11.: the kept lot is a Strategy C BUY with its entry's
+    // exit rules; held again, it keeps them (its `k` record names them).
+    let rules = darkbot_bsc_trading::strategy::engine::ExitTerms {
+        ratio_places: 4,
+        target_net_multiple: 30_000,
+        stop_net_multiple: 2_500,
+        hold_ms: 90_000,
+        creator_sell_exit: false,
+    };
     let g = granted_generation(&r.state);
     let ledger = Ledger::open(&r.state);
     for (n, token) in [
@@ -9182,7 +9226,10 @@ fn the_runtime_holds_an_earlier_processs_open_lots_again() {
             kind: FactKind::Released,
             tx_hash: [0xe0 + n as u8; 32],
             intent: LiveIntentKind::Buy,
-            component: ComponentId::ExecC3,
+            component: match token {
+                KEPT => ComponentId::StrategyC,
+                _ => ComponentId::ExecC3,
+            },
             token,
             nonce: n,
             grant_generation: g,
@@ -9202,6 +9249,7 @@ fn the_runtime_holds_an_earlier_processs_open_lots_again() {
             operator: None,
             source: None,
             venue: None,
+            exits: (token == KEPT).then_some(rules),
         };
         ledger.append(&buy, NOW).unwrap();
         let included = Fact {
@@ -9356,6 +9404,20 @@ fn the_runtime_holds_an_earlier_processs_open_lots_again() {
     let d = live.as_ref().unwrap().exit_deciders.clone().unwrap();
     assert!(d.undecided.contains(&KEPT) && d.undecided.contains(&FLAKY));
     live.take().unwrap().shutdown();
+    journal.finish().unwrap();
+    let run = fs::read_dir(&base).unwrap().next().unwrap().unwrap().path();
+    let mut reader =
+        darkbot_bsc_journal::storage::run::RunReader::open(&run, journal_max_payload(&config))
+            .unwrap();
+    let mut held = Vec::new();
+    while let Some(rec) = reader.next_record().unwrap() {
+        if let Some(darkbot_bsc_trading::strategy::engine::Input::Reheld(h)) =
+            crate::runtime_strategy::input_of_record(rec.kind, &rec.payload)
+        {
+            held.push((h.token, h.exits));
+        }
+    }
+    assert!(held.contains(&(KEPT, Some(rules))), "{held:?}");
     r.clean();
     let _ = fs::remove_dir_all(&base);
 }
@@ -9532,6 +9594,7 @@ fn unresolved_transactions_are_recovered_from_final_confirmed_blocks() {
             operator: None,
             source: None,
             venue: None,
+            exits: None,
         };
         ledger.append(&buy, NOW).unwrap();
     }
@@ -9774,6 +9837,7 @@ fn the_recovery_names_what_it_never_asks_and_resolves_reverts_takers_and_orphans
         operator: None,
         source: None,
         venue: None,
+        exits: None,
     };
     let other = Some(NonceOrigin {
         chain_id: crate::wss::BSC_MAINNET_CHAIN_ID,
@@ -10287,6 +10351,7 @@ fn a_lost_bundle_never_blocks_the_buy_that_takes_its_nonce() {
             operator: None,
             source: None,
             venue: None,
+            exits: None,
         };
         Ledger::open(&r.state).append(&lost, NOW).unwrap();
         let c2 = c2_at(&r.d, r.buyer, 5);
@@ -10849,6 +10914,7 @@ fn r3_fact(n: u8, intent: LiveIntentKind, token: [u8; 20], nonce: u64) -> crate:
         operator: None,
         source: None,
         venue: None,
+        exits: None,
     }
 }
 
@@ -11280,6 +11346,7 @@ fn rehold_four_lots(
             operator: None,
             source: None,
             venue: Some(*venue),
+            exits: None,
         };
         ledger.append(&buy, NOW).unwrap();
         ledger

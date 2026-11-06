@@ -1609,6 +1609,7 @@ fn the_controller_hands_the_operators_ledger_decisions_to_the_runtime() {
         operator: None,
         source: None,
         venue: None,
+        exits: None,
     };
     ledger.append(&buy, 1).unwrap();
     ledger
@@ -1755,6 +1756,7 @@ fn the_operators_lot_and_ledger_commands_write_their_facts_once() {
         operator: None,
         source: None,
         venue: None,
+        exits: None,
     };
     ledger.append(&buy, 1).unwrap();
     let included = Fact {

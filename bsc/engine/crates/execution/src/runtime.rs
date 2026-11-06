@@ -1085,13 +1085,133 @@ fn status_bytes(
             rs::STRATEGY,
             crate::runtime_strategy::status_draft(
                 c.strategy.as_ref(),
-                c.strategy_refused.as_deref(),
+                c.strategy_refused.as_ref(),
                 cfg,
+                c.strategy_settings.as_ref(),
             )
             .into_nested(),
         );
     }
     d.encode().map_err(|e| e.to_string())
+}
+
+/// Frontend package (06.11.): starts Strategy C on `c` with the operator's
+/// settings on file under `sources` (`keep`: with those it ran with, a
+/// restart for other venues: new settings are effective at a switch on or a
+/// runtime restart), journaled before its switch (`p`, then `U`: a replay
+/// starts it with them); refused (`SETTINGS_REFUSED`: unreadable, invalid,
+/// beyond the records' bound, or its `p` not journaled), it stays off and
+/// the next pass tries again.
+#[allow(clippy::too_many_arguments)]
+fn start_strategy(
+    c: &mut Canonical,
+    journal: &mut RuntimeJournal,
+    clock: Clock,
+    config: &RuntimeConfig,
+    sources: &Path,
+    gas: &darkbot_bsc_trading::economics::network::GasEvidence,
+    venues: crate::runtime_strategy::StrategyVenues,
+    keep: Option<crate::strategy_settings::Settings>,
+) {
+    use darkbot_bsc_record::schema::bsc_runtime::runtime_status::strategy as st;
+    let started = match keep {
+        Some(settings) => strategy_with(config, settings),
+        None => strategy_start(config, sources),
+    };
+    let refuse = |c: &mut Canonical, why: String| {
+        c.strategy_refused = Some((
+            "SETTINGS_REFUSED",
+            crate::strategy_settings::bounded(why, st::SCHEMA.field(st::REASON)),
+        ))
+    };
+    let (settings, engine) = match started {
+        Ok(s) => s,
+        Err(why) => return refuse(c, why),
+    };
+    let values = crate::strategy_settings::effective_values(&config.source_text, &settings);
+    if let Some((k, _)) = values
+        .iter()
+        .find(|(_, v)| v.len() > crate::strategy_settings::max_value_len())
+    {
+        return refuse(
+            c,
+            format!("STRATEGY_SETTINGS_INVALID: {k} is longer than the status holds"),
+        );
+    }
+    // Review LOW 4: a start whose settings are not journaled would replay
+    // with others.
+    if settings.generation > 0
+        && !journal.record(RecordKind::Runtime, clock.now_ns(), settings.journal())
+    {
+        return refuse(
+            c,
+            format!(
+                "STRATEGY_SETTINGS_NOT_JOURNALED: generation {}",
+                settings.generation
+            ),
+        );
+    }
+    journal.record(
+        RecordKind::Runtime,
+        clock.now_ns(),
+        crate::runtime_strategy::switch_payload(true, venues),
+    );
+    c.strategy = Some(crate::runtime_strategy::StrategyRuntime::new(
+        engine.clone(),
+        gas.clone(),
+        venues,
+    ));
+    c.strategy_settings = Some(crate::strategy_settings::Settings {
+        generation: settings.generation,
+        request_id: None,
+        values,
+    });
+    c.strategy_taken = Some(settings);
+    c.strategy_config = Some(engine);
+    c.strategy_refused = None;
+}
+
+/// Frontend package (06.11.): the operator's Strategy C settings on file
+/// under `sources` and the strategy's configuration with them in place.
+fn strategy_start(
+    config: &RuntimeConfig,
+    sources: &Path,
+) -> Result<
+    (
+        crate::strategy_settings::Settings,
+        darkbot_bsc_trading::strategy::engine::Config,
+    ),
+    String,
+> {
+    let settings = crate::strategy_settings::current(sources)
+        .map_err(|e| format!("STRATEGY_SETTINGS_UNREADABLE: {e}"))?;
+    strategy_with(config, settings)
+}
+
+/// The strategy's configuration with `settings` in place (none: the file's).
+fn strategy_with(
+    config: &RuntimeConfig,
+    settings: crate::strategy_settings::Settings,
+) -> Result<
+    (
+        crate::strategy_settings::Settings,
+        darkbot_bsc_trading::strategy::engine::Config,
+    ),
+    String,
+> {
+    if settings.generation == 0 {
+        return Ok((settings, config.strategy.engine.clone()));
+    }
+    let engine = crate::strategy_settings::effective(&config.source_text, &settings)
+        .map_err(|e| {
+            format!(
+                "STRATEGY_SETTINGS_INVALID: generation {}: {e}",
+                settings.generation
+            )
+        })?
+        .strategy
+        .engine;
+    Ok((settings, engine))
 }
 
 /// The stop request of the runtime in `rundir` (written by `darkbotctl` or
@@ -1387,20 +1507,25 @@ pub fn run(
                     }
                     match (switch, &strategy_gas) {
                         (StrategySwitch::Start | StrategySwitch::Restart, Ok(gas)) => {
-                            journal.record(
-                                RecordKind::Runtime,
-                                clock.now_ns(),
-                                crate::runtime_strategy::switch_payload(true, strategy_venues),
-                            );
-                            c.strategy = Some(crate::runtime_strategy::StrategyRuntime::new(
-                                config.strategy.engine.clone(),
-                                gas.clone(),
+                            // While it stays switched on (a restart for
+                            // other venues, a refused restart tried again)
+                            // it keeps the settings it ran with (review M1);
+                            // a switch on or a runtime restart takes those
+                            // on file.
+                            let keep = c.strategy_taken.clone();
+                            start_strategy(
+                                c,
+                                &mut journal,
+                                clock,
+                                config,
+                                sources_dir,
+                                gas,
                                 strategy_venues,
-                            ));
-                            c.strategy_refused = None;
+                                keep,
+                            )
                         }
                         (StrategySwitch::Refused, Err(why)) => {
-                            c.strategy_refused = Some(why.clone())
+                            c.strategy_refused = Some(("GAS_EVIDENCE_REFUSED", why.clone()))
                         }
                         (StrategySwitch::Off, _) => {
                             c.strategy = None;
@@ -1408,7 +1533,20 @@ pub fn run(
                         }
                         _ => {}
                     }
-                    c.strategy_config = strategy_on.then(|| config.strategy.engine.clone());
+                    // The configuration of the running strategy, else the
+                    // file's.
+                    c.strategy_config = match (strategy_on, &c.strategy) {
+                        (false, _) => None,
+                        (true, Some(_)) => c.strategy_config.take(),
+                        (true, None) => Some(config.strategy.engine.clone()),
+                    };
+                    if c.strategy.is_none() {
+                        c.strategy_settings = None;
+                    }
+                    // Off, the next start takes the settings on file.
+                    if !strategy_on {
+                        c.strategy_taken = None;
+                    }
                     // R1: a strategy switched on or off changes who decides
                     // the open lots' exits.
                     refresh_lot_deciders(c, &mut live);
@@ -1479,7 +1617,16 @@ pub fn run(
                                     tokens,
                                     spent_wei,
                                     filled_ms,
-                                } => s.hold(token, tokens, spent_wei, filled_ms, at, &mut journal),
+                                    exits,
+                                } => s.hold(
+                                    token,
+                                    tokens,
+                                    spent_wei,
+                                    filled_ms,
+                                    exits,
+                                    at,
+                                    &mut journal,
+                                ),
                                 live::PositionChange::Ended { token } => {
                                     s.unhold(token, at, &mut journal)
                                 }

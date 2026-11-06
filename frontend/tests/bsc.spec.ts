@@ -1,7 +1,7 @@
 import { expect, test, type Page, type WebSocketRoute } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { create, fromBinary, toBinary, type MessageInitShape } from "@bufbuild/protobuf";
-import { BscLiveStateSchema } from "../src/core/generated/darkbot/bsc/v1/status_pb";
+import { BscLiveStateSchema, BscMonitoringStateSchema } from "../src/core/generated/darkbot/bsc/v1/status_pb";
 import { AckStatus, ClientMessageSchema, ServerMessageSchema, StateQuality, WelcomeStatus } from "../src/core/generated/darkbot/control/v1/stream_pb";
 import { CommandLookupResponseSchema, CommandPhase, CommandRequestSchema, CommandResponseSchema, CommandStatus, type CommandRequest } from "../src/core/generated/darkbot/control/v1/commands_pb";
 import { ProjectId, TopicClass, TopicId } from "../src/core/generated/darkbot/control/v1/topics_pb";
@@ -23,10 +23,11 @@ const STATE_TOPICS: [TopicId, string, string, string][] = [
 
 /** The gateway stand-in: every BSC STATE topic with its golden payload (`live` replaced). Returns
  *  a push of the next LIVE state (a new full state, as the reporter republishes it). */
-async function feed(page: Page, live: Uint8Array = golden("live")): Promise<(next: Uint8Array) => void> {
+async function feed(page: Page, live: Uint8Array = golden("live"), monitoring?: Uint8Array): Promise<(next: Uint8Array) => void> {
   let socket: WebSocketRoute;
   let seq = 1n;
-  const payloads = new Map<TopicId, Uint8Array>(STATE_TOPICS.map(([t, , , name]) => [t, t === TopicId.BSC_LIVE_STATE ? live : golden(name)]));
+  const payloads = new Map<TopicId, Uint8Array>(STATE_TOPICS.map(([t, , , name]) => [t, t === TopicId.BSC_LIVE_STATE ? live
+    : t === TopicId.BSC_MONITORING_STATE && monitoring ? monitoring : golden(name)]));
   const send = (msg: MessageInitShape<typeof ServerMessageSchema>["msg"]) =>
     socket.send(Buffer.from(toBinary(ServerMessageSchema, create(ServerMessageSchema, { msg }))));
   // The connection's session bootstrap comes first; without it no WebSocket is opened.
@@ -433,5 +434,48 @@ test("an unreadable campaign verdict is INVALID, an exact T0 leaves only the loc
   await expect(rows.first()).toContainText("of another evaluation");
   await expect(rows.last()).not.toContainText("of another evaluation");
   await expect(rows.first()).toContainText("T0 exact (recorded)");
+  expect(errors).toEqual([]);
+});
+
+test("the LIVE tab sets a Strategy C setting at the stored generation; the running strategy keeps its start's (frontend package 06.11.)", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  // TEST_ONLY records: the owner, its stored settings (generation 5) and a running strategy that started with generation 4.
+  const leaf = (name: string, value: string) => ({ name, value, kind: 7, unit: "" });
+  const record = (schema: string, fields: { name: string; value: string }[]) => ({ schema, provenance: "NATIVE_CREATED", fields: fields.map(f => leaf(f.name, f.value)) });
+  const monitoring = toBinary(BscMonitoringStateSchema, create(BscMonitoringStateSchema, { state: "NOT_EXECUTED", records: [
+    record("darkbot.bsc.source-modes.v1", [{ name: "generation", value: "9" }]),
+    record("darkbot.bsc.strategy-settings.v1", [{ name: "generation", value: "5" }, { name: "request_id", value: "r-5" },
+      { name: "settings[0].id", value: "BSC_STRATEGY_C_MAX_OPEN" }, { name: "settings[0].value", value: "4" }]),
+    record("darkbot.bsc.runtime-status.v1", [{ name: "_provenance.observed_unix_ms", value: String(Date.now()) }, { name: "status_interval_ms", value: "60000" },
+      { name: "status_stale_intervals", value: "3" }, { name: "strategy[0].state", value: "SHADOW" }, { name: "strategy[0].settings_generation", value: "4" },
+      { name: "strategy[0].settings[0].id", value: "BSC_STRATEGY_C_MAX_OPEN" }, { name: "strategy[0].settings[0].value", value: "3" },
+      { name: "strategy[0].settings[1].id", value: "BSC_STRATEGY_C_CREATOR_SELL_EXIT" }, { name: "strategy[0].settings[1].value", value: "ENABLED" }]),
+  ] }));
+  const sent = await commands(page);
+  await feed(page, liveOf({}), monitoring);
+  await page.goto("/bsc");
+  await tab(page, "LIVE").click();
+  await expect(line(page, "Settings generation")).toContainText("5 stored · 4 in effect");
+  await expect(line(page, "Team-sell exit")).toContainText("NOT IMPLEMENTED");
+  await expect(page.getByTestId("bsc-live-strategy-BSC_STRATEGY_C_MAX_OPEN-stored")).toHaveText("4");
+  await expect(page.getByTestId("bsc-live-strategy-BSC_STRATEGY_C_MAX_OPEN-effective")).toHaveText("3 · stored value effective at the next start");
+  await expect(page.getByTestId("bsc-live-strategy-BSC_STRATEGY_C_HOLD_MS-stored")).toHaveText("— (configuration file)");
+  // A choice needs a choice; the value goes as typed, the native owner decides it.
+  await expect(page.getByTestId("bsc-live-strategy-BSC_STRATEGY_C_CREATOR_SELL_EXIT-set")).toBeDisabled();
+  await page.getByTestId("bsc-live-strategy-BSC_STRATEGY_C_CREATOR_SELL_EXIT-input").selectOption("DISABLED");
+  await page.getByTestId("bsc-live-strategy-BSC_STRATEGY_C_CREATOR_SELL_EXIT-set").click();
+  await expect(page.getByTestId("bsc-live-strategy-dialog")).toContainText("nächsten Start von Strategy C");
+  await expect(page.getByTestId("bsc-live-strategy-request")).toHaveText("BSC_STRATEGY_C_CREATOR_SELL_EXIT=DISABLED");
+  await page.getByTestId("bsc-live-strategy-confirm").click();
+  await expect(page.getByTestId("bsc-live-strategy-receipt")).toContainText("outcome=APPLIED bsc.strategy.set");
+  await page.getByTestId("bsc-live-strategy-BSC_STRATEGY_C_FILTERS-input").fill("buy_count:3:");
+  await page.getByTestId("bsc-live-strategy-BSC_STRATEGY_C_FILTERS-set").click();
+  await page.getByTestId("bsc-live-strategy-confirm").click();
+  await expect(page.getByTestId("bsc-live-strategy-receipt")).toContainText("outcome=APPLIED bsc.strategy.set");
+  expect(sent.map(r => [r.action, r.resourceId, r.params.length, r.expected?.version])).toEqual([
+    ["bsc.strategy.set", "BSC_STRATEGY_C_CREATOR_SELL_EXIT:DISABLED", 0, { case: "profileVersion", value: 5n }],
+    ["bsc.strategy.set", "BSC_STRATEGY_C_FILTERS:buy_count:3:", 0, { case: "profileVersion", value: 5n }],
+  ]);
   expect(errors).toEqual([]);
 });

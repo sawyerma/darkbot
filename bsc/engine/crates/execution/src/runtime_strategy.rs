@@ -255,15 +255,62 @@ fn word(w: &[u8; 32]) -> U256 {
     U256::from_be_bytes(*w)
 }
 
+/// Decision 06.11.: a held position's exit rules from its entry, after its
+/// `h`, `k` or `q` record (a record without them: the strategy's):
+/// `places u32 | target i128 | stop i128 | hold ms u64 | creator-sell exit
+/// u8`, little-endian.
+const EXITS_LEN: usize = 4 + 16 + 16 + 8 + 1;
+
+fn push_exits(out: &mut Vec<u8>, exits: Option<ExitTerms>) {
+    if let Some(x) = exits {
+        out.extend_from_slice(&x.ratio_places.to_le_bytes());
+        out.extend_from_slice(&x.target_net_multiple.to_le_bytes());
+        out.extend_from_slice(&x.stop_net_multiple.to_le_bytes());
+        out.extend_from_slice(&x.hold_ms.to_le_bytes());
+        out.push(u8::from(x.creator_sell_exit));
+    }
+}
+
+/// The exit rules of a record of `len` bytes without them: none at `len`,
+/// those after it at `len + EXITS_LEN` (as the strategy's check takes
+/// them); `None`: neither.
+fn exits_after(p: &[u8], len: usize) -> Option<Option<ExitTerms>> {
+    if p.len() == len {
+        return Some(None);
+    }
+    let x = p.get(len..).filter(|x| x.len() == EXITS_LEN)?;
+    let exits = ExitTerms {
+        ratio_places: u32::from_le_bytes(x[0..4].try_into().ok()?),
+        target_net_multiple: i128::from_le_bytes(x[4..20].try_into().ok()?),
+        stop_net_multiple: i128::from_le_bytes(x[20..36].try_into().ok()?),
+        hold_ms: u64::from_le_bytes(x[36..44].try_into().ok()?),
+        creator_sell_exit: match x[44] {
+            0 => false,
+            1 => true,
+            _ => return None,
+        },
+    };
+    exits.validate().ok()?;
+    Some(Some(exits))
+}
+
 /// Plan 28.10.: a real LIVE position held by the strategy, a `Runtime`
-/// record: `h | token [20] | tokens [32] | spent wei [32] | filled ms u64`.
-pub fn hold_payload(token: [u8; 20], tokens: U256, spent_wei: U256, filled_ms: u64) -> Vec<u8> {
-    let mut out = Vec::with_capacity(HOLD_LEN);
+/// record: `h | token [20] | tokens [32] | spent wei [32] | filled ms u64`
+/// and (decision 06.11.) its entry's exit rules.
+pub fn hold_payload(
+    token: [u8; 20],
+    tokens: U256,
+    spent_wei: U256,
+    filled_ms: u64,
+    exits: Option<ExitTerms>,
+) -> Vec<u8> {
+    let mut out = Vec::with_capacity(HOLD_LEN + EXITS_LEN);
     out.push(b'h');
     out.extend_from_slice(&token);
     out.extend_from_slice(&tokens.to_be_bytes::<32>());
     out.extend_from_slice(&spent_wei.to_be_bytes::<32>());
     out.extend_from_slice(&filled_ms.to_le_bytes());
+    push_exits(&mut out, exits);
     out
 }
 
@@ -282,7 +329,7 @@ pub fn unhold_payload(token: [u8; 20]) -> Vec<u8> {
 /// creator [20] | tradable u8 | version u8 | quote token [20] | NFT gate
 /// [20] | r, h, k [32 each] | DEX threshold [32] | buy, sell tax bps u16 |
 /// reserve [32] | circulating [32] | tokens [32] | spent wei [32] | filled
-/// ms u64`.
+/// ms u64` and (decision 06.11.) its entry's exit rules.
 pub fn reheld_payload(r: &Reheld) -> Vec<u8> {
     let (t, reserve, circulating) = match r.curve {
         HeldCurve::Flap {
@@ -310,14 +357,16 @@ pub fn reheld_payload(r: &Reheld) -> Vec<u8> {
         out.extend_from_slice(&w.to_be_bytes::<32>());
     }
     out.extend_from_slice(&r.filled_ms.to_le_bytes());
+    push_exits(&mut out, r.exits);
     out
 }
 
 /// SC4 d: a real LIVE Four.meme position held again on its curve as read,
 /// a `Runtime` record: `q | venue u8 | token [20] | creator [20] | start
 /// w0..w3 [4 × 32] | now w0..w3 [4 × 32] | a u16 | b [32] | c u16 | tokens
-/// [32] | spent wei [32] | filled ms u64`: Classic `k t offers sold` and
-/// the fee `rate min tax`, OpenFour `k T Q remaining` and `protocol 0 dev`.
+/// [32] | spent wei [32] | filled ms u64` and (decision 06.11.) its entry's
+/// exit rules: Classic `k t offers sold` and the fee `rate min tax`,
+/// OpenFour `k T Q remaining` and `protocol 0 dev`.
 fn reheld_four_payload(r: &Reheld, curve: FourCurve) -> Vec<u8> {
     use crate::canonical_join::Venue;
     let classic = |c: darkbot_bsc_trading::economics::four_classic::ClassicCurve| {
@@ -355,6 +404,7 @@ fn reheld_four_payload(r: &Reheld, curve: FourCurve) -> Vec<u8> {
         out.extend_from_slice(&w.to_be_bytes::<32>());
     }
     out.extend_from_slice(&r.filled_ms.to_le_bytes());
+    push_exits(&mut out, r.exits);
     out
 }
 
@@ -366,9 +416,10 @@ fn reheld_four_of(p: &[u8]) -> Option<Reheld> {
     use crate::canonical_join::Venue;
     use darkbot_bsc_trading::economics::four_classic::{ClassicCurve, ClassicFee};
     use darkbot_bsc_trading::economics::openfour::{OpenFourCurve, OpenFourFee};
-    if p.len() != REHELD_FOUR_LEN || p[0] != b'q' {
+    if p.first() != Some(&b'q') {
         return None;
     }
+    let exits = exits_after(p, REHELD_FOUR_LEN)?;
     let venue = crate::runtime_journal::venue_of_byte(p[1])?;
     let w = |i: usize| U256::from_be_slice(&p[42 + 32 * i..74 + 32 * i]);
     let at = 42 + 8 * 32;
@@ -415,19 +466,18 @@ fn reheld_four_of(p: &[u8]) -> Option<Reheld> {
         tokens: U256::from_be_slice(p.get(rest..rest + 32)?),
         spent_wei: U256::from_be_slice(p.get(rest + 32..rest + 64)?),
         filled_ms: u64_at(p, rest + 64)?,
+        exits,
     })
 }
 
 const REHELD_LEN: usize = 1 + 20 + 20 + 1 + 1 + 20 + 20 + 4 * 32 + 2 + 2 + 4 * 32 + 8;
 
-pub use darkbot_bsc_trading::strategy::engine::{HeldCurve, Reheld};
+pub use darkbot_bsc_trading::strategy::engine::{ExitTerms, HeldCurve, Reheld};
 
 fn reheld_of(p: &[u8]) -> Option<Reheld> {
     use darkbot_bsc_trading::economics::flap::curve::Curve;
     use darkbot_bsc_trading::economics::flap::native_curve20::TokenTerms;
-    if p.len() != REHELD_LEN {
-        return None;
-    }
+    let exits = exits_after(p, REHELD_LEN)?;
     let w = |at: usize| p.get(at..at + 32).map(U256::from_be_slice);
     let bps = |at: usize| Some(u16::from_le_bytes(p.get(at..at + 2)?.try_into().ok()?));
     let tradable = match p[41] {
@@ -461,6 +511,7 @@ fn reheld_of(p: &[u8]) -> Option<Reheld> {
         tokens: w(after + 68)?,
         spent_wei: w(after + 100)?,
         filled_ms: u64_at(p, after + 132)?,
+        exits,
     })
 }
 
@@ -469,7 +520,8 @@ pub fn input_of_record(kind: RecordKind, p: &[u8]) -> Option<Input> {
     match (kind, p.first()?) {
         (RecordKind::Runtime, b'k') => reheld_of(p).map(Input::Reheld),
         (RecordKind::Runtime, b'q') => reheld_four_of(p).map(Input::Reheld),
-        (RecordKind::Runtime, b'h') if p.len() == HOLD_LEN => Some(Input::Hold {
+        (RecordKind::Runtime, b'h') => Some(Input::Hold {
+            exits: exits_after(p, HOLD_LEN)?,
             token: p.get(1..21)?.try_into().ok()?,
             tokens: U256::from_be_slice(p.get(21..53)?),
             spent_wei: U256::from_be_slice(p.get(53..85)?),
@@ -926,6 +978,9 @@ pub enum StrategyAction {
         curve: StrategyCurve,
         input_wei: U256,
         decided_ns: u64,
+        /// Decision 06.11.: the exit rules its lot keeps (the deciding
+        /// strategy's; a strategy's action always names them).
+        exits: Option<darkbot_bsc_trading::strategy::engine::ExitTerms>,
     },
     Exit {
         token: [u8; 20],
@@ -999,8 +1054,9 @@ pub struct StrategyRuntime {
 /// runtime, with its reason).
 pub fn status_draft(
     strategy: Option<&StrategyRuntime>,
-    refused: Option<&str>,
+    refused: Option<&(&'static str, String)>,
     config: &Config,
+    settings: Option<&crate::strategy_settings::Settings>,
 ) -> darkbot_bsc_record::Draft {
     use darkbot_bsc_record::Value;
     use darkbot_bsc_record::schema::bsc_runtime::runtime_status::strategy as st;
@@ -1008,10 +1064,10 @@ pub fn status_draft(
     let mut d = darkbot_bsc_record::Draft::new(&st::SCHEMA);
     d.set(
         st::STATE,
-        if strategy.is_some() {
-            "SHADOW"
-        } else {
-            "GAS_EVIDENCE_REFUSED"
+        match (strategy, refused) {
+            (Some(_), _) => "SHADOW",
+            (None, Some((state, _))) => state,
+            (None, None) => "GAS_EVIDENCE_REFUSED",
         },
     )
     .set(st::FOLLOWED, strategy.map_or(0, |s| s.followed() as u64))
@@ -1051,8 +1107,18 @@ pub fn status_draft(
     .set(st::CANCELLED_QUOTE, c.cancelled_quote)
     .set(st::CANCELLED_COST, c.cancelled_cost)
     .set(st::SUPERSEDED, c.superseded);
-    if let (None, Some(why)) = (strategy, refused) {
-        d.set(st::REASON, why);
+    if let (None, Some((_, why))) = (strategy, refused) {
+        d.set(st::REASON, why.as_str());
+    }
+    // Frontend package (06.11.): the settings the running strategy took.
+    if let (Some(_), Some(s)) = (strategy, settings) {
+        d.set(st::SETTINGS_GENERATION, s.generation);
+        for (k, v) in &s.values {
+            let mut e = darkbot_bsc_record::Draft::new(&st::setting::SCHEMA);
+            e.set(st::setting::ID, *k)
+                .set(st::setting::VALUE, v.as_str());
+            d.push(st::SETTINGS, e.into_nested());
+        }
     }
     d
 }
@@ -1085,6 +1151,7 @@ impl StrategyRuntime {
                         curve,
                         input_wei: self.input_wei,
                         decided_ns,
+                        exits: Some(self.engine.exits()),
                     })
                 }
                 Pending::Exit(token, decided_ns) => self.exit_action(token, decided_ns),
@@ -1128,16 +1195,18 @@ impl StrategyRuntime {
     /// Plan 28.10.: the strategy holds a real LIVE position (its exit rules
     /// apply on the real curve). The input is journaled first, so a replay
     /// steps the same engine.
+    #[allow(clippy::too_many_arguments)]
     pub fn hold(
         &mut self,
         token: [u8; 20],
         tokens: U256,
         spent_wei: U256,
         filled_ms: u64,
+        exits: Option<ExitTerms>,
         at: u64,
         journal: &mut RuntimeJournal,
     ) {
-        let p = hold_payload(token, tokens, spent_wei, filled_ms);
+        let p = hold_payload(token, tokens, spent_wei, filled_ms, exits);
         journal.record(RecordKind::Runtime, at, p.clone());
         self.record(RecordKind::Runtime, &p, at, Some(journal));
     }
@@ -1419,6 +1488,7 @@ pub fn replay(
     config: &Config,
     gas: &GasEvidence,
     config_sha256: Option<[u8; 32]>,
+    config_text: Option<&str>,
 ) -> Result<Replay, String> {
     use darkbot_bsc_journal::storage::run::RunReader;
     use darkbot_bsc_record::schema::bsc_capture::capture_run as cr;
@@ -1442,6 +1512,9 @@ pub fn replay(
     }
     let mut reader = RunReader::open(&run, max_payload).map_err(|e| e.to_string())?;
     let mut strategy: Option<StrategyRuntime> = None;
+    // Frontend package (06.11.): the operator's settings the next start
+    // takes (its `p` record), on the configuration `config_text`.
+    let mut settings: Option<Config> = None;
     let mut journaled: Vec<Vec<u8>> = Vec::new();
     let mut replayed: Vec<Vec<u8>> = Vec::new();
     // Phase I positioning: block times, foreign BUYs, entries (PASS
@@ -1469,7 +1542,26 @@ pub fn replay(
                 }
                 if let Some(venues) = switched_on(p) {
                     out.starts += 1;
-                    strategy = Some(StrategyRuntime::new(config.clone(), gas.clone(), venues));
+                    let config = settings.take().unwrap_or_else(|| config.clone());
+                    strategy = Some(StrategyRuntime::new(config, gas.clone(), venues));
+                }
+            }
+            (RecordKind::Runtime, p)
+                if p.first() == Some(&crate::strategy_settings::JOURNAL_TAG) =>
+            {
+                let taken = crate::strategy_settings::Settings::of_journal(p)
+                    .ok_or_else(|| "an unreadable settings record".to_string())
+                    .and_then(|s| {
+                        let text = config_text
+                            .ok_or("a settings record without the run's configuration")?;
+                        crate::strategy_settings::effective(text, &s)
+                    });
+                match taken {
+                    Ok(c) => settings = Some(c.strategy.engine),
+                    Err(e) => {
+                        out.read_error = Some(format!("Strategy C settings: {e}"));
+                        break;
+                    }
                 }
             }
             (RecordKind::Runtime, p) if p.first() == Some(&b'Y') => journaled.push(p.to_vec()),
@@ -1785,6 +1877,7 @@ mod tests {
             tokens: U256::from(9u8),
             spent_wei: U256::from(10u8),
             filled_ms: 11,
+            exits: None,
         };
         let p = reheld_payload(&r);
         assert_eq!(p.len(), REHELD_LEN);
@@ -1800,6 +1893,95 @@ mod tests {
         let mut flag = p.clone();
         flag[41] = 2;
         assert_eq!(input_of_record(RecordKind::Runtime, &flag), None);
+    }
+
+    /// Decision 06.11. (review M1): a held position's records (`h`, `k`,
+    /// `q`) carry its entry's exit rules and read back with them; without
+    /// them (a record before them) they read as the strategy's; rules its
+    /// check refuses, a flag other than 0/1 or another length are no input.
+    #[test]
+    fn a_held_positions_records_carry_its_exit_rules() {
+        use darkbot_bsc_trading::economics::flap::native_curve20::profile_terms;
+        use darkbot_bsc_trading::economics::openfour::{OpenFourCurve, OpenFourFee};
+        let rules = ExitTerms {
+            ratio_places: 4,
+            target_net_multiple: 30_000,
+            stop_net_multiple: 2_500,
+            hold_ms: 90_000,
+            creator_sell_exit: false,
+        };
+        let flap = Reheld {
+            token: [0xE1; 20],
+            creator: [0xC1; 20],
+            curve: HeldCurve::Flap {
+                terms: profile_terms(100, 200),
+                reserve: U256::from(7u8),
+                circulating: U256::from(8u8),
+            },
+            tokens: U256::from(9u8),
+            spent_wei: U256::from(10u8),
+            filled_ms: 11,
+            exits: Some(rules),
+        };
+        let curve = OpenFourCurve {
+            k: U256::from(1u8),
+            token_reserve: U256::from(2u8),
+            quote_reserve: U256::from(3u8),
+            remaining: U256::from(4u8),
+        };
+        let four = Reheld {
+            curve: HeldCurve::Four(FourCurve::OpenFour {
+                start: curve,
+                now: curve,
+                fee: OpenFourFee {
+                    protocol_bps: 5,
+                    dev_bps: 6,
+                },
+            }),
+            ..flap
+        };
+        for r in [flap, four] {
+            let p = reheld_payload(&r);
+            assert_eq!(
+                input_of_record(RecordKind::Runtime, &p),
+                Some(Input::Reheld(r))
+            );
+            let without = reheld_payload(&Reheld { exits: None, ..r });
+            assert_eq!(p.len(), without.len() + EXITS_LEN);
+            assert_eq!(
+                input_of_record(RecordKind::Runtime, &without),
+                Some(Input::Reheld(Reheld { exits: None, ..r }))
+            );
+        }
+        let hold = hold_payload(
+            [0xE1; 20],
+            U256::from(9u8),
+            U256::from(10u8),
+            11,
+            Some(rules),
+        );
+        assert_eq!(
+            input_of_record(RecordKind::Runtime, &hold),
+            Some(Input::Hold {
+                token: [0xE1; 20],
+                tokens: U256::from(9u8),
+                spent_wei: U256::from(10u8),
+                filled_ms: 11,
+                exits: Some(rules),
+            })
+        );
+        assert_eq!(hold.len(), HOLD_LEN + EXITS_LEN);
+        let mut flag = hold.clone();
+        *flag.last_mut().unwrap() = 2;
+        assert_eq!(input_of_record(RecordKind::Runtime, &flag), None);
+        let mut stop = hold.clone();
+        // A stop at 1x is no rule of the strategy's.
+        stop[HOLD_LEN + 20..HOLD_LEN + 36].copy_from_slice(&10_000i128.to_le_bytes());
+        assert_eq!(input_of_record(RecordKind::Runtime, &stop), None);
+        assert_eq!(
+            input_of_record(RecordKind::Runtime, &hold[..hold.len() - 1]),
+            None
+        );
     }
 
     /// SC4 d: a Four.meme position held again reads back as its input
@@ -1849,6 +2031,7 @@ mod tests {
                 tokens: w(11),
                 spent_wei: w(12),
                 filled_ms: 13,
+                exits: None,
             };
             let p = reheld_payload(&r);
             assert_eq!((p[0], p.len()), (b'q', REHELD_FOUR_LEN));
@@ -1883,6 +2066,7 @@ mod tests {
             tokens: w(11),
             spent_wei: w(12),
             filled_ms: 13,
+            exits: None,
         });
         openfour_with_min_fee(&mut p);
         assert_eq!(input_of_record(RecordKind::Runtime, &p), None);
@@ -1912,6 +2096,7 @@ mod tests {
             input_wei: U256::from(10_000_000_000_000_000u64),
             fill_delay_blocks: 1,
             creator_sold_before_fill: CreatorSoldBeforeFill::FreeCancel,
+            creator_sell_exit: true,
             gas_price_wei: U256::from(100_000_000u64),
         }
     }
@@ -1971,7 +2156,7 @@ mod tests {
         assert_eq!(&with[32..64], &U256::from(7u64).to_be_bytes::<32>());
         assert_eq!(&with[128..160], &U256::from(17u64).to_be_bytes::<32>());
         assert!(waiting[32..].iter().all(|b| *b == 0));
-        let d = status_draft(Some(&s), None, &config());
+        let d = status_draft(Some(&s), None, &config(), None);
         assert_eq!(d.values(st::SUPERSEDED), [Value::U64(2)]);
     }
 
@@ -2014,7 +2199,7 @@ mod tests {
             ),
             (7, 1, 2, 1, 3)
         );
-        let d = status_draft(Some(&s), None, &config());
+        let d = status_draft(Some(&s), None, &config(), None);
         for (tag, n) in [
             (st::CANCELLED, 7),
             (st::CANCELLED_CREATOR_SOLD, 1),
@@ -2342,7 +2527,9 @@ mod tests {
         feed(&mut s, &launch_records(100));
         let r = darkbot_bsc_record::decode(
             &st::SCHEMA,
-            &status_draft(Some(&s), None, &config()).encode().unwrap(),
+            &status_draft(Some(&s), None, &config(), None)
+                .encode()
+                .unwrap(),
         )
         .unwrap();
         assert_eq!(
@@ -2356,9 +2543,14 @@ mod tests {
         assert_eq!(r.get(st::REASON), None);
         let r = darkbot_bsc_record::decode(
             &st::SCHEMA,
-            &status_draft(None, Some("no gas evidence"), &config())
-                .encode()
-                .unwrap(),
+            &status_draft(
+                None,
+                Some(&("GAS_EVIDENCE_REFUSED", "no gas evidence".to_string())),
+                &config(),
+                None,
+            )
+            .encode()
+            .unwrap(),
         )
         .unwrap();
         assert_eq!(
@@ -2412,6 +2604,7 @@ mod tests {
             tokens: U256::from(1_000_000_000_000_000_000u128),
             spent_wei: U256::from(10_000_000_000_000_000u128),
             filled_ms: 0,
+            exits: None,
         };
         s.reheld(&held, 4, &mut j);
         assert!(s.holds(&held.token));
@@ -2428,7 +2621,7 @@ mod tests {
         ));
         assert!(j.record(RecordKind::Runtime, 7, EXIT_PAYLOAD.to_vec()));
         j.finish().unwrap();
-        let r = replay(&base, "7", max, &config(), &gas(), Some([0xC0; 32])).unwrap();
+        let r = replay(&base, "7", max, &config(), &gas(), Some([0xC0; 32]), None).unwrap();
         assert_eq!(r.verdict(), "PASS", "{}", r.summary());
         assert!(
             r.journaled > 0 && r.journaled == r.replayed,
@@ -2499,7 +2692,7 @@ mod tests {
         assert!(j.record(RecordKind::Runtime, 6, EXIT_PAYLOAD.to_vec()));
         j.finish().unwrap();
 
-        let r = replay(&base, "7", max, &config(), &gas(), Some([0xC0; 32])).unwrap();
+        let r = replay(&base, "7", max, &config(), &gas(), Some([0xC0; 32]), None).unwrap();
         assert_eq!(r.verdict(), "PASS", "{}", r.summary());
         assert_eq!((r.starts, r.journaled, r.replayed), (1, 2, 2));
         assert_eq!(r.counters, s.counters);
@@ -2541,21 +2734,109 @@ mod tests {
 
         let mut other = config();
         other.input_wei = U256::from(20_000_000_000_000_000u64);
-        let r = replay(&base, "7", max, &other, &gas(), Some([0xC0; 32])).unwrap();
+        let r = replay(&base, "7", max, &other, &gas(), Some([0xC0; 32]), None).unwrap();
         assert_eq!((r.verdict(), r.first_difference), ("DIFFERS", Some(1)));
-        let r = replay(&base, "7", max, &config(), &gas(), Some([0xC1; 32])).unwrap();
+        let r = replay(&base, "7", max, &config(), &gas(), Some([0xC1; 32]), None).unwrap();
         assert_eq!((r.verdict(), r.config_match), ("DIFFERS", Some(false)));
         // H gate MEDIUM 3: the decision's features are part of its record,
         // so a feature computed differently is a difference.
         let mut filtered = config();
         // The creator's share rounded at 2 places instead of 4.
         filtered.ratio_places = 2;
-        let r = replay(&base, "7", max, &filtered, &gas(), Some([0xC0; 32])).unwrap();
+        let r = replay(&base, "7", max, &filtered, &gas(), Some([0xC0; 32]), None).unwrap();
         assert_eq!((r.verdict(), r.first_difference), ("DIFFERS", Some(0)));
         // H gate L6: without the run manifest the configuration is unknown.
         std::fs::remove_file(base.join("7").join(crate::runtime_journal::RUN_MANIFEST)).unwrap();
-        let r = replay(&base, "7", max, &config(), &gas(), Some([0xC0; 32])).unwrap();
+        let r = replay(&base, "7", max, &config(), &gas(), Some([0xC0; 32]), None).unwrap();
         assert_eq!((r.verdict(), r.config_match), ("INCOMPLETE", None));
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    /// Frontend package (06.11.): a start after the operator's settings
+    /// (`p`) replays with them in place on the run's configuration; the
+    /// same outputs without the record differ, and a settings record
+    /// without the configuration does not replay.
+    #[test]
+    fn a_start_replays_with_the_settings_it_took() {
+        use crate::runtime_journal::{EXIT_PAYLOAD, JournalSetup, RunIdentity};
+        use crate::strategy_settings::{Settings, effective};
+        const CONFIG: &str = include_str!("../../../../config/ingress.public.env");
+        let file = crate::runtime::RuntimeConfig::parse(CONFIG)
+            .unwrap()
+            .strategy
+            .engine;
+        // No entry filter: the launch without BUYs passes (the file's
+        // filters reject it).
+        let settings = Settings {
+            generation: 3,
+            request_id: None,
+            values: vec![("BSC_STRATEGY_C_FILTERS", String::new())],
+        };
+        let set = effective(CONFIG, &settings).unwrap().strategy.engine;
+        let max = 16_384;
+        let journal = |run: u64, with_settings: bool| {
+            let base = std::env::temp_dir().join(format!(
+                "bsc-strategy-settings-replay-{run}-{}",
+                std::process::id()
+            ));
+            let _ = std::fs::remove_dir_all(&base);
+            let mut j = RuntimeJournal::open(&base, run, 1, JournalSetup::whole(64, max)).unwrap();
+            j.set_identity(RunIdentity {
+                host: "test".into(),
+                build: "test".into(),
+                config_sha256: [0xC0; 32],
+                build_sha256: None,
+                build_dirty: None,
+                capture_pending: "VENUES",
+            });
+            if with_settings {
+                assert!(j.record(RecordKind::Runtime, 1, settings.journal()));
+            }
+            assert!(j.record(
+                RecordKind::Runtime,
+                2,
+                switch_payload(true, StrategyVenues::FLAP)
+            ));
+            let mut s = StrategyRuntime::new(set.clone(), gas(), StrategyVenues::FLAP);
+            let mut records = launch_records(100);
+            records.extend((101..=107).map(block));
+            for (k, p) in records {
+                assert!(j.record(k, 3, p.clone()));
+                s.record(k, &p, 3, Some(&mut j));
+            }
+            assert!(s.counters.passed > 0);
+            assert!(j.record(RecordKind::Runtime, 6, EXIT_PAYLOAD.to_vec()));
+            j.finish().unwrap();
+            base
+        };
+        let base = journal(7, true);
+        let r = replay(
+            &base,
+            "7",
+            max,
+            &file,
+            &gas(),
+            Some([0xC0; 32]),
+            Some(CONFIG),
+        )
+        .unwrap();
+        assert_eq!(r.verdict(), "PASS", "{}", r.summary());
+        assert!(r.journaled > 0 && r.counters.passed > 0, "{}", r.summary());
+        let r = replay(&base, "7", max, &file, &gas(), Some([0xC0; 32]), None).unwrap();
+        assert_eq!(r.verdict(), "INCOMPLETE", "{}", r.summary());
+        std::fs::remove_dir_all(&base).unwrap();
+        let base = journal(8, false);
+        let r = replay(
+            &base,
+            "8",
+            max,
+            &file,
+            &gas(),
+            Some([0xC0; 32]),
+            Some(CONFIG),
+        )
+        .unwrap();
+        assert_eq!(r.verdict(), "DIFFERS", "{}", r.summary());
         std::fs::remove_dir_all(&base).unwrap();
     }
 
@@ -2717,7 +2998,7 @@ mod tests {
         ));
         assert!(j.record(RecordKind::Runtime, 7_000_000, EXIT_PAYLOAD.to_vec()));
         j.finish().unwrap();
-        let r = replay(&base, "7", max, &config(), &gas(), Some([0xC0; 32])).unwrap();
+        let r = replay(&base, "7", max, &config(), &gas(), Some([0xC0; 32]), None).unwrap();
         assert_eq!(r.positions.len(), 1, "{:?}", r.positions);
         let p = &r.positions[0];
         assert_eq!(
@@ -3233,6 +3514,8 @@ mod tests {
                     curve: StrategyCurve::Four(real),
                     input_wei: config().input_wei,
                     decided_ns: 1,
+                    // Decision 06.11.: the deciding strategy's exit rules.
+                    exits: Some(config().exits()),
                 }]
             );
             // Filled at the end of 106: the exit sells the position's

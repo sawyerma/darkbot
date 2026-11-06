@@ -247,8 +247,15 @@ export async function liveDecisionCommand(origin: string, d: LiveDecision): Prom
     : d.action === "bsc.live.nonce_burn" ? [d.tx, d.ledgerVersion] : [d.seq.toString(), d.generation];
   await ownerSend(origin, d.action, resourceId, new Uint8Array(), { case: "configVersion" as const, value }, `${d.action} ${resourceId}`);
 }
-async function ownerSend(origin: string, action: OwnerAction | "bsc.live.grant" | LiveDecision["action"], resourceId: string, params: Uint8Array,
-  version: { case: "walletPolicyVersion" | "configVersion"; value: bigint }, detail: string): Promise<void> {
+// Frontend package (06.11.): the operator's Strategy C settings at their native owner, the same
+// request a terminal sends with `darkbotctl bsc strategy set`: `<KEY>:<VALUE>` at the shown settings
+// generation as `profileVersion`. The owner checks the value with the runtime configuration's own
+// parser and stores it at once; effective at the next start of Strategy C.
+export async function strategySettingCommand(origin: string, id: string, value: string, generation: bigint): Promise<void> {
+  await ownerSend(origin, "bsc.strategy.set", `${id}:${value}`, new Uint8Array(), { case: "profileVersion" as const, value: generation }, `${id} ${value}`);
+}
+async function ownerSend(origin: string, action: OwnerAction | "bsc.live.grant" | "bsc.strategy.set" | LiveDecision["action"], resourceId: string, params: Uint8Array,
+  version: { case: "walletPolicyVersion" | "configVersion" | "profileVersion"; value: bigint }, detail: string): Promise<void> {
   if (useSourceControl.getState().busy) return;
   const requestId = crypto.randomUUID();
   useSourceControl.setState({ busy: true, receipt: { id: requestId, phase: "SENDING", detail, origin } });

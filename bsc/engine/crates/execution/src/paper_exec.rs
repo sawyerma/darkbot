@@ -1430,6 +1430,9 @@ pub struct Handover<'a> {
     /// REV.1.0 R2: a Strategy C BUY's launch creator (the end keeps it with
     /// the release); none for C3 (its block names it) and the exits.
     pub launcher: Option<[u8; 20]>,
+    /// Decision 06.11.: a Strategy C BUY's exit rules from its entry (the
+    /// end keeps them with the release: its lot's across restarts).
+    pub exit_terms: Option<darkbot_bsc_trading::strategy::engine::ExitTerms>,
 }
 
 /// What an end made of one hand-over.
@@ -1589,6 +1592,7 @@ impl End for PaperEnd {
             config,
             exit_reserve_wei: _,
             launcher: _,
+            exit_terms: _,
         } = h;
         // PAPER's adapters: the 48Club builder's bundle; a transaction alone
         // through the local node (a builder's single is enabled only by the
@@ -1705,6 +1709,7 @@ fn to_end<E: End>(
     start_ns: u64,
     submission: Submission<'_>,
     launcher: Option<[u8; 20]>,
+    exit_terms: Option<darkbot_bsc_trading::strategy::engine::ExitTerms>,
 ) -> (Result<E::Handoff, Refusal>, u64, u64, (bool, bool)) {
     let Parts {
         end,
@@ -1732,6 +1737,7 @@ fn to_end<E: End>(
         config,
         exit_reserve_wei,
         launcher,
+        exit_terms,
     });
     (
         handed.result,
@@ -2307,6 +2313,7 @@ impl<E: End> Executor<E> {
             launch.ingress_ns,
             Submission::LaunchBundle(launch.raw),
             None,
+            None,
         );
         // The exposure is the session's once the economic admission was
         // consumed (`begin_send`), whatever followed.
@@ -2389,11 +2396,12 @@ impl<E: End> Executor<E> {
         c2: &CanonicalContext<'_>,
         clock: &dyn Clock,
         decided_ns: u64,
+        exit_terms: Option<darkbot_bsc_trading::strategy::engine::ExitTerms>,
     ) -> Result<ExecIntent<E::Handoff>, Refusal> {
         self.strategy_counters.launches += 1;
         let start_ns = clock.now_ns();
         let result = self.strategy_buy(
-            token, creator, curve, input_wei, c2, clock, decided_ns, start_ns,
+            token, creator, curve, input_wei, c2, clock, decided_ns, start_ns, exit_terms,
         );
         match &result {
             Ok(_) => self.strategy_counters.handoffs += 1,
@@ -2570,6 +2578,7 @@ impl<E: End> Executor<E> {
             clock,
             start_ns,
             Submission::Single,
+            None,
             None,
         );
         if disclosed {
@@ -2860,6 +2869,7 @@ impl<E: End> Executor<E> {
         clock: &dyn Clock,
         decided_ns: u64,
         start_ns: u64,
+        exit_terms: Option<darkbot_bsc_trading::strategy::engine::ExitTerms>,
     ) -> Result<ExecIntent<E::Handoff>, Refusal> {
         if !self.config.sender_paths.strategy() {
             return Err(Refusal::PathOff);
@@ -2990,6 +3000,7 @@ impl<E: End> Executor<E> {
             start_ns,
             Submission::Single,
             (creator != [0; 20]).then_some(creator),
+            exit_terms,
         );
         // Gate L2: the exposure counts once the BUY may be out; a nonce
         // taken again (nothing disclosed) spends nothing.
@@ -3278,6 +3289,7 @@ impl<E: End> Executor<E> {
                 clock,
                 start_ns,
                 Submission::Single,
+                None,
                 None,
             );
             // Gate L2: gas counts once something may be out; a nonce taken

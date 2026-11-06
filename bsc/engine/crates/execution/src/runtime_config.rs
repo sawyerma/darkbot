@@ -237,6 +237,9 @@ pub struct RuntimeConfig {
     pub strategy: StrategyConfig,
     /// SHA-256 of the configuration text this was parsed from.
     pub source_sha256: [u8; 32],
+    /// Frontend package (06.11.): that text (the operator's Strategy C
+    /// settings take their place in it at a start: `strategy_settings`).
+    pub source_text: String,
 }
 
 /// The canonical follower's endpoint and bounds (`BSC_CANONICAL_*`).
@@ -475,6 +478,12 @@ impl RuntimeConfig {
         let strategy_stop = text_of("BSC_STRATEGY_C_STOP_NET_MULTIPLE")?;
         let strategy_creator = text_of("BSC_STRATEGY_C_CREATOR_SOLD_BEFORE_FILL")?;
         let strategy_gas = text_of("BSC_STRATEGY_C_GAS_EVIDENCE")?;
+        // Frontend package (06.11.): absent in a configuration from before the
+        // key (its evidence copies): ENABLED, what every run before it did.
+        let strategy_creator_exit = values
+            .remove("BSC_STRATEGY_C_CREATOR_SELL_EXIT")
+            .unwrap_or("ENABLED")
+            .to_string();
         let mut take = |name: &str, min: u64, max: u64| -> Result<u64, String> {
             let v = values
                 .remove(name)
@@ -1144,6 +1153,15 @@ impl RuntimeConfig {
                         creator_sold_before_fill: crate::runtime_strategy::creator_sold_policy(
                             &strategy_creator,
                         )?,
+                        creator_sell_exit: match strategy_creator_exit.as_str() {
+                            "ENABLED" => true,
+                            "DISABLED" => false,
+                            v => {
+                                return Err(format!(
+                                    "BSC_STRATEGY_C_CREATOR_SELL_EXIT={v} is neither ENABLED nor DISABLED"
+                                ));
+                            }
+                        },
                         gas_price_wei: alloy_primitives::U256::from(take(
                             "BSC_STRATEGY_C_GAS_PRICE_WEI",
                             1,
@@ -1158,6 +1176,7 @@ impl RuntimeConfig {
                 }
             },
             source_sha256: darkbot_bsc_record::sha256(text.as_bytes()),
+            source_text: text.to_string(),
         };
         // A6: the exit multiples, by the strategy's own check.
         config.strategy.engine.validate().map_err(|e| {

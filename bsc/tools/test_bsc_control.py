@@ -109,5 +109,22 @@ class ControlTests(unittest.TestCase):
         self.assertEqual(code, 0, out)
         self.assertEqual(self.calls(), [['live', 'loopback-identity', 'show', '--state', '/s', '--root', f'{self.w}/repo']])
 
+    def test_a_strategy_setting_reaches_the_owner_with_its_value_as_one_argument(self):
+        for args, why in [(['BSC_EXEC_INPUT_WEI', '1', '0', 'r1'], 'unknown Strategy C setting'),
+                          (['BSC_STRATEGY_C_MAX_OPEN', '3', 'x', 'r1'], 'unsigned integer'),
+                          (['BSC_STRATEGY_C_MAX_OPEN', '3', '0', '-r1'], 'letters, digits and hyphens'),
+                          (['BSC_STRATEGY_C_MAX_OPEN', '3', '0'], 'bsc strategy set')]:
+            code, out = self.sh('cmd_bsc', 'strategy', 'set', *args)
+            self.assertEqual(code, 1, out); self.assertIn(why, out)
+        self.assertEqual(self.calls(), [])
+        config = f'{self.snapshot}/bsc/config/ingress.public.env'
+        code, out = self.sh('cmd_bsc', 'strategy', 'set', 'BSC_STRATEGY_C_FILTERS', '', '2', 'r-1')
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.calls(), [['strategy', 'set', 'BSC_STRATEGY_C_FILTERS', '', '--expect-generation', '2',
+                                         '--request-id', 'r-1', '--state', f'{self.w}/run/bsc-sources', '--config', config]])
+        code, out = self.sh('cmd_bsc', 'strategy', 'show')
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.calls()[-1], ['strategy', 'show', '--state', f'{self.w}/run/bsc-sources', '--config', config])
+
 if __name__ == '__main__':
     unittest.main()

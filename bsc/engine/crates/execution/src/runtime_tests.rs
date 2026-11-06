@@ -3023,3 +3023,185 @@ fn the_c3_candidates_are_self_or_foreign_auto() {
     assert!(with("ALL").is_err());
     assert!(RuntimeConfig::parse(&CONFIG.replace(line, "")).is_err());
 }
+
+/// Frontend package (06.11.): Strategy C starts with the operator's
+/// settings on file in place (none: the file's configuration); settings
+/// the configuration no longer takes, or a store another user can change,
+/// keep it off with the reason.
+#[test]
+fn strategy_c_starts_with_the_settings_on_file() {
+    use crate::strategy_settings::Owner;
+    use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+    const CONFIG: &str = include_str!("../../../../config/ingress.public.env");
+    let dir =
+        std::env::temp_dir().join(format!("bsc-runtime-strategy-start-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::DirBuilder::new().mode(0o700).create(&dir).unwrap();
+    let config = RuntimeConfig::parse(CONFIG).unwrap();
+    let (s, engine) = strategy_start(&config, &dir).unwrap();
+    assert_eq!((s.generation, engine), (0, config.strategy.engine.clone()));
+    let owner = Owner::open(&dir).unwrap();
+    owner
+        .set(
+            "r1",
+            "BSC_STRATEGY_C_STOP_NET_MULTIPLE",
+            "0.9",
+            0,
+            CONFIG,
+            1,
+        )
+        .unwrap();
+    let (s, engine) = strategy_start(&config, &dir).unwrap();
+    assert_eq!(s.generation, 1);
+    assert_eq!(engine.stop_net_multiple, 9_000);
+    assert_eq!(engine.max_open, config.strategy.engine.max_open);
+    // A file at 0 places: 0.9 is no multiple of it.
+    let places: String = CONFIG
+        .lines()
+        .map(|l| match l {
+            "BSC_STRATEGY_C_RATIO_PLACES=4" => "BSC_STRATEGY_C_RATIO_PLACES=0".to_string(),
+            "BSC_STRATEGY_C_STOP_NET_MULTIPLE=0.5" => {
+                "BSC_STRATEGY_C_STOP_NET_MULTIPLE=0".to_string()
+            }
+            l => l.to_string(),
+        })
+        .map(|l| l + "\n")
+        .collect();
+    let other = RuntimeConfig::parse(&places).unwrap();
+    let why = strategy_start(&other, &dir).unwrap_err();
+    assert!(
+        why.starts_with("STRATEGY_SETTINGS_INVALID: generation 1"),
+        "{why}"
+    );
+    let store = dir.join(crate::strategy_settings::DIR);
+    fs::set_permissions(&store, fs::Permissions::from_mode(0o755)).unwrap();
+    let why = strategy_start(&config, &dir).unwrap_err();
+    assert!(why.starts_with("STRATEGY_SETTINGS_UNREADABLE"), "{why}");
+    fs::set_permissions(&store, fs::Permissions::from_mode(0o700)).unwrap();
+    fs::remove_dir_all(&dir).unwrap();
+}
+
+/// Frontend package (06.11.): a start of Strategy C journals the settings it
+/// takes before its switch (`p`, then `U`), none without settings on file;
+/// refused, it journals nothing and stays off with the reason.
+#[test]
+fn a_strategy_start_journals_its_settings_before_its_switch() {
+    use crate::runtime_strategy::{StrategyVenues, switch_payload};
+    use crate::strategy_settings::{Owner, Settings};
+    use darkbot_bsc_journal::storage::run::RunReader;
+    use std::os::unix::fs::DirBuilderExt;
+    const CONFIG: &str = include_str!("../../../../config/ingress.public.env");
+    let base = std::env::temp_dir().join(format!(
+        "bsc-runtime-strategy-journal-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&base);
+    fs::DirBuilder::new()
+        .mode(0o700)
+        .recursive(true)
+        .create(base.join("sources"))
+        .unwrap();
+    let config = RuntimeConfig::parse(CONFIG).unwrap();
+    let gas = config
+        .strategy
+        .gas(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../.."))
+        .unwrap();
+    let records = |sources: &Path, run: u64, file: &RuntimeConfig, keep: Option<Settings>| {
+        let dir = base.join(format!("journal-{run}"));
+        let mut c = Canonical::new(config.canonical.as_ref().unwrap(), 0);
+        let mut journal = RuntimeJournal::open(
+            &dir,
+            run,
+            1,
+            crate::runtime_journal::JournalSetup::whole(256, journal_max_payload(&config)),
+        )
+        .unwrap();
+        start_strategy(
+            &mut c,
+            &mut journal,
+            Clock(Instant::now()),
+            file,
+            sources,
+            &gas,
+            StrategyVenues::FLAP,
+            keep,
+        );
+        journal.finish().unwrap();
+        let run = fs::read_dir(&dir).unwrap().next().unwrap().unwrap().path();
+        let mut reader = RunReader::open(&run, journal_max_payload(&config)).unwrap();
+        let mut out = Vec::new();
+        while let Some(r) = reader.next_record().unwrap() {
+            if r.kind == RecordKind::Runtime && matches!(r.payload.first(), Some(b'p' | b'U')) {
+                out.push(r.payload.to_vec());
+            }
+        }
+        (c, out)
+    };
+    let sources = base.join("sources");
+    let (c, out) = records(&sources, 1, &config, None);
+    assert_eq!(out, [switch_payload(true, StrategyVenues::FLAP)]);
+    assert!(c.strategy.is_some());
+    assert_eq!(
+        c.strategy_settings
+            .as_ref()
+            .map(|s| (s.generation, s.values.len())),
+        Some((0, 9))
+    );
+    Owner::open(&sources)
+        .unwrap()
+        .set("r1", "BSC_STRATEGY_C_MAX_OPEN", "3", 0, CONFIG, 1)
+        .unwrap();
+    let (c, out) = records(&sources, 2, &config, None);
+    let taken = Settings::of_journal(&out[0]).unwrap();
+    assert_eq!(
+        (taken.generation, taken.value("BSC_STRATEGY_C_MAX_OPEN")),
+        (1, Some("3"))
+    );
+    assert_eq!(out[1..], [switch_payload(true, StrategyVenues::FLAP)]);
+    assert_eq!(c.strategy_config.as_ref().map(|e| e.max_open), Some(3));
+    let s = c.strategy_settings.as_ref().unwrap();
+    assert_eq!(
+        (s.generation, s.value("BSC_STRATEGY_C_MAX_OPEN")),
+        (1, Some("3"))
+    );
+    // A configuration that no longer takes them: nothing journaled, off with the reason.
+    let other: String = CONFIG
+        .lines()
+        .map(|l| match l {
+            "BSC_STRATEGY_C_RATIO_PLACES=4" => "BSC_STRATEGY_C_RATIO_PLACES=0".into(),
+            "BSC_STRATEGY_C_STOP_NET_MULTIPLE=0.5" => "BSC_STRATEGY_C_STOP_NET_MULTIPLE=0".into(),
+            l => l.to_string(),
+        })
+        .map(|l| l + "\n")
+        .collect();
+    Owner::open(&sources)
+        .unwrap()
+        .set(
+            "r2",
+            "BSC_STRATEGY_C_STOP_NET_MULTIPLE",
+            "0.9",
+            1,
+            CONFIG,
+            2,
+        )
+        .unwrap();
+    // Review M1: while it stays on (a restart for other venues) it keeps
+    // the settings it ran with; generation 2 waits for a switch on.
+    let ran = c.strategy_taken.clone();
+    assert_eq!(ran.as_ref().map(|s| s.generation), Some(1));
+    let (c, out) = records(&sources, 4, &config, ran);
+    assert_eq!(Settings::of_journal(&out[0]).map(|s| s.generation), Some(1));
+    assert_eq!(
+        c.strategy_config
+            .as_ref()
+            .map(|e| (e.max_open, e.stop_net_multiple)),
+        Some((3, config.strategy.engine.stop_net_multiple))
+    );
+    let (c, out) = records(&sources, 3, &RuntimeConfig::parse(&other).unwrap(), None);
+    assert!(out.is_empty(), "{out:?}");
+    assert!(c.strategy.is_none());
+    assert!(
+        matches!(&c.strategy_refused, Some(("SETTINGS_REFUSED", why)) if why.starts_with("STRATEGY_SETTINGS_INVALID"))
+    );
+    fs::remove_dir_all(&base).unwrap();
+}
