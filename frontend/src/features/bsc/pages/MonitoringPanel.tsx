@@ -24,8 +24,10 @@ const VENUE_HINTS: Record<string, string> = {
   BSC_VENUE_OPENFOUR: "SHADOW admits OpenFour launches to the C3 PAPER path (with BSC_EXEC SHADOW and BSC_EXEC_OPENFOUR_* set: the pinned Core, its executed bonding preset and modules probed, the exact-amount BUY economics of that preset only) and to Strategy C's ledger (PAPER BUY and exit); OFF admits none; LIVE only under a grant naming it, with its qualification (the pinned Core's freeze, this build's economics snapshot) and the LIVE gates",
 };
 
-/** Monitoring in the fixed §13 order: sources → venues → builder → G0.7 → G0.8 → chain → timing. */
-export function MonitoringPanel() {
+/** Monitoring in the fixed §13 order: sources → venues → builder → G0.7 → G0.8 → chain → timing.
+ *  V8: shown in the Settings drawer; the five sources are switched in Live → Market monitoring
+ *  (the reference's Mode column), so this section lists them without a second control. */
+export function MonitoringPanel({ sourceControls = true }: { sourceControls?: boolean }) {
   const quality = useTopic(TopicId.BSC_MONITORING_STATE);
   const { projection: m } = useBscStore(selectMonitoring);
   const { projection: s } = useBscStore(selectStatus);
@@ -43,7 +45,7 @@ export function MonitoringPanel() {
       {!sources.rows.length && <Line label="Sources" value={<ValueState state={sources.reason || BACKEND_UNAVAILABLE} />} hint="No readable owner state: nothing to request" />}
       {sources.rows.map(row => <Line key={row.id} label={row.id} value={<><ValueState state={row.effective} /> <ValueState state={row.health} /></>}
         hint={`requested ${row.requested}${row.blockReason ? ` · ${row.blockReason}` : ""}${row.counters ? ` · ${row.counters}` : ""}`} />)}
-      <SourceActions view={sources} />
+      {sourceControls ? <SourceActions view={sources} /> : <Line label="Source modes" value="Live → Market monitoring" hint="Each source is switched where V8 shows it, never twice" />}
     </PlacedSection>
     <PlacedSection panel="monitoring" section={2} records={records}>
       {!sources.venues.length && <Line label="Venues" value={<ValueState state={sources.reason || BACKEND_UNAVAILABLE} />} hint="No venue in the owner's record" />}

@@ -1,29 +1,30 @@
 # BSC React UI
 
-Six existing Graphite tabs (Overview, Launch / BUY, Monitoring, Analytics, Wallets, LIVE) with one
-Zustand store and one adapter over the shared Protobuf WebSocket. No Project_0 imports. Every
-control is a request the native owner applies or refuses; LIVE is effective only under the owner's
-LIVE gate for the operator's granted scope, and the browser signs or sends nothing.
+Graphite V8 (06.11.2026, `frontend/design/reference/bsc_graphite_v8_approved.html`, FRONTEND_PHASENPLAN
+§13A): four areas **Overview | Training | Live | Wallets**, the Health pill top right with its own window
+and the Settings drawer, over one Zustand store and one adapter on the shared Protobuf WebSocket. No
+Project_0 imports. Every control is a request the native owner applies or refuses; LIVE is effective only
+under the owner's LIVE gate for the operator's granted scope, and the browser signs or sends nothing.
 
 - **Data:** `bsc.status`, `bsc.launch.state`, `bsc.monitoring.state`, `bsc.wallets.state` and
-  `bsc.live.state` are decoded from `darkbot.bsc.v1` (`api/bscAdapter.ts`). Typed fields carry the
-  guard, gates, readiness (native verdict, mode, candidate binding), jobs, wallets and the LIVE gate;
-  `bsc.live.state` is the one LIVE source (tabs, overview and gateway); it also carries the LIVE
-  campaign verdict and its attempts as recorded (REV.1.0 R2b, evidence only). Every other public native
-  leaf arrives as a `NativeRecord` with kind and unit.
-- **Placement:** every native field has exactly one panel section in the fixed order of
-  `frontend/docs/FRONTEND_PHASENPLAN.md` §13. The rules live in `frontend/contracts/bsc-fields.json`.
-  `model/placement.generated.ts` is a copy of them (`npm run gen:bsc-placement`), and
-  `check:bsc-fields` fails when the copy is stale or a census field is unplaced. Record families
-  without data show `NO_RECORD`; planned producers show `FUTURE_PHASE_BLOCKED`.
-- **Controls:** one command client (`core/realtime/bscControl.ts`): the readiness start/stop, the
-  offline A/B candidate request and the native owner's requests (modes, wallet and economic
-  switches, limits, the LIVE grant of a confirmed scope and its revocation). Process and owner
-  state come only from the push, never from HTTP polling; a lost acknowledgement gets one lookup.
-- **Never shown:** salts, raw transaction bytes, the private B economics record and absolute
-  local paths (native census sensitivity). Wei amounts are displayed exactly.
+  `bsc.live.state` are decoded from `darkbot.bsc.v1` (`api/bscAdapter.ts`); `bsc.live.state` is the one LIVE
+  source. Public native leaves arrive as `NativeRecord`s with kind and unit.
+- **V8 contracts:** training, Strategy C settings, trade history, wallets and WATCH are prepared in
+  `protocol/schemas/darkbot/bsc/v1/{common,training,history,wallet,watch,query}.proto` (`api/bscV8Adapter.ts`,
+  golden bytes `protocol/golden/bsc/v8`). Their bounded query (`core/realtime/bscQuery.ts`,
+  `POST /api/v1/bsc/query`) answers NOT_IMPLEMENTED/UNAVAILABLE until the native owner exists; the UI then
+  shows the function disabled with its reason, never data of its own.
+- **Placement:** every native field keeps its section from `frontend/contracts/bsc-fields.json`
+  (`model/placement.generated.ts`, `check:bsc-fields`); the pre-V8 groups (Overview, Launch / BUY,
+  Monitoring, Analytics) render in the Settings drawer, the LIVE groups in the Live drawers.
+- **Controls:** one command client (`core/realtime/bscControl.ts`): readiness, candidate, source/venue/
+  component modes, wallet and economic switches, limits, the LIVE grant/revoke/lot/nonce decisions and
+  Strategy C settings (one `bsc.strategy.set` per change). A lost acknowledgement gets one lookup.
+- **Never shown:** salts, raw transaction bytes, the private B economics record and absolute local paths.
+  Wei amounts are exact (`pages/V8.tsx` `bnb()`, `model/strategyForm.ts`), never floating point.
 
 Tests:
-- `src/features/bsc/**/*.test.ts` and `src/core/realtime/bscControl.test.ts`
-- `tests/bsc.spec.ts` (`npm run test:bsc`, CI workflow `bsc`)
+- `src/features/bsc/**/*.test.ts` (incl. `model/v8.test.ts`, `api/bsc-v8-golden.test.ts`) and
+  `src/core/realtime/bscControl.test.ts`
+- `tests/bsc.spec.ts` (`npm run test:bsc`) and `tests/visual/bsc-v8.spec.ts` (`npm run visual`)
 - the real gateway→browser run `ops/tests/bsc_control_test.py`

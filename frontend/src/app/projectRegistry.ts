@@ -8,7 +8,7 @@ import { ProjectId, TopicId } from "@/core/realtime";
 export type ProjectKey = "overview" | "project0" | "bsc" | "solana";
 
 export type Project0Panel = "overview" | "liquidator" | "capture" | "analytics" | "wallets";
-export type BscPanel = "overview" | "launch" | "monitoring" | "analytics" | "wallets";
+export type BscPanel = "overview" | "training" | "live" | "wallets";
 
 export interface ProjectRegistration<P extends string = string> {
   readonly key: ProjectKey;
@@ -74,12 +74,13 @@ const bsc: ProjectRegistration<BscPanel> = {
   page: lazy(() => import("@/features/bsc/BscPage")),
   topics: {
     base: [TopicId.BSC_STATUS],
+    // V8 (FE-V8-01): the four areas; the page holds monitoring and live for its Health pill, the
+    // Settings drawer additionally the launch topic while it is open.
     panels: {
-      overview: [],
-      launch: [TopicId.BSC_LAUNCH_STATE],
-      monitoring: [TopicId.BSC_MONITORING_STATE],
-      analytics: [],
-      wallets: [TopicId.BSC_WALLETS_STATE],
+      overview: [TopicId.BSC_MONITORING_STATE, TopicId.BSC_LIVE_STATE, TopicId.BSC_WALLETS_STATE],
+      training: [TopicId.BSC_MONITORING_STATE, TopicId.BSC_LIVE_STATE],
+      live: [TopicId.BSC_MONITORING_STATE, TopicId.BSC_LIVE_STATE],
+      wallets: [TopicId.BSC_MONITORING_STATE, TopicId.BSC_LIVE_STATE, TopicId.BSC_WALLETS_STATE, TopicId.BSC_LAUNCH_STATE],
     },
   },
   capabilities: { readStatus: true, commands: true },

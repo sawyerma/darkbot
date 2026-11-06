@@ -2,17 +2,20 @@ import { expect, test, type Page, type WebSocketRoute } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { create, fromBinary, toBinary, type MessageInitShape } from "@bufbuild/protobuf";
 import { BscLiveStateSchema, BscMonitoringStateSchema } from "../src/core/generated/darkbot/bsc/v1/status_pb";
+import { BscQueryResponseSchema } from "../src/core/generated/darkbot/bsc/v1/query_pb";
+import { Availability } from "../src/core/generated/darkbot/bsc/v1/common_pb";
 import { AckStatus, ClientMessageSchema, ServerMessageSchema, StateQuality, WelcomeStatus } from "../src/core/generated/darkbot/control/v1/stream_pb";
 import { CommandLookupResponseSchema, CommandPhase, CommandRequestSchema, CommandResponseSchema, CommandStatus, type CommandRequest } from "../src/core/generated/darkbot/control/v1/commands_pb";
 import { ProjectId, TopicClass, TopicId } from "../src/core/generated/darkbot/control/v1/topics_pb";
 
-// The BSC page in a production build (`npm run test:bsc`, CI workflow `bsc`): its six tabs, the one
-// LIVE source and fail-closed controls. The static fixture server has no proxy (/api and /ws answer
-// 503); the gateway is a stand-in in page routes serving the reporter's golden projections
-// (protocol/golden/bsc). No request reaches a real gateway.
+// The BSC page (Graphite V8, FE-V8-01…18) in a production build (`npm run test:bsc`): its four areas,
+// the Health window, the Settings and LIVE drawers, the one LIVE source and fail-closed controls. The
+// static fixture server has no proxy (/api and /ws answer 503); the gateway is a stand-in in page
+// routes serving the reporter's golden projections (protocol/golden/bsc). No request reaches a real
+// gateway.
 const golden = (name: string) => Buffer.from(readFileSync(new URL(`../../protocol/golden/bsc/${name}.hex`, import.meta.url), "utf8").trim(), "hex");
 const schemaId = readFileSync(new URL("../../protocol/schema_id.txt", import.meta.url), "utf8").trim();
-const TABS = ["Overview", "Launch / BUY", "Monitoring", "Analytics", "Wallets", "LIVE"];
+const AREAS = ["Overview", "Training", "Live", "Wallets"] as const;
 const STATE_TOPICS: [TopicId, string, string, string][] = [
   [TopicId.BSC_STATUS, "bsc.status", "darkbot.bsc.v1.BscStatus", "status"],
   [TopicId.BSC_LAUNCH_STATE, "bsc.launch.state", "darkbot.bsc.v1.BscLaunchState", "launch"],
@@ -51,52 +54,85 @@ async function feed(page: Page, live: Uint8Array = golden("live"), monitoring?: 
     sourceTimestampUnixNs: BigInt(Date.now()) * 1_000_000n, payload: next } });
 }
 
-const tab = (page: Page, name: string) => page.getByRole("tablist", { name: "BSC areas" }).getByRole("tab", { name, exact: true });
+const nav = (page: Page) => page.getByRole("navigation", { name: "BSC areas" });
+async function area(page: Page, name: (typeof AREAS)[number]) {
+  await nav(page).getByRole("button", { name, exact: true }).click();
+  await expect(nav(page).getByRole("button", { name, exact: true })).toHaveAttribute("aria-current", "page");
+}
 const line = (page: Page, label: string) => page.locator(".g-line").filter({ has: page.locator(":scope > span:first-child", { hasText: new RegExp(`^${label}$`) }) }).first();
-/** Buttons that only navigate between tabs; every other button is a request to a native owner. */
-const NAVIGATION = new Set(["Launch / BUY", "Monitoring"]);
+/** Opens one of the Live drawers (controls: sections 1/2/3/6, limits: 4/5, receipts: 7/8/9). */
+async function liveDrawer(page: Page, which: "controls" | "limits" | "receipts") {
+  await area(page, "Live");
+  if (which === "receipts") await page.getByRole("button", { name: "Receipts", exact: true }).click();
+  else await page.getByTestId(which === "controls" ? "bsc-live-controls-open" : "bsc-live-limits-open").click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+}
 
-test("the six tabs fail closed without a gateway: UNKNOWN, never 0, no control acts", async ({ page }) => {
+test("the four areas fail closed without a gateway: UNKNOWN, never 0, no control acts", async ({ page }) => {
   await page.routeWebSocket("**/ws/v1/gateway", (ws) => ws.close());
   await page.goto("/bsc");
-  // The page is a lazy chunk: wait for its tabs (a slow runner renders them later).
-  await expect(page.getByRole("tablist", { name: "BSC areas" }).getByRole("tab")).toHaveText(TABS);
-  let locked = 0;
-  for (const name of TABS) {
-    await tab(page, name).click();
-    await expect(tab(page, name)).toHaveAttribute("aria-selected", "true");
+  // The page is a lazy chunk: wait for its areas (a slow runner renders them later).
+  await expect(nav(page).getByRole("button")).toHaveText([...AREAS]);
+  for (const name of AREAS) {
+    await area(page, name);
     // No direct BUY, SEND or SWEEP control: a BUY is only ever the native owner's, under its gate.
-    expect(await page.getByRole("button", { name: /^(start )?buy$|^send$|sweep/i }).count()).toBe(0);
-    // Without the native owner's state every request control is locked.
-    for (const button of await page.locator(".bsc-page button:not([role=tab])").all()) {
-      const label = (await button.innerText()).trim();
-      if (!NAVIGATION.has(label)) { await expect(button, `${name}: ${label}`).toBeDisabled(); locked++; }
-    }
+    expect(await page.locator("#bsc-content").getByRole("button", { name: /^(start )?buy$|^send$|sweep/i }).count()).toBe(0);
     // Unknown is "—" or UNKNOWN, never 0.
-    for (const v of await page.locator(".g-line .g-right").allTextContents()) expect(v.trim()).not.toMatch(/^0(\.0+)?( BNB| USD)?$/);
+    for (const v of await page.locator(".system-metric strong, .stat b, .g-line .g-right").allTextContents()) expect(v.trim()).not.toMatch(/^0(\.0+)?( BNB| USD)?$/);
   }
-  // Every tab's requests were checked: readiness, candidate, switches, modes, limits, grant, revoke.
-  // Audit E 4.9: without the owner's projection no source, component or venue row exists to
-  // request at all (before, rows from frontend lists showed locked buttons): the 20 left are locked.
-  expect(locked).toBeGreaterThanOrEqual(20);
+  await area(page, "Overview");
+  await expect(page.getByTestId("bsc-trading-state")).toHaveText("Trading UNKNOWN");
+  await expect(page.getByTestId("bsc-metric-pnl")).toContainText("—");
+  await expect(page.getByTestId("bsc-metric-balance")).toContainText("—");
+  // Health: nothing green without a gateway.
+  await page.getByTestId("bsc-health-pill").click();
+  await expect(page.locator("[data-testid^=bsc-health-][data-state=ok]")).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  // Training without its native owner: no module, no test starts.
+  await area(page, "Training");
+  await expect(page.getByTestId("bsc-training-new")).toBeDisabled();
+  await page.getByRole("button", { name: "Open Strategy C module" }).click();
+  await expect(page.getByTestId("bsc-training-start")).toBeDisabled();
+  // Wallets: transfer and sweep stay visible, never executable.
+  await area(page, "Wallets");
+  await page.getByRole("button", { name: "Send funds", exact: true }).click();
+  await expect(page.getByTestId("bsc-wallet-send").getByRole("button", { name: "Review transfer" })).toBeDisabled();
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Auto-transfer", exact: true }).click();
+  await expect(page.getByTestId("bsc-wallet-sweep").getByRole("button", { name: "Save rule" })).toBeDisabled();
+  await page.keyboard.press("Escape");
+  // Every owner request in the Settings drawer and the Live drawers is locked without owner state.
+  let locked = 0;
+  const lockedIn = async (scope: string) => {
+    for (const button of await page.locator(scope).locator("button.g-secondary, button.g-primary").all()) { await expect(button, (await button.innerText()).trim()).toBeDisabled(); locked++; }
+  };
+  for (const wallet of ["launcher", "buyer"]) {
+    await page.getByTestId(`bsc-wallet-${wallet}`).click();
+    await lockedIn("#bsc-content");
+  }
+  await page.getByTestId("bsc-settings-open").click();
+  await lockedIn("[data-testid=bsc-settings]");
+  // Audit E 4.9 / review M1: no source, component or venue row without the owner's projection, and the empty lists say why.
   expect(await page.locator("[data-testid^=bsc-source-BSC_]").count()).toBe(0);
-  // Review M1: and the empty lists say why, never nothing.
-  await tab(page, "Monitoring").click();
   for (const group of ["Sources", "Venues", "Components"]) await expect(line(page, group)).toContainText("BACKEND_UNAVAILABLE");
-  await tab(page, "Launch / BUY").click();
   await expect(line(page, "Economic switches").first()).toContainText("BACKEND_UNAVAILABLE");
-  await tab(page, "Overview").click();
-  await expect(page.getByTestId("bsc-guard")).toHaveText("Guard · UNKNOWN");
-  await expect(line(page, "LIVE")).toContainText("UNKNOWN");
-  // Audit E 1.6: no grantable source without the native projection, so none is offered.
-  await tab(page, "LIVE").click();
+  await page.keyboard.press("Escape");
+  await liveDrawer(page, "controls");
+  await lockedIn("[data-testid=bsc-live-controls]");
+  // Audit E 1.6 / 4.9: no grantable source, strategy or adapter without the native projection.
   await expect(page.locator("[data-testid^=bsc-live-grant-source-]")).toHaveCount(0);
-  // Audit E 4.9: nor a strategy or an adapter: the choices are the owner's projection alone.
   await expect(page.getByTestId("bsc-live-grant-strategies").locator("option")).toHaveCount(0);
   await expect(page.locator("[data-testid^=bsc-live-grant-adapter-]")).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await liveDrawer(page, "limits");
+  await lockedIn("[data-testid=bsc-live-limits-drawer]");
   // REV.1.0 R2b: no campaign verdict is no evaluation, never a value.
   await expect(page.getByTestId("bsc-live-campaign-none")).toHaveText("keine Bewertung");
   await expect(page.getByTestId("bsc-live-attempts")).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  // The Strategy C form saves nothing without its owner.
+  await expect(page.getByTestId("bsc-live-strategy-save")).toBeDisabled();
+  expect(locked).toBeGreaterThanOrEqual(20);
 });
 
 test("LIVE comes from bsc.live.state alone and the grant offers only its grantable sources", async ({ page }) => {
@@ -111,14 +147,16 @@ test("LIVE comes from bsc.live.state alone and the grant offers only its grantab
   }));
   await feed(page, live);
   await page.goto("/bsc");
-  await expect(page.getByTestId("bsc-guard")).toHaveText("Guard · UNARMED");
-  // Audit E 4.10: the Overview's LIVE line is the owner's gate and the LIVE path, nothing else.
-  await expect(line(page, "LIVE")).toContainText("LIVE");
+  // Audit E 4.10: ON is the owner's gate and the LIVE path, nothing else.
+  await expect(page.getByTestId("bsc-trading-state")).toHaveText("Trading ON");
+  await page.getByTestId("bsc-settings-open").click();
+  await expect(page.getByTestId("bsc-guard")).toHaveCount(0);
+  await expect(line(page, "Compiled guard")).toContainText("UNARMED");
   await expect(line(page, "LIVE")).toContainText("gate CLEAR · LIVE path ARMED");
-  for (const name of TABS) {
-    await tab(page, name).click();
-    await expect(tab(page, name)).toHaveAttribute("aria-selected", "true");
-  }
+  await page.keyboard.press("Escape");
+  await area(page, "Live");
+  await expect(page.getByTestId("bsc-live-strip")).toContainText("Trading ON");
+  await liveDrawer(page, "controls");
   await expect(line(page, "LIVE gate")).toContainText("CLEAR");
   // Audit E 1.6: exactly the sources with an adapter endpoint; the first is chosen until the operator chooses.
   const sources = page.locator("[data-testid^=bsc-live-grant-source-]");
@@ -136,6 +174,8 @@ test("LIVE comes from bsc.live.state alone and the grant offers only its grantab
   await expect(page.getByTestId("bsc-live-grant-adapter-CLUB48_BUILDER_V1")).toBeChecked();
   await page.getByTestId("bsc-live-grant-source-BSC_INGRESS_PUBLICNODE").uncheck();
   await expect(page.getByTestId("bsc-live-grant-error")).toContainText("at least one grantable source");
+  await page.keyboard.press("Escape");
+  await liveDrawer(page, "limits");
   await expect(page.getByTestId("bsc-live-campaign-none")).toHaveText("keine Bewertung");
   expect(errors).toEqual([]);
 });
@@ -164,7 +204,7 @@ test("the campaign verdict and its attempts as recorded, evidence only (REV.1.0 
   }));
   await feed(page, live([attempt(1n, "UNKNOWN"), { ...attempt(2n, "UNKNOWN"), evaluatedUnixMs: 1793000060000n }]));
   await page.goto("/bsc");
-  await tab(page, "LIVE").click();
+  await liveDrawer(page, "limits");
   await expect(line(page, "Campaign verdict")).toContainText("CAMPAIGN_OPEN");
   await expect(line(page, "Campaign verdict")).toContainText("SAMPLES_MISSING: EXTERNAL_FULL_LAUNCH 2/10");
   await expect(line(page, "Release evidence")).toContainText("RELEASE_EVIDENCE_NOT_READY");
@@ -199,12 +239,9 @@ test("a campaign section beyond the state is INVALID, never no evaluation or no 
   page.on("pageerror", (error) => errors.push(error.message));
   // TEST_ONLY values: they test the display, they are no campaign.
   const beyond = "LIVE_CAMPAIGN_BEYOND_STATE 3 records, 2 warnings";
-  const live = toBinary(BscLiveStateSchema, create(BscLiveStateSchema, {
-    gate: "BLOCKED", pathState: "NOT_CONFIGURED", generation: 5n, qualification: "NONE", warnings: [beyond],
-  }));
-  await feed(page, live);
+  await feed(page, toBinary(BscLiveStateSchema, create(BscLiveStateSchema, { gate: "BLOCKED", pathState: "NOT_CONFIGURED", generation: 5n, qualification: "NONE", warnings: [beyond] })));
   await page.goto("/bsc");
-  await tab(page, "LIVE").click();
+  await liveDrawer(page, "limits");
   await expect(page.getByTestId("bsc-live-campaign-invalid")).toHaveText("INVALID");
   await expect(line(page, "Campaign verdict")).toContainText(beyond);
   await expect(page.getByTestId("bsc-live-campaign-none")).toHaveCount(0);
@@ -214,12 +251,12 @@ test("a campaign section beyond the state is INVALID, never no evaluation or no 
   expect(errors).toEqual([]);
 });
 
-test("the LIVE tab names the undecided and stranded lots, the receipt recovery and each transaction's source (REV.1.0 R1/R3b)", async ({ page }) => {
+test("the LIVE receipts name the undecided and stranded lots, the receipt recovery and each transaction's source (REV.1.0 R1/R3b)", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   // TEST_ONLY values: they test the display, they are no LIVE state.
   const tx = (n: number) => `0x${n.toString(16).padStart(64, "0")}`;
-  const live = toBinary(BscLiveStateSchema, create(BscLiveStateSchema, {
+  await feed(page, toBinary(BscLiveStateSchema, create(BscLiveStateSchema, {
     gate: "BLOCKED", pathState: "ARMED", generation: 5n, qualification: "NONE",
     exitUndecided: ["0x" + "e1".repeat(20)], stranded: ["0x" + "e2".repeat(20) + " LIVE_POSITION_OFF_CURVE"], lotReadFaults: 3n, lotReadFault: "curve fault",
     recoveryPending: [`${tx(0xc1)} RECOVERY_NOT_FINAL`], recovered: 2n, recoveryFaults: 1n, recoveryFault: "recovery fault",
@@ -227,10 +264,9 @@ test("the LIVE tab names the undecided and stranded lots, the receipt recovery a
       { txHash: tx(0xa1), intent: "BUY", token: "0x" + "aa".repeat(20), nonce: 1n, state: "INCLUDED", blockNumber: 90n, source: "RECEIPT" },
       { txHash: tx(0xb5), intent: "BUY", token: "0x" + "aa".repeat(20), nonce: 2n, state: "REPLACED", blockNumber: 91n, source: "" },
     ],
-  }));
-  await feed(page, live);
+  })));
   await page.goto("/bsc");
-  await tab(page, "LIVE").click();
+  await liveDrawer(page, "receipts");
   const deciders = page.getByTestId("bsc-live-exit-deciders");
   await expect(line(page, "Exit undecided")).toContainText("0x" + "e1".repeat(20));
   await expect(line(page, "Stranded lots")).toContainText("LIVE_POSITION_OFF_CURVE");
@@ -241,6 +277,8 @@ test("the LIVE tab names the undecided and stranded lots, the receipt recovery a
   const rows = page.getByTestId("bsc-live-transactions").locator("tr");
   await expect(rows.nth(0)).toContainText("RECEIPT");
   await expect(rows.nth(1)).not.toContainText("RECEIPT");
+  // The positions are the V8 trade list, not a second table in the drawer.
+  await expect(page.getByTestId("bsc-live-positions")).toHaveCount(0);
   expect(errors).toEqual([]);
 });
 
@@ -267,29 +305,31 @@ const lotRow = (lot: string, state: string, decisions: string[]) => ({ lot, toke
 const txRow = (txHash: string, nonce: bigint, state: string, burnable: boolean, burnRequested = false) => ({ txHash, intent: "BUY", token: "0x" + "aa".repeat(20), nonce, state, source: "", burnable, burnRequested });
 type LiveInit = MessageInitShape<typeof BscLiveStateSchema>;
 const liveOf = (init: LiveInit) => toBinary(BscLiveStateSchema, create(BscLiveStateSchema, { gate: "BLOCKED", pathState: "ARMED", generation: 5n, qualification: "NONE", ...init }));
+/** Opens the trade detail of a lot (the V8 trade list's row). */
+async function tradeDetail(page: Page, lot: string) {
+  await area(page, "Live");
+  await page.locator(`[data-testid=bsc-trade-row][data-lot="${lot}"]`).click();
+  await expect(page.getByTestId("bsc-trade-detail")).toBeVisible();
+}
 
-test("the LIVE tab shows the path's counters, the second source and the presence; a revoke names the exits it ends (REV.1.0 R10)", async ({ page }) => {
+test("the Live controls show the path's counters, the second source and the presence; a revoke names the exits it ends (REV.1.0 R10)", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
-  const live = liveOf({
+  await feed(page, liveOf({
     nextNonce: 41n, armedGeneration: 6n, refusals: ["OWNER=2"], responses: ["ACCEPTED=3"], probes: 16n, included: 11n, finalized: 14n,
     latencySamples: 9n, latencyP50Ns: 100n, latencyP99Ns: 200n, latencyMaxNs: 300n, leaseAttempt: hash(0xab),
     divergenceQuarantine: true, confirmState: "DISAGREES", presenceAnchor: "0x" + "ab".repeat(20), presenceSigner: "",
     grant: { venue: "BSC_VENUE_FLAP", strategies: "C3+STRATEGY_C", requestId: "g1", setGeneration: 5n, expiresUnixMs: 1793000000000n, scopeSha256: "s", riskScopeSha256: "r1" },
     positions: [lotRow(hash(1), "OPEN", []), lotRow(hash(2), "CLOSED", [])],
-  });
-  await feed(page, live);
+  }));
   await page.goto("/bsc");
-  await tab(page, "LIVE").click();
+  await liveDrawer(page, "controls");
   await expect(line(page, "Next nonce")).toContainText("41");
   await expect(line(page, "Refusals by stage")).toContainText("OWNER=2");
   await expect(line(page, "Release latency")).toContainText("p50 100 ns · p99 200 ns · max 300 ns (9 samples)");
-  await expect(line(page, "Provider answers")).toContainText("ACCEPTED=3");
-  await expect(line(page, "Chain evidence")).toContainText("11 included · 0 reverted · 0 replaced · 14 final · 0 orphaned");
   await expect(line(page, "Second source")).toContainText("second source DISAGREES · quarantine ON");
   await expect(line(page, "Presence anchor")).toContainText("unsigned: BUYs refused (LIVE_PRESENCE_UNSIGNED)");
   await expect(line(page, "Grant risk scope SHA-256")).toContainText("r1");
-  await expect(line(page, "Next C3 attempt")).toContainText(hash(0xab));
   // A revoke ends the held position's exits; its dialog says so. Accessible: named, focus inside, cancelled by its button.
   await page.getByTestId("bsc-live-revoke-request").click();
   const dialog = page.getByRole("alertdialog");
@@ -298,26 +338,33 @@ test("the LIVE tab shows the path's counters, the second source and the presence
   await expect(dialog.locator(":focus")).toHaveCount(1);
   await dialog.getByRole("button", { name: "Abbrechen", exact: true }).click();
   await expect(dialog).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await liveDrawer(page, "limits");
+  await expect(line(page, "Next C3 attempt")).toContainText(hash(0xab));
+  await page.keyboard.press("Escape");
+  await liveDrawer(page, "receipts");
+  await expect(line(page, "Provider answers")).toContainText("ACCEPTED=3");
+  await expect(line(page, "Chain evidence")).toContainText("11 included · 0 reverted · 0 replaced · 14 final · 0 orphaned");
   expect(errors).toEqual([]);
 });
 
-test("every BSC control has an accessible name and the tabs follow the keyboard (REV.1.0 R10 a11y)", async ({ page }) => {
+test("every BSC control has an accessible name and the areas follow the keyboard (REV.1.0 R10 a11y)", async ({ page }) => {
   await feed(page);
   await page.goto("/bsc");
-  for (const name of TABS) {
-    await tab(page, name).click();
-    await expect(tab(page, name)).toHaveAttribute("aria-selected", "true");
-    const controls = page.locator(".bsc-page").locator("button:visible, input:visible, select:visible, textarea:visible");
+  for (const name of AREAS) {
+    await area(page, name);
+    const controls = page.locator("[data-testid=bsc-v8]").locator("button:visible, input:visible, select:visible, textarea:visible");
     for (let i = 0; i < await controls.count(); i++) await expect(controls.nth(i)).toHaveAccessibleName(/\S/);
   }
-  // Roving focus: the arrow keys move from the selected tab and select the next.
-  await tab(page, TABS[0]!).click();
-  await page.keyboard.press("ArrowRight");
-  await expect(tab(page, TABS[1]!)).toBeFocused();
-  await expect(tab(page, TABS[1]!)).toHaveAttribute("aria-selected", "true");
+  // The area buttons are reachable with Tab and act on Enter.
+  await nav(page).getByRole("button", { name: "Overview", exact: true }).focus();
+  await page.keyboard.press("Tab");
+  await expect(nav(page).getByRole("button", { name: "Training", exact: true })).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(nav(page).getByRole("button", { name: "Training", exact: true })).toHaveAttribute("aria-current", "page");
 });
 
-test("the LIVE tab's operator decisions go at the state their dialog opened on (REV.1.0 R3b, Audit A)", async ({ page }) => {
+test("the LIVE operator decisions go at the state their dialog opened on (REV.1.0 R3b, Audit A)", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   const state = (ledgerVersion: bigint): LiveInit => ({
@@ -328,25 +375,31 @@ test("the LIVE tab's operator decisions go at the state their dialog opened on (
   const sent = await commands(page);
   const push = await feed(page, liveOf(state(12n)));
   await page.goto("/bsc");
-  await tab(page, "LIVE").click();
-  await expect(line(page, "Operator decisions")).toContainText("ledger version 12 · exit-now locked · nonce burn ON");
   // R4: the campaign's spend and its budget (0: no BUY), never made up.
+  await liveDrawer(page, "limits");
   await expect(line(page, "Campaign spent")).toContainText(/1000 wei of .*· 0 wei/);
-  // The ledger's decisions of the open lot; exit-now locked (its switch OFF); a closed lot none.
-  const lots = page.getByTestId("bsc-live-positions").locator("tr");
-  const exitNow = lots.nth(0).getByTestId("bsc-live-lot-EXIT_NOW");
+  await page.keyboard.press("Escape");
+  // The ledger's decisions of the open lot, in its trade detail; exit-now locked (its switch OFF); a closed lot none.
+  await tradeDetail(page, hash(0xa1));
+  await expect(line(page, "Operator decisions")).toHaveCount(0);
+  const exitNow = page.getByTestId("bsc-live-lot-EXIT_NOW");
   await expect(exitNow).toBeDisabled();
   await expect(exitNow).toHaveAttribute("title", "gesperrt: BSC_EXEC_LIVE_OPERATOR_EXIT ist OFF");
-  await expect(lots.nth(0).getByTestId("bsc-live-lot-RESUME")).toBeEnabled();
-  await expect(lots.nth(1).getByRole("button")).toHaveCount(0);
+  await expect(page.getByTestId("bsc-live-lot-RESUME")).toBeEnabled();
   // Review H1: the dialog opened at 12 stays at 12 when a newer state arrives; it names it.
-  await lots.nth(0).getByTestId("bsc-live-lot-WRITE_OFF").click();
+  await page.getByTestId("bsc-live-lot-WRITE_OFF").click();
   await expect(page.getByTestId("bsc-live-lot-dialog")).toContainText("Ledger-Version 12");
   push(liveOf(state(13n)));
   await expect(page.getByTestId("bsc-live-lot-moved")).toContainText("Version 13");
   await page.getByTestId("bsc-live-lot-confirm").click();
   await expect(page.getByTestId("bsc-live-lot-receipt")).toContainText("outcome=APPLIED bsc.live.lot");
-  // The burnable transaction; the one requested is named and offers nothing again; others none.
+  await page.keyboard.press("Escape");
+  await tradeDetail(page, hash(0xa2));
+  await expect(page.getByTestId("bsc-trade-detail").getByRole("button", { name: /^(Resume|Write off|Exit now)$/ })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  // The burnable transaction under Receipts; the one requested is named and offers nothing again; others none.
+  await liveDrawer(page, "receipts");
+  await expect(line(page, "Operator decisions")).toContainText("ledger version 13 · exit-now locked · nonce burn ON");
   const txs = page.getByTestId("bsc-live-transactions").locator("tr");
   await expect(txs.nth(0).getByRole("button")).toHaveCount(0);
   await expect(txs.nth(2).getByTestId("bsc-live-burn-request")).toBeDisabled();
@@ -362,29 +415,30 @@ test("the LIVE tab's operator decisions go at the state their dialog opened on (
   expect(errors).toEqual([]);
 });
 
-test("the LIVE tab's operator decisions stay locked without their switch ON or the ledger's version (REV.1.0 R3b review M2)", async ({ page }) => {
+test("the LIVE operator decisions stay locked without their switch ON or the ledger's version (REV.1.0 R3b review M2)", async ({ page }) => {
   const rows: LiveInit = {
     positions: [lotRow(hash(0xa1), "OPEN", ["RESUME", "WRITE_OFF", "EXIT_NOW"])],
     transactions: [txRow(hash(0xb5), 4n, "UNKNOWN", true)],
   };
   const push = await feed(page, liveOf({ ...rows, operatorExit: true, nonceBurn: true }));
   await page.goto("/bsc");
-  await tab(page, "LIVE").click();
   // No version (the ledger unreadable): nothing goes.
-  const lot = page.getByTestId("bsc-live-positions").locator("tr").nth(0);
-  const burn = page.getByTestId("bsc-live-transactions").locator("tr").nth(0).getByTestId("bsc-live-burn-request");
-  for (const d of ["RESUME", "WRITE_OFF", "EXIT_NOW"]) await expect(lot.getByTestId(`bsc-live-lot-${d}`)).toBeDisabled();
-  await expect(burn).toBeDisabled();
-  // At a version, exit-now ON: every decision; the burn with its switch OFF, then unknown: locked.
+  await tradeDetail(page, hash(0xa1));
+  for (const d of ["RESUME", "WRITE_OFF", "EXIT_NOW"]) await expect(page.getByTestId(`bsc-live-lot-${d}`)).toBeDisabled();
+  // At a version, exit-now ON: every decision.
   push(liveOf({ ...rows, ledgerVersion: 3n, operatorExit: true, nonceBurn: false }));
-  for (const d of ["RESUME", "WRITE_OFF", "EXIT_NOW"]) await expect(lot.getByTestId(`bsc-live-lot-${d}`)).toBeEnabled();
+  for (const d of ["RESUME", "WRITE_OFF", "EXIT_NOW"]) await expect(page.getByTestId(`bsc-live-lot-${d}`)).toBeEnabled();
+  push(liveOf({ ...rows, ledgerVersion: 3n }));
+  await expect(page.getByTestId("bsc-live-lot-EXIT_NOW")).toBeDisabled();
+  await page.keyboard.press("Escape");
+  // The burn with its switch OFF, then unknown: locked; ON: it goes.
+  push(liveOf({ ...rows, ledgerVersion: 3n, operatorExit: true, nonceBurn: false }));
+  await liveDrawer(page, "receipts");
+  const burn = page.getByTestId("bsc-live-transactions").locator("tr").nth(0).getByTestId("bsc-live-burn-request");
   await expect(burn).toBeDisabled();
   await expect(burn).toHaveAttribute("title", "gesperrt: BSC_EXEC_LIVE_NONCE_BURN ist OFF");
   push(liveOf({ ...rows, ledgerVersion: 3n }));
-  await expect(lot.getByTestId("bsc-live-lot-EXIT_NOW")).toBeDisabled();
-  await expect(burn).toBeDisabled();
   await expect(burn).toHaveAttribute("title", /unbekannt/);
-  // ON: the burn goes.
   push(liveOf({ ...rows, ledgerVersion: 3n, nonceBurn: true }));
   await expect(burn).toBeEnabled();
 });
@@ -394,7 +448,7 @@ test("an unreadable LIVE ledger offers its lowest entry's quarantine at the owne
   const unreadable: LiveInit = { firstUnreadable: 9n, warnings: ["LIVE_LEDGER_INVALID 2 unreadable, first seq 9"] };
   const push = await feed(page, liveOf({ ...unreadable, gate: "UNKNOWN" }));
   await page.goto("/bsc");
-  await tab(page, "LIVE").click();
+  await liveDrawer(page, "controls");
   const request = page.getByTestId("bsc-live-quarantine-request");
   await expect(request).toBeDisabled();
   push(liveOf(unreadable));
@@ -415,14 +469,13 @@ test("an unreadable campaign verdict is INVALID, an exact T0 leaves only the loc
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   // TEST_ONLY values: they test the display, they are no campaign.
-  const live = toBinary(BscLiveStateSchema, create(BscLiveStateSchema, {
+  await feed(page, toBinary(BscLiveStateSchema, create(BscLiveStateSchema, {
     gate: "BLOCKED", pathState: "NOT_CONFIGURED", generation: 5n, qualification: "NONE", warnings: ["LIVE_CAMPAIGN_VERDICT_INVALID"],
     attempts: [1n, 2n].map(ordinal => ({ ordinal, tx: `0x${ordinal.toString(16).padStart(64, "0")}`, kind: "C3_BUY", state: "INCLUDED", verdict: "UNKNOWN", window: "COMPLETE",
       t0Exact: true, windowMs: 15000n, evaluatedUnixMs: 1793000040000n + ordinal * 10000n })),
-  }));
-  await feed(page, live);
+  })));
   await page.goto("/bsc");
-  await tab(page, "LIVE").click();
+  await liveDrawer(page, "limits");
   await expect(page.getByTestId("bsc-live-campaign-invalid")).toHaveText("INVALID");
   await expect(line(page, "Campaign verdict")).toContainText("LIVE_CAMPAIGN_VERDICT_INVALID");
   await expect(page.getByTestId("bsc-live-campaign-none")).toHaveCount(0);
@@ -437,51 +490,118 @@ test("an unreadable campaign verdict is INVALID, an exact T0 leaves only the loc
   expect(errors).toEqual([]);
 });
 
-test("the LIVE tab sets a Strategy C setting at the stored generation; the running strategy keeps its start's (frontend package 06.11.)", async ({ page }) => {
+// TEST_ONLY records: the owner, its stored settings (generation 5) and a running strategy that started with generation 4.
+const leaf = (name: string, value: string) => ({ name, value, kind: 7, unit: "" });
+const record = (schema: string, fields: [string, string][]) => ({ schema, provenance: "NATIVE_CREATED", fields: fields.map(([n, v]) => leaf(n, v)) });
+const strategyMonitoring = (extra: [string, string][] = []) => toBinary(BscMonitoringStateSchema, create(BscMonitoringStateSchema, { state: "NOT_EXECUTED", records: [
+  record("darkbot.bsc.source-modes.v1", [["generation", "9"], ["sources[0].source_id", "BSC_INGRESS_GETH"], ["sources[0].requested", "SHADOW"], ["sources[0].effective", "SHADOW"],
+    ["sources[1].source_id", "BSC_INGRESS_DRPC"], ["sources[1].requested", "OFF"], ["sources[1].effective", "OFF"]]),
+  record("darkbot.bsc.strategy-settings.v1", [["generation", "5"], ["request_id", "r-5"], ["settings[0].id", "BSC_STRATEGY_C_MAX_OPEN"], ["settings[0].value", "4"]]),
+  record("darkbot.bsc.runtime-status.v1", [["_provenance.observed_unix_ms", String(Date.now())], ["status_interval_ms", "60000"], ["status_stale_intervals", "3"], ["mode", "SHADOW"],
+    ["strategy[0].state", "SHADOW"], ["strategy[0].settings_generation", "4"], ["strategy[0].settings[0].id", "BSC_STRATEGY_C_MAX_OPEN"], ["strategy[0].settings[0].value", "3"],
+    ["strategy[0].settings[1].id", "BSC_STRATEGY_C_CREATOR_SELL_EXIT"], ["strategy[0].settings[1].value", "ENABLED"],
+    ["strategy[0].gains", "2"], ["strategy[0].gain_wei", "30000000000000000"], ["strategy[0].losses", "1"], ["strategy[0].loss_wei", "10000000000000000"], ["strategy[0].launches", "37"],
+    ["sources[0].source_id", "BSC_INGRESS_GETH"], ["sources[0].health", "HEALTHY"], ["sources[0].last_event_age_ms", "1200"], ["sources[0].capability", "FULL"], ...extra]),
+] }));
+
+test("Live sets one Strategy C setting at the stored generation; saved vs running stays visible (frontend package 06.11., FE-V8-06)", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
-  // TEST_ONLY records: the owner, its stored settings (generation 5) and a running strategy that started with generation 4.
-  const leaf = (name: string, value: string) => ({ name, value, kind: 7, unit: "" });
-  const record = (schema: string, fields: { name: string; value: string }[]) => ({ schema, provenance: "NATIVE_CREATED", fields: fields.map(f => leaf(f.name, f.value)) });
-  const monitoring = toBinary(BscMonitoringStateSchema, create(BscMonitoringStateSchema, { state: "NOT_EXECUTED", records: [
-    record("darkbot.bsc.source-modes.v1", [{ name: "generation", value: "9" }]),
-    record("darkbot.bsc.strategy-settings.v1", [{ name: "generation", value: "5" }, { name: "request_id", value: "r-5" },
-      { name: "settings[0].id", value: "BSC_STRATEGY_C_MAX_OPEN" }, { name: "settings[0].value", value: "4" }]),
-    record("darkbot.bsc.runtime-status.v1", [{ name: "_provenance.observed_unix_ms", value: String(Date.now()) }, { name: "status_interval_ms", value: "60000" },
-      { name: "status_stale_intervals", value: "3" }, { name: "strategy[0].state", value: "SHADOW" }, { name: "strategy[0].settings_generation", value: "4" },
-      { name: "strategy[0].settings[0].id", value: "BSC_STRATEGY_C_MAX_OPEN" }, { name: "strategy[0].settings[0].value", value: "3" },
-      { name: "strategy[0].settings[1].id", value: "BSC_STRATEGY_C_CREATOR_SELL_EXIT" }, { name: "strategy[0].settings[1].value", value: "ENABLED" }]),
-  ] }));
   const sent = await commands(page);
-  await feed(page, liveOf({}), monitoring);
+  await feed(page, liveOf({}), strategyMonitoring());
   await page.goto("/bsc");
-  await tab(page, "LIVE").click();
-  await expect(line(page, "Settings generation")).toContainText("5 stored · 4 in effect");
-  await expect(line(page, "Team-sell exit")).toContainText("NOT IMPLEMENTED");
-  await expect(page.getByTestId("bsc-live-strategy-BSC_STRATEGY_C_MAX_OPEN-stored")).toHaveText("4");
-  await expect(page.getByTestId("bsc-live-strategy-BSC_STRATEGY_C_MAX_OPEN-effective")).toHaveText("3 · stored value effective at the next start");
-  await expect(page.getByTestId("bsc-live-strategy-BSC_STRATEGY_C_HOLD_MS-stored")).toHaveText("— (configuration file)");
-  // A choice needs a choice; the value goes as typed, the native owner decides it.
-  await page.getByTestId("bsc-live-strategy-key").selectOption("BSC_STRATEGY_C_CREATOR_SELL_EXIT");
-  await expect(page.getByTestId("bsc-live-strategy-set")).toBeDisabled();
-  await page.getByTestId("bsc-live-strategy-value").selectOption("DISABLED");
-  await page.getByTestId("bsc-live-strategy-set").click();
+  await area(page, "Live");
+  await expect(page.getByTestId("bsc-live-strategy-generation")).toContainText("Saved generation 5 · 4 in effect");
+  await expect(page.getByTestId("bsc-live-strategy-maxOpen")).toHaveValue("4");
+  await expect(page.getByTestId("bsc-live-strategy-maxOpen-running")).toHaveText("Saved · running 3 until the next start");
+  await expect(page.getByLabel("Exit when the creator’s team sells")).toHaveValue("Not implemented");
+  // Nothing changed: nothing to save; two changes: one at a time (no half set, BSC-V8-04).
+  const save = page.getByTestId("bsc-live-strategy-save");
+  await expect(save).toBeDisabled();
+  await page.getByTestId("bsc-live-strategy-creatorSellExit").selectOption("DISABLED");
+  await page.getByTestId("bsc-live-strategy-maxOpen").fill("5");
+  await expect(save).toBeDisabled();
+  await expect(page.getByTestId("bsc-live-strategy-generation")).toContainText("save one change at a time");
+  await page.getByTestId("bsc-live-strategy-maxOpen").fill("4");
+  await save.click();
   await expect(page.getByTestId("bsc-live-strategy-dialog")).toContainText("nächsten Start von Strategy C");
   await expect(page.getByTestId("bsc-live-strategy-request")).toHaveText("BSC_STRATEGY_C_CREATOR_SELL_EXIT=DISABLED");
   await page.getByTestId("bsc-live-strategy-confirm").click();
   await expect(page.getByTestId("bsc-live-strategy-receipt")).toContainText("outcome=APPLIED bsc.strategy.set");
-  await page.getByTestId("bsc-live-strategy-key").selectOption("BSC_STRATEGY_C_FILTERS");
-  await page.getByTestId("bsc-live-strategy-value").fill("buy_count:3:");
-  await page.getByTestId("bsc-live-strategy-set").click();
+  // A filter: its toggle and bound make the native rule string.
+  await page.getByTestId("bsc-live-strategy-filter-buy_count").getByLabel("Buy count filter").check();
+  await page.getByTestId("bsc-live-strategy-filter-buy_count").getByLabel("Buy count minimum").fill("3");
+  await save.click();
+  await expect(page.getByTestId("bsc-live-strategy-request")).toHaveText("BSC_STRATEGY_C_FILTERS=buy_count:3:");
   await page.getByTestId("bsc-live-strategy-confirm").click();
   await expect(page.getByTestId("bsc-live-strategy-receipt")).toContainText("outcome=APPLIED bsc.strategy.set");
   expect(sent.map(r => [r.action, r.resourceId, r.params.length, r.expected?.version])).toEqual([
     ["bsc.strategy.set", "BSC_STRATEGY_C_CREATOR_SELL_EXIT:DISABLED", 0, { case: "profileVersion", value: 5n }],
     ["bsc.strategy.set", "BSC_STRATEGY_C_FILTERS:buy_count:3:", 0, { case: "profileVersion", value: 5n }],
   ]);
+  // Training shows the running strategy's own PAPER result, never a computed net.
+  await area(page, "Training");
+  await expect(page.getByTestId("bsc-training-native")).toContainText("+0.030");
+  await expect(page.getByTestId("bsc-training-native")).toContainText("−0.010");
   // R14: the LIVE tab fits a phone's width (390 px), the settings form included.
+  await area(page, "Live");
   await page.setViewportSize({ width: 390, height: 844 });
   const [scroll, width] = await page.evaluate(() => [document.documentElement.scrollWidth, window.innerWidth]);
   expect(scroll).toBeLessThanOrEqual(width + 1);
   expect(errors).toEqual([]);
+});
+
+test("the trade list joins only the lot's own attempt, shows 17 chosen columns and asks the history once per request", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  const queries: string[] = [];
+  await page.route("**/api/v1/bsc/query", async (r) => {
+    queries.push(r.request().method());
+    return r.fulfill({ status: 200, contentType: "application/x-protobuf",
+      body: Buffer.from(toBinary(BscQueryResponseSchema, create(BscQueryResponseSchema, { availability: Availability.NOT_IMPLEMENTED, unavailableReason: "BSC-V8-10" }))) });
+  });
+  await feed(page, liveOf({
+    positions: [{ ...lotRow(hash(0xa1), "CLOSED", []), pnlWei: "0" }, lotRow(hash(0xa2), "OPEN", []), { ...lotRow(hash(0xa3), "CLOSED", []), pnlWei: "-5", proceedsUnknown: true }],
+    attempts: [{ ordinal: 1n, tx: hash(0xa2), trigger: "BSC_INGRESS_GETH", ingressToSendNs: 420_000n, sendToAckNs: 610_000n, placed: "FIRST", blockMs: 1793000000000n }],
+  }));
+  await page.goto("/bsc");
+  await area(page, "Live");
+  const rows = page.getByTestId("bsc-trade-row");
+  await expect(rows).toHaveCount(3);
+  // Active first; a lower-bound loss (proceeds unknown) is no LOSS and no WIN; 0 PnL is no WIN.
+  await expect(rows.nth(0)).toContainText("RUN");
+  await expect(rows.nth(0)).toContainText("Geth (local)");
+  await expect(rows.nth(0)).toContainText("0.42 ms");
+  await expect(rows.nth(1)).toContainText("UNKN");
+  await expect(rows.nth(2)).toContainText("DONE");
+  await expect(rows.nth(2)).not.toContainText("Geth");
+  // Columns: 17 to choose, token always; the choice is a browser preference.
+  await page.getByTestId("bsc-trade-columns").click();
+  await expect(page.locator("[data-testid^=bsc-col-]")).toHaveCount(17);
+  await expect(page.getByTestId("bsc-col-token")).toBeDisabled();
+  await page.getByTestId("bsc-col-ack").check();
+  await page.getByTestId("bsc-trade-columns-apply").click();
+  await expect(page.locator(".trade-flow-table thead th").filter({ hasText: /^Ack$/ })).toHaveCount(1);
+  await expect(rows.nth(0)).toContainText("0.61 ms");
+  // The history: no query until asked, then one; the owner's NOT_IMPLEMENTED is shown as such.
+  expect(queries).toEqual([]);
+  await page.getByTestId("bsc-live-trades").getByPlaceholder("Find token or transaction").fill("0xa");
+  expect(queries).toEqual([]);
+  await page.getByTestId("bsc-trade-history-more").click();
+  await expect(page.getByTestId("bsc-live-trades")).toContainText("Not implemented yet");
+  expect(queries).toEqual(["POST"]);
+  expect(errors).toEqual([]);
+});
+
+test("Health shows each native state, a disabled source grey and never a missing one green", async ({ page }) => {
+  await feed(page, liveOf({ grantAdapters: ["CLUB48_BUILDER_V1"] }), strategyMonitoring([["canonical[0].state", "STALLED"], ["canonical[0].head", "100"], ["canonical[0].head_age_ms", "9000"]]));
+  await page.goto("/bsc");
+  await page.getByTestId("bsc-health-pill").click();
+  await expect(page.getByTestId("bsc-health-BSC_INGRESS_GETH")).toHaveAttribute("data-state", "ok");
+  await expect(page.getByTestId("bsc-health-BSC_INGRESS_DRPC")).toHaveAttribute("data-state", "off");
+  await expect(page.getByTestId("bsc-health-chain")).toHaveAttribute("data-state", "warn");
+  await expect(page.getByTestId("bsc-health-confirm")).toHaveAttribute("data-state", "off");
+  // The golden builder evidence is unqualified: never green.
+  await expect(page.getByTestId("bsc-health-CLUB48_BUILDER_V1")).not.toHaveAttribute("data-state", "ok");
+  await expect(page.getByTestId("bsc-health-pill")).toContainText("alert");
 });

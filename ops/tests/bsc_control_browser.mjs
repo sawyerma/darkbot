@@ -13,11 +13,29 @@ const browser=await chromium.launch({headless:true});const p=await browser.newPa
 const pageRequests=[];p.on('request',r=>pageRequests.push({method:r.method(),path:new URL(r.url()).pathname}));
 const statusGets=(from,path)=>pageRequests.slice(from).filter(r=>r.method==='GET'&&r.path===path).length;
 const idle=ms=>new Promise(r=>setTimeout(r,ms));
-// FRONTEND_PHASENPLAN §13: every tab shows its numbered sections in exactly this order.
+// FRONTEND_PHASENPLAN §13: every pre-V8 group shows its numbered sections in exactly this order.
 const sections=JSON.parse(readFileSync(`${root}/frontend/contracts/bsc-fields.json`,'utf8')).panel_sections;
 const salt=readFileSync(`${dir}/salt.txt`,'utf8').trim();
-const headings=async()=>(await p.locator('h2.g-section-title').allInnerTexts()).map(t=>t.trim());
-const expectSections=async(panel)=>assert.deepEqual(await headings(),sections[panel].map((t,i)=>`${i+1}. ${t}`),panel+' section order');
+// V8 (FRONTEND_PHASENPLAN §13A): four areas and their drawers replace the six tabs. The groups of
+// Overview, Launch / BUY, Monitoring and Analytics are the Settings drawer's (data-testid
+// bsc-settings-*), Wallets is the Wallets area (its sections in the Wallet evidence card), LIVE the
+// Live area's drawers (controls: 1 2 3 6, limits: 4 5, receipts: 7 8 9) and section 10 the Training
+// workspace of the native Strategy C configuration. The five sources are switched in Live → Market monitoring.
+const GROUP={overview:'bsc-settings-system',launch:'bsc-settings-launch',monitoring:'bsc-settings-monitoring',analytics:'bsc-settings-reports',wallets:'bsc-wallet-evidence'};
+const LIVE_DRAWERS={controls:[1,2,3,6],limits:[4,5],receipts:[7,8,9]};
+const closeLayers=async()=>{for(let i=0;i<3&&await p.locator('.drawer-area').count();i++){await p.keyboard.press('Escape');await idle(100);}};
+const openArea=async name=>{await closeLayers();await p.getByRole('navigation',{name:'BSC areas'}).getByRole('button',{name,exact:true}).click();};
+const openSettings=async()=>{if(await p.getByTestId('bsc-settings').count())return;await closeLayers();await p.getByTestId('bsc-settings-open').click();await p.getByTestId('bsc-settings').waitFor();};
+const openLive=async which=>{await openArea('Live');await (which==='receipts'?p.getByRole('button',{name:'Receipts',exact:true}):p.getByTestId(which==='controls'?'bsc-live-controls-open':'bsc-live-limits-open')).click();await p.getByRole('dialog').waitFor();};
+/** The V8 place of a pre-V8 tab. */
+const tab=async name=>name==='Wallets'?openArea('Wallets'):name==='LIVE'?openLive('controls'):openSettings();
+const headings=async sel=>(await p.locator(sel).locator('h2.g-section-title').allInnerTexts()).map(t=>t.trim());
+const expectSections=async(panel)=>{
+ if(panel!=='live'){assert.deepEqual(await headings(`[data-testid=${GROUP[panel]}]`),sections[panel].map((t,i)=>`${i+1}. ${t}`),panel+' section order');return;}
+ for(const [which,list] of Object.entries(LIVE_DRAWERS)){await openLive(which);assert.deepEqual(await headings('.drawer'),list.map(n=>`${n}. ${sections.live[n-1]}`),'live '+which+' section order');}
+ await openArea('Training');await p.getByRole('button',{name:'Open Strategy C module'}).click();
+ assert.deepEqual(await headings('[data-testid=bsc-training-native-record]'),[`10. ${sections.live[9]}`],'live 10 in Training');
+};
 const body=async()=>await p.locator('body').innerText();
 p.on('pageerror',e=>errors.push(e.message));p.on('dialog',d=>{errors.push('native dialog');void d.dismiss();});
 // A wait longer than two seconds is named on stderr with the run's elapsed time, so a harness timeout shows where it stood.
@@ -49,6 +67,7 @@ try{
  assert.equal(statusGets(mark,'/api/v1/bsc/process'),0);assert.equal(statusGets(mark,'/api/v1/command'),0);
  const p0Polls=statusGets(mark,'/api/v1/project0/process');
  await p.getByTestId('project-link-bsc').click();
+ await openSettings();
  await until(async()=> (await p.locator('body').innerText()).includes('isolated-fixture'),'BSC panel real feed');
  const gateLine=id=>p.locator('.g-line').filter({has:p.locator('span:first-child',{hasText:new RegExp('^'+id.replace('.','\\.')+'$')})}).first();
  await until(async()=> (await gateLine('G0.8').innerText()).includes('UNRESOLVED'),'Overview G0.8 gate UNRESOLVED');
@@ -59,12 +78,12 @@ try{
  await expectSections('overview');
  for(const name of ['BUY','Send','Arm','Probe','Run DRY'])assert.equal(await p.getByRole('button',{name,exact:true}).count(),0);
  await p.screenshot({path:`${dir}/bsc-overview.png`,fullPage:true});
- await p.getByRole('tab',{name:'Wallets',exact:true}).click();
- await until(async()=> (await p.locator('body').innerText()).includes('Wallet snapshots'),'wallet snapshots');
+ await tab('Wallets');
+ await until(async()=> (await p.locator('body').innerText()).includes('Wallet evidence'),'wallet evidence');
  await expectSections('wallets');
  await until(async()=> (await body()).includes('launcher_pending_nonce · g06a.preflight-readonly.v3'),'native preflight nonce in Wallets section 6');
  await p.screenshot({path:`${dir}/bsc-wallets.png`,fullPage:true});
- await p.getByRole('tab',{name:'Launch / BUY',exact:true}).click();
+ await tab('Launch / BUY');
  await p.getByRole('heading',{name:'8. '+sections.launch[7],exact:true}).waitFor();
  await expectSections('launch');
  await until(async()=> (await body()).includes('protocol_fee_bps · g06a.native-bnb-quote.v2'),'native quote leaf in Launch section 3');
@@ -80,13 +99,13 @@ try{
  await until(async()=> (await p.locator('.g-line',{hasText:'Pre-Live Readiness'}).first().innerText()).includes(verdict),'Launch panel shows the native verdict');
  assert.equal(await p.getByTestId('bsc-readiness-control').count(),1);
  await p.screenshot({path:`${dir}/bsc-launch.png`,fullPage:true});
- await p.getByRole('tab',{name:'Analytics',exact:true}).click();
+ await tab('Analytics');
  await p.getByLabel('Report',{exact:true}).selectOption('g08');
  // V2 §2.3: the real verifier's UNRESOLVED (no canonical receipts) reaches the report unchanged.
  await until(async()=> (await p.locator('.g-line',{hasText:'Native verdict'}).first().innerText()).includes('UNRESOLVED'),'G0.8 native UNRESOLVED in the report');
  await expectSections('analytics');
  assert((await body()).includes('g06a.local-simulation.import.v1'),'evidence record list');
- await p.getByRole('tab',{name:'Monitoring',exact:true}).click();
+ await tab('Monitoring');
  await until(async()=> (await body()).includes('BSC_INGRESS_GETH'),'monitoring future sources');
  await expectSections('monitoring');
  const g08Line=await p.locator('.g-line',{hasText:'G0.8 verdict'}).first().innerText();
@@ -100,10 +119,14 @@ try{
  const srcLine=id=>p.locator('.g-line').filter({has:p.locator('span:first-child',{hasText:new RegExp('^'+id+'$')})}).first();
  await until(async()=> (await p.locator('.g-line',{hasText:'Source modes generation'}).first().innerText()).includes('0'),'native source owner generation 0');
  for(const id of ['BSC_INGRESS_GETH','BSC_INGRESS_PUBLICNODE','BSC_INGRESS_DRPC','BSC_INGRESS_BLOCKREQ','BSC_INGRESS_48CLUB'])assert((await srcLine(id).innerText()).includes('OFF'),id+' OFF');
+ // V8: a source is switched in Live → Market monitoring, a venue or component in the Settings drawer;
+ // the rows and runtime lines read below are the Settings drawer's.
  const requestSource=async(id,mode,expect,receipt='bsc-source-receipt')=>{
+  if(id.startsWith('BSC_INGRESS_'))await openArea('Live');else await openSettings();
   await p.getByTestId(`bsc-source-${id}-${mode}`).click();
   await p.getByRole('alertdialog').getByRole('button',{name:'Anfordern',exact:true}).click();
   await until(async()=> (await p.getByTestId(receipt).innerText()).includes(expect),`${id} ${mode} receipt ${expect}`);
+  await openSettings();
  };
  await requestSource('BSC_INGRESS_PUBLICNODE','SHADOW','outcome=APPLIED source=BSC_INGRESS_PUBLICNODE requested=SHADOW effective=SHADOW');
  await until(async()=> (await srcLine('BSC_INGRESS_PUBLICNODE').innerText()).includes('SHADOW'),'PUBLICNODE effective SHADOW pushed');
@@ -150,13 +173,13 @@ await until(async()=> /HEALTHY[\s\S]*sealed segments \d+ · durable to sequence/
  assert((await srcLine('BSC_VENUE_FLAP').innerText()).includes('last set by '),'venue shows the request that set it');
  // Plan v9 §2.5: the global runtime mode (Launch / BUY §5), OFF initially, bounds the components:
  // PAPER lets the C3 path run to the PAPER sink (zero-balance PAPER identity, nothing sent).
- await p.getByRole('tab',{name:'Launch / BUY',exact:true}).click();
+ await tab('Launch / BUY');
  await until(async()=> (await p.locator('.g-line').filter({has:p.locator('span:first-child',{hasText:/^Runtime mode$/})}).first().locator('.bsc-state').innerText()).trim()==='OFF','runtime mode OFF initially');
  await p.getByTestId('bsc-switch-BSC_RUNTIME_MODE-PAPER').click();
  await p.getByRole('alertdialog').getByRole('button',{name:'Anfordern',exact:true}).click();
  await until(async()=> (await p.getByTestId('bsc-runtime-mode-receipt').innerText()).includes('source=BSC_RUNTIME_MODE requested=PAPER effective=PAPER'),'runtime mode PAPER receipt');
  await until(async()=> await p.getByTestId('bsc-switch-BSC_RUNTIME_MODE-PAPER').isDisabled(),'runtime mode PAPER pushed');
- await p.getByRole('tab',{name:'Monitoring',exact:true}).click();
+ await tab('Monitoring');
  await until(async()=> (await p.locator('.g-line',{hasText:'Source modes generation'}).first().innerText()).includes('7'),'generation 7 pushed');
  const execLine=()=>p.locator('.g-line').filter({has:p.locator('span:first-child',{hasText:/^C3 PAPER path$/})}).first();
  const execComp=()=>p.locator('.g-line').filter({has:p.locator('span:first-child',{hasText:/^BSC_EXEC$/})}).first();
@@ -208,13 +231,15 @@ await until(async()=> /HEALTHY[\s\S]*sealed segments \d+ · durable to sequence/
  const switchState=async label=>(await switchLine(label).locator('.bsc-state').innerText()).trim();
  const gen=async()=>BigInt((await switchLine('Launcher wallet switch generation').innerText()).match(/(\d+)/)[1]);
  const requestSwitch=async(id,mode,receipt,expect)=>{
+  // V8: a wallet's switch is shown for the selected wallet.
+  if(id.startsWith('BSC_WALLET_'))await p.getByTestId(id==='BSC_WALLET_LAUNCHER'?'bsc-wallet-launcher':'bsc-wallet-buyer').click();
   await p.getByTestId(`bsc-switch-${id}-${mode}`).click();
   await p.getByRole('alertdialog').getByRole('button',{name:'Anfordern',exact:true}).click();
   await until(async()=> (await p.getByTestId(receipt).innerText()).includes(expect),`${id} ${mode} receipt ${expect}`);
   // The pushed state shows the request (its button locks): the next request's CAS is that generation.
   await until(async()=> await p.getByTestId(`bsc-switch-${id}-${mode}`).isDisabled(),`${id} ${mode} pushed`);
  };
- await p.getByRole('tab',{name:'Wallets',exact:true}).click();
+ await tab('Wallets');
  await until(async()=> (await switchState('Launcher wallet switch'))==='DISABLED'&&(await switchState('Buyer wallet switch'))==='DISABLED','both wallet switches DISABLED initially');
  let r=requireSwitches('BSC_WALLET_LAUNCHER');assert(r.code===2&&r.out.includes('BSC_WALLET_LAUNCHER DISABLED'),'terminal runner refused while DISABLED: '+JSON.stringify(r));
  await requestSwitch('BSC_WALLET_LAUNCHER','ENABLED','bsc-wallet-launcher-receipt','outcome=APPLIED source=BSC_WALLET_LAUNCHER requested=ENABLED effective=ENABLED');
@@ -241,15 +266,15 @@ await until(async()=> /HEALTHY[\s\S]*sealed segments \d+ · durable to sequence/
  r=requireSwitches('BSC_WALLET_LAUNCHER');assert.equal(r.code,2,'terminal runner refused again after DISABLE');
  await p.screenshot({path:`${dir}/bsc-wallet-switches.png`,fullPage:true});
  // The economic switches on Launch / BUY: SEND and the global LIVE switch, enabled and disabled again.
- await p.getByRole('tab',{name:'Launch / BUY',exact:true}).click();
+ await tab('Launch / BUY');
  await until(async()=> (await switchState('SEND switch'))==='DISABLED','SEND DISABLED initially');
  await requestSwitch('BSC_ECON_SEND','ENABLED','bsc-economic-attempt-receipt','source=BSC_ECON_SEND requested=ENABLED effective=ENABLED');
  r=requireSwitches('BSC_ECON_SEND');assert.equal(r.code,0,'SEND ENABLED reaches the runner check');
  r=requireSwitches('BSC_ECON_SEND','BSC_ECON_SIGN','BSC_WALLET_BUYER');assert(r.code===2&&r.out.includes('BSC_ECON_SIGN DISABLED'),'one switch never enables another');
  await requestSwitch('BSC_ECON_LIVE','ENABLED','bsc-economic-authorization-receipt','source=BSC_ECON_LIVE requested=ENABLED effective=ENABLED');
- await p.getByRole('tab',{name:'Monitoring',exact:true}).click();
+ await tab('Monitoring');
  await until(async()=> {const t=await srcLine('BSC_INGRESS_DRPC').innerText();return t.includes('BLOCKED')&&t.includes('LIVE_GRANT_MISSING');},'global LIVE ENABLED: DRPC LIVE still BLOCKED, next missing condition');
- await p.getByRole('tab',{name:'Launch / BUY',exact:true}).click();
+ await tab('Launch / BUY');
  await requestSwitch('BSC_ECON_LIVE','DISABLED','bsc-economic-authorization-receipt','source=BSC_ECON_LIVE requested=DISABLED effective=DISABLED');
  await requestSwitch('BSC_ECON_SEND','DISABLED','bsc-economic-attempt-receipt','source=BSC_ECON_SEND requested=DISABLED effective=DISABLED');
  r=requireSwitches('BSC_ECON_SEND');assert.equal(r.code,2,'SEND disabled again');
@@ -277,22 +302,24 @@ await until(async()=> /HEALTHY[\s\S]*sealed segments \d+ · durable to sequence/
  const liveLine=label=>p.locator('.g-line').filter({has:p.locator('span:first-child',{hasText:new RegExp('^'+label+'$')})}).first();
  const unmet=async()=>await p.getByTestId('bsc-live-conditions').locator('tr[data-met="false"]').count();
  const confirm=async()=>await p.getByRole('alertdialog').getByRole('button',{name:'Anfordern',exact:true}).click();
- await p.getByRole('tab',{name:'LIVE',exact:true}).click();
- await p.getByRole('heading',{name:'9. '+sections.live[8],exact:true}).waitFor();
+ await tab('LIVE');
+ await p.getByRole('heading',{name:'1. '+sections.live[0],exact:true}).waitFor();
  await expectSections('live');
+ await openLive('controls');
  await until(async()=> (await liveLine('LIVE gate').innerText()).includes('BLOCKED'),'LIVE gate BLOCKED initially');
  await until(async()=> (await liveLine('LIVE qualification').innerText()).includes('VERIFIED'),'synthetic qualification VERIFIED');
  await until(async()=> (await unmet())>5,'the checklist names what is missing');
  await until(async()=> (await liveLine('LIVE path').innerText()).includes('NOT_CONFIGURED'),'no LIVE path in this runtime');
- await p.getByRole('tab',{name:'Wallets',exact:true}).click();
+ await tab('Wallets');
  await requestSwitch('BSC_WALLET_LAUNCHER','ENABLED','bsc-wallet-launcher-receipt','requested=ENABLED effective=ENABLED');
  await requestSwitch('BSC_WALLET_BUYER','ENABLED','bsc-wallet-buyer-receipt','requested=ENABLED effective=ENABLED');
- await p.getByRole('tab',{name:'Launch / BUY',exact:true}).click();
+ await tab('Launch / BUY');
  for(const [id,receipt] of [['BSC_ECON_SIGN','bsc-economic-authorization-receipt'],['BSC_ECON_ARM','bsc-economic-authorization-receipt'],['BSC_ECON_SEND','bsc-economic-attempt-receipt'],['BSC_ECON_ATTEMPT','bsc-economic-attempt-receipt']])
   await requestSwitch(id,'ENABLED',receipt,`source=${id} requested=ENABLED effective=ENABLED`);
  await requestSwitch('BSC_RUNTIME_MODE','LIVE','bsc-runtime-mode-receipt','source=BSC_RUNTIME_MODE requested=LIVE');
- await p.getByRole('tab',{name:'LIVE',exact:true}).click();
+ await tab('LIVE');
  await requestSwitch('BSC_ECON_LIVE','ENABLED','bsc-live-econ-receipt','source=BSC_ECON_LIVE requested=ENABLED effective=ENABLED');
+ await openLive('limits');
  await p.getByTestId('bsc-buy-limit-input').fill('1');await p.getByTestId('bsc-buy-limit-set').click();await confirm();
  await until(async()=> (await p.getByTestId('bsc-buy-limit-receipt').innerText()).includes('outcome=APPLIED source=BSC_BUY_ATTEMPTS_PER_DAY requested=1 effective=1'),'daily limit 1 from the LIVE tab');
  // Every next request takes the pushed generation as its CAS: wait for the push first.
@@ -301,6 +328,7 @@ await until(async()=> /HEALTHY[\s\S]*sealed segments \d+ · durable to sequence/
  await until(async()=> (await p.getByTestId('bsc-live-total-receipt').innerText()).includes('outcome=APPLIED source=BSC_BUY_ATTEMPTS_TOTAL requested=1'),'campaign limit 1');
  await until(async()=> (await liveLine('Campaign BUY attempts').innerText()).includes('0 of 1'),'campaign limit pushed');
  // The grant: the dialog shows the exact canonical scope and its digest; the native owner computes the same.
+ await openLive('controls');
  await p.getByTestId('bsc-live-grant-max-input').fill('2000000000000000');
  await p.getByTestId('bsc-live-grant-max-spend').fill('50000000000000000');
  await p.getByTestId('bsc-live-grant-attempts').fill('1');
@@ -335,46 +363,47 @@ await until(async()=> /HEALTHY[\s\S]*sealed segments \d+ · durable to sequence/
  await until(async()=> (await p.getByTestId('bsc-live-revoke-receipt').innerText()).includes('outcome=APPLIED'),'revoke APPLIED');
  await until(async()=> {const t=await liveLine('LIVE gate').innerText();return t.includes('BLOCKED')&&t.includes('LIVE_GRANT_MISSING');},'revoked: BLOCKED LIVE_GRANT_MISSING');
  await requestSwitch('BSC_ECON_LIVE','DISABLED','bsc-live-econ-receipt','source=BSC_ECON_LIVE requested=DISABLED effective=DISABLED');
+ await openLive('limits');
  await p.getByTestId('bsc-live-total-input').fill('0');await p.getByTestId('bsc-live-total-set').click();await confirm();
  await until(async()=> (await p.getByTestId('bsc-live-total-receipt').innerText()).includes('outcome=APPLIED source=BSC_BUY_ATTEMPTS_TOTAL requested=0'),'campaign limit 0 applied');
  await until(async()=> (await liveLine('Campaign BUY attempts').innerText()).includes('0 of 0'),'campaign limit 0 again');
  await p.screenshot({path:`${dir}/bsc-live.png`,fullPage:true});
  // Everything back as before: sources and venue SHADOW, runtime PAPER, every switch DISABLED, limit 0.
- await p.getByRole('tab',{name:'Monitoring',exact:true}).click();
+ await tab('Monitoring');
  // Monitoring names the LIVE tab's decision: after the stop, BLOCKED with the gate's first reason.
  await until(async()=> {const t=await srcLine('BSC_INGRESS_PUBLICNODE').innerText();return t.includes('requested LIVE')&&t.includes('BLOCKED')&&t.includes('ECONOMIC_LIVE_DISABLED');},'Monitoring follows the LIVE gate');
  for(const [id,receipt] of [['BSC_INGRESS_PUBLICNODE','bsc-source-receipt'],['BSC_VENUE_FLAP','bsc-venue-receipt']]){
   await requestSource(id,'SHADOW',`source=${id} requested=SHADOW effective=SHADOW`,receipt);
   await until(async()=> (await srcLine(id).innerText()).includes('requested SHADOW'),`${id} SHADOW pushed`);
  }
- await p.getByRole('tab',{name:'Launch / BUY',exact:true}).click();
+ await tab('Launch / BUY');
  await requestSwitch('BSC_RUNTIME_MODE','PAPER','bsc-runtime-mode-receipt','source=BSC_RUNTIME_MODE requested=PAPER');
  for(const [id,receipt] of [['BSC_ECON_SIGN','bsc-economic-authorization-receipt'],['BSC_ECON_ARM','bsc-economic-authorization-receipt'],['BSC_ECON_SEND','bsc-economic-attempt-receipt'],['BSC_ECON_ATTEMPT','bsc-economic-attempt-receipt']])
   await requestSwitch(id,'DISABLED',receipt,`source=${id} requested=DISABLED effective=DISABLED`);
  await setLimit(0);
- await p.getByRole('tab',{name:'Wallets',exact:true}).click();
+ await tab('Wallets');
  await requestSwitch('BSC_WALLET_LAUNCHER','DISABLED','bsc-wallet-launcher-receipt','requested=DISABLED effective=DISABLED');
  await requestSwitch('BSC_WALLET_BUYER','DISABLED','bsc-wallet-buyer-receipt','requested=DISABLED effective=DISABLED');
  process.stderr.write(`[${elapsed()}] LIVE tab restored\n`);
- await p.getByRole('tab',{name:'Overview',exact:true}).click();
+ await tab('Overview');
  await until(async()=> (await switchLine('Wallet switches').innerText()).includes('Launcher wallet DISABLED · Buyer wallet DISABLED'),'Overview wallet summary');
  assert(!(await switchLine('Economic switches').innerText()).includes('ENABLED'),'every economic switch DISABLED at the end');
- await p.getByRole('tab',{name:'Monitoring',exact:true}).click();
+ await tab('Monitoring');
  // The G0.4 census, replayed by the runtime from its journals: Analytics §2, no verdict.
- await p.getByRole('tab',{name:'Analytics',exact:true}).click();
+ await tab('Analytics');
  await until(async()=> (await p.locator('.g-line',{hasText:'criteria'}).filter({hasText:'CRITERIA_UNCONFIRMED'}).count())>0,'G0.4 census on Analytics, CRITERIA_UNCONFIRMED');
  assert((await p.locator('.g-line',{hasText:'flap_launches'}).count())>0,'census denominator row');
  // BSC-023: the C1.9 native latency report (boundary, clock, eligibility) on Analytics §3.
  assert((await p.locator('.g-line',{hasText:'c1_9_qualification_eligible'}).filter({hasText:'true'}).count())>0,'C1.9 report eligible on Analytics');
  assert((await p.locator('.g-line',{hasText:'clock.domain'}).count())>0,'C1.9 clock domain row');
  await p.screenshot({path:`${dir}/bsc-analytics.png`,fullPage:true});
- await p.getByRole('tab',{name:'Monitoring',exact:true}).click();
+ await tab('Monitoring');
 
  // A bounded fixture child is used for explicit cancellation and crash tests only.
  const fixture=`#!/usr/bin/python3\nimport pathlib,signal,time,sys\nmode=pathlib.Path(${JSON.stringify(dir+'/mode')}).read_text().strip()\nif mode=='crash': sys.exit(19)\ndef stop(a,b):\n time.sleep(3);sys.exit(0)\nsignal.signal(signal.SIGTERM,stop)\nwhile True: time.sleep(.1)\n`;
  writeFileSync(`${dir}/app/releases/test/g07_pre_live_readiness`,fixture);chmodSync(`${dir}/app/releases/test/g07_pre_live_readiness`,0o755);writeFileSync(`${dir}/mode`,'hold');
  // Lost acknowledgement: the gateway executes the start, the page never sees the answer.
- await p.getByRole('tab',{name:'Launch / BUY',exact:true}).click();
+ await tab('Launch / BUY');
  await until(async()=>!(await p.getByTestId('bsc-readiness-control').isDisabled()),'BSC launch control');
  const beforeLost=(await state()).run_id;let posts=0;
  await p.route('**/api/v1/command',async route=>{if(route.request().method()!=='POST')return route.continue();posts++;await route.fetch();await route.abort('connectionreset');});
@@ -413,17 +442,20 @@ await until(async()=> /HEALTHY[\s\S]*sealed segments \d+ · durable to sequence/
  writeFileSync(`${dir}/mode`,'hold');await p.getByTestId('project-startstop-bsc').click();await until(async()=> (await state()).state==='RUNNING','run for Stop All');
  await p.getByTestId('overview-stop-all').click();await p.getByRole('alertdialog').getByRole('button',{name:'Aufzeichnungen stoppen',exact:true}).click();await until(async()=> (await state()).state==='STOPPED','Stop All BSC');
  assert.equal((await api.get(base+'/healthz')).status(),200);assert.deepEqual(errors,[]);
- // Narrow screen: every tab fits the viewport, nothing widens the page.
+ // Narrow screen: every V8 area and drawer fits the viewport, nothing widens the page.
  await p.setViewportSize({width:390,height:844});await p.goto(base+'/');await p.getByTestId('project-link-bsc').click();
+ await openSettings();
  await until(async()=> (await body()).includes('isolated-fixture'),'mobile BSC feed');
  assert.match(await p.locator('.g-line',{hasText:'Snapshot age'}).first().innerText(),/\d+ s/,'snapshot age shown');
- for(const [tab,panel] of [['Overview','overview'],['Launch / BUY','launch'],['Monitoring','monitoring'],['Analytics','analytics'],['Wallets','wallets'],['LIVE','live']]){
-  await p.getByRole('tab',{name:tab,exact:true}).click();await p.locator('h2.g-section-title').first().waitFor();await expectSections(panel);
+ for(const panel of ['overview','launch','monitoring','analytics'])await expectSections(panel);
+ for(const [place,panel] of [['Overview','overview'],['Training','training'],['Live','live'],['Wallets','wallets'],['Settings','settings']]){
+  if(place==='Settings')await openSettings();else await openArea(place);
+  if(panel==='wallets')await expectSections('wallets');
   const [scroll,width,wide]=await p.evaluate(()=>[document.documentElement.scrollWidth,window.innerWidth,[...document.querySelectorAll('body *')].filter(e=>e.getBoundingClientRect().right>window.innerWidth+1&&![...e.children].some(c=>c.getBoundingClientRect().right>window.innerWidth+1)).slice(0,5).map(e=>`${e.tagName}.${e.className}: ${(e.textContent||'').slice(0,60)}`)]);
-  assert(scroll<=width+1,`${tab} overflows on mobile: ${scroll} > ${width} · ${wide.join(' | ')}`);
+  assert(scroll<=width+1,`${place} overflows on mobile: ${scroll} > ${width} · ${wide.join(' | ')}`);
   await p.screenshot({path:`${dir}/bsc-mobile-${panel}.png`,fullPage:true});
  }
  writeFileSync(`${dir}/bsc-test.json`,JSON.stringify({passed:true,errors},null,2));assert.equal(pageRequests.filter(r=>r.path==='/api/v1/bsc/process').length,0,'BSC process status is never fetched by the page');
  writeFileSync(`${dir}/bsc-requests.json`,JSON.stringify({p0PollsInIdleWindow:p0Polls,requests:pageRequests},null,1));
- console.log(`PASS native verdict ${verdict}, source owner OFF/SHADOW/LIVE→BLOCKED/stale/invalid via gateway→darkbotctl→bsc_runtime→reporter→Monitoring, venues (Flap SHADOW, Four BLOCKED), runtime mode PAPER, daily BUY limit 3→0 (invalid refused), wallet switches LAUNCHER/BUYER and economic SEND/LIVE ENABLE→DISABLE via GUI and CLI with the native check on the same state, a foreign HOME refused (stale CAS, wrong version kind refused), canonical follower FOLLOWING and G0.4 census (CRITERIA_UNCONFIRMED), C2 component SHADOW (owner coherent on real blocks)/LIVE→BLOCKED (owner stopped), C3 BSC_EXEC SHADOW (live probe: ${c3}${c3.startsWith('ARMED')?', C2 nonce fact, 64 fenced PAPER lanes':', fail-closed, no lane'})/LIVE→BLOCKED, Strategy C SHADOW (PAPER ledger on real Flap events)/LIVE→BLOCKED, C1.9 report on Analytics, real G0.8 UNRESOLVED (no canonical receipts) on Overview/Monitoring/Analytics, reporter→gateway→frontend push, zero BSC status/command polling (Project 0 capture watcher still polls: ${p0Polls} GETs in 8 s, separate owner gate), lost ACK → one lookup and one execution, §13 section order on all six tabs (desktop and 390 px without overflow), the LIVE tab: GUI activation to an effective LIVE (gate CLEAR, synthetic verified qualification, the CLI sees the same), grant of a confirmed scope whose SHA-256 is the native owner's, revoke → LIVE_GRANT_MISSING, stop, campaign limit, no LIVE path (nothing signed or sent), native records on screen without salt, source detach/reattach with locked control, snapshot age, UNKNOWN runtime, snapshots, no send, CSRF, allowlist, idempotency, launch CAS, cancel, STOPPING/STOPPED, crash FAILED, logs and Stop All`);
+ console.log(`PASS native verdict ${verdict}, source owner OFF/SHADOW/LIVE→BLOCKED/stale/invalid via gateway→darkbotctl→bsc_runtime→reporter→Monitoring, venues (Flap SHADOW, Four BLOCKED), runtime mode PAPER, daily BUY limit 3→0 (invalid refused), wallet switches LAUNCHER/BUYER and economic SEND/LIVE ENABLE→DISABLE via GUI and CLI with the native check on the same state, a foreign HOME refused (stale CAS, wrong version kind refused), canonical follower FOLLOWING and G0.4 census (CRITERIA_UNCONFIRMED), C2 component SHADOW (owner coherent on real blocks)/LIVE→BLOCKED (owner stopped), C3 BSC_EXEC SHADOW (live probe: ${c3}${c3.startsWith('ARMED')?', C2 nonce fact, 64 fenced PAPER lanes':', fail-closed, no lane'})/LIVE→BLOCKED, Strategy C SHADOW (PAPER ledger on real Flap events)/LIVE→BLOCKED, C1.9 report on Analytics, real G0.8 UNRESOLVED (no canonical receipts) on Overview/Monitoring/Analytics, reporter→gateway→frontend push, zero BSC status/command polling (Project 0 capture watcher still polls: ${p0Polls} GETs in 8 s, separate owner gate), lost ACK → one lookup and one execution, §13 section order of every pre-V8 group at its V8 place (desktop and 390 px without overflow), the LIVE tab: GUI activation to an effective LIVE (gate CLEAR, synthetic verified qualification, the CLI sees the same), grant of a confirmed scope whose SHA-256 is the native owner's, revoke → LIVE_GRANT_MISSING, stop, campaign limit, no LIVE path (nothing signed or sent), native records on screen without salt, source detach/reattach with locked control, snapshot age, UNKNOWN runtime, snapshots, no send, CSRF, allowlist, idempotency, launch CAS, cancel, STOPPING/STOPPED, crash FAILED, logs and Stop All`);
 }finally{await browser.close();}

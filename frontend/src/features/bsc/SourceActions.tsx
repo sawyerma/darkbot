@@ -7,9 +7,10 @@ import type { SourceControlView, SourceRow } from "./model/sources";
 // native projection; the confirmation states what the owner will do: LIVE is
 // recorded as requested and stays effective BLOCKED, nothing is signed or sent.
 const MODES: SourceMode[] = ["OFF", "SHADOW", "LIVE"];
-/** Mode requests for `rows` (the sources by default, the components or the venues) of the one native owner. */
-export function SourceActions({ view, rows = view.rows, testId = "bsc-source", action = "bsc.source.mode.set" }: { view: SourceControlView; rows?: SourceRow[]; testId?: string; action?: OwnerAction }) {
-  const { busy, receipt } = useSourceControl();
+/** Mode requests for `rows` (the sources by default, the components or the venues) of the one native owner.
+ *  `receipt` off: a caller rendering one instance per row shows the one receipt itself (V8 Mode column). */
+export function SourceActions({ view, rows = view.rows, testId = "bsc-source", action = "bsc.source.mode.set", receipt = true }: { view: SourceControlView; rows?: SourceRow[]; testId?: string; action?: OwnerAction; receipt?: boolean }) {
+  const { busy, receipt: last } = useSourceControl();
   const [target, setTarget] = useState<{ source: string; mode: SourceMode } | null>(null);
   return <>
     <div className="bsc-filter" data-testid={`${testId}-controls`}>
@@ -31,6 +32,6 @@ export function SourceActions({ view, rows = view.rows, testId = "bsc-source", a
           <AlertDialog.Action asChild><button className="ov-btn" onClick={() => { if (target) void ownerCommand(testId, action, target.source, target.mode, view.generation); setTarget(null); }}>Anfordern</button></AlertDialog.Action></div>
       </AlertDialog.Content></AlertDialog.Portal>
     </AlertDialog.Root>
-    {receipt && receipt.origin === testId ? <p role="status" data-testid={`${testId}-receipt`}>{receipt.phase} · {receipt.detail}<br />Command {receipt.id}</p> : null}
+    {receipt && last && last.origin === testId ? <p role="status" data-testid={`${testId}-receipt`}>{last.phase} · {last.detail}<br />Command {last.id}</p> : null}
   </>;
 }

@@ -1,76 +1,51 @@
-import { Line, Section } from "@/shared/ui/graphite/Rows";
-import { Notice } from "@/shared/ui/graphite/Notice";
 import { TopicId } from "@/core/realtime";
 import { useTopic } from "@/core/realtime/hooks";
-import { selectLaunch, selectLive, selectStatus, selectWallets, useBscStore } from "../store/bscStore";
-import { EvidenceRows, timestamp, ValueState } from "./EvidenceRows";
-import { SECTIONS } from "../model/placement";
-import { checkStatus } from "../model/checks";
-import type { BscTab } from "../BscPage";
+import { selectLive, selectStatus, selectWallets, useBscStore } from "../store/bscStore";
+import { capital, lastSignalMs, openPositions, pendingTransactions, tradingState } from "../model/overview";
 import { runtimeView } from "../model/sources";
+import { strategySettingsView } from "../model/strategySettings";
+import type { BscView } from "../BscPage";
 import { useNativeRecords } from "./useNativeRecords";
-import { buyLimitRow, economicRows, summary, switchRow } from "../model/switches";
-import { liveIndicator } from "../model/live";
+import { useNowMs } from "./useNowMs";
+import { Badge, Icon, PanelHead, SystemMetric, TopHeading, bnb, signTone, signedBnbText } from "./V8";
 
-const title = (n: number) => `${n}. ${SECTIONS.overview[n - 1]}`;
-const age = (s: bigint | undefined) => s && s > 0n ? `${Math.max(0, Math.floor(Date.now() / 1000) - Number(s))} s` : "UNKNOWN";
-
-/** Summary in the fixed §13 order; details and every control live in the five other tabs. */
-export function OverviewPanel({ goto }: { goto: (t: BscTab) => void }) {
-  const { projection: s, status } = useBscStore(selectStatus);
-  // Audit E 4.10: the LIVE line reads the one LIVE source, bsc.live.state.
-  useTopic(TopicId.BSC_LIVE_STATE);
-  const live = liveIndicator(useBscStore(selectLive).projection);
-  const job = s?.jobs.find(j => j.job === "readiness");
-  const r = s?.readiness;
-  const runtime = runtimeView(useNativeRecords(), Date.now()).view;
-  const { projection: w } = useBscStore(selectWallets);
-  const { projection: launch } = useBscStore(selectLaunch);
-  const walletSwitches = [switchRow("BSC_WALLET_LAUNCHER", w?.launcherControl), switchRow("BSC_WALLET_BUYER", w?.buyerControl)];
+/** V8 Overview (FE-V8-03): one compact system status, the pending notice and the two jumps. */
+export function OverviewPanel({ goto }: { goto: (v: BscView) => void }) {
+  useTopic(TopicId.BSC_WALLETS_STATE);
+  const { projection: live } = useBscStore(selectLive);
+  const { projection: wallets } = useBscStore(selectWallets);
+  const { projection: status } = useBscStore(selectStatus);
+  const records = useNativeRecords();
+  const nowMs = useNowMs();
+  const trading = tradingState(live);
+  const signal = lastSignalMs(records, nowMs);
+  const cap = capital(wallets);
+  const pending = pendingTransactions(live);
+  const open = openPositions(live);
+  const strategy = strategySettingsView(records, status?.warnings ?? [], nowMs);
+  const runtime = runtimeView(records, nowMs).view;
   return <>
-    <Section title={title(1)}>
-      <Line label="Source quality" value={<ValueState state={status} />} hint="Transport state of bsc.status, never a trading permission" />
-      <Line label="Data as of" value={timestamp(s?.dataAsOfUnixS)} hint="Explicit snapshot sync time" />
-      <Line label="Snapshot age" value={age(s?.dataAsOfUnixS)} hint="An old snapshot is STALE, not SOURCE_DETACHED" />
-      <Line label="Evaluated" value={timestamp(s?.evaluatedUnixS)} />
-      <Line label="Source commit" value={s?.sourceCommit || "—"} />
-      <Line label="Update source" value="darkbotctl bsc sync" hint="Run in the original repository terminal; existing snapshots remain dated." />
-    </Section>
-    <Section title={title(2)}>
-      <Line label="Readiness job" value={<ValueState state={job?.state} />} hint="Process lifecycle only, not the readiness verdict" />
-      <Line label="Job result" value={<ValueState state={job?.resultCode || undefined} />} />
-      <Line label="Launch ID" value={job?.launchId || "—"} />
-      <Line label="Started / ended" value={`${timestamp(job?.startedUnixS)} / ${timestamp(job?.endedUnixS)}`} />
-      <Line label="Controller available" value={job?.controllerAvailable === undefined ? "UNKNOWN" : String(job.controllerAvailable)} hint="Start and stop in Launch / BUY" />
-    </Section>
-    <Section title={title(3)}>
-      <Line label="Compiled guard" value={<ValueState state={s?.guard?.guardState} />} />
-      <Line label="Contract approval" value={s?.guard?.approved === undefined ? "UNKNOWN" : String(s.guard.approved)} />
-      <Line label="Execution ready" value={s?.guard?.executionReady === undefined ? "UNKNOWN" : String(s.guard.executionReady)} />
-      <Line label="Current contract" value={s?.guard?.contractPresent ? s.guard.contractPath : "No active V5 contract"} />
-      <Line label="LIVE" value={<ValueState state={live.state} />} hint={`${live.detail}; switch it on the LIVE tab`} />
-      <Line label="Wallet switches" value={summary(walletSwitches)} hint="Native permissions; switch them in Wallets. DISABLED initially and after every restart" />
-      <Line label="Economic switches" value={summary(economicRows(launch?.economicControls))} hint="Native permissions; switch them in Launch / BUY. None of them is LIVE or an approval" />
-      <Line label="Runtime mode" value={<ValueState state={switchRow("BSC_RUNTIME_MODE", launch?.runtimeMode).effective} />} hint="Global execution mode of the native owner; set it in Launch / BUY" />
-      <Line label="Daily BUY limit" value={buyLimitRow(launch?.buyAttemptLimit).summary} hint="Persisted per UTC day at the native owner; set it in Launch / BUY" />
-    </Section>
-    <Section title={title(4)}>
-      <Line label="Runtime readiness" value={<ValueState state={runtime.state} />} hint={`${runtime.mode}: the runtime's own status record; it signs or sends only on its LIVE path, under the owner's LIVE gate (LIVE tab)`} />
-      <Line label="Pre-Live verdict" value={<ValueState state={r?.verdict} />} />
-      <Line label="Mode" value={<ValueState state={r?.mode || undefined} />} />
-      <Line label="Selected candidate binding" value={<ValueState state={r?.candidateBinding || undefined} />} hint="Only BOUND counts for the selected candidate; STALE is history" />
-      <Line label="Clock (CLOCK_CONFIG)" value={<ValueState state={checkStatus(r?.checks, "CLOCK_CONFIG")} />} hint="Needs an attested clock/boot ID; the GUI job stays BLOCKED without one" />
-      <Line label="Attempt authority (ATTEMPT_AUTHORITY)" value={<ValueState state={checkStatus(r?.checks, "ATTEMPT_AUTHORITY")} />} hint="Shared one-attempt authority on origin: PASS = none yet (grant after approval); STOP = granted or consumed, never again" />
-      <Line label="Blocking reasons" value={r?.reasons.length ? r.reasons.join(" · ") : "—"} />
-    </Section>
-    <Section title={title(5)}>
-      {s?.gates.map(g => <Line key={g.gateId} label={g.gateId} value={<ValueState state={g.state} />} hint={[...g.reasonCodes, g.evidence?.path].filter(Boolean).join(" · ")} />)}
-    </Section>
-    <Section title={title(6)}>
-      {s?.warnings.length ? s.warnings.map(w => <Notice key={w}>{w}</Notice>) : <Line label="Warnings" value="—" />}
-      <EvidenceRows evidence={r?.evidence} />
-    </Section>
-    <div className="g-actions"><button className="g-secondary" onClick={() => goto("launch")}>Launch / BUY</button><button className="g-secondary" onClick={() => goto("monitoring")}>Monitoring</button></div>
-    <Notice>Observations of the native owners. A connected reporter, a successful readiness check or an ARMED guard never grants LIVE: only the owner's LIVE gate does, for the operator's granted scope (LIVE tab).</Notice>
+    <TopHeading title="Overview" subtitle="System status and quick access." />
+    <div className="card" data-testid="bsc-overview-status">
+      <div className="pad" style={{ paddingBottom: 4 }}><PanelHead title="System status" extra={<Badge label={trading.label} tone={trading.tone} testId="bsc-trading-state" />} /></div>
+      <div className="system-strip" aria-label="System status">
+        <SystemMetric label="RPC latency · p95" value="—" unit="ms" testId="bsc-metric-rpc" />
+        <SystemMetric label="Decision latency · p95" value="—" unit="ms" testId="bsc-metric-decision" />
+        <SystemMetric label="Last market signal" value={signal === undefined ? "—" : signal < 1000 ? `${signal}` : `${Math.round(signal / 1000)}`} unit={signal === undefined ? "s" : signal < 1000 ? "ms" : "s"} testId="bsc-metric-signal" />
+        <SystemMetric label="Realized net PnL" value={live ? signedBnbText(live.realizedPnlWei) : "—"} accent={signTone(live?.realizedPnlWei)} testId="bsc-metric-pnl" />
+        <SystemMetric label="Total balance" value={cap.totalWei === undefined ? "—" : bnb(cap.totalWei, 2)} unit="BNB" testId="bsc-metric-balance" />
+      </div>
+      <div className="tiny" style={{ padding: "0 24px 17px" }}>{runtime.state === "RUNNING" ? `Runtime ${runtime.mode}` : runtime.state === "STALE" ? "Runtime status stale" : "Runtime not reported"} · {cap.detail} · unreported latencies remain blank.</div>
+    </div>
+    {pending ? <div className="notice mt" style={{ alignItems: "center", justifyContent: "space-between", gap: 15 }} data-testid="bsc-pending-notice">
+      <div className="start"><Icon name="info" size="s" /><span><strong>{pending} pending {pending === 1 ? "transaction" : "transactions"}</strong><span className="small" style={{ display: "block" }}>Review in trade history</span></span></div>
+      <button type="button" className="link" onClick={() => goto("live")}>View <Icon name="chevron" size="s" /></button>
+    </div> : null}
+    <div className="grid cols2 mtl">
+      <div className="card pad dashboard-jump"><div><h2>Live trading</h2><p>{trading.label === "Trading ON" ? "Trading running" : trading.label === "Trading OFF" ? "Currently off" : "State unknown"} · {open} open {open === 1 ? "position" : "positions"}</p></div>
+        <button type="button" className="btn quiet" onClick={() => goto("live")}>Open Live <Icon name="chevron" size="s" /></button></div>
+      <div className="card pad dashboard-jump"><div><h2>Training</h2><p>Strategy C {strategy.state === "UNKNOWN" ? "state unknown" : strategy.state.toLowerCase()} · training modules not implemented</p></div>
+        <button type="button" className="btn quiet" onClick={() => goto("training")}>Open Training <Icon name="chevron" size="s" /></button></div>
+    </div>
   </>;
 }
