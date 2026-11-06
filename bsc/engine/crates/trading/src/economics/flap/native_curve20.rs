@@ -13,8 +13,9 @@
 //! [`admit_native_buy`] is the only producer of a sendable native BUY. It
 //! requires a [`QualifiedNativeState`], which exists only for
 //!
-//! - a launch that the profile classifier accepted on a validated
-//!   deployment (which excludes a creator purchase),
+//! - a launch that a profile classifier accepted on a validated deployment
+//!   (the native profile excludes a creator purchase; R13's foreign one
+//!   prices it into the state),
 //! - resident venue terms equal to the witnessed ones,
 //! - the state directly after the launch, before any trade of the token,
 //! - a state snapshot of the same code generation that names the same
@@ -36,7 +37,7 @@
 //! | code generation | live code fingerprints | G0.6a preflight, crosscheck | startup-precomputed | Portal or implementation change | runner |
 //! | venue terms | Portal configuration | G0.6a preflight | pre-resident | Portal or registry update | C2 |
 //! | caller exemption | Portal configuration | G0.6a EVM execution (not exempt) | pre-resident | exemption or sender change | C2 |
-//! | reserve 0, supply 0 | launch without creator purchase, no prior trade | G0.6a EVM execution | launch-derived | any trade of the token, reorg | C2 |
+//! | reserve 0, supply 0 (R13: after the creator purchase) | the launch, no prior trade | G0.6a EVM execution; R13 launch receipts | launch-derived | any trade of the token, reorg | C2 |
 //! | input amount, slippage, gas | operating policy | G0.6a EVM execution (amount) | policy | policy generation change | runner |
 //!
 //! The state engine that supplies these inputs is phase C2 and does not
@@ -431,9 +432,13 @@ pub const QUALIFIED_MAINNET_INPUT_WEI: u64 = 1_000_000_000_000_000;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct QualifiedNativeState {
     token: Address,
-    /// The profile's validated terms (the classifier binds buy and sell
-    /// tax to the same witnessed value).
+    /// The profile's validated terms (the native classifier binds buy and
+    /// sell tax to the same witnessed value; the foreign one each its own).
     terms: PricedToken,
+    /// R13: the curve the launch left (after its creator's purchase; the
+    /// fresh curve without one).
+    reserve: U256,
+    circulating: U256,
     snapshot: SnapshotId,
 }
 
@@ -449,9 +454,6 @@ impl QualifiedNativeState {
         trades_since_launch: u64,
         snapshot: SnapshotId,
     ) -> Result<Self, AdmissionError> {
-        match classified.profile() {
-            LaunchProfile::NativeCurve20NoCreatorPurchase => {}
-        }
         if classified.codehash_generation() != snapshot.codehash_generation {
             return Err(AdmissionError::GenerationMismatch);
         }
@@ -464,13 +466,38 @@ impl QualifiedNativeState {
         if trades_since_launch != 0 {
             return Err(AdmissionError::StateNotFresh);
         }
+        let terms = PricedToken::new(&profile_terms(
+            classified.buy_tax_bps(),
+            classified.sell_tax_bps(),
+        ))
+        .map_err(AdmissionError::Unpriced)?;
+        // R13: a foreign launch's creator purchase moved the curve in the
+        // launch transaction (priced as any BUY, launch receipts).
+        let (reserve, circulating) = match classified.profile() {
+            LaunchProfile::NativeCurve20NoCreatorPurchase => (U256::ZERO, U256::ZERO),
+            LaunchProfile::NativeCurve20Foreign if classified.creator_input().is_zero() => {
+                (U256::ZERO, U256::ZERO)
+            }
+            LaunchProfile::NativeCurve20Foreign => {
+                let creator = quote_native_buy(&NativeBuyInputs {
+                    token: terms,
+                    reserve_before: U256::ZERO,
+                    circulating_before: U256::ZERO,
+                    input_amount: classified.creator_input(),
+                    protocol_fee_bps: WITNESSED_MAINNET_TERMS.protocol_buy_fee_bps,
+                    tax_on_bonding_curve_enabled: WITNESSED_MAINNET_TERMS
+                        .tax_on_bonding_curve_enabled,
+                    caller_fee_exempt: WITNESSED_MAINNET_TERMS.caller_fee_exempt,
+                    holding_cap: HoldingCap::None,
+                })?;
+                (creator.reserve_after, creator.supply_after)
+            }
+        };
         Ok(Self {
             token: classified.token(),
-            terms: PricedToken::new(&profile_terms(
-                classified.buy_tax_bps(),
-                classified.buy_tax_bps(),
-            ))
-            .map_err(AdmissionError::Unpriced)?,
+            terms,
+            reserve,
+            circulating,
             snapshot,
         })
     }
@@ -505,8 +532,8 @@ pub fn admit_native_buy(
     }
     let quote = quote_native_buy(&NativeBuyInputs {
         token: state.terms,
-        reserve_before: U256::ZERO,
-        circulating_before: U256::ZERO,
+        reserve_before: state.reserve,
+        circulating_before: state.circulating,
         input_amount,
         protocol_fee_bps: WITNESSED_MAINNET_TERMS.protocol_buy_fee_bps,
         tax_on_bonding_curve_enabled: WITNESSED_MAINNET_TERMS.tax_on_bonding_curve_enabled,
@@ -1222,6 +1249,50 @@ mod tests {
             1_500_000,
         )
         .unwrap()
+    }
+
+    /// R13 (FOREIGN_AUTO): a foreign launch's state is the curve its
+    /// creator's purchase left in the launch transaction; the C3 BUY is
+    /// priced on it (without a purchase on the fresh curve, as the native
+    /// profile's).
+    #[test]
+    fn a_foreign_launchs_buy_is_priced_after_its_creators_purchase() {
+        use crate::venues::flap::profile::classify_foreign_launch;
+        let creator = U256::from(40_000_000_000_000_000u64);
+        let launch = |quote_amt: U256| {
+            let mut l = witnessed_native_launch();
+            l.beneficiary = Address::repeat_byte(0x77);
+            l.buy_tax = 300;
+            l.sell_tax = 500;
+            l.quote_amt = quote_amt;
+            classify_foreign_launch(&validated_mainnet(7), candidate_a(), &l, quote_amt).unwrap()
+        };
+        let state = |c: &ClassifiedLaunch| {
+            QualifiedNativeState::fresh_launch(c, &WITNESSED_MAINNET_TERMS, 0, snapshot(7)).unwrap()
+        };
+        let quote = |reserve: U256, circulating: U256, input: U256| {
+            quote_native_buy(&NativeBuyInputs {
+                token: priced(300, 500),
+                reserve_before: reserve,
+                circulating_before: circulating,
+                input_amount: input,
+                ..witnessed(1)
+            })
+            .unwrap()
+        };
+        let after = quote(U256::ZERO, U256::ZERO, creator);
+        let bought = quote(after.reserve_after, after.supply_after, qualified_amount());
+        let admitted =
+            admit_native_buy(&state(&launch(creator)), &policy(qualified_amount(), 500)).unwrap();
+        assert_eq!(admitted.expected_output(), bought.output_amount);
+        let fresh = quote(U256::ZERO, U256::ZERO, qualified_amount());
+        assert!(bought.output_amount < fresh.output_amount);
+        let none = admit_native_buy(
+            &state(&launch(U256::ZERO)),
+            &policy(qualified_amount(), 500),
+        )
+        .unwrap();
+        assert_eq!(none.expected_output(), fresh.output_amount);
     }
 
     #[test]

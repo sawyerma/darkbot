@@ -2586,6 +2586,14 @@ impl LiveRuntime {
             self.phase = Phase::Blocked(why);
             return;
         }
+        // R13 review H1: C3 taking foreign launches is beyond what a grant
+        // and its risk decision name: no LIVE C3 under it.
+        if live_now.grant().strategies.c3()
+            && self.exec.exec.c3_candidates == crate::paper_exec::C3Candidates::ForeignAuto
+        {
+            self.phase = Phase::Blocked(crate::sources::LIVE_C3_FOREIGN_UNGRANTED.into());
+            return;
+        }
         // BSC3-025: an end of this grant and this qualification whose
         // connections are being established is waited for, never built again.
         let (mut end, since) = match self.connecting.take() {

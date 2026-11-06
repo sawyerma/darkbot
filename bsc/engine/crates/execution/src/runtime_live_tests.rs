@@ -11645,3 +11645,31 @@ fn a_lots_venue_followed_again_is_decided_and_one_unfollowed_is_not_held() {
         [(OPENFOUR, crate::sources::LIVE_POSITION_VENUE_UNFOLLOWED)]
     );
 }
+
+/// R13 review H1: while C3 takes foreign launches
+/// (`BSC_EXEC_C3_CANDIDATES=FOREIGN_AUTO`) a grant naming C3 does not arm:
+/// no grant or risk decision names that scope; a Strategy C grant does.
+#[test]
+fn a_c3_grant_does_not_arm_for_foreign_launches() {
+    for (tag, strategies, arms) in [
+        ("live-c3-foreign", LiveStrategies::C3, false),
+        ("live-both-foreign", LiveStrategies::Both, false),
+        ("live-sc-foreign", LiveStrategies::StrategyC, true),
+    ] {
+        let mut r = Rig::new(tag, strategies);
+        r.exec.exec.c3_candidates = crate::paper_exec::C3Candidates::ForeignAuto;
+        let mut x = r.runtime("boot-1");
+        let c2 = c2_at(&r.d, r.buyer, 0);
+        settle(&mut x, &c2);
+        assert_eq!(x.armed(), arms, "{tag}: {:?}", reason(&x));
+        if !arms {
+            assert_eq!(
+                reason(&x).1.as_deref(),
+                Some(crate::sources::LIVE_C3_FOREIGN_UNGRANTED),
+                "{tag}"
+            );
+        }
+        x.shutdown();
+        r.clean();
+    }
+}

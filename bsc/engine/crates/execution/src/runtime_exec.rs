@@ -1032,6 +1032,7 @@ pub(crate) mod tests {
                 live_dex_exit: false,
                 live_divergence_quarantine: false,
                 sender_paths: crate::paper_exec::SenderPaths::Both,
+                c3_candidates: crate::paper_exec::C3Candidates::SelfLaunch,
             },
             reprobe,
             reprobe_failures: 1,

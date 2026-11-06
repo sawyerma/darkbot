@@ -86,11 +86,28 @@ const WITNESSED_BENEFICIARY: [u8; 20] = [
     0x00, 0x00, 0xa1, 0x1c,
 ];
 
+/// R13: the highest buy or sell tax of the census' foreign launches (every
+/// LAUNCH row of `fixtures/flap/foreign_launch_parity_20261106.txt` at most;
+/// a higher one is not witnessed).
+pub const FOREIGN_WITNESSED_MAX_TAX_BPS: u16 = 1_000;
+
+/// R13: the shortest tax duration of the census' foreign launches (30 days,
+/// beyond the longest hold): a shorter one could end the tax inside a hold
+/// and is not witnessed.
+pub const FOREIGN_WITNESSED_MIN_TAX_DURATION: u64 = 2_592_000;
+
 /// A qualified launch profile.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LaunchProfile {
     /// Native-BNB quote on curve id 20, no creator purchase, 100 bps taxes.
     NativeCurve20NoCreatorPurchase,
+    /// R13 (FOREIGN_AUTO): a foreign launch on the native curve 20 by its
+    /// economic fields alone (its identity unchecked): taxes in the priced
+    /// scope, the creator's purchase (`quoteAmt`, possibly none) priced on
+    /// the fresh curve below the DEX threshold. Every distribution, tax and
+    /// anti-farmer duration of the census priced the same
+    /// (`fixtures/flap/foreign_launch_parity_20261106.txt`).
+    NativeCurve20Foreign,
 }
 
 /// Why a decoded launch is not admissible. Each variant names the first
@@ -142,6 +159,14 @@ pub enum UnsupportedLaunch {
     /// The deployment is decode-only: its economics are not witnessed on
     /// its implementation.
     EconomicsNotWitnessed,
+    /// R13: the taxes are outside the priced scope.
+    Taxes,
+    /// R13: the creator's purchase is not priced on the fresh curve (it
+    /// reaches the DEX threshold: the token leaves the curve at its launch).
+    CreatorPurchaseUnpriced,
+    /// R13 review M2: the launch transaction's value is not its creator
+    /// purchase (`quoteAmt`), as every witnessed native launch's is.
+    CreatorValue,
 }
 
 impl core::fmt::Display for UnsupportedLaunch {
@@ -170,6 +195,9 @@ impl core::fmt::Display for UnsupportedLaunch {
             Self::EconomicsNotWitnessed => {
                 "launch profile: the deployment's economics are not witnessed"
             }
+            Self::Taxes => "launch profile: taxes outside the priced scope",
+            Self::CreatorPurchaseUnpriced => "launch profile: creator purchase not priced",
+            Self::CreatorValue => "launch profile: value is not the creator purchase",
         })
     }
 }
@@ -177,13 +205,17 @@ impl core::fmt::Display for UnsupportedLaunch {
 impl std::error::Error for UnsupportedLaunch {}
 
 /// A launch that matched a qualified profile on a validated deployment.
-/// Constructed only by [`classify_launch`].
+/// Constructed only by [`classify_launch`] and [`classify_foreign_launch`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ClassifiedLaunch {
     profile: LaunchProfile,
     candidate: B256,
     token: Address,
     buy_tax_bps: u16,
+    /// R13: the sell tax (the native profile's equals its buy tax).
+    sell_tax_bps: u16,
+    /// R13: the creator's purchase in the launch, in wei (none: zero).
+    creator_input: U256,
     codehash_generation: u64,
 }
 
@@ -210,6 +242,18 @@ impl ClassifiedLaunch {
     #[inline]
     pub fn buy_tax_bps(&self) -> u16 {
         self.buy_tax_bps
+    }
+
+    /// R13: sell tax of the token in basis points.
+    #[inline]
+    pub fn sell_tax_bps(&self) -> u16 {
+        self.sell_tax_bps
+    }
+
+    /// R13: the creator's purchase in the launch, in wei (zero: none).
+    #[inline]
+    pub fn creator_input(&self) -> U256 {
+        self.creator_input
     }
 
     /// Code generation of the deployment the launch was classified against.
@@ -306,9 +350,99 @@ pub fn classify_launch(
         candidate,
         token: deployment.deployment().taxed_v3_token(launch.salt),
         buy_tax_bps: launch.buy_tax,
+        sell_tax_bps: launch.buy_tax,
+        creator_input: U256::ZERO,
         codehash_generation: deployment.codehash_generation(),
     })
 }
+
+/// R13 (FOREIGN_AUTO): classifies a foreign launch by its economic fields
+/// alone ([`LaunchProfile::NativeCurve20Foreign`]): native BNB on the curve
+/// and DEX parameters of the native profile, no permit and no extension
+/// (its contract's behaviour is not witnessed), taxes in the priced scope,
+/// the creator's purchase priced on the fresh curve. Its name, symbol, URI
+/// and beneficiary are not checked: the token is the pinned CREATE2 of its
+/// salt, whoever launches it. `value` is the launch transaction's (its
+/// creator purchase, as every witnessed one's).
+pub fn classify_foreign_launch(
+    deployment: &ValidatedDeployment,
+    candidate: B256,
+    launch: &LaunchParamsV6<'_>,
+    value: U256,
+) -> Result<ClassifiedLaunch, UnsupportedLaunch> {
+    use crate::economics::flap::native_curve20::{
+        HoldingCap, NativeBuyInputs, PricedToken, WITNESSED_MAINNET_TERMS, profile_terms,
+        quote_native_buy,
+    };
+    if !deployment.economics_witnessed() {
+        return Err(UnsupportedLaunch::EconomicsNotWitnessed);
+    }
+    if launch.token_version != TOKEN_VERSION_TAXED_V3 {
+        return Err(UnsupportedLaunch::TokenVersion);
+    }
+    if launch.dex_thresh != NATIVE_DEX_THRESH {
+        return Err(UnsupportedLaunch::DexThresh);
+    }
+    if launch.migrator_type != NATIVE_MIGRATOR_TYPE {
+        return Err(UnsupportedLaunch::MigratorType);
+    }
+    if launch.quote_token != Address::ZERO {
+        return Err(UnsupportedLaunch::QuoteToken);
+    }
+    if !launch.permit.is_empty() {
+        return Err(UnsupportedLaunch::Permit);
+    }
+    if launch.extension_id != B256::ZERO || !launch.extension_data.is_empty() {
+        return Err(UnsupportedLaunch::Extension);
+    }
+    if launch.dex_id != NATIVE_DEX_ID {
+        return Err(UnsupportedLaunch::DexId);
+    }
+    if launch.lp_fee_profile != NATIVE_LP_FEE_PROFILE {
+        return Err(UnsupportedLaunch::LpFeeProfile);
+    }
+    // Review L3/L4: the taxes and tax durations the census witnessed.
+    if launch.buy_tax > FOREIGN_WITNESSED_MAX_TAX_BPS
+        || launch.sell_tax > FOREIGN_WITNESSED_MAX_TAX_BPS
+    {
+        return Err(UnsupportedLaunch::Taxes);
+    }
+    if launch.tax_duration < FOREIGN_WITNESSED_MIN_TAX_DURATION {
+        return Err(UnsupportedLaunch::TaxDuration);
+    }
+    let terms = PricedToken::new(&profile_terms(launch.buy_tax, launch.sell_tax))
+        .map_err(|_| UnsupportedLaunch::Taxes)?;
+    if value != launch.quote_amt {
+        return Err(UnsupportedLaunch::CreatorValue);
+    }
+    if !launch.quote_amt.is_zero() {
+        let venue = WITNESSED_MAINNET_TERMS;
+        quote_native_buy(&NativeBuyInputs {
+            token: terms,
+            reserve_before: U256::ZERO,
+            circulating_before: U256::ZERO,
+            input_amount: launch.quote_amt,
+            protocol_fee_bps: venue.protocol_buy_fee_bps,
+            tax_on_bonding_curve_enabled: venue.tax_on_bonding_curve_enabled,
+            caller_fee_exempt: venue.caller_fee_exempt,
+            holding_cap: HoldingCap::None,
+        })
+        .map_err(|_| UnsupportedLaunch::CreatorPurchaseUnpriced)?;
+    }
+    Ok(ClassifiedLaunch {
+        profile: LaunchProfile::NativeCurve20Foreign,
+        candidate,
+        token: deployment.deployment().taxed_v3_token(launch.salt),
+        buy_tax_bps: launch.buy_tax,
+        sell_tax_bps: launch.sell_tax,
+        creator_input: launch.quote_amt,
+        codehash_generation: deployment.codehash_generation(),
+    })
+}
+
+#[cfg(test)]
+#[path = "foreign_tests.rs"]
+mod foreign_tests;
 
 #[cfg(test)]
 pub(crate) mod testkit {
@@ -524,5 +658,93 @@ mod tests {
             classify_launch(&deployment, candidate_b(), &launch),
             Err(UnsupportedLaunch::DogeRuntimeDisabled)
         );
+    }
+
+    /// R13 (FOREIGN_AUTO): a foreign launch is classified by its economic
+    /// fields alone: another identity, tax rates in the priced scope, any
+    /// tax or anti-farmer duration, distribution, dividend token or
+    /// commission, and a priced creator purchase pass; every field the
+    /// curve or the venue depends on fails closed with its reason.
+    #[test]
+    fn a_foreign_launch_is_classified_by_its_economics_alone() {
+        use UnsupportedLaunch::*;
+        let foreign = |mutate: &dyn Fn(&mut LaunchParamsV6<'static>)| {
+            let mut launch = witnessed_native_launch();
+            launch.name = b"Foreign";
+            launch.symbol = b"FRGN";
+            launch.uri = b"ipfs://foreign";
+            launch.beneficiary = Address::repeat_byte(0x77);
+            mutate(&mut launch);
+            let value = launch.quote_amt;
+            classify_foreign_launch(&validated_mainnet(1), candidate_b(), &launch, value)
+        };
+        let deployment = validated_mainnet(1);
+        let plain = foreign(&|_| {}).unwrap();
+        assert_eq!(
+            (plain.profile(), plain.candidate(), plain.token()),
+            (
+                LaunchProfile::NativeCurve20Foreign,
+                candidate_b(),
+                deployment
+                    .deployment()
+                    .taxed_v3_token(witnessed_native_launch().salt)
+            )
+        );
+        assert_eq!(plain.creator_input(), U256::ZERO);
+        let census = foreign(&|l| {
+            l.buy_tax = 300;
+            l.sell_tax = 500;
+            l.tax_duration = 3_153_600_000;
+            l.anti_farmer_duration = 2_592_000;
+            l.mkt_bps = 0;
+            l.dividend_bps = 10_000;
+            l.minimum_share_balance = U256::from(1u8);
+            l.dividend_token = Address::repeat_byte(0x55);
+            l.commission_receiver = Address::repeat_byte(0x66);
+            l.quote_amt = U256::from(40_000_000_000_000_000u64);
+        })
+        .unwrap();
+        assert_eq!(
+            (
+                census.buy_tax_bps(),
+                census.sell_tax_bps(),
+                census.creator_input()
+            ),
+            (300, 500, U256::from(40_000_000_000_000_000u64))
+        );
+        type Mutate = dyn Fn(&mut LaunchParamsV6<'static>);
+        let failing: [(&Mutate, UnsupportedLaunch); 12] = [
+            (&|l| l.token_version = 5, TokenVersion),
+            (&|l| l.dex_thresh = 2, DexThresh),
+            (&|l| l.migrator_type = 2, MigratorType),
+            (&|l| l.quote_token = Address::repeat_byte(0x44), QuoteToken),
+            (&|l| l.permit = &[0x01], Permit),
+            (&|l| l.extension_id = B256::repeat_byte(0x01), Extension),
+            (&|l| l.dex_id = 1, DexId),
+            (&|l| l.lp_fee_profile = 1, LpFeeProfile),
+            (&|l| l.sell_tax = FOREIGN_WITNESSED_MAX_TAX_BPS + 1, Taxes),
+            (&|l| l.buy_tax = FOREIGN_WITNESSED_MAX_TAX_BPS + 1, Taxes),
+            (
+                &|l| l.tax_duration = FOREIGN_WITNESSED_MIN_TAX_DURATION - 1,
+                TaxDuration,
+            ),
+            // The curve bought out at its launch (the census' 16.66 BNB).
+            (
+                &|l| l.quote_amt = U256::from(16_664_671_682_908_717_934u128),
+                CreatorPurchaseUnpriced,
+            ),
+        ];
+        for (mutate, why) in failing {
+            assert_eq!(foreign(mutate), Err(why));
+        }
+        // Review M2: a value other than the creator purchase.
+        let mut launch = witnessed_native_launch();
+        launch.quote_amt = U256::from(40_000_000_000_000_000u64);
+        for value in [U256::ZERO, U256::from(39_999_999_999_999_999u64)] {
+            assert_eq!(
+                classify_foreign_launch(&validated_mainnet(1), candidate_b(), &launch, value),
+                Err(CreatorValue)
+            );
+        }
     }
 }

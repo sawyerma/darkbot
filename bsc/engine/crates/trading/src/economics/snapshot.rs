@@ -80,6 +80,13 @@ pub const SCOPES: &[Scope] = &[
     Scope {
         venue: "FLAP",
         surface: FLAP_V6,
+        path: "ADMITTED BUY (FOREIGN_AUTO)",
+        support: Support::Priced,
+        rule: "R13 classify_foreign_launch + admit_native_buy: a foreign newTokenV6 launch by its economics alone (native quote, no permit, no extension, taxes at most 1000 bps and tax durations at least 30 days as the census witnessed, any distribution, the transaction's value its creator purchase), the state its creator's purchase left (priced on the fresh curve below the DEX threshold); the creator purchases and the first trades after the launch of the G0.4 campaign executed as quoted (foreign_launch_parity_20261106: 1,083 purchases, 187 first BUYs); ERC20 quotes and extensions unsupported; LIVE C3 does not arm under it (LIVE_C3_FOREIGN_UNGRANTED)",
+    },
+    Scope {
+        venue: "FLAP",
+        surface: FLAP_V6,
         path: "CURVE BUY (Strategy C)",
         support: Support::Priced,
         rule: "admit_curve_buy: a curve replayed exactly from canonical trades (strategy::book), in the PricedToken scope, witnessed venue terms, the policy's input, no holding cap (a capped or NFT-gated token is never tracked), minOutput the slippage floor; equal to the Portal's quote at the parity v3 states, taken on v5.27.2 (curve_admission_is_the_parity_quote)",
@@ -343,6 +350,7 @@ pub const BOUND_FILES: &[&str] = &[
     "bsc/engine/crates/trading/fixtures/flap/quote_parity_g02_v4.txt",
     "bsc/engine/crates/trading/fixtures/fourmeme/classic_parity_20261104.txt",
     "bsc/engine/crates/trading/fixtures/fourmeme/openfour_parity_20261104.txt",
+    "bsc/engine/crates/trading/fixtures/flap/foreign_launch_parity_20261106.txt",
 ];
 
 /// The economics sources not bound, each with its reason (Phase G gate M4:
@@ -416,6 +424,7 @@ mod tests {
                 ("FLAP", "BUY"),
                 ("FLAP", "SELL"),
                 ("FLAP", "ADMITTED BUY"),
+                ("FLAP", "ADMITTED BUY (FOREIGN_AUTO)"),
                 ("FLAP", "CURVE BUY (Strategy C)"),
                 ("FLAP", "CURVE SELL (Strategy C exit)"),
                 ("FLAP", "ROUND TRIP"),

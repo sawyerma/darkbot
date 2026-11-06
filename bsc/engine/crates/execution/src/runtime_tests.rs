@@ -3001,3 +3001,25 @@ fn a_four_lot_read_again_is_classified_or_stranded() {
         Err(LIVE_POSITION_UNPRICED)
     );
 }
+
+/// R13: the launches C3 BUYs behind are the operator's choice: SELF (the
+/// shipped one) or FOREIGN_AUTO; any other value, or none, is refused.
+#[test]
+fn the_c3_candidates_are_self_or_foreign_auto() {
+    use crate::paper_exec::C3Candidates;
+    let line = CONFIG
+        .lines()
+        .find(|l| l.starts_with("BSC_EXEC_C3_CANDIDATES="))
+        .unwrap();
+    let with = |v: &str| {
+        RuntimeConfig::parse(&CONFIG.replace(line, &format!("BSC_EXEC_C3_CANDIDATES={v}")))
+    };
+    let scope = |c: Result<RuntimeConfig, String>| c.unwrap().exec.unwrap().exec.c3_candidates;
+    assert_eq!(
+        scope(RuntimeConfig::parse(CONFIG)),
+        C3Candidates::SelfLaunch
+    );
+    assert_eq!(scope(with("FOREIGN_AUTO")), C3Candidates::ForeignAuto);
+    assert!(with("ALL").is_err());
+    assert!(RuntimeConfig::parse(&CONFIG.replace(line, "")).is_err());
+}

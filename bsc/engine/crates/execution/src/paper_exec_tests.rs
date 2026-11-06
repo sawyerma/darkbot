@@ -87,6 +87,7 @@ pub(crate) fn config(lanes: usize, buys: u128) -> ExecConfig {
         live_dex_exit: false,
         live_divergence_quarantine: false,
         sender_paths: SenderPaths::Both,
+        c3_candidates: crate::paper_exec::C3Candidates::SelfLaunch,
     }
 }
 
@@ -275,6 +276,106 @@ fn a_signed_launch_reaches_the_sink_through_plan_frame_and_dispatch() {
     assert!(fence.exists());
     exec.disarm().unwrap();
     assert!(!fence.exists());
+    fs::remove_dir_all(&d).unwrap();
+}
+
+/// R13 (FOREIGN_AUTO): a foreign launch the campaign saw (another identity,
+/// 3 % taxes, a creator purchase in the launch) is no SELF launch (PROFILE);
+/// with `BSC_EXEC_C3_CANDIDATES=FOREIGN_AUTO` it reaches the sink as the
+/// BUY of its token (the CREATE2 of its salt: the receipt's), priced on the
+/// curve its creator's purchase left.
+#[test]
+fn a_foreign_launch_is_a_c3_candidate_only_under_foreign_auto() {
+    use darkbot_bsc_trading::economics::flap::native_curve20::{
+        HoldingCap, NativeBuyInputs, PricedToken, WITNESSED_MAINNET_TERMS, profile_terms,
+        quote_native_buy,
+    };
+    use darkbot_bsc_trading::economics::slippage::min_output;
+    const FIXTURE: &str =
+        include_str!("../../trading/fixtures/flap/foreign_launch_parity_20261106.txt");
+    let rows = |kind: &'static str| {
+        FIXTURE
+            .lines()
+            .map(|l| l.split(' ').collect::<Vec<_>>())
+            .filter(move |f| f[0] == kind)
+    };
+    let u = |s: &str| U256::from_str_radix(s, 10).unwrap();
+    // A sampled launch the receipts priced, with a creator purchase.
+    let (c, f) = rows("CALLDATA")
+        .filter(|c| c[2] == "OK" && c[3] != "0")
+        .find_map(|c| {
+            let f = rows("LAUNCH").find(|f| f[2] == c[1])?;
+            (f[5] != "100").then_some((c, f))
+        })
+        .unwrap();
+    let input = hex::decode(c[4]).unwrap();
+    let portal = bsc_mainnet_v5_27_2().portal.into_array();
+    let (hash, raw, _) = launch(0, 7);
+    let value_bytes = u(c[3]).to_be_bytes_trimmed_vec();
+    let pending = PendingLaunch {
+        hash,
+        raw: &raw,
+        from: [0; 20],
+        to: Some(portal),
+        value: &value_bytes,
+        input: &input,
+        ingress_ns: 100,
+    };
+    let (mut own, d) = armed("foreign-self", config(2, 2));
+    assert!(matches!(
+        own.on_launch(pending, &c2(Some(HEAD)), &clock(100, 7)),
+        Err(Refusal::Profile(_))
+    ));
+    own.disarm().unwrap();
+    fs::remove_dir_all(&d).unwrap();
+    let mut cfg = config(2, 2);
+    cfg.c3_candidates = C3Candidates::ForeignAuto;
+    let (mut exec, d) = armed("foreign-auto", cfg.clone());
+    // Review M2: a value other than the creator purchase is no profile.
+    assert!(matches!(
+        exec.on_launch(
+            PendingLaunch {
+                value: &[0x01],
+                ..pending
+            },
+            &c2(Some(HEAD)),
+            &clock(100, 7)
+        ),
+        Err(Refusal::Profile(UnsupportedLaunch::CreatorValue))
+    ));
+    let buy = exec
+        .on_launch(pending, &c2(Some(HEAD)), &clock(100, 7))
+        .unwrap();
+    let signed = decode_signed(&buy.raw).unwrap();
+    let call = decode_swap_exact_input_native(signed.tx.input).unwrap();
+    let token: [u8; 20] = hex::decode(&f[4][2..]).unwrap().try_into().unwrap();
+    assert_eq!((buy.token, call.output_token.into_array()), (token, token));
+    let quote = |reserve: U256, circulating: U256, input: U256| {
+        quote_native_buy(&NativeBuyInputs {
+            token: PricedToken::new(&profile_terms(f[5].parse().unwrap(), f[6].parse().unwrap()))
+                .unwrap(),
+            reserve_before: reserve,
+            circulating_before: circulating,
+            input_amount: input,
+            protocol_fee_bps: WITNESSED_MAINNET_TERMS.protocol_buy_fee_bps,
+            tax_on_bonding_curve_enabled: true,
+            caller_fee_exempt: false,
+            holding_cap: HoldingCap::None,
+        })
+        .unwrap()
+    };
+    let creator = quote(U256::ZERO, U256::ZERO, u(f[10]));
+    assert_eq!(creator.output_amount, u(f[11]));
+    let ours = quote(
+        creator.reserve_after,
+        creator.supply_after,
+        U256::from(cfg.input_wei),
+    );
+    assert_eq!(
+        call.min_output_amount,
+        min_output(ours.output_amount, cfg.slippage_bps).unwrap()
+    );
+    exec.disarm().unwrap();
     fs::remove_dir_all(&d).unwrap();
 }
 

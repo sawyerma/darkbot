@@ -792,6 +792,7 @@ fn exec_setup() -> ExecSetup {
             live_dex_exit: false,
             live_divergence_quarantine: false,
             sender_paths: SenderPaths::Both,
+            c3_candidates: darkbot_bsc_execution::paper_exec::C3Candidates::SelfLaunch,
         },
         reprobe: Duration::from_secs(3_600),
         reprobe_failures: 1,

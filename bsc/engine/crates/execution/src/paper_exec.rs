@@ -82,7 +82,9 @@ use darkbot_bsc_trading::venues::flap::binding::{
     ExpectedBurn, ExpectedBuy, ExpectedExit, ExpectedTx, TRANSFER_GAS,
 };
 use darkbot_bsc_trading::venues::flap::deployment::ValidatedDeployment;
-use darkbot_bsc_trading::venues::flap::profile::{UnsupportedLaunch, classify_launch};
+use darkbot_bsc_trading::venues::flap::profile::{
+    UnsupportedLaunch, classify_foreign_launch, classify_launch,
+};
 use darkbot_bsc_trading::venues::flap::recognize::{Recognized, recognize};
 use darkbot_bsc_trading::venues::fourmeme::binding::{
     ExpectedClassicBuy, ExpectedClassicExit, ExpectedOpenFourBuy, ExpectedOpenFourExit,
@@ -131,6 +133,35 @@ pub fn max_start_limit_ns() -> u64 {
 /// both, the first to disclose n owns it: after a C3 BUY the strategy
 /// starts at n+1; after a strategy intent every later C3 BUY of the arm is
 /// refused NONCE_TAKEN. A path left out is refused PATH_OFF.
+/// R13: the launches a C3 BUY goes behind (`BSC_EXEC_C3_CANDIDATES`):
+/// `SELF` the witnessed self-launch profile alone (its identity included),
+/// `FOREIGN_AUTO` every launch of the foreign profile (its economics alone:
+/// `classify_foreign_launch`, the token the pinned CREATE2 of its salt).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum C3Candidates {
+    SelfLaunch,
+    ForeignAuto,
+}
+
+impl C3Candidates {
+    pub fn parse(text: &str) -> Result<Self, String> {
+        match text {
+            "SELF" => Ok(Self::SelfLaunch),
+            "FOREIGN_AUTO" => Ok(Self::ForeignAuto),
+            other => Err(format!(
+                "BSC_EXEC_C3_CANDIDATES {other:?}: SELF or FOREIGN_AUTO"
+            )),
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::SelfLaunch => "SELF",
+            Self::ForeignAuto => "FOREIGN_AUTO",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SenderPaths {
     C3,
@@ -292,6 +323,8 @@ pub struct ExecConfig {
     pub live_divergence_quarantine: bool,
     /// Phase I gate M2: the PAPER paths that take the sender.
     pub sender_paths: SenderPaths,
+    /// R13: the launches C3 BUYs behind (`BSC_EXEC_C3_CANDIDATES`).
+    pub c3_candidates: C3Candidates,
 }
 
 impl ExecConfig {
@@ -2059,8 +2092,15 @@ impl<E: End> Executor<E> {
         };
         let decoded_ns = clock.now_ns();
         let candidate = B256::from(launch.hash);
-        let classified =
-            classify_launch(&self.deployment, candidate, &decoded).map_err(Refusal::Profile)?;
+        // R13: the candidate scope's profile.
+        let classified = match self.config.c3_candidates {
+            C3Candidates::SelfLaunch => classify_launch(&self.deployment, candidate, &decoded),
+            C3Candidates::ForeignAuto => {
+                let value = native_value(launch.value).ok_or(Refusal::NotDecoded)?;
+                classify_foreign_launch(&self.deployment, candidate, &decoded, value)
+            }
+        }
+        .map_err(Refusal::Profile)?;
         let snapshot = (c2.snapshot)(
             candidate,
             self.policy.generation(),

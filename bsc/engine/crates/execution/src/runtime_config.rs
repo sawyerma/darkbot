@@ -420,6 +420,7 @@ impl RuntimeConfig {
             values.remove(crate::sources::OwnerLimits::KEEP_GENERATIONS),
         )?;
         let sender_paths = values.remove("BSC_EXEC_SENDER_PATHS");
+        let c3_candidates = values.remove("BSC_EXEC_C3_CANDIDATES");
         // R12c: the Four Classic BUY of the C3 path, SC4 c its exits' gas
         // limits: all five or none.
         let four_keys = [
@@ -637,6 +638,9 @@ impl RuntimeConfig {
                 }
                 if sender_paths.is_some() {
                     return Err("BSC_EXEC_SENDER_PATHS needs BSC_EXEC_PAPER_IDENTITY".into());
+                }
+                if c3_candidates.is_some() {
+                    return Err("BSC_EXEC_C3_CANDIDATES needs BSC_EXEC_PAPER_IDENTITY".into());
                 }
                 if exit_slippage.is_some() {
                     return Err("BSC_EXEC_EXIT_SLIPPAGE_BPS needs BSC_EXEC_PAPER_IDENTITY".into());
@@ -946,6 +950,9 @@ impl RuntimeConfig {
                         },
                         sender_paths: crate::paper_exec::SenderPaths::parse(
                             sender_paths.ok_or("BSC_EXEC_SENDER_PATHS is required")?,
+                        )?,
+                        c3_candidates: crate::paper_exec::C3Candidates::parse(
+                            c3_candidates.ok_or("BSC_EXEC_C3_CANDIDATES is required")?,
                         )?,
                     },
                 }

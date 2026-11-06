@@ -147,6 +147,10 @@ pub const LIVE_POSITION_VENUE_UNFOLLOWED: &str = "LIVE_POSITION_VENUE_UNFOLLOWED
 /// (`BSC_EXEC_FOUR_*`, `BSC_EXEC_OPENFOUR_*`): the path does not arm its
 /// venue, no strategy exit sells it; no new BUY until it ends.
 pub const LIVE_POSITION_VENUE_UNCONFIGURED: &str = "LIVE_POSITION_VENUE_UNCONFIGURED";
+/// R13 review H1: a grant naming C3 while C3 takes foreign launches
+/// (`BSC_EXEC_C3_CANDIDATES=FOREIGN_AUTO`): no grant or risk decision names
+/// that scope, so the path does not arm (FOREIGN_AUTO is PAPER/SHADOW).
+pub const LIVE_C3_FOREIGN_UNGRANTED: &str = "LIVE_C3_FOREIGN_UNGRANTED";
 /// REV.1.0 R3b (BSC3-024/041): an unresolved LIVE transaction whose
 /// receipt recovery is asked (not answered yet), would need the second
 /// source (none configured), or failed (asked again after

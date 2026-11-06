@@ -313,6 +313,7 @@ fn c3_paper_path_latency() {
             live_dex_exit: false,
             live_divergence_quarantine: false,
             sender_paths: darkbot_bsc_execution::paper_exec::SenderPaths::C3,
+            c3_candidates: darkbot_bsc_execution::paper_exec::C3Candidates::SelfLaunch,
         },
         Arming {
             next_nonce: 0,
