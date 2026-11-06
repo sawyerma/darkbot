@@ -1,0 +1,73 @@
+syntax = "proto3";
+package darkbot.bsc.v1;
+
+import "darkbot/bsc/v1/common.proto";
+import "darkbot/bsc/v1/history.proto";
+import "darkbot/bsc/v1/training.proto";
+import "darkbot/bsc/v1/wallet.proto";
+import "darkbot/bsc/v1/watch.proto";
+
+// V8 bounded read-only queries (BSC-V8-10, Wire V1.3 §7 shape; prepared, the gateway route is NOT
+// registered until the native owner answers):
+//   POST /api/v1/bsc/query   Content-Type: application/x-protobuf   Body: BscQueryRequest
+//   Answer                   Content-Type: application/x-protobuf   Body: BscQueryResponse
+//   Header: X-CSRF-Token of the session bootstrap; session cookie HttpOnly, SameSite=Strict.
+// One request per operator view or page step, never polling; history never on a STATE topic
+// (BscLiveState stays bounded, topic 40 stays reserved). The gateway checks session, origin, host
+// and CSRF and bounds the body; the native owner reads its journals (an index only as a rebuildable
+// cache), binds every cursor to its snapshot and caps every limit. Without the route the frontend
+// shows each answer as UNAVAILABLE; it never substitutes data.
+
+// One bounded query.
+message BscQueryRequest {
+  // Client-generated identity for correlation (UUIDv4); a query changes nothing.
+  string request_id = 1;
+  // The query.
+  oneof query {
+    // A page of LIVE trades.
+    TradeHistoryQuery trades = 2;
+    // One lot's detail.
+    TradeDetailQuery trade = 3;
+    // A page of training runs.
+    TrainingRunQuery training_runs = 4;
+    // The training profiles.
+    TrainingProfilesQuery training_profiles = 5;
+    // A page of wallet movements.
+    WalletHistoryQuery wallet_movements = 6;
+    // The treasury state.
+    WalletTreasuryQuery treasury = 7;
+    // One performance series.
+    PerformanceSeriesQuery series = 8;
+    // The WATCH projection (REV.2.0).
+    BscWatchQuery watch = 9;
+  }
+}
+
+// The answer to one query.
+message BscQueryResponse {
+  // Echo of the request.
+  string request_id = 1;
+  // Whether the native owner answered.
+  Availability availability = 2;
+  // Why it is not AVAILABLE.
+  string unavailable_reason = 3;
+  // The result, of the query's kind.
+  oneof result {
+    // A page of LIVE trades.
+    TradeHistoryPage trades = 4;
+    // One lot's detail.
+    TradeDetail trade = 5;
+    // A page of training runs.
+    TrainingRunPage training_runs = 6;
+    // The training profiles.
+    TrainingProfiles training_profiles = 7;
+    // A page of wallet movements.
+    WalletHistoryPage wallet_movements = 8;
+    // The treasury state.
+    WalletTreasuryState treasury = 9;
+    // One performance series.
+    PerformanceSeries series = 10;
+    // The WATCH projection (REV.2.0).
+    BscWatchState watch = 11;
+  }
+}

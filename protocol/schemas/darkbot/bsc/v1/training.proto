@@ -1,0 +1,440 @@
+syntax = "proto3";
+package darkbot.bsc.v1;
+
+import "darkbot/bsc/v1/common.proto";
+
+// V8 Training and Strategy C settings (BSC-V8-01…06, FE-V8-04…09, Bindings §14.1/§14.2/§14.4
+// M1–M3). Prepared contracts: no producer yet. Strategy C stays the one BSC strategy; a profile is
+// a named, versioned Strategy C configuration, a training run executes it PAPER/SHADOW/REPLAY on
+// the one existing core, never with real funds. The nine settable keys exist natively today
+// (execution/src/strategy_settings.rs, gateway `bsc.strategy.set`, one key per request); the 15
+// filters are trading/src/strategy/features.rs NAMES[0..15] with the parser filters.rs.
+//
+// Prepared actions (POST /api/v1/command, CommandRequest.action; NOT registered in the gateway
+// until the native owner implements them, the frontend keeps them disabled):
+//   bsc.strategy.set_all          StrategyCSettingsSetAllCommand  expected profile_version = stored revision
+//   bsc.training.profile.create   TrainingProfileCreateCommand    expected config_version = catalog_version
+//   bsc.training.profile.update   TrainingProfileUpdateCommand    expected profile_version = profile revision
+//   bsc.training.profile.clone    TrainingProfileCloneCommand     expected config_version = catalog_version
+//   bsc.training.profile.delete   TrainingProfileDeleteCommand    expected profile_version = profile revision
+//   bsc.training.run.start        TrainingRunStartCommand         expected profile_version = profile revision
+//   bsc.training.run.stop         TrainingRunStopCommand          resource_id = run_id
+
+// The creator selling before the BUY fills (BSC_STRATEGY_C_CREATOR_SOLD_BEFORE_FILL).
+enum CreatorSoldBeforeFill {
+  // Not set: the configuration file's value.
+  CREATOR_SOLD_BEFORE_FILL_UNSPECIFIED = 0;
+  // FREE_CANCEL: the entry is cancelled before execution.
+  CREATOR_SOLD_BEFORE_FILL_FREE_CANCEL = 1;
+  // TX_LANDS: the BUY transaction may still land; never a guaranteed fill.
+  CREATOR_SOLD_BEFORE_FILL_TX_LANDS = 2;
+}
+
+// The creator-sell exit (BSC_STRATEGY_C_CREATOR_SELL_EXIT). A team-sell exit is NOT_IMPLEMENTED
+// (BSC-V8-06) and has no field until a native wallet attribution and sell signal exist.
+enum CreatorSellExit {
+  // Not set: the configuration file's value.
+  CREATOR_SELL_EXIT_UNSPECIFIED = 0;
+  // ENABLED: a sale by the token's creator ends the position.
+  CREATOR_SELL_EXIT_ENABLED = 1;
+  // DISABLED: a creator sale does not end the position.
+  CREATOR_SELL_EXIT_DISABLED = 2;
+}
+
+// One entry filter `feature:min:max` of BSC_STRATEGY_C_FILTERS. A disabled rule is not part of the
+// serialized native string; an enabled rule without bounds still fails on a NULL feature.
+message StrategyFilterRule {
+  // The native feature name (features.rs NAMES[0..15]); never provider_gap_flag.
+  string feature = 1;
+  // Whether the rule is part of the configuration.
+  bool enabled = 2;
+  // Lower bound, exact decimal at the feature's places; absent: unbounded.
+  optional string min = 3;
+  // Upper bound, exact decimal at the feature's places; absent: unbounded.
+  optional string max = 4;
+}
+
+// One filterable native feature as the owner defines it (no frontend list of units or places).
+message StrategyFeatureSpec {
+  // The native feature name.
+  string name = 1;
+  // Its position in features.rs NAMES.
+  uint32 index = 2;
+  // Native unit: count, wei, ratio, percent or milliseconds.
+  string unit = 3;
+  // Decimal places a bound may have (BNB amounts 18, ratios BSC_STRATEGY_C_RATIO_PLACES).
+  uint32 places = 4;
+  // Whether a bound may be negative (signed features such as net_buy_flow_bnb, price_change).
+  bool signed = 5;
+  // False for provider_gap_flag: a data-quality flag, never a filter.
+  bool filterable = 6;
+}
+
+// A complete Strategy C configuration. Each of the nine settable keys is optional: absent means
+// the configuration file's value (the native owner's rule); a profile stores all of them.
+message StrategyCSettings {
+  // BSC_STRATEGY_C_INPUT_WEI: the BUY input per entry, decimal wei.
+  optional string input_wei = 1;
+  // BSC_STRATEGY_C_TARGET_NET_MULTIPLE: exit at this net multiple of the input (after every cost),
+  // exact decimal at ratio_places, e.g. "1.50".
+  optional string target_net_multiple = 2;
+  // BSC_STRATEGY_C_STOP_NET_MULTIPLE: exit at this net multiple, exact decimal at ratio_places.
+  optional string stop_net_multiple = 3;
+  // BSC_STRATEGY_C_OBSERVATION_MS: the observation window before an entry, milliseconds.
+  optional uint64 observation_ms = 4;
+  // BSC_STRATEGY_C_HOLD_MS: the longest hold before the timeout exit, milliseconds.
+  optional uint64 hold_ms = 5;
+  // BSC_STRATEGY_C_MAX_OPEN: the most positions open at once.
+  optional uint32 max_open = 6;
+  // BSC_STRATEGY_C_CREATOR_SOLD_BEFORE_FILL.
+  CreatorSoldBeforeFill creator_sold_before_fill = 7;
+  // BSC_STRATEGY_C_CREATOR_SELL_EXIT.
+  CreatorSellExit creator_sell_exit = 8;
+  // BSC_STRATEGY_C_FILTERS: every filterable feature in native order, enabled or not.
+  repeated StrategyFilterRule filters = 9;
+  // BSC_STRATEGY_C_FIRST_BUYER_WINDOW: the buyers counted as early (1..100). In the runtime
+  // configuration today but no settable key yet (BSC-V8-05): read-only until the owner takes it.
+  optional uint32 first_buyer_window = 10;
+  // BSC_STRATEGY_C_RATIO_PLACES: decimal places of ratios and multiples (read-only).
+  optional uint32 ratio_places = 11;
+  // BSC_STRATEGY_C_FILL_DELAY_BLOCKS (read-only, configuration file).
+  optional uint32 fill_delay_blocks = 12;
+  // BSC_STRATEGY_C_GAS_PRICE_WEI (read-only, configuration file), decimal wei.
+  optional string gas_price_wei = 13;
+}
+
+// Whether a stored Strategy C configuration is in effect.
+enum SettingsApplyStatus {
+  // Not set by any producer; never displayed as a value.
+  SETTINGS_APPLY_STATUS_UNSPECIFIED = 0;
+  // The running strategy took the stored revision at its start.
+  SETTINGS_APPLY_STATUS_IN_EFFECT = 1;
+  // Stored; the running strategy keeps the revision of its start until its next start.
+  SETTINGS_APPLY_STATUS_SAVED_APPLIES_NEXT_START = 2;
+  // Strategy C does not run: the stored revision applies at its next start.
+  SETTINGS_APPLY_STATUS_NOT_RUNNING = 3;
+  // The strategy refused its settings at its start (SETTINGS_REFUSED, GAS_EVIDENCE_REFUSED).
+  SETTINGS_APPLY_STATUS_REFUSED = 4;
+}
+
+// The stored and the running Strategy C configuration of the native owner.
+message StrategyCSettingsState {
+  // Whether the native owner answered.
+  Availability availability = 1;
+  // Why it is not AVAILABLE.
+  string unavailable_reason = 2;
+  // The owner and its settings generation.
+  OwnerProvenance provenance = 3;
+  // The stored configuration (absent keys: the configuration file's).
+  StrategyCSettings stored = 4;
+  // The stored revision (settings generation): the compare-and-swap of the next save.
+  uint64 stored_revision = 5;
+  // SHA-256 of the stored configuration's canonical native text, lowercase hex.
+  string stored_config_sha256 = 6;
+  // What the running strategy took at its start; absent while it does not run.
+  StrategyCSettings running = 7;
+  // The revision the running strategy took; absent while it does not run.
+  optional uint64 running_revision = 8;
+  // SHA-256 of the running configuration's canonical native text; empty while it does not run.
+  string running_config_sha256 = 9;
+  // Whether the stored revision is in effect.
+  SettingsApplyStatus apply_status = 10;
+  // The strategy's refusal of its settings; empty without one.
+  string refusal_reason = 11;
+  // The request that wrote the stored revision; empty while none.
+  string request_id = 12;
+  // The filterable features with their unit and places, in native order.
+  repeated StrategyFeatureSpec features = 13;
+}
+
+// Params of `bsc.strategy.set_all` (BSC-V8-04, prepared): the complete form as ONE validated
+// revision; a refused field refuses the whole set, nothing is stored half.
+message StrategyCSettingsSetAllCommand {
+  // Every settable key; the owner refuses a set that leaves one out.
+  StrategyCSettings settings = 1;
+}
+
+// The lifecycle of a training profile.
+enum TrainingProfileStatus {
+  // Not set by any producer; never displayed as a value.
+  TRAINING_PROFILE_STATUS_UNSPECIFIED = 0;
+  // Usable for runs and the LIVE selection.
+  TRAINING_PROFILE_STATUS_ACTIVE = 1;
+  // Kept with its runs and results, not selectable.
+  TRAINING_PROFILE_STATUS_ARCHIVED = 2;
+  // Deleted; kept only while a run or result references it.
+  TRAINING_PROFILE_STATUS_DELETED = 3;
+}
+
+// A named, versioned Strategy C configuration of the native owner (one strategy, many profiles).
+message TrainingProfile {
+  // Stable owner identity, never reused.
+  string profile_id = 1;
+  // The operator's name.
+  string name = 2;
+  // The profile revision: the compare-and-swap of an update, delete or run start.
+  uint64 revision = 3;
+  // The complete configuration of this revision.
+  StrategyCSettings settings = 4;
+  // SHA-256 of this revision's canonical native configuration text, lowercase hex.
+  string config_sha256 = 5;
+  // The venues it trains on (BSC_VENUE_FLAP, BSC_VENUE_FOUR_CLASSIC, BSC_VENUE_OPENFOUR), as the
+  // owner offers them; never an implicit "all markets".
+  repeated string venues = 6;
+  // Creation time, unix ms.
+  uint64 created_unix_ms = 7;
+  // Time of this revision, unix ms.
+  uint64 updated_unix_ms = 8;
+  // Its lifecycle.
+  TrainingProfileStatus status = 9;
+  // The runs that reference it, newest first (bounded; the run query has all).
+  repeated string run_ids = 10;
+  // Whether a running run or the LIVE selection uses it (edits then need a clone).
+  bool in_use = 11;
+  // What uses it; empty when not in use.
+  string in_use_reason = 12;
+}
+
+// The training profiles of the native owner.
+message TrainingProfiles {
+  // Whether the native owner answered.
+  Availability availability = 1;
+  // Why it is not AVAILABLE.
+  string unavailable_reason = 2;
+  // The owner and its catalog version.
+  OwnerProvenance provenance = 3;
+  // Every non-deleted profile.
+  repeated TrainingProfile profiles = 4;
+  // The catalog version: the compare-and-swap of a create or clone.
+  uint64 catalog_version = 5;
+  // The profile the LIVE selection names; empty without one.
+  string live_profile_id = 6;
+  // The revision the LIVE selection is bound to.
+  optional uint64 live_profile_revision = 7;
+}
+
+// A bounded read of the training profiles.
+message TrainingProfilesQuery {
+  // Also archived profiles.
+  bool include_archived = 1;
+}
+
+// Params of `bsc.training.profile.create` (prepared).
+message TrainingProfileCreateCommand {
+  // The operator's name.
+  string name = 1;
+  // The complete configuration.
+  StrategyCSettings settings = 2;
+  // The venues it trains on.
+  repeated string venues = 3;
+}
+
+// Params of `bsc.training.profile.update` (prepared): a new revision of one profile.
+message TrainingProfileUpdateCommand {
+  // The profile.
+  string profile_id = 1;
+  // The operator's name.
+  string name = 2;
+  // The complete configuration.
+  StrategyCSettings settings = 3;
+  // The venues it trains on.
+  repeated string venues = 4;
+}
+
+// Params of `bsc.training.profile.clone` (prepared): a new profile from one revision.
+message TrainingProfileCloneCommand {
+  // The profile copied.
+  string source_profile_id = 1;
+  // The revision copied.
+  uint64 source_revision = 2;
+  // The new profile's name.
+  string name = 3;
+}
+
+// Params of `bsc.training.profile.delete` (prepared): refused while a run or LIVE uses it.
+message TrainingProfileDeleteCommand {
+  // The profile.
+  string profile_id = 1;
+  // Archive instead of delete (runs and results stay readable either way).
+  bool archive = 2;
+}
+
+// How a training run executes. Never with real funds or the LIVE wallet, nonce or budget.
+enum TrainingRunMode {
+  // Not set by any producer; never displayed as a value.
+  TRAINING_RUN_MODE_UNSPECIFIED = 0;
+  // PAPER on live market data: decisions, PAPER BUYs and exits valued by the exact curve.
+  TRAINING_RUN_MODE_PAPER = 1;
+  // SHADOW: the production path to the PAPER sink, nothing sent.
+  TRAINING_RUN_MODE_SHADOW = 2;
+  // Offline replay of recorded journals (strategy-replay).
+  TRAINING_RUN_MODE_REPLAY = 3;
+}
+
+// What ends a training run.
+enum TrainingRunStopKind {
+  // Not set by any producer; never displayed as a value.
+  TRAINING_RUN_STOP_KIND_UNSPECIFIED = 0;
+  // After duration_ms.
+  TRAINING_RUN_STOP_KIND_DURATION = 1;
+  // After max_launches qualified launches processed.
+  TRAINING_RUN_STOP_KIND_LAUNCH_COUNT = 2;
+  // Only by a stop request.
+  TRAINING_RUN_STOP_KIND_UNTIL_STOPPED = 3;
+}
+
+// The bound of a training run.
+message TrainingRunPlan {
+  // What ends it.
+  TrainingRunStopKind stop_kind = 1;
+  // The run's length for DURATION, milliseconds.
+  optional uint64 duration_ms = 2;
+  // The qualified launches for LAUNCH_COUNT.
+  optional uint64 max_launches = 3;
+}
+
+// The lifecycle of a training run.
+enum TrainingRunStatus {
+  // Not set by any producer; never displayed as a value.
+  TRAINING_RUN_STATUS_UNSPECIFIED = 0;
+  // Accepted, not started.
+  TRAINING_RUN_STATUS_PENDING = 1;
+  // Running.
+  TRAINING_RUN_STATUS_RUNNING = 2;
+  // A stop was requested; the run seals its results.
+  TRAINING_RUN_STATUS_STOPPING = 3;
+  // Ended by its plan (duration or launch count).
+  TRAINING_RUN_STATUS_COMPLETED = 4;
+  // Ended by a stop request.
+  TRAINING_RUN_STATUS_STOPPED = 5;
+  // Ended by a failure (stop_reason).
+  TRAINING_RUN_STATUS_FAILED = 6;
+  // The owner cannot tell (state unreadable, crash before seal).
+  TRAINING_RUN_STATUS_UNKNOWN = 7;
+}
+
+// The results of one training run, from its native journal; UNKNOWN stays absent, never zero.
+message TrainingResult {
+  // Launches the strategy evaluated.
+  uint64 evaluated = 1;
+  // Of them passed every filter.
+  uint64 passed = 2;
+  // Of them rejected by a filter.
+  uint64 rejected = 3;
+  // Of them DATA_INCOMPLETE (a coverage gap, never a pass).
+  uint64 data_incomplete = 4;
+  // Launches not tracked (the venue or curve not exact).
+  uint64 not_tracked = 5;
+  // Positions whose value is unresolved (the curve stopped being exact).
+  uint64 unresolved = 6;
+  // PAPER entries.
+  uint64 entered = 7;
+  // Exits at the target.
+  uint64 exits_target = 8;
+  // Exits at the stop.
+  uint64 exits_stop = 9;
+  // Exits by a creator sale.
+  uint64 exits_creator_sell = 10;
+  // Exits at the hold timeout.
+  uint64 exits_timeout = 11;
+  // Closed positions with a gain.
+  uint64 wins = 12;
+  // Closed positions with a loss.
+  uint64 losses = 13;
+  // Sum of the gains, decimal wei.
+  string gain_wei = 14;
+  // Sum of the losses, decimal wei (a positive amount).
+  string loss_wei = 15;
+  // Net result after every cost, signed decimal wei; absent while unresolved positions exist.
+  optional string net_wei = 16;
+  // Positions still open.
+  uint64 open_positions = 17;
+  // The ingress sources the run observed.
+  repeated string sources = 18;
+  // The observed market time with complete coverage, ms.
+  optional uint64 observable_ms = 19;
+  // Records lost by the capture.
+  uint64 lost_records = 20;
+  // Ingress messages dropped.
+  uint64 ingress_dropped = 21;
+}
+
+// One training run of a profile revision.
+message TrainingRun {
+  // Stable run identity, never reused.
+  string run_id = 1;
+  // The profile it runs.
+  string profile_id = 2;
+  // The profile revision it runs.
+  uint64 profile_revision = 3;
+  // SHA-256 of the configuration it runs, lowercase hex.
+  string config_sha256 = 4;
+  // How it executes.
+  TrainingRunMode mode = 5;
+  // The venues it trains on.
+  repeated string venues = 6;
+  // Its bound.
+  TrainingRunPlan plan = 7;
+  // Start, unix ms; absent before it started.
+  optional uint64 started_unix_ms = 8;
+  // End, unix ms; absent while running.
+  optional uint64 ended_unix_ms = 9;
+  // Its lifecycle.
+  TrainingRunStatus status = 10;
+  // Why it ended (PLAN_DURATION, PLAN_LAUNCH_COUNT, STOP_REQUESTED, a failure); empty while running.
+  string stop_reason = 11;
+  // Qualified launches processed so far.
+  uint64 launches_processed = 12;
+  // Its results so far.
+  TrainingResult result = 13;
+  // The owner and journal the run was read from.
+  OwnerProvenance provenance = 14;
+  // The request that started it.
+  string request_id = 15;
+}
+
+// Params of `bsc.training.run.start` (prepared).
+message TrainingRunStartCommand {
+  // The profile.
+  string profile_id = 1;
+  // How it executes.
+  TrainingRunMode mode = 2;
+  // The venues it trains on (a subset of the profile's).
+  repeated string venues = 3;
+  // Its bound.
+  TrainingRunPlan plan = 4;
+}
+
+// Params of `bsc.training.run.stop` (prepared); CommandRequest.resource_id names the run.
+message TrainingRunStopCommand {
+  // Why the operator stops it (free text, diagnostic only).
+  string reason = 1;
+}
+
+// A bounded, cursor-paged read of training runs.
+message TrainingRunQuery {
+  // Only runs of this profile; empty: every profile.
+  string profile_id = 1;
+  // Only runs in these states; empty: every state.
+  repeated TrainingRunStatus statuses = 2;
+  // The previous page's next_cursor; empty: the first page.
+  string cursor = 3;
+  // At most this many runs; the owner caps it.
+  uint32 limit = 4;
+}
+
+// One page of training runs, newest first, bound to one owner snapshot.
+message TrainingRunPage {
+  // Whether the native owner answered.
+  Availability availability = 1;
+  // Why it is not AVAILABLE.
+  string unavailable_reason = 2;
+  // The owner and the snapshot the cursor is bound to.
+  OwnerProvenance provenance = 3;
+  // The runs.
+  repeated TrainingRun runs = 4;
+  // The cursor of the next page; empty on the last one.
+  string next_cursor = 5;
+  // Whether another page follows.
+  bool has_more = 6;
+}

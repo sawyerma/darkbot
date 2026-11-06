@@ -36,6 +36,98 @@
 
     - [NativeKind](#darkbot-bsc-v1-NativeKind)
 
+- [darkbot/bsc/v1/common.proto](#darkbot_bsc_v1_common-proto)
+    - [OwnerProvenance](#darkbot-bsc-v1-OwnerProvenance)
+    - [PerformancePoint](#darkbot-bsc-v1-PerformancePoint)
+    - [PerformanceSeries](#darkbot-bsc-v1-PerformanceSeries)
+    - [PerformanceSeriesQuery](#darkbot-bsc-v1-PerformanceSeriesQuery)
+    - [SourcedTime](#darkbot-bsc-v1-SourcedTime)
+
+    - [Availability](#darkbot-bsc-v1-Availability)
+    - [DataQuality](#darkbot-bsc-v1-DataQuality)
+    - [PerformanceMetric](#darkbot-bsc-v1-PerformanceMetric)
+    - [PerformanceScope](#darkbot-bsc-v1-PerformanceScope)
+    - [TimeSource](#darkbot-bsc-v1-TimeSource)
+
+- [darkbot/bsc/v1/history.proto](#darkbot_bsc_v1_history-proto)
+    - [TradeCounts](#darkbot-bsc-v1-TradeCounts)
+    - [TradeDetail](#darkbot-bsc-v1-TradeDetail)
+    - [TradeDetailQuery](#darkbot-bsc-v1-TradeDetailQuery)
+    - [TradeHistoryPage](#darkbot-bsc-v1-TradeHistoryPage)
+    - [TradeHistoryQuery](#darkbot-bsc-v1-TradeHistoryQuery)
+    - [TradeRow](#darkbot-bsc-v1-TradeRow)
+    - [TradeSighting](#darkbot-bsc-v1-TradeSighting)
+    - [TradeTransaction](#darkbot-bsc-v1-TradeTransaction)
+
+    - [ExitReason](#darkbot-bsc-v1-ExitReason)
+    - [ExitReasonSource](#darkbot-bsc-v1-ExitReasonSource)
+    - [TradePlacement](#darkbot-bsc-v1-TradePlacement)
+    - [TradeSort](#darkbot-bsc-v1-TradeSort)
+    - [TradeStatus](#darkbot-bsc-v1-TradeStatus)
+
+- [darkbot/bsc/v1/training.proto](#darkbot_bsc_v1_training-proto)
+    - [StrategyCSettings](#darkbot-bsc-v1-StrategyCSettings)
+    - [StrategyCSettingsSetAllCommand](#darkbot-bsc-v1-StrategyCSettingsSetAllCommand)
+    - [StrategyCSettingsState](#darkbot-bsc-v1-StrategyCSettingsState)
+    - [StrategyFeatureSpec](#darkbot-bsc-v1-StrategyFeatureSpec)
+    - [StrategyFilterRule](#darkbot-bsc-v1-StrategyFilterRule)
+    - [TrainingProfile](#darkbot-bsc-v1-TrainingProfile)
+    - [TrainingProfileCloneCommand](#darkbot-bsc-v1-TrainingProfileCloneCommand)
+    - [TrainingProfileCreateCommand](#darkbot-bsc-v1-TrainingProfileCreateCommand)
+    - [TrainingProfileDeleteCommand](#darkbot-bsc-v1-TrainingProfileDeleteCommand)
+    - [TrainingProfileUpdateCommand](#darkbot-bsc-v1-TrainingProfileUpdateCommand)
+    - [TrainingProfiles](#darkbot-bsc-v1-TrainingProfiles)
+    - [TrainingProfilesQuery](#darkbot-bsc-v1-TrainingProfilesQuery)
+    - [TrainingResult](#darkbot-bsc-v1-TrainingResult)
+    - [TrainingRun](#darkbot-bsc-v1-TrainingRun)
+    - [TrainingRunPage](#darkbot-bsc-v1-TrainingRunPage)
+    - [TrainingRunPlan](#darkbot-bsc-v1-TrainingRunPlan)
+    - [TrainingRunQuery](#darkbot-bsc-v1-TrainingRunQuery)
+    - [TrainingRunStartCommand](#darkbot-bsc-v1-TrainingRunStartCommand)
+    - [TrainingRunStopCommand](#darkbot-bsc-v1-TrainingRunStopCommand)
+
+    - [CreatorSellExit](#darkbot-bsc-v1-CreatorSellExit)
+    - [CreatorSoldBeforeFill](#darkbot-bsc-v1-CreatorSoldBeforeFill)
+    - [SettingsApplyStatus](#darkbot-bsc-v1-SettingsApplyStatus)
+    - [TrainingProfileStatus](#darkbot-bsc-v1-TrainingProfileStatus)
+    - [TrainingRunMode](#darkbot-bsc-v1-TrainingRunMode)
+    - [TrainingRunStatus](#darkbot-bsc-v1-TrainingRunStatus)
+    - [TrainingRunStopKind](#darkbot-bsc-v1-TrainingRunStopKind)
+
+- [darkbot/bsc/v1/wallet.proto](#darkbot_bsc_v1_wallet-proto)
+    - [WalletBalanceSnapshot](#darkbot-bsc-v1-WalletBalanceSnapshot)
+    - [WalletDestination](#darkbot-bsc-v1-WalletDestination)
+    - [WalletDestinationSetCommand](#darkbot-bsc-v1-WalletDestinationSetCommand)
+    - [WalletHistoryPage](#darkbot-bsc-v1-WalletHistoryPage)
+    - [WalletHistoryQuery](#darkbot-bsc-v1-WalletHistoryQuery)
+    - [WalletMovement](#darkbot-bsc-v1-WalletMovement)
+    - [WalletSweepPolicy](#darkbot-bsc-v1-WalletSweepPolicy)
+    - [WalletSweepPolicySetCommand](#darkbot-bsc-v1-WalletSweepPolicySetCommand)
+    - [WalletTransferReceipt](#darkbot-bsc-v1-WalletTransferReceipt)
+    - [WalletTransferRequest](#darkbot-bsc-v1-WalletTransferRequest)
+    - [WalletTransferState](#darkbot-bsc-v1-WalletTransferState)
+    - [WalletTreasuryQuery](#darkbot-bsc-v1-WalletTreasuryQuery)
+    - [WalletTreasuryState](#darkbot-bsc-v1-WalletTreasuryState)
+
+    - [ChainTxStatus](#darkbot-bsc-v1-ChainTxStatus)
+    - [TransferStatus](#darkbot-bsc-v1-TransferStatus)
+    - [WalletMovementKind](#darkbot-bsc-v1-WalletMovementKind)
+    - [WalletRole](#darkbot-bsc-v1-WalletRole)
+
+- [darkbot/bsc/v1/watch.proto](#darkbot_bsc_v1_watch-proto)
+    - [BscWatchQuery](#darkbot-bsc-v1-BscWatchQuery)
+    - [BscWatchState](#darkbot-bsc-v1-BscWatchState)
+    - [WatchEvent](#darkbot-bsc-v1-WatchEvent)
+    - [WatchSubjectState](#darkbot-bsc-v1-WatchSubjectState)
+
+    - [RequalificationState](#darkbot-bsc-v1-RequalificationState)
+    - [WatchSubjectKind](#darkbot-bsc-v1-WatchSubjectKind)
+    - [WatchVerdict](#darkbot-bsc-v1-WatchVerdict)
+
+- [darkbot/bsc/v1/query.proto](#darkbot_bsc_v1_query-proto)
+    - [BscQueryRequest](#darkbot-bsc-v1-BscQueryRequest)
+    - [BscQueryResponse](#darkbot-bsc-v1-BscQueryResponse)
+
 - [darkbot/control/v1/topics.proto](#darkbot_control_v1_topics-proto)
     - [TopicDescriptor](#darkbot-control-v1-TopicDescriptor)
 
@@ -1029,6 +1121,1583 @@ Kind of a native leaf; the value is its canonical text form.
 | NATIVE_KIND_ADDRESS | 5 | 0x followed by 40 hex digits. |
 | NATIVE_KIND_B256 | 6 | 0x followed by 64 hex digits. |
 | NATIVE_KIND_TEXT | 7 | Redacted public text. |
+
+
+
+
+
+
+
+
+
+
+<a name="darkbot_bsc_v1_common-proto"></a>
+<p align="right"><a href="#top">Top</a></p>
+
+## darkbot/bsc/v1/common.proto
+
+
+
+<a name="darkbot-bsc-v1-OwnerProvenance"></a>
+
+### OwnerProvenance
+Who produced a V8 projection, from what, and how far it is proven.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| owner | [string](#string) |  | The native owner, e.g. &#34;bsc_runtime live ledger&#34;, &#34;bsc_runtime strategy settings&#34;. |
+| owner_version | [uint64](#uint64) |  | The owner&#39;s version the values were read at (ledger version, settings generation, policy version); the snapshot a cursor and a compare-and-swap are bound to. |
+| observed_unix_ms | [uint64](#uint64) |  | When the owner produced this projection, unix milliseconds. |
+| evidence | [Evidence](#darkbot-bsc-v1-Evidence) |  | The native record it was read from; absent when it is the owner&#39;s in-memory state. |
+| quality | [DataQuality](#darkbot-bsc-v1-DataQuality) |  | How far the values are proven. |
+| quality_reasons | [string](#string) | repeated | Why the quality is not VERIFIED, in the owner&#39;s order. |
+| provenance | [string](#string) |  | NATIVE_CREATED, LEGACY_IMPORTED_AUDITED or UNKNOWN, as NativeRecord.provenance. |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-PerformancePoint"></a>
+
+### PerformancePoint
+One point of a performance series, from verified snapshots and trade facts only.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| at | [SourcedTime](#darkbot-bsc-v1-SourcedTime) |  | When the value holds. |
+| value_wei | [string](#string) |  | The value at that time, exact (signed) decimal wei. |
+| fact_id | [string](#string) |  | The fact that produced the point (trade lot, transfer request, balance snapshot); empty for a period boundary. |
+| quality | [DataQuality](#darkbot-bsc-v1-DataQuality) |  | How far this point is proven. |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-PerformanceSeries"></a>
+
+### PerformanceSeries
+A time series of one metric, reconstructible from the owner&#39;s facts; never a demo curve.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| availability | [Availability](#darkbot-bsc-v1-Availability) |  | Whether the native owner answered. |
+| unavailable_reason | [string](#string) |  | Why it is not AVAILABLE. |
+| provenance | [OwnerProvenance](#darkbot-bsc-v1-OwnerProvenance) |  | The owner and snapshot the series was read at. |
+| metric | [PerformanceMetric](#darkbot-bsc-v1-PerformanceMetric) |  | The quantity. |
+| scope | [PerformanceScope](#darkbot-bsc-v1-PerformanceScope) |  | What it is about. |
+| scope_id | [string](#string) |  | The run, profile or wallet role the scope names; empty for LIVE and ALL_WALLETS. |
+| points | [PerformancePoint](#darkbot-bsc-v1-PerformancePoint) | repeated | The points in time order. |
+| opening_wei | [string](#string) | optional | The value before the first point (the period&#39;s opening balance or PnL), decimal wei; absent when the basis is unknown. |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-PerformanceSeriesQuery"></a>
+
+### PerformanceSeriesQuery
+A bounded read of one performance series.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| metric | [PerformanceMetric](#darkbot-bsc-v1-PerformanceMetric) |  | The quantity. |
+| scope | [PerformanceScope](#darkbot-bsc-v1-PerformanceScope) |  | What it is about. |
+| scope_id | [string](#string) |  | The run, profile or wallet role the scope names. |
+| from_unix_ms | [uint64](#uint64) | optional | Start of the period, unix ms; absent: the owner&#39;s first fact. |
+| to_unix_ms | [uint64](#uint64) | optional | End of the period, unix ms; absent: now. |
+| max_points | [uint32](#uint32) |  | At most this many points; the owner caps it and says so in the series. |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-SourcedTime"></a>
+
+### SourcedTime
+A point in time with the clock it was taken on.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| unix_ms | [uint64](#uint64) | optional | Unix milliseconds; absent while unknown. |
+| source | [TimeSource](#darkbot-bsc-v1-TimeSource) |  | The clock of unix_ms. |
+| block_number | [uint64](#uint64) | optional | The block it refers to, when it is a block time. |
+
+
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-Availability"></a>
+
+### Availability
+Whether the native owner answers for a V8 projection or action.
+
+| Name | Number | Description |
+| ---- | ------ | ----------- |
+| AVAILABILITY_UNSPECIFIED | 0 | Not set by any producer; never displayed as a value. |
+| AVAILABILITY_AVAILABLE | 1 | The native owner answered; the values are its own. |
+| AVAILABILITY_UNAVAILABLE | 2 | The owner exists but cannot answer now (reason given): its state unreadable, stale or detached. |
+| AVAILABILITY_NOT_IMPLEMENTED | 3 | No native owner implements it yet (the BSC-V8 checklist names the missing one). |
+
+
+
+<a name="darkbot-bsc-v1-DataQuality"></a>
+
+### DataQuality
+How far the values of a row or projection are proven by native evidence.
+
+| Name | Number | Description |
+| ---- | ------ | ----------- |
+| DATA_QUALITY_UNSPECIFIED | 0 | Not set by any producer; never displayed as a value. |
+| DATA_QUALITY_VERIFIED | 1 | Every value comes from identified native evidence. |
+| DATA_QUALITY_INCOMPLETE | 2 | Some values are missing; each missing field stays absent, never zero. |
+| DATA_QUALITY_UNRESOLVED | 3 | The chain has not decided yet (UNKNOWN handoff, receipt window, reorg depth). |
+| DATA_QUALITY_STALE | 4 | Older than the owner&#39;s freshness rule. |
+| DATA_QUALITY_CONFLICT | 5 | Independent sources disagree (e.g. the second chain source DISAGREES). |
+
+
+
+<a name="darkbot-bsc-v1-PerformanceMetric"></a>
+
+### PerformanceMetric
+The quantity of a performance series.
+
+| Name | Number | Description |
+| ---- | ------ | ----------- |
+| PERFORMANCE_METRIC_UNSPECIFIED | 0 | Not set by any producer; never displayed as a value. |
+| PERFORMANCE_METRIC_REALIZED_NET_PNL | 1 | Cumulative realized net PnL of closed trades, signed decimal wei (no transfers). |
+| PERFORMANCE_METRIC_WALLET_BALANCE | 2 | A wallet&#39;s balance including transfers, decimal wei. |
+| PERFORMANCE_METRIC_WALLET_TRADING_PNL | 3 | A wallet&#39;s trading PnL excluding transfers, signed decimal wei. |
+| PERFORMANCE_METRIC_TRAINING_NET_RESULT | 4 | A training run&#39;s cumulative PAPER net result, signed decimal wei (no real funds). |
+
+
+
+<a name="darkbot-bsc-v1-PerformanceScope"></a>
+
+### PerformanceScope
+What a performance series is about.
+
+| Name | Number | Description |
+| ---- | ------ | ----------- |
+| PERFORMANCE_SCOPE_UNSPECIFIED | 0 | Not set by any producer; never displayed as a value. |
+| PERFORMANCE_SCOPE_LIVE | 1 | The LIVE ledger&#39;s trades. |
+| PERFORMANCE_SCOPE_WALLET | 2 | One BSC wallet (scope_id = its role). |
+| PERFORMANCE_SCOPE_ALL_WALLETS | 3 | Every BSC wallet together. |
+| PERFORMANCE_SCOPE_TRAINING_RUN | 4 | One training run (scope_id = its run_id). |
+| PERFORMANCE_SCOPE_TRAINING_PROFILE | 5 | One training profile across its runs (scope_id = its profile_id). |
+
+
+
+<a name="darkbot-bsc-v1-TimeSource"></a>
+
+### TimeSource
+The clock a time was taken on. Times of different clocks are never subtracted.
+
+| Name | Number | Description |
+| ---- | ------ | ----------- |
+| TIME_SOURCE_UNSPECIFIED | 0 | Not set by any producer; never displayed as a value. |
+| TIME_SOURCE_BLOCK_HEADER | 1 | The block header&#39;s own timestamp (BSC block time, ms); not the producer&#39;s T0. |
+| TIME_SOURCE_LOCAL_WALL | 2 | The host wall clock at a local event (sighting, send, answer). |
+| TIME_SOURCE_RUNTIME_MONOTONIC | 3 | The runtime&#39;s monotonic clock (clock_id of the release record); only differences on one clock are meaningful. |
+| TIME_SOURCE_PRODUCER_WITNESS | 4 | An exact producer T0 from an original execution witness (t0_exact). |
+
+
+
+
+
+
+
+
+
+
+<a name="darkbot_bsc_v1_history-proto"></a>
+<p align="right"><a href="#top">Top</a></p>
+
+## darkbot/bsc/v1/history.proto
+
+
+
+<a name="darkbot-bsc-v1-TradeCounts"></a>
+
+### TradeCounts
+The counts of the whole filtered result (V8 trade summary).
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| pending | [uint64](#uint64) |  | PENDING and UNKNOWN (PEND). |
+| running | [uint64](#uint64) |  | OPEN and EXITING (RUN). |
+| wins | [uint64](#uint64) |  | CLOSED with a gain (WIN). |
+| losses | [uint64](#uint64) |  | CLOSED with a loss (LOSS). |
+| flat | [uint64](#uint64) |  | CLOSED without gain or loss. |
+| failed | [uint64](#uint64) |  | FAILED. |
+| written_off | [uint64](#uint64) |  | WRITTEN_OFF. |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-TradeDetail"></a>
+
+### TradeDetail
+The full detail of one lot.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| availability | [Availability](#darkbot-bsc-v1-Availability) |  | Whether the native owner answered. |
+| unavailable_reason | [string](#string) |  | Why it is not AVAILABLE. |
+| provenance | [OwnerProvenance](#darkbot-bsc-v1-OwnerProvenance) |  | The owner and the ledger snapshot. |
+| row | [TradeRow](#darkbot-bsc-v1-TradeRow) |  | The row. |
+| transactions | [TradeTransaction](#darkbot-bsc-v1-TradeTransaction) | repeated | Every transaction of the lot in nonce order. |
+| sightings | [TradeSighting](#darkbot-bsc-v1-TradeSighting) | repeated | The launch&#39;s sightings per source; empty for a lot without an attributed launch. |
+| launch_hash | [string](#string) |  | The launch transaction hash, 0x hex; empty without a launch (Strategy C). |
+| launch_block | [uint64](#uint64) | optional | The launch&#39;s block; absent without one. |
+| launch_time | [SourcedTime](#darkbot-bsc-v1-SourcedTime) |  | The launch block&#39;s header time. |
+| clock_id | [uint64](#uint64) | optional | The runtime clock of the local timings; absent without a release record. |
+| t0_exact | [bool](#bool) |  | Whether T0 is the producer&#39;s exact time (never without its witness). |
+| t_detect_ns | [uint64](#uint64) | optional | Detection on that clock, ns. |
+| t_select_ns | [uint64](#uint64) | optional | Selection on that clock, ns. |
+| t_send_ns | [uint64](#uint64) | optional | The first qualified send on that clock, ns. |
+| t_ack_ns | [uint64](#uint64) | optional | The first acknowledgement on that clock, ns. |
+| launch_index | [uint64](#uint64) | optional | The launch&#39;s transaction index in its block. |
+| own_index | [uint64](#uint64) | optional | The BUY&#39;s transaction index in its block. |
+| buys_before | [uint64](#uint64) | optional | Other traders&#39; BUYs between the launch and the own BUY. |
+| tokens | [string](#string) | optional | Tokens the BUY received, decimal token units. |
+| grant_generation | [uint64](#uint64) | optional | The grant generation its BUY was admitted under. |
+| config_sha256 | [string](#string) |  | The settings or profile revision its entry took (Strategy C); empty for C3. |
+| decisions | [string](#string) | repeated | The operator decisions the ledger takes of this lot now (RESUME, WRITE_OFF, EXIT_NOW). |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-TradeDetailQuery"></a>
+
+### TradeDetailQuery
+A read of one lot.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| lot | [string](#string) |  | The lot, 0x hex. |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-TradeHistoryPage"></a>
+
+### TradeHistoryPage
+One page of trades, bound to one ledger snapshot (no gap, no duplicate across pages).
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| availability | [Availability](#darkbot-bsc-v1-Availability) |  | Whether the native owner answered. |
+| unavailable_reason | [string](#string) |  | Why it is not AVAILABLE. |
+| provenance | [OwnerProvenance](#darkbot-bsc-v1-OwnerProvenance) |  | The owner and the ledger version the cursor is bound to. |
+| rows | [TradeRow](#darkbot-bsc-v1-TradeRow) | repeated | The rows. |
+| next_cursor | [string](#string) |  | The cursor of the next page; empty on the last one. |
+| has_more | [bool](#bool) |  | Whether another page follows. |
+| total | [uint64](#uint64) |  | Rows matching the query in the snapshot. |
+| counts | [TradeCounts](#darkbot-bsc-v1-TradeCounts) |  | The counts of the whole filtered result. |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-TradeHistoryQuery"></a>
+
+### TradeHistoryQuery
+A bounded, cursor-paged, read-only query of the LIVE trades.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| statuses | [TradeStatus](#darkbot-bsc-v1-TradeStatus) | repeated | Only these states; empty: every state. |
+| gains | [bool](#bool) | optional | Only gains (pnl &gt; 0) or only losses (pnl &lt; 0) among CLOSED; unset: both. |
+| venues | [string](#string) | repeated | Only these venues; empty: every venue. |
+| from_unix_ms | [uint64](#uint64) | optional | BUY time from, unix ms. |
+| to_unix_ms | [uint64](#uint64) | optional | BUY time to, unix ms. |
+| search | [string](#string) |  | A token address or transaction hash (lot, BUY or SELL), exact 0x hex or a prefix of it. |
+| sort | [TradeSort](#darkbot-bsc-v1-TradeSort) |  | The order. |
+| cursor | [string](#string) |  | The previous page&#39;s next_cursor; empty: the first page. |
+| limit | [uint32](#uint32) |  | At most this many rows; the owner caps it. |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-TradeRow"></a>
+
+### TradeRow
+One lot&#39;s row of the trade table (the 17 V8 columns and their identity).
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| lot | [string](#string) |  | The lot: its BUY&#39;s transaction hash, 0x hex (a token bought again is another lot). |
+| token | [string](#string) |  | Column token: the token address, 0x hex (authoritative; no symbol without checked metadata). |
+| status | [TradeStatus](#darkbot-bsc-v1-TradeStatus) |  | Column status: the ledger state. |
+| venue | [string](#string) |  | Column market: the venue its BUY traded on (BSC_VENUE_FLAP, BSC_VENUE_FOUR_CLASSIC, BSC_VENUE_OPENFOUR), from live_ledger Position.venue. |
+| component | [string](#string) |  | BSC_EXEC (C3) or BSC_STRATEGY_C. |
+| input_wei | [string](#string) |  | Column invest: the BUY&#39;s input, decimal wei. |
+| proceeds_wei | [string](#string) | optional | The SELL&#39;s proceeds, decimal wei; absent while not closed. |
+| proceeds_unknown | [bool](#bool) |  | True when the SELL is included without the Portal&#39;s trade event (proceeds counted as 0, PnL a lower bound). |
+| pnl_wei | [string](#string) | optional | Column pnl: proceeds − input − every gas and proven fee, signed decimal wei; absent while open. |
+| roi_ppm | [sint64](#sint64) | optional | Column roi: pnl over input, parts per million, signed, computed natively; absent with pnl. |
+| buy_time | [SourcedTime](#darkbot-bsc-v1-SourcedTime) |  | Column buy: the BUY&#39;s time (its block header; the local send time is in TradeDetail). |
+| sell_time | [SourcedTime](#darkbot-bsc-v1-SourcedTime) |  | Column sell: the SELL&#39;s time (its block header); absent unix_ms while not closed. |
+| hold_ms | [uint64](#uint64) | optional | Column hold: SELL block time − BUY block time, ms, natively; absent while open. |
+| first_source | [string](#string) |  | Column source: the ingress source of the first verified full sighting attributed to this lot; empty without an attributed sighting (a Strategy C BUY has a decision, not a trigger). |
+| lead_before_block_us | [sint64](#sint64) | optional | Column lead: that sighting&#39;s lead before the launch block&#39;s header time, microseconds (negative: after it); absent without an attributed sighting. Never the producer&#39;s T0. |
+| detect_to_send_ns | [uint64](#uint64) | optional | Column send: detection (ingress or decision) to the first qualified send, ns, on the runtime clock of the release record; absent without one. |
+| send_to_ack_ns | [uint64](#uint64) | optional | Column ack: the first qualified send to the first acknowledgement, ns; absent without one. |
+| gas_wei | [string](#string) |  | Column gas: gas of every included or reverted transaction of the lot, decimal wei. |
+| fees_wei | [string](#string) | optional | Other proven fees (taxes, builder tips), decimal wei; absent when none is proven. |
+| placement | [TradePlacement](#darkbot-bsc-v1-TradePlacement) |  | Column placement: from the qualified PLACED fact only. |
+| exit_reason | [ExitReason](#darkbot-bsc-v1-ExitReason) |  | Column exit: why it ended. |
+| exit_reason_source | [ExitReasonSource](#darkbot-bsc-v1-ExitReasonSource) |  | Where the exit reason comes from. |
+| exit_reason_detail | [string](#string) |  | The owner&#39;s native exit text (the journal&#39;s or the fact&#39;s); empty without one. |
+| buy_tx_hash | [string](#string) |  | Column tx: the BUY transaction hash, 0x hex. |
+| sell_tx_hash | [string](#string) |  | The SELL transaction hash, 0x hex; empty while not sold. |
+| run | [uint64](#uint64) | optional | The run whose journal holds its release; absent without a release record. |
+| ledger_version | [uint64](#uint64) |  | The ledger version the row was read at. |
+| quality | [DataQuality](#darkbot-bsc-v1-DataQuality) |  | How far the row is proven (UNRESOLVED during a receipt or reorg window). |
+| quality_reasons | [string](#string) | repeated | Why the quality is not VERIFIED. |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-TradeSighting"></a>
+
+### TradeSighting
+One ingress source&#39;s sighting of the lot&#39;s launch.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| source | [string](#string) |  | The source ID (BSC_INGRESS_GETH, …). |
+| capability | [string](#string) |  | FULL (the full transaction) or HASH_ONLY. |
+| seen | [SourcedTime](#darkbot-bsc-v1-SourcedTime) |  | The local wall-clock time of the sighting. |
+| lead_before_block_us | [sint64](#sint64) | optional | Lead before the launch block&#39;s header time, microseconds (negative: after it). |
+| first_verified | [bool](#bool) |  | Whether this is the first verified full sighting. |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-TradeTransaction"></a>
+
+### TradeTransaction
+One transaction of a lot and what the chain made of it.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| tx_hash | [string](#string) |  | Transaction hash, 0x hex. |
+| intent | [string](#string) |  | BUY, APPROVE, SELL or BURN. |
+| nonce | [uint64](#uint64) |  | The buyer&#39;s nonce it used. |
+| state | [string](#string) |  | RELEASED, UNKNOWN, INCLUDED, REVERTED, REPLACED or ORPHANED. |
+| block_number | [uint64](#uint64) | optional | The block that included it; absent while not included. |
+| block_time | [SourcedTime](#darkbot-bsc-v1-SourcedTime) |  | That block&#39;s header time. |
+| gas_wei | [string](#string) | optional | Its gas, decimal wei; absent while not included. |
+| source | [string](#string) |  | RECEIPT when the receipt recovery decided it; empty otherwise. |
+| released | [SourcedTime](#darkbot-bsc-v1-SourcedTime) |  | The local time its bytes were handed to the first adapter. |
+
+
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-ExitReason"></a>
+
+### ExitReason
+Why a position ended.
+
+| Name | Number | Description |
+| ---- | ------ | ----------- |
+| EXIT_REASON_UNSPECIFIED | 0 | Not set by any producer; never displayed as a value. |
+| EXIT_REASON_NONE | 1 | Still held: no exit yet. |
+| EXIT_REASON_TARGET | 2 | The net target multiple was reached. |
+| EXIT_REASON_STOP | 3 | The net stop multiple was reached. |
+| EXIT_REASON_TIMEOUT | 4 | The hold timeout ran out. |
+| EXIT_REASON_CREATOR_SELL | 5 | The token&#39;s creator sold (creator-sell exit). |
+| EXIT_REASON_OPERATOR_EXIT | 6 | The operator&#39;s EXIT_NOW. |
+| EXIT_REASON_WRITE_OFF | 7 | The operator&#39;s WRITE_OFF. |
+| EXIT_REASON_BUY_FAILED | 8 | The BUY failed; nothing to exit. |
+| EXIT_REASON_DEX_MIGRATED | 9 | The token migrated to its DEX and was exited there (DEX exit). |
+| EXIT_REASON_OTHER | 10 | An exit whose reason the owner holds in exit_reason_detail only. |
+
+
+
+<a name="darkbot-bsc-v1-ExitReasonSource"></a>
+
+### ExitReasonSource
+Where an exit reason comes from.
+
+| Name | Number | Description |
+| ---- | ------ | ----------- |
+| EXIT_REASON_SOURCE_UNSPECIFIED | 0 | Not set by any producer; never displayed as a value. |
+| EXIT_REASON_SOURCE_STRATEGY_JOURNAL | 1 | The Strategy C journal&#39;s exit decision (Y record). |
+| EXIT_REASON_SOURCE_LEDGER_OPERATOR | 2 | An operator fact of the LIVE ledger (EXIT_NOW, WRITE_OFF). |
+| EXIT_REASON_SOURCE_LEDGER_CHAIN | 3 | A chain fact of the LIVE ledger (a failed BUY, a DEX-routed SELL). |
+| EXIT_REASON_SOURCE_UNKNOWN | 4 | No fact names it. |
+
+
+
+<a name="darkbot-bsc-v1-TradePlacement"></a>
+
+### TradePlacement
+Where an own BUY landed relative to the launch (the ledger&#39;s PLACED fact).
+
+| Name | Number | Description |
+| ---- | ------ | ----------- |
+| TRADE_PLACEMENT_UNSPECIFIED | 0 | Not set by any producer; never displayed as a value. |
+| TRADE_PLACEMENT_UNKNOWN | 1 | No PLACED fact (yet). |
+| TRADE_PLACEMENT_FIRST | 2 | First other-than-launch BUY of the token in the launch&#39;s block, from the qualified verdict. |
+| TRADE_PLACEMENT_LATE | 3 | In the launch&#39;s block after other BUYs. |
+| TRADE_PLACEMENT_OTHER_BLOCK | 4 | In another block than the launch. |
+| TRADE_PLACEMENT_NO_TOKENS | 5 | Included without tokens received. |
+
+
+
+<a name="darkbot-bsc-v1-TradeSort"></a>
+
+### TradeSort
+The order of a trade page.
+
+| Name | Number | Description |
+| ---- | ------ | ----------- |
+| TRADE_SORT_UNSPECIFIED | 0 | Not set: ACTIVE_FIRST. |
+| TRADE_SORT_ACTIVE_FIRST | 1 | Pending, open and exiting first, then the rest; each group newest BUY first (V8 default). |
+| TRADE_SORT_NEWEST | 2 | Newest BUY first. |
+| TRADE_SORT_OLDEST | 3 | Oldest BUY first. |
+
+
+
+<a name="darkbot-bsc-v1-TradeStatus"></a>
+
+### TradeStatus
+The ledger state of a lot (LivePosition.state plus the owner&#39;s write-off and unknown).
+
+| Name | Number | Description |
+| ---- | ------ | ----------- |
+| TRADE_STATUS_UNSPECIFIED | 0 | Not set by any producer; never displayed as a value. |
+| TRADE_STATUS_PENDING | 1 | The BUY was released, the chain has not included it. |
+| TRADE_STATUS_OPEN | 2 | The BUY is included; the position is held. |
+| TRADE_STATUS_EXITING | 3 | An exit step is released. |
+| TRADE_STATUS_CLOSED | 4 | The SELL is included. |
+| TRADE_STATUS_FAILED | 5 | The BUY failed (reverted, dropped, replaced); its gas is the loss. |
+| TRADE_STATUS_WRITTEN_OFF | 6 | The operator wrote the lot off (input and gas lost); never a normal SELL. |
+| TRADE_STATUS_UNKNOWN | 7 | The owner cannot decide (an UNKNOWN handoff, unreadable facts). |
+
+
+
+
+
+
+
+
+
+
+<a name="darkbot_bsc_v1_training-proto"></a>
+<p align="right"><a href="#top">Top</a></p>
+
+## darkbot/bsc/v1/training.proto
+
+
+
+<a name="darkbot-bsc-v1-StrategyCSettings"></a>
+
+### StrategyCSettings
+A complete Strategy C configuration. Each of the nine settable keys is optional: absent means
+the configuration file&#39;s value (the native owner&#39;s rule); a profile stores all of them.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| input_wei | [string](#string) | optional | BSC_STRATEGY_C_INPUT_WEI: the BUY input per entry, decimal wei. |
+| target_net_multiple | [string](#string) | optional | BSC_STRATEGY_C_TARGET_NET_MULTIPLE: exit at this net multiple of the input (after every cost), exact decimal at ratio_places, e.g. &#34;1.50&#34;. |
+| stop_net_multiple | [string](#string) | optional | BSC_STRATEGY_C_STOP_NET_MULTIPLE: exit at this net multiple, exact decimal at ratio_places. |
+| observation_ms | [uint64](#uint64) | optional | BSC_STRATEGY_C_OBSERVATION_MS: the observation window before an entry, milliseconds. |
+| hold_ms | [uint64](#uint64) | optional | BSC_STRATEGY_C_HOLD_MS: the longest hold before the timeout exit, milliseconds. |
+| max_open | [uint32](#uint32) | optional | BSC_STRATEGY_C_MAX_OPEN: the most positions open at once. |
+| creator_sold_before_fill | [CreatorSoldBeforeFill](#darkbot-bsc-v1-CreatorSoldBeforeFill) |  | BSC_STRATEGY_C_CREATOR_SOLD_BEFORE_FILL. |
+| creator_sell_exit | [CreatorSellExit](#darkbot-bsc-v1-CreatorSellExit) |  | BSC_STRATEGY_C_CREATOR_SELL_EXIT. |
+| filters | [StrategyFilterRule](#darkbot-bsc-v1-StrategyFilterRule) | repeated | BSC_STRATEGY_C_FILTERS: every filterable feature in native order, enabled or not. |
+| first_buyer_window | [uint32](#uint32) | optional | BSC_STRATEGY_C_FIRST_BUYER_WINDOW: the buyers counted as early (1..100). In the runtime configuration today but no settable key yet (BSC-V8-05): read-only until the owner takes it. |
+| ratio_places | [uint32](#uint32) | optional | BSC_STRATEGY_C_RATIO_PLACES: decimal places of ratios and multiples (read-only). |
+| fill_delay_blocks | [uint32](#uint32) | optional | BSC_STRATEGY_C_FILL_DELAY_BLOCKS (read-only, configuration file). |
+| gas_price_wei | [string](#string) | optional | BSC_STRATEGY_C_GAS_PRICE_WEI (read-only, configuration file), decimal wei. |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-StrategyCSettingsSetAllCommand"></a>
+
+### StrategyCSettingsSetAllCommand
+Params of `bsc.strategy.set_all` (BSC-V8-04, prepared): the complete form as ONE validated
+revision; a refused field refuses the whole set, nothing is stored half.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| settings | [StrategyCSettings](#darkbot-bsc-v1-StrategyCSettings) |  | Every settable key; the owner refuses a set that leaves one out. |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-StrategyCSettingsState"></a>
+
+### StrategyCSettingsState
+The stored and the running Strategy C configuration of the native owner.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| availability | [Availability](#darkbot-bsc-v1-Availability) |  | Whether the native owner answered. |
+| unavailable_reason | [string](#string) |  | Why it is not AVAILABLE. |
+| provenance | [OwnerProvenance](#darkbot-bsc-v1-OwnerProvenance) |  | The owner and its settings generation. |
+| stored | [StrategyCSettings](#darkbot-bsc-v1-StrategyCSettings) |  | The stored configuration (absent keys: the configuration file&#39;s). |
+| stored_revision | [uint64](#uint64) |  | The stored revision (settings generation): the compare-and-swap of the next save. |
+| stored_config_sha256 | [string](#string) |  | SHA-256 of the stored configuration&#39;s canonical native text, lowercase hex. |
+| running | [StrategyCSettings](#darkbot-bsc-v1-StrategyCSettings) |  | What the running strategy took at its start; absent while it does not run. |
+| running_revision | [uint64](#uint64) | optional | The revision the running strategy took; absent while it does not run. |
+| running_config_sha256 | [string](#string) |  | SHA-256 of the running configuration&#39;s canonical native text; empty while it does not run. |
+| apply_status | [SettingsApplyStatus](#darkbot-bsc-v1-SettingsApplyStatus) |  | Whether the stored revision is in effect. |
+| refusal_reason | [string](#string) |  | The strategy&#39;s refusal of its settings; empty without one. |
+| request_id | [string](#string) |  | The request that wrote the stored revision; empty while none. |
+| features | [StrategyFeatureSpec](#darkbot-bsc-v1-StrategyFeatureSpec) | repeated | The filterable features with their unit and places, in native order. |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-StrategyFeatureSpec"></a>
+
+### StrategyFeatureSpec
+One filterable native feature as the owner defines it (no frontend list of units or places).
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| name | [string](#string) |  | The native feature name. |
+| index | [uint32](#uint32) |  | Its position in features.rs NAMES. |
+| unit | [string](#string) |  | Native unit: count, wei, ratio, percent or milliseconds. |
+| places | [uint32](#uint32) |  | Decimal places a bound may have (BNB amounts 18, ratios BSC_STRATEGY_C_RATIO_PLACES). |
+| signed | [bool](#bool) |  | Whether a bound may be negative (signed features such as net_buy_flow_bnb, price_change). |
+| filterable | [bool](#bool) |  | False for provider_gap_flag: a data-quality flag, never a filter. |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-StrategyFilterRule"></a>
+
+### StrategyFilterRule
+One entry filter `feature:min:max` of BSC_STRATEGY_C_FILTERS. A disabled rule is not part of the
+serialized native string; an enabled rule without bounds still fails on a NULL feature.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| feature | [string](#string) |  | The native feature name (features.rs NAMES[0..15]); never provider_gap_flag. |
+| enabled | [bool](#bool) |  | Whether the rule is part of the configuration. |
+| min | [string](#string) | optional | Lower bound, exact decimal at the feature&#39;s places; absent: unbounded. |
+| max | [string](#string) | optional | Upper bound, exact decimal at the feature&#39;s places; absent: unbounded. |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-TrainingProfile"></a>
+
+### TrainingProfile
+A named, versioned Strategy C configuration of the native owner (one strategy, many profiles).
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| profile_id | [string](#string) |  | Stable owner identity, never reused. |
+| name | [string](#string) |  | The operator&#39;s name. |
+| revision | [uint64](#uint64) |  | The profile revision: the compare-and-swap of an update, delete or run start. |
+| settings | [StrategyCSettings](#darkbot-bsc-v1-StrategyCSettings) |  | The complete configuration of this revision. |
+| config_sha256 | [string](#string) |  | SHA-256 of this revision&#39;s canonical native configuration text, lowercase hex. |
+| venues | [string](#string) | repeated | The venues it trains on (BSC_VENUE_FLAP, BSC_VENUE_FOUR_CLASSIC, BSC_VENUE_OPENFOUR), as the owner offers them; never an implicit &#34;all markets&#34;. |
+| created_unix_ms | [uint64](#uint64) |  | Creation time, unix ms. |
+| updated_unix_ms | [uint64](#uint64) |  | Time of this revision, unix ms. |
+| status | [TrainingProfileStatus](#darkbot-bsc-v1-TrainingProfileStatus) |  | Its lifecycle. |
+| run_ids | [string](#string) | repeated | The runs that reference it, newest first (bounded; the run query has all). |
+| in_use | [bool](#bool) |  | Whether a running run or the LIVE selection uses it (edits then need a clone). |
+| in_use_reason | [string](#string) |  | What uses it; empty when not in use. |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-TrainingProfileCloneCommand"></a>
+
+### TrainingProfileCloneCommand
+Params of `bsc.training.profile.clone` (prepared): a new profile from one revision.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| source_profile_id | [string](#string) |  | The profile copied. |
+| source_revision | [uint64](#uint64) |  | The revision copied. |
+| name | [string](#string) |  | The new profile&#39;s name. |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-TrainingProfileCreateCommand"></a>
+
+### TrainingProfileCreateCommand
+Params of `bsc.training.profile.create` (prepared).
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| name | [string](#string) |  | The operator&#39;s name. |
+| settings | [StrategyCSettings](#darkbot-bsc-v1-StrategyCSettings) |  | The complete configuration. |
+| venues | [string](#string) | repeated | The venues it trains on. |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-TrainingProfileDeleteCommand"></a>
+
+### TrainingProfileDeleteCommand
+Params of `bsc.training.profile.delete` (prepared): refused while a run or LIVE uses it.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| profile_id | [string](#string) |  | The profile. |
+| archive | [bool](#bool) |  | Archive instead of delete (runs and results stay readable either way). |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-TrainingProfileUpdateCommand"></a>
+
+### TrainingProfileUpdateCommand
+Params of `bsc.training.profile.update` (prepared): a new revision of one profile.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| profile_id | [string](#string) |  | The profile. |
+| name | [string](#string) |  | The operator&#39;s name. |
+| settings | [StrategyCSettings](#darkbot-bsc-v1-StrategyCSettings) |  | The complete configuration. |
+| venues | [string](#string) | repeated | The venues it trains on. |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-TrainingProfiles"></a>
+
+### TrainingProfiles
+The training profiles of the native owner.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| availability | [Availability](#darkbot-bsc-v1-Availability) |  | Whether the native owner answered. |
+| unavailable_reason | [string](#string) |  | Why it is not AVAILABLE. |
+| provenance | [OwnerProvenance](#darkbot-bsc-v1-OwnerProvenance) |  | The owner and its catalog version. |
+| profiles | [TrainingProfile](#darkbot-bsc-v1-TrainingProfile) | repeated | Every non-deleted profile. |
+| catalog_version | [uint64](#uint64) |  | The catalog version: the compare-and-swap of a create or clone. |
+| live_profile_id | [string](#string) |  | The profile the LIVE selection names; empty without one. |
+| live_profile_revision | [uint64](#uint64) | optional | The revision the LIVE selection is bound to. |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-TrainingProfilesQuery"></a>
+
+### TrainingProfilesQuery
+A bounded read of the training profiles.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| include_archived | [bool](#bool) |  | Also archived profiles. |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-TrainingResult"></a>
+
+### TrainingResult
+The results of one training run, from its native journal; UNKNOWN stays absent, never zero.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| evaluated | [uint64](#uint64) |  | Launches the strategy evaluated. |
+| passed | [uint64](#uint64) |  | Of them passed every filter. |
+| rejected | [uint64](#uint64) |  | Of them rejected by a filter. |
+| data_incomplete | [uint64](#uint64) |  | Of them DATA_INCOMPLETE (a coverage gap, never a pass). |
+| not_tracked | [uint64](#uint64) |  | Launches not tracked (the venue or curve not exact). |
+| unresolved | [uint64](#uint64) |  | Positions whose value is unresolved (the curve stopped being exact). |
+| entered | [uint64](#uint64) |  | PAPER entries. |
+| exits_target | [uint64](#uint64) |  | Exits at the target. |
+| exits_stop | [uint64](#uint64) |  | Exits at the stop. |
+| exits_creator_sell | [uint64](#uint64) |  | Exits by a creator sale. |
+| exits_timeout | [uint64](#uint64) |  | Exits at the hold timeout. |
+| wins | [uint64](#uint64) |  | Closed positions with a gain. |
+| losses | [uint64](#uint64) |  | Closed positions with a loss. |
+| gain_wei | [string](#string) |  | Sum of the gains, decimal wei. |
+| loss_wei | [string](#string) |  | Sum of the losses, decimal wei (a positive amount). |
+| net_wei | [string](#string) | optional | Net result after every cost, signed decimal wei; absent while unresolved positions exist. |
+| open_positions | [uint64](#uint64) |  | Positions still open. |
+| sources | [string](#string) | repeated | The ingress sources the run observed. |
+| observable_ms | [uint64](#uint64) | optional | The observed market time with complete coverage, ms. |
+| lost_records | [uint64](#uint64) |  | Records lost by the capture. |
+| ingress_dropped | [uint64](#uint64) |  | Ingress messages dropped. |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-TrainingRun"></a>
+
+### TrainingRun
+One training run of a profile revision.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| run_id | [string](#string) |  | Stable run identity, never reused. |
+| profile_id | [string](#string) |  | The profile it runs. |
+| profile_revision | [uint64](#uint64) |  | The profile revision it runs. |
+| config_sha256 | [string](#string) |  | SHA-256 of the configuration it runs, lowercase hex. |
+| mode | [TrainingRunMode](#darkbot-bsc-v1-TrainingRunMode) |  | How it executes. |
+| venues | [string](#string) | repeated | The venues it trains on. |
+| plan | [TrainingRunPlan](#darkbot-bsc-v1-TrainingRunPlan) |  | Its bound. |
+| started_unix_ms | [uint64](#uint64) | optional | Start, unix ms; absent before it started. |
+| ended_unix_ms | [uint64](#uint64) | optional | End, unix ms; absent while running. |
+| status | [TrainingRunStatus](#darkbot-bsc-v1-TrainingRunStatus) |  | Its lifecycle. |
+| stop_reason | [string](#string) |  | Why it ended (PLAN_DURATION, PLAN_LAUNCH_COUNT, STOP_REQUESTED, a failure); empty while running. |
+| launches_processed | [uint64](#uint64) |  | Qualified launches processed so far. |
+| result | [TrainingResult](#darkbot-bsc-v1-TrainingResult) |  | Its results so far. |
+| provenance | [OwnerProvenance](#darkbot-bsc-v1-OwnerProvenance) |  | The owner and journal the run was read from. |
+| request_id | [string](#string) |  | The request that started it. |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-TrainingRunPage"></a>
+
+### TrainingRunPage
+One page of training runs, newest first, bound to one owner snapshot.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| availability | [Availability](#darkbot-bsc-v1-Availability) |  | Whether the native owner answered. |
+| unavailable_reason | [string](#string) |  | Why it is not AVAILABLE. |
+| provenance | [OwnerProvenance](#darkbot-bsc-v1-OwnerProvenance) |  | The owner and the snapshot the cursor is bound to. |
+| runs | [TrainingRun](#darkbot-bsc-v1-TrainingRun) | repeated | The runs. |
+| next_cursor | [string](#string) |  | The cursor of the next page; empty on the last one. |
+| has_more | [bool](#bool) |  | Whether another page follows. |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-TrainingRunPlan"></a>
+
+### TrainingRunPlan
+The bound of a training run.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| stop_kind | [TrainingRunStopKind](#darkbot-bsc-v1-TrainingRunStopKind) |  | What ends it. |
+| duration_ms | [uint64](#uint64) | optional | The run&#39;s length for DURATION, milliseconds. |
+| max_launches | [uint64](#uint64) | optional | The qualified launches for LAUNCH_COUNT. |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-TrainingRunQuery"></a>
+
+### TrainingRunQuery
+A bounded, cursor-paged read of training runs.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| profile_id | [string](#string) |  | Only runs of this profile; empty: every profile. |
+| statuses | [TrainingRunStatus](#darkbot-bsc-v1-TrainingRunStatus) | repeated | Only runs in these states; empty: every state. |
+| cursor | [string](#string) |  | The previous page&#39;s next_cursor; empty: the first page. |
+| limit | [uint32](#uint32) |  | At most this many runs; the owner caps it. |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-TrainingRunStartCommand"></a>
+
+### TrainingRunStartCommand
+Params of `bsc.training.run.start` (prepared).
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| profile_id | [string](#string) |  | The profile. |
+| mode | [TrainingRunMode](#darkbot-bsc-v1-TrainingRunMode) |  | How it executes. |
+| venues | [string](#string) | repeated | The venues it trains on (a subset of the profile&#39;s). |
+| plan | [TrainingRunPlan](#darkbot-bsc-v1-TrainingRunPlan) |  | Its bound. |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-TrainingRunStopCommand"></a>
+
+### TrainingRunStopCommand
+Params of `bsc.training.run.stop` (prepared); CommandRequest.resource_id names the run.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| reason | [string](#string) |  | Why the operator stops it (free text, diagnostic only). |
+
+
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-CreatorSellExit"></a>
+
+### CreatorSellExit
+The creator-sell exit (BSC_STRATEGY_C_CREATOR_SELL_EXIT). A team-sell exit is NOT_IMPLEMENTED
+(BSC-V8-06) and has no field until a native wallet attribution and sell signal exist.
+
+| Name | Number | Description |
+| ---- | ------ | ----------- |
+| CREATOR_SELL_EXIT_UNSPECIFIED | 0 | Not set: the configuration file&#39;s value. |
+| CREATOR_SELL_EXIT_ENABLED | 1 | ENABLED: a sale by the token&#39;s creator ends the position. |
+| CREATOR_SELL_EXIT_DISABLED | 2 | DISABLED: a creator sale does not end the position. |
+
+
+
+<a name="darkbot-bsc-v1-CreatorSoldBeforeFill"></a>
+
+### CreatorSoldBeforeFill
+The creator selling before the BUY fills (BSC_STRATEGY_C_CREATOR_SOLD_BEFORE_FILL).
+
+| Name | Number | Description |
+| ---- | ------ | ----------- |
+| CREATOR_SOLD_BEFORE_FILL_UNSPECIFIED | 0 | Not set: the configuration file&#39;s value. |
+| CREATOR_SOLD_BEFORE_FILL_FREE_CANCEL | 1 | FREE_CANCEL: the entry is cancelled before execution. |
+| CREATOR_SOLD_BEFORE_FILL_TX_LANDS | 2 | TX_LANDS: the BUY transaction may still land; never a guaranteed fill. |
+
+
+
+<a name="darkbot-bsc-v1-SettingsApplyStatus"></a>
+
+### SettingsApplyStatus
+Whether a stored Strategy C configuration is in effect.
+
+| Name | Number | Description |
+| ---- | ------ | ----------- |
+| SETTINGS_APPLY_STATUS_UNSPECIFIED | 0 | Not set by any producer; never displayed as a value. |
+| SETTINGS_APPLY_STATUS_IN_EFFECT | 1 | The running strategy took the stored revision at its start. |
+| SETTINGS_APPLY_STATUS_SAVED_APPLIES_NEXT_START | 2 | Stored; the running strategy keeps the revision of its start until its next start. |
+| SETTINGS_APPLY_STATUS_NOT_RUNNING | 3 | Strategy C does not run: the stored revision applies at its next start. |
+| SETTINGS_APPLY_STATUS_REFUSED | 4 | The strategy refused its settings at its start (SETTINGS_REFUSED, GAS_EVIDENCE_REFUSED). |
+
+
+
+<a name="darkbot-bsc-v1-TrainingProfileStatus"></a>
+
+### TrainingProfileStatus
+The lifecycle of a training profile.
+
+| Name | Number | Description |
+| ---- | ------ | ----------- |
+| TRAINING_PROFILE_STATUS_UNSPECIFIED | 0 | Not set by any producer; never displayed as a value. |
+| TRAINING_PROFILE_STATUS_ACTIVE | 1 | Usable for runs and the LIVE selection. |
+| TRAINING_PROFILE_STATUS_ARCHIVED | 2 | Kept with its runs and results, not selectable. |
+| TRAINING_PROFILE_STATUS_DELETED | 3 | Deleted; kept only while a run or result references it. |
+
+
+
+<a name="darkbot-bsc-v1-TrainingRunMode"></a>
+
+### TrainingRunMode
+How a training run executes. Never with real funds or the LIVE wallet, nonce or budget.
+
+| Name | Number | Description |
+| ---- | ------ | ----------- |
+| TRAINING_RUN_MODE_UNSPECIFIED | 0 | Not set by any producer; never displayed as a value. |
+| TRAINING_RUN_MODE_PAPER | 1 | PAPER on live market data: decisions, PAPER BUYs and exits valued by the exact curve. |
+| TRAINING_RUN_MODE_SHADOW | 2 | SHADOW: the production path to the PAPER sink, nothing sent. |
+| TRAINING_RUN_MODE_REPLAY | 3 | Offline replay of recorded journals (strategy-replay). |
+
+
+
+<a name="darkbot-bsc-v1-TrainingRunStatus"></a>
+
+### TrainingRunStatus
+The lifecycle of a training run.
+
+| Name | Number | Description |
+| ---- | ------ | ----------- |
+| TRAINING_RUN_STATUS_UNSPECIFIED | 0 | Not set by any producer; never displayed as a value. |
+| TRAINING_RUN_STATUS_PENDING | 1 | Accepted, not started. |
+| TRAINING_RUN_STATUS_RUNNING | 2 | Running. |
+| TRAINING_RUN_STATUS_STOPPING | 3 | A stop was requested; the run seals its results. |
+| TRAINING_RUN_STATUS_COMPLETED | 4 | Ended by its plan (duration or launch count). |
+| TRAINING_RUN_STATUS_STOPPED | 5 | Ended by a stop request. |
+| TRAINING_RUN_STATUS_FAILED | 6 | Ended by a failure (stop_reason). |
+| TRAINING_RUN_STATUS_UNKNOWN | 7 | The owner cannot tell (state unreadable, crash before seal). |
+
+
+
+<a name="darkbot-bsc-v1-TrainingRunStopKind"></a>
+
+### TrainingRunStopKind
+What ends a training run.
+
+| Name | Number | Description |
+| ---- | ------ | ----------- |
+| TRAINING_RUN_STOP_KIND_UNSPECIFIED | 0 | Not set by any producer; never displayed as a value. |
+| TRAINING_RUN_STOP_KIND_DURATION | 1 | After duration_ms. |
+| TRAINING_RUN_STOP_KIND_LAUNCH_COUNT | 2 | After max_launches qualified launches processed. |
+| TRAINING_RUN_STOP_KIND_UNTIL_STOPPED | 3 | Only by a stop request. |
+
+
+
+
+
+
+
+
+
+
+<a name="darkbot_bsc_v1_wallet-proto"></a>
+<p align="right"><a href="#top">Top</a></p>
+
+## darkbot/bsc/v1/wallet.proto
+
+
+
+<a name="darkbot-bsc-v1-WalletBalanceSnapshot"></a>
+
+### WalletBalanceSnapshot
+A wallet balance at one block, with its age and source.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| role | [WalletRole](#darkbot-bsc-v1-WalletRole) |  | The wallet. |
+| address | [string](#string) |  | Its address, 0x hex. |
+| chain_id | [uint64](#uint64) |  | Chain identity. |
+| balance_wei | [string](#string) |  | The balance, decimal wei. |
+| reserved_wei | [string](#string) | optional | Of it reserved (open trades&#39; budget, a pending transfer), decimal wei; absent when unknown. |
+| available_wei | [string](#string) | optional | Of it freely available, decimal wei; absent when unknown. |
+| block_number | [uint64](#uint64) | optional | The block it was read at. |
+| observed | [SourcedTime](#darkbot-bsc-v1-SourcedTime) |  | When it was read. |
+| source | [string](#string) |  | The reader (LIVE_PROBE, READINESS_SNAPSHOT, TRANSFER_OWNER). |
+| quality | [DataQuality](#darkbot-bsc-v1-DataQuality) |  | How far it is proven (STALE when older than the owner&#39;s freshness rule). |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-WalletDestination"></a>
+
+### WalletDestination
+A saved, confirmed destination address (e.g. a MetaMask wallet&#39;s BSC address).
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| destination_id | [string](#string) |  | Stable owner identity. |
+| label | [string](#string) |  | The operator&#39;s label. |
+| address | [string](#string) |  | The address, 0x hex (checksummed by the owner). |
+| chain_id | [uint64](#uint64) |  | Chain identity. |
+| confirmed | [bool](#bool) |  | Whether the operator confirmed it (only confirmed destinations receive). |
+| created_unix_ms | [uint64](#uint64) |  | When it was saved, unix ms. |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-WalletDestinationSetCommand"></a>
+
+### WalletDestinationSetCommand
+Params of `bsc.wallet.destination.set` (prepared).
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| label | [string](#string) |  | The operator&#39;s label. |
+| address | [string](#string) |  | The address, 0x hex. |
+| chain_id | [uint64](#uint64) |  | Chain identity. |
+| remove | [bool](#bool) |  | Remove the destination instead (its id in CommandRequest.resource_id). |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-WalletHistoryPage"></a>
+
+### WalletHistoryPage
+One page of wallet movements, newest first, bound to one owner snapshot.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| availability | [Availability](#darkbot-bsc-v1-Availability) |  | Whether the native owner answered. |
+| unavailable_reason | [string](#string) |  | Why it is not AVAILABLE. |
+| provenance | [OwnerProvenance](#darkbot-bsc-v1-OwnerProvenance) |  | The owner and the snapshot the cursor is bound to. |
+| movements | [WalletMovement](#darkbot-bsc-v1-WalletMovement) | repeated | The movements. |
+| next_cursor | [string](#string) |  | The cursor of the next page; empty on the last one. |
+| has_more | [bool](#bool) |  | Whether another page follows. |
+| deposited_wei | [string](#string) |  | Deposits of the whole filtered result, decimal wei. |
+| withdrawn_wei | [string](#string) |  | Withdrawals of the whole filtered result, decimal wei (a positive amount). |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-WalletHistoryQuery"></a>
+
+### WalletHistoryQuery
+A bounded, cursor-paged, read-only query of wallet movements.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| roles | [WalletRole](#darkbot-bsc-v1-WalletRole) | repeated | Only these wallets; empty: every BSC wallet. |
+| kinds | [WalletMovementKind](#darkbot-bsc-v1-WalletMovementKind) | repeated | Only these kinds; empty: every kind. |
+| from_unix_ms | [uint64](#uint64) | optional | Block time from, unix ms. |
+| to_unix_ms | [uint64](#uint64) | optional | Block time to, unix ms. |
+| cursor | [string](#string) |  | The previous page&#39;s next_cursor; empty: the first page. |
+| limit | [uint32](#uint32) |  | At most this many movements; the owner caps it. |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-WalletMovement"></a>
+
+### WalletMovement
+One wallet movement, proven by its block and receipt.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| movement_id | [string](#string) |  | Stable owner identity of the movement. |
+| role | [WalletRole](#darkbot-bsc-v1-WalletRole) |  | The wallet it belongs to. |
+| wallet_address | [string](#string) |  | That wallet&#39;s address, 0x hex. |
+| chain_id | [uint64](#uint64) |  | Chain identity. |
+| kind | [WalletMovementKind](#darkbot-bsc-v1-WalletMovementKind) |  | What it is. |
+| counterparty_address | [string](#string) |  | The other side, 0x hex; empty for a fee. |
+| counterparty_role | [WalletRole](#darkbot-bsc-v1-WalletRole) |  | The other side&#39;s role. |
+| amount_wei | [string](#string) |  | The amount for this wallet, signed decimal wei (&#43; received, − sent). |
+| fee_wei | [string](#string) |  | Its gas and fees, decimal wei. |
+| tx_hash | [string](#string) |  | The transaction hash, 0x hex. |
+| nonce | [uint64](#uint64) | optional | The sender&#39;s nonce, when this wallet sent it. |
+| block_number | [uint64](#uint64) | optional | The including block; absent while not included. |
+| block_time | [SourcedTime](#darkbot-bsc-v1-SourcedTime) |  | That block&#39;s header time. |
+| status | [ChainTxStatus](#darkbot-bsc-v1-ChainTxStatus) |  | What the chain made of it. |
+| origin | [string](#string) |  | The native fact it comes from: LIVE_LEDGER, TRANSFER_OWNER or CHAIN_BACKFILL. |
+| lot | [string](#string) |  | The lot of a trade movement; empty otherwise. |
+| transfer_request_id | [string](#string) |  | The transfer or sweep request of a withdrawal; empty otherwise. |
+| quality | [DataQuality](#darkbot-bsc-v1-DataQuality) |  | How far it is proven. |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-WalletSweepPolicy"></a>
+
+### WalletSweepPolicy
+The automatic transfer above a threshold, as its native owner holds it.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| enabled | [bool](#bool) |  | Whether it is enabled. |
+| source_role | [WalletRole](#darkbot-bsc-v1-WalletRole) |  | The wallet it sweeps. |
+| destination_id | [string](#string) |  | The saved destination it sweeps to. |
+| destination_address | [string](#string) |  | That destination&#39;s address, 0x hex. |
+| threshold_wei | [string](#string) |  | The balance above which it sweeps, decimal wei. |
+| retain_wei | [string](#string) |  | What always stays in the wallet, decimal wei (below threshold_wei). |
+| policy_version | [uint64](#uint64) |  | The policy version: the compare-and-swap of the next change. |
+| last_execution | [WalletTransferState](#darkbot-bsc-v1-WalletTransferState) |  | The last sweep it caused; absent before any. |
+| request_id | [string](#string) |  | The request that wrote this version. |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-WalletSweepPolicySetCommand"></a>
+
+### WalletSweepPolicySetCommand
+Params of `bsc.wallet.sweep.set` (prepared).
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| enabled | [bool](#bool) |  | Whether it is enabled. |
+| source_role | [WalletRole](#darkbot-bsc-v1-WalletRole) |  | The wallet it sweeps. |
+| destination_id | [string](#string) |  | The saved, confirmed destination. |
+| threshold_wei | [string](#string) |  | The balance above which it sweeps, decimal wei. |
+| retain_wei | [string](#string) |  | What always stays in the wallet, decimal wei. |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-WalletTransferReceipt"></a>
+
+### WalletTransferReceipt
+The chain receipt of a transfer or sweep.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| request_id | [string](#string) |  | The request. |
+| status | [TransferStatus](#darkbot-bsc-v1-TransferStatus) |  | Its final or current lifecycle state. |
+| tx_hash | [string](#string) |  | Its transaction hash, 0x hex. |
+| block_number | [uint64](#uint64) | optional | The including block. |
+| block_time | [SourcedTime](#darkbot-bsc-v1-SourcedTime) |  | That block&#39;s header time. |
+| gas_used | [uint64](#uint64) | optional | Gas used. |
+| fee_wei | [string](#string) | optional | The fee paid, decimal wei. |
+| reason | [string](#string) |  | The owner&#39;s reason (a revert, a replacement); empty when confirmed. |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-WalletTransferRequest"></a>
+
+### WalletTransferRequest
+Params of `bsc.wallet.transfer` (prepared): one manual BNB transfer from a BSC wallet.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| source_role | [WalletRole](#darkbot-bsc-v1-WalletRole) |  | The wallet that sends. |
+| destination_id | [string](#string) |  | The saved destination it goes to. |
+| destination_address | [string](#string) |  | The destination address the operator confirmed, 0x hex (must equal the saved one). |
+| chain_id | [uint64](#uint64) |  | Chain identity. |
+| amount_wei | [string](#string) |  | The amount, decimal wei. |
+| max_fee_wei | [string](#string) |  | The most gas it may cost, decimal wei; the owner refuses above it. |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-WalletTransferState"></a>
+
+### WalletTransferState
+A transfer or sweep as its native owner holds it.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| request_id | [string](#string) |  | The operator&#39;s or the sweep&#39;s request. |
+| command_id | [string](#string) |  | The owner&#39;s durable intent. |
+| source_role | [WalletRole](#darkbot-bsc-v1-WalletRole) |  | The wallet that sends. |
+| source_address | [string](#string) |  | Its address, 0x hex. |
+| destination_address | [string](#string) |  | The destination address, 0x hex. |
+| chain_id | [uint64](#uint64) |  | Chain identity. |
+| amount_wei | [string](#string) |  | The amount, decimal wei. |
+| fee_wei | [string](#string) | optional | The fee: estimated while pending, the receipt&#39;s once included, decimal wei. |
+| nonce | [uint64](#uint64) | optional | The nonce it uses; absent before the owner assigned one. |
+| tx_hash | [string](#string) |  | Its transaction hash, 0x hex; empty before signing. |
+| status | [TransferStatus](#darkbot-bsc-v1-TransferStatus) |  | Its lifecycle. |
+| failure_reason | [string](#string) |  | Why it failed or is unknown; empty otherwise. |
+| created_unix_ms | [uint64](#uint64) |  | Creation time, unix ms. |
+| updated_unix_ms | [uint64](#uint64) |  | Last change, unix ms. |
+| policy_version | [uint64](#uint64) | optional | The sweep policy version that caused it; absent for a manual transfer. |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-WalletTreasuryQuery"></a>
+
+### WalletTreasuryQuery
+A read of the treasury state.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| roles | [WalletRole](#darkbot-bsc-v1-WalletRole) | repeated | Only these wallets; empty: every BSC wallet. |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-WalletTreasuryState"></a>
+
+### WalletTreasuryState
+The BSC treasury state of the native wallet owner.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| availability | [Availability](#darkbot-bsc-v1-Availability) |  | Whether the native owner answered. |
+| unavailable_reason | [string](#string) |  | Why it is not AVAILABLE. |
+| provenance | [OwnerProvenance](#darkbot-bsc-v1-OwnerProvenance) |  | The owner and its policy version. |
+| balances | [WalletBalanceSnapshot](#darkbot-bsc-v1-WalletBalanceSnapshot) | repeated | The current balances of the BSC wallets. |
+| destinations | [WalletDestination](#darkbot-bsc-v1-WalletDestination) | repeated | The saved destinations. |
+| sweep | [WalletSweepPolicy](#darkbot-bsc-v1-WalletSweepPolicy) |  | The automatic transfer; absent without one. |
+| transfers | [WalletTransferState](#darkbot-bsc-v1-WalletTransferState) | repeated | Pending and recent transfers, newest first (bounded; the history query has all). |
+| wallet_policy_version | [uint64](#uint64) |  | The wallet policy version: the compare-and-swap of a destination, transfer or sweep change. |
+
+
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-ChainTxStatus"></a>
+
+### ChainTxStatus
+What the chain made of a wallet transaction.
+
+| Name | Number | Description |
+| ---- | ------ | ----------- |
+| CHAIN_TX_STATUS_UNSPECIFIED | 0 | Not set by any producer; never displayed as a value. |
+| CHAIN_TX_STATUS_PENDING | 1 | Released, not included yet. |
+| CHAIN_TX_STATUS_INCLUDED | 2 | Included in the canonical chain. |
+| CHAIN_TX_STATUS_FINAL | 3 | Included and final. |
+| CHAIN_TX_STATUS_REVERTED | 4 | Included and reverted. |
+| CHAIN_TX_STATUS_REPLACED | 5 | Another transaction took its nonce. |
+| CHAIN_TX_STATUS_ORPHANED | 6 | Its block left the canonical chain. |
+| CHAIN_TX_STATUS_UNKNOWN | 7 | The owner cannot decide. |
+
+
+
+<a name="darkbot-bsc-v1-TransferStatus"></a>
+
+### TransferStatus
+The lifecycle of a transfer or sweep, from native evidence only.
+
+| Name | Number | Description |
+| ---- | ------ | ----------- |
+| TRANSFER_STATUS_UNSPECIFIED | 0 | Not set by any producer; never displayed as a value. |
+| TRANSFER_STATUS_DRAFT | 1 | Saved by the owner, not authorized for sending. |
+| TRANSFER_STATUS_PENDING | 2 | Authorized and admitted; not released yet. |
+| TRANSFER_STATUS_SENT | 3 | Its bytes were handed to the network. |
+| TRANSFER_STATUS_CONFIRMED | 4 | Included (and final per the owner&#39;s depth). |
+| TRANSFER_STATUS_FAILED | 5 | Refused, reverted or replaced (failure_reason). |
+| TRANSFER_STATUS_UNKNOWN | 6 | Its handoff did not complete; the chain decides, never sent again automatically. |
+
+
+
+<a name="darkbot-bsc-v1-WalletMovementKind"></a>
+
+### WalletMovementKind
+What a wallet movement is, economically separated (no double count of internal transfers).
+
+| Name | Number | Description |
+| ---- | ------ | ----------- |
+| WALLET_MOVEMENT_KIND_UNSPECIFIED | 0 | Not set by any producer; never displayed as a value. |
+| WALLET_MOVEMENT_KIND_DEPOSIT | 1 | BNB received from outside DarkBot. |
+| WALLET_MOVEMENT_KIND_WITHDRAWAL | 2 | BNB sent outside DarkBot (a transfer or sweep). |
+| WALLET_MOVEMENT_KIND_INTERNAL_TRANSFER | 3 | BNB between the launcher and the buyer (counted once, in neither PnL). |
+| WALLET_MOVEMENT_KIND_TRADE_BUY | 4 | A trade BUY&#39;s input. |
+| WALLET_MOVEMENT_KIND_TRADE_SELL | 5 | A trade SELL&#39;s proceeds. |
+| WALLET_MOVEMENT_KIND_FEE | 6 | Gas or a proven fee without its own movement. |
+
+
+
+<a name="darkbot-bsc-v1-WalletRole"></a>
+
+### WalletRole
+A BSC wallet&#39;s role.
+
+| Name | Number | Description |
+| ---- | ------ | ----------- |
+| WALLET_ROLE_UNSPECIFIED | 0 | Not set by any producer; never displayed as a value. |
+| WALLET_ROLE_LAUNCHER | 1 | The launcher wallet (funding, test launches). |
+| WALLET_ROLE_BUYER | 2 | The buyer wallet (LIVE trading). |
+| WALLET_ROLE_EXTERNAL | 3 | An address outside DarkBot (a deposit&#39;s sender, a transfer&#39;s destination). |
+
+
+
+
+
+
+
+
+
+
+<a name="darkbot_bsc_v1_watch-proto"></a>
+<p align="right"><a href="#top">Top</a></p>
+
+## darkbot/bsc/v1/watch.proto
+
+
+
+<a name="darkbot-bsc-v1-BscWatchQuery"></a>
+
+### BscWatchQuery
+A read of the WATCH projection.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| subject_ids | [string](#string) | repeated | Only these subjects; empty: every subject. |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-BscWatchState"></a>
+
+### BscWatchState
+The WATCH projection for the Health window.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| availability | [Availability](#darkbot-bsc-v1-Availability) |  | Whether the native owner answered (NOT_IMPLEMENTED in REV.1.0). |
+| unavailable_reason | [string](#string) |  | Why it is not AVAILABLE. |
+| provenance | [OwnerProvenance](#darkbot-bsc-v1-OwnerProvenance) |  | The owner. |
+| subjects | [WatchSubjectState](#darkbot-bsc-v1-WatchSubjectState) | repeated | Every watched subject. |
+| recent_events | [WatchEvent](#darkbot-bsc-v1-WatchEvent) | repeated | The latest events, newest first (bounded). |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-WatchEvent"></a>
+
+### WatchEvent
+One WATCH event.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| event_id | [string](#string) |  | Stable event identity. |
+| subject_id | [string](#string) |  | The subject. |
+| event | [string](#string) |  | DRIFT, UPDATE, REQUALIFICATION_STARTED, REQUALIFICATION_PASSED or REQUALIFICATION_FAILED. |
+| from | [string](#string) |  | The binding before. |
+| to | [string](#string) |  | The observation after. |
+| source | [string](#string) |  | The source of the observation. |
+| unix_ms | [uint64](#uint64) |  | When it happened, unix ms. |
+| detail | [string](#string) |  | The owner&#39;s detail. |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-WatchSubjectState"></a>
+
+### WatchSubjectState
+One watched subject.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| subject_id | [string](#string) |  | Stable subject identity (e.g. BSC_VENUE_FLAP). |
+| kind | [WatchSubjectKind](#darkbot-bsc-v1-WatchSubjectKind) |  | What it is. |
+| bound | [string](#string) |  | The version or code hash the qualification is bound to. |
+| observed | [string](#string) |  | The version or code hash observed. |
+| verdict | [WatchVerdict](#darkbot-bsc-v1-WatchVerdict) |  | What WATCH observed. |
+| requalification | [RequalificationState](#darkbot-bsc-v1-RequalificationState) |  | The requalification it requires. |
+| latched | [bool](#bool) |  | Whether a drift latch holds (cleared only by a passed requalification). |
+| source | [string](#string) |  | The source of the observation (RPC, announcement, probe). |
+| observed_unix_ms | [uint64](#uint64) | optional | When it was observed, unix ms. |
+| drift_since_unix_ms | [uint64](#uint64) | optional | When the current drift was first observed, unix ms; absent without one. |
+| reason | [string](#string) |  | The owner&#39;s reason. |
+
+
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-RequalificationState"></a>
+
+### RequalificationState
+The requalification a drift requires.
+
+| Name | Number | Description |
+| ---- | ------ | ----------- |
+| REQUALIFICATION_STATE_UNSPECIFIED | 0 | Not set by any producer; never displayed as a value. |
+| REQUALIFICATION_STATE_NOT_REQUIRED | 1 | Nothing to requalify. |
+| REQUALIFICATION_STATE_REQUIRED | 2 | Required; the subject admits no BUY until it passes (latched). |
+| REQUALIFICATION_STATE_RUNNING | 3 | Running. |
+| REQUALIFICATION_STATE_PASSED | 4 | Passed against the new binding. |
+| REQUALIFICATION_STATE_FAILED | 5 | Failed. |
+
+
+
+<a name="darkbot-bsc-v1-WatchSubjectKind"></a>
+
+### WatchSubjectKind
+What a watched subject is.
+
+| Name | Number | Description |
+| ---- | ------ | ----------- |
+| WATCH_SUBJECT_KIND_UNSPECIFIED | 0 | Not set by any producer; never displayed as a value. |
+| WATCH_SUBJECT_KIND_VENUE_DEPLOYMENT | 1 | A venue&#39;s deployment (Flap Portal, Four.meme Classic TokenManager2, OpenFour Core). |
+| WATCH_SUBJECT_KIND_CONTRACT | 2 | A pinned contract (implementation address, code hash). |
+| WATCH_SUBJECT_KIND_PROVIDER | 3 | An RPC or ingress provider. |
+| WATCH_SUBJECT_KIND_BUILDER | 4 | An inclusion builder. |
+
+
+
+<a name="darkbot-bsc-v1-WatchVerdict"></a>
+
+### WatchVerdict
+What WATCH observed of a subject against its qualified binding.
+
+| Name | Number | Description |
+| ---- | ------ | ----------- |
+| WATCH_VERDICT_UNSPECIFIED | 0 | Not set by any producer; never displayed as a value. |
+| WATCH_VERDICT_UNKNOWN | 1 | No observation yet (WATCH not running). |
+| WATCH_VERDICT_UNCHANGED | 2 | Observed equal to the qualified binding. |
+| WATCH_VERDICT_DRIFT_DETECTED | 3 | Observed different from the qualified binding (version, code hash, behaviour). |
+| WATCH_VERDICT_UPDATE_DETECTED | 4 | A new version or deployment was announced or observed. |
+
+
+
+
+
+
+
+
+
+
+<a name="darkbot_bsc_v1_query-proto"></a>
+<p align="right"><a href="#top">Top</a></p>
+
+## darkbot/bsc/v1/query.proto
+
+
+
+<a name="darkbot-bsc-v1-BscQueryRequest"></a>
+
+### BscQueryRequest
+One bounded query.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| request_id | [string](#string) |  | Client-generated identity for correlation (UUIDv4); a query changes nothing. |
+| trades | [TradeHistoryQuery](#darkbot-bsc-v1-TradeHistoryQuery) |  | A page of LIVE trades. |
+| trade | [TradeDetailQuery](#darkbot-bsc-v1-TradeDetailQuery) |  | One lot&#39;s detail. |
+| training_runs | [TrainingRunQuery](#darkbot-bsc-v1-TrainingRunQuery) |  | A page of training runs. |
+| training_profiles | [TrainingProfilesQuery](#darkbot-bsc-v1-TrainingProfilesQuery) |  | The training profiles. |
+| wallet_movements | [WalletHistoryQuery](#darkbot-bsc-v1-WalletHistoryQuery) |  | A page of wallet movements. |
+| treasury | [WalletTreasuryQuery](#darkbot-bsc-v1-WalletTreasuryQuery) |  | The treasury state. |
+| series | [PerformanceSeriesQuery](#darkbot-bsc-v1-PerformanceSeriesQuery) |  | One performance series. |
+| watch | [BscWatchQuery](#darkbot-bsc-v1-BscWatchQuery) |  | The WATCH projection (REV.2.0). |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-BscQueryResponse"></a>
+
+### BscQueryResponse
+The answer to one query.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| request_id | [string](#string) |  | Echo of the request. |
+| availability | [Availability](#darkbot-bsc-v1-Availability) |  | Whether the native owner answered. |
+| unavailable_reason | [string](#string) |  | Why it is not AVAILABLE. |
+| trades | [TradeHistoryPage](#darkbot-bsc-v1-TradeHistoryPage) |  | A page of LIVE trades. |
+| trade | [TradeDetail](#darkbot-bsc-v1-TradeDetail) |  | One lot&#39;s detail. |
+| training_runs | [TrainingRunPage](#darkbot-bsc-v1-TrainingRunPage) |  | A page of training runs. |
+| training_profiles | [TrainingProfiles](#darkbot-bsc-v1-TrainingProfiles) |  | The training profiles. |
+| wallet_movements | [WalletHistoryPage](#darkbot-bsc-v1-WalletHistoryPage) |  | A page of wallet movements. |
+| treasury | [WalletTreasuryState](#darkbot-bsc-v1-WalletTreasuryState) |  | The treasury state. |
+| series | [PerformanceSeries](#darkbot-bsc-v1-PerformanceSeries) |  | One performance series. |
+| watch | [BscWatchState](#darkbot-bsc-v1-BscWatchState) |  | The WATCH projection (REV.2.0). |
+
+
+
+
+
 
 
 

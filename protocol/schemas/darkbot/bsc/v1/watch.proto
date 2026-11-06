@@ -1,0 +1,119 @@
+syntax = "proto3";
+package darkbot.bsc.v1;
+
+import "darkbot/bsc/v1/common.proto";
+
+// REV.2.0 WATCH (BSC-V8-18, Bindings §14.4 M6, bsc/docs/1_PLAN/Phasenplan Rev2.0.md W0–W7).
+// Prepared status and event contracts for the Health window; WATCH is NOT implemented in REV.1.0.
+// A defined message is no active monitoring: without its native owner the frontend shows the
+// deployment state as UNKNOWN, never "unchanged" or "update detected".
+
+// What a watched subject is.
+enum WatchSubjectKind {
+  // Not set by any producer; never displayed as a value.
+  WATCH_SUBJECT_KIND_UNSPECIFIED = 0;
+  // A venue's deployment (Flap Portal, Four.meme Classic TokenManager2, OpenFour Core).
+  WATCH_SUBJECT_KIND_VENUE_DEPLOYMENT = 1;
+  // A pinned contract (implementation address, code hash).
+  WATCH_SUBJECT_KIND_CONTRACT = 2;
+  // An RPC or ingress provider.
+  WATCH_SUBJECT_KIND_PROVIDER = 3;
+  // An inclusion builder.
+  WATCH_SUBJECT_KIND_BUILDER = 4;
+}
+
+// What WATCH observed of a subject against its qualified binding.
+enum WatchVerdict {
+  // Not set by any producer; never displayed as a value.
+  WATCH_VERDICT_UNSPECIFIED = 0;
+  // No observation yet (WATCH not running).
+  WATCH_VERDICT_UNKNOWN = 1;
+  // Observed equal to the qualified binding.
+  WATCH_VERDICT_UNCHANGED = 2;
+  // Observed different from the qualified binding (version, code hash, behaviour).
+  WATCH_VERDICT_DRIFT_DETECTED = 3;
+  // A new version or deployment was announced or observed.
+  WATCH_VERDICT_UPDATE_DETECTED = 4;
+}
+
+// The requalification a drift requires.
+enum RequalificationState {
+  // Not set by any producer; never displayed as a value.
+  REQUALIFICATION_STATE_UNSPECIFIED = 0;
+  // Nothing to requalify.
+  REQUALIFICATION_STATE_NOT_REQUIRED = 1;
+  // Required; the subject admits no BUY until it passes (latched).
+  REQUALIFICATION_STATE_REQUIRED = 2;
+  // Running.
+  REQUALIFICATION_STATE_RUNNING = 3;
+  // Passed against the new binding.
+  REQUALIFICATION_STATE_PASSED = 4;
+  // Failed.
+  REQUALIFICATION_STATE_FAILED = 5;
+}
+
+// One watched subject.
+message WatchSubjectState {
+  // Stable subject identity (e.g. BSC_VENUE_FLAP).
+  string subject_id = 1;
+  // What it is.
+  WatchSubjectKind kind = 2;
+  // The version or code hash the qualification is bound to.
+  string bound = 3;
+  // The version or code hash observed.
+  string observed = 4;
+  // What WATCH observed.
+  WatchVerdict verdict = 5;
+  // The requalification it requires.
+  RequalificationState requalification = 6;
+  // Whether a drift latch holds (cleared only by a passed requalification).
+  bool latched = 7;
+  // The source of the observation (RPC, announcement, probe).
+  string source = 8;
+  // When it was observed, unix ms.
+  optional uint64 observed_unix_ms = 9;
+  // When the current drift was first observed, unix ms; absent without one.
+  optional uint64 drift_since_unix_ms = 10;
+  // The owner's reason.
+  string reason = 11;
+}
+
+// One WATCH event.
+message WatchEvent {
+  // Stable event identity.
+  string event_id = 1;
+  // The subject.
+  string subject_id = 2;
+  // DRIFT, UPDATE, REQUALIFICATION_STARTED, REQUALIFICATION_PASSED or REQUALIFICATION_FAILED.
+  string event = 3;
+  // The binding before.
+  string from = 4;
+  // The observation after.
+  string to = 5;
+  // The source of the observation.
+  string source = 6;
+  // When it happened, unix ms.
+  uint64 unix_ms = 7;
+  // The owner's detail.
+  string detail = 8;
+}
+
+// The WATCH projection for the Health window.
+message BscWatchState {
+  // Whether the native owner answered (NOT_IMPLEMENTED in REV.1.0).
+  Availability availability = 1;
+  // Why it is not AVAILABLE.
+  string unavailable_reason = 2;
+  // The owner.
+  OwnerProvenance provenance = 3;
+  // Every watched subject.
+  repeated WatchSubjectState subjects = 4;
+  // The latest events, newest first (bounded).
+  repeated WatchEvent recent_events = 5;
+}
+
+// A read of the WATCH projection.
+message BscWatchQuery {
+  // Only these subjects; empty: every subject.
+  repeated string subject_ids = 1;
+}

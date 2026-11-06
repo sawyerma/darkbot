@@ -1,0 +1,345 @@
+syntax = "proto3";
+package darkbot.bsc.v1;
+
+import "darkbot/bsc/v1/common.proto";
+
+// V8 Wallets: finance history, transfers and the automatic transfer (BSC-V8-13…17,
+// FE-V8-13…16, Bindings §14.1/§14.4 M5). Prepared contracts: no producer yet. The BSC wallet
+// switches (BscWalletsState.*_control, `bsc.wallet.set`) are permissions, never transfers; a
+// transfer or sweep needs its own persisted, authorized native BSC owner (allowlist, fee, nonce,
+// reserve, signer, durable receipt, crash recovery, idempotency). Project_0's treasury is never
+// the BSC authority. A MetaMask wallet is an external BSC destination address only; DarkBot holds
+// no MetaMask connection. Nothing here signs or sends; the browser never sees a key.
+//
+// Prepared actions (POST /api/v1/command; NOT registered until the native owner implements them):
+//   bsc.wallet.destination.set   WalletDestinationSetCommand    expected wallet_policy_version
+//   bsc.wallet.transfer          WalletTransferRequest          expected wallet_policy_version
+//   bsc.wallet.sweep.set         WalletSweepPolicySetCommand    expected wallet_policy_version
+
+// A BSC wallet's role.
+enum WalletRole {
+  // Not set by any producer; never displayed as a value.
+  WALLET_ROLE_UNSPECIFIED = 0;
+  // The launcher wallet (funding, test launches).
+  WALLET_ROLE_LAUNCHER = 1;
+  // The buyer wallet (LIVE trading).
+  WALLET_ROLE_BUYER = 2;
+  // An address outside DarkBot (a deposit's sender, a transfer's destination).
+  WALLET_ROLE_EXTERNAL = 3;
+}
+
+// What a wallet movement is, economically separated (no double count of internal transfers).
+enum WalletMovementKind {
+  // Not set by any producer; never displayed as a value.
+  WALLET_MOVEMENT_KIND_UNSPECIFIED = 0;
+  // BNB received from outside DarkBot.
+  WALLET_MOVEMENT_KIND_DEPOSIT = 1;
+  // BNB sent outside DarkBot (a transfer or sweep).
+  WALLET_MOVEMENT_KIND_WITHDRAWAL = 2;
+  // BNB between the launcher and the buyer (counted once, in neither PnL).
+  WALLET_MOVEMENT_KIND_INTERNAL_TRANSFER = 3;
+  // A trade BUY's input.
+  WALLET_MOVEMENT_KIND_TRADE_BUY = 4;
+  // A trade SELL's proceeds.
+  WALLET_MOVEMENT_KIND_TRADE_SELL = 5;
+  // Gas or a proven fee without its own movement.
+  WALLET_MOVEMENT_KIND_FEE = 6;
+}
+
+// What the chain made of a wallet transaction.
+enum ChainTxStatus {
+  // Not set by any producer; never displayed as a value.
+  CHAIN_TX_STATUS_UNSPECIFIED = 0;
+  // Released, not included yet.
+  CHAIN_TX_STATUS_PENDING = 1;
+  // Included in the canonical chain.
+  CHAIN_TX_STATUS_INCLUDED = 2;
+  // Included and final.
+  CHAIN_TX_STATUS_FINAL = 3;
+  // Included and reverted.
+  CHAIN_TX_STATUS_REVERTED = 4;
+  // Another transaction took its nonce.
+  CHAIN_TX_STATUS_REPLACED = 5;
+  // Its block left the canonical chain.
+  CHAIN_TX_STATUS_ORPHANED = 6;
+  // The owner cannot decide.
+  CHAIN_TX_STATUS_UNKNOWN = 7;
+}
+
+// One wallet movement, proven by its block and receipt.
+message WalletMovement {
+  // Stable owner identity of the movement.
+  string movement_id = 1;
+  // The wallet it belongs to.
+  WalletRole role = 2;
+  // That wallet's address, 0x hex.
+  string wallet_address = 3;
+  // Chain identity.
+  uint64 chain_id = 4;
+  // What it is.
+  WalletMovementKind kind = 5;
+  // The other side, 0x hex; empty for a fee.
+  string counterparty_address = 6;
+  // The other side's role.
+  WalletRole counterparty_role = 7;
+  // The amount for this wallet, signed decimal wei (+ received, − sent).
+  string amount_wei = 8;
+  // Its gas and fees, decimal wei.
+  string fee_wei = 9;
+  // The transaction hash, 0x hex.
+  string tx_hash = 10;
+  // The sender's nonce, when this wallet sent it.
+  optional uint64 nonce = 11;
+  // The including block; absent while not included.
+  optional uint64 block_number = 12;
+  // That block's header time.
+  SourcedTime block_time = 13;
+  // What the chain made of it.
+  ChainTxStatus status = 14;
+  // The native fact it comes from: LIVE_LEDGER, TRANSFER_OWNER or CHAIN_BACKFILL.
+  string origin = 15;
+  // The lot of a trade movement; empty otherwise.
+  string lot = 16;
+  // The transfer or sweep request of a withdrawal; empty otherwise.
+  string transfer_request_id = 17;
+  // How far it is proven.
+  DataQuality quality = 18;
+}
+
+// A wallet balance at one block, with its age and source.
+message WalletBalanceSnapshot {
+  // The wallet.
+  WalletRole role = 1;
+  // Its address, 0x hex.
+  string address = 2;
+  // Chain identity.
+  uint64 chain_id = 3;
+  // The balance, decimal wei.
+  string balance_wei = 4;
+  // Of it reserved (open trades' budget, a pending transfer), decimal wei; absent when unknown.
+  optional string reserved_wei = 5;
+  // Of it freely available, decimal wei; absent when unknown.
+  optional string available_wei = 6;
+  // The block it was read at.
+  optional uint64 block_number = 7;
+  // When it was read.
+  SourcedTime observed = 8;
+  // The reader (LIVE_PROBE, READINESS_SNAPSHOT, TRANSFER_OWNER).
+  string source = 9;
+  // How far it is proven (STALE when older than the owner's freshness rule).
+  DataQuality quality = 10;
+}
+
+// A bounded, cursor-paged, read-only query of wallet movements.
+message WalletHistoryQuery {
+  // Only these wallets; empty: every BSC wallet.
+  repeated WalletRole roles = 1;
+  // Only these kinds; empty: every kind.
+  repeated WalletMovementKind kinds = 2;
+  // Block time from, unix ms.
+  optional uint64 from_unix_ms = 3;
+  // Block time to, unix ms.
+  optional uint64 to_unix_ms = 4;
+  // The previous page's next_cursor; empty: the first page.
+  string cursor = 5;
+  // At most this many movements; the owner caps it.
+  uint32 limit = 6;
+}
+
+// One page of wallet movements, newest first, bound to one owner snapshot.
+message WalletHistoryPage {
+  // Whether the native owner answered.
+  Availability availability = 1;
+  // Why it is not AVAILABLE.
+  string unavailable_reason = 2;
+  // The owner and the snapshot the cursor is bound to.
+  OwnerProvenance provenance = 3;
+  // The movements.
+  repeated WalletMovement movements = 4;
+  // The cursor of the next page; empty on the last one.
+  string next_cursor = 5;
+  // Whether another page follows.
+  bool has_more = 6;
+  // Deposits of the whole filtered result, decimal wei.
+  string deposited_wei = 7;
+  // Withdrawals of the whole filtered result, decimal wei (a positive amount).
+  string withdrawn_wei = 8;
+}
+
+// The lifecycle of a transfer or sweep, from native evidence only.
+enum TransferStatus {
+  // Not set by any producer; never displayed as a value.
+  TRANSFER_STATUS_UNSPECIFIED = 0;
+  // Saved by the owner, not authorized for sending.
+  TRANSFER_STATUS_DRAFT = 1;
+  // Authorized and admitted; not released yet.
+  TRANSFER_STATUS_PENDING = 2;
+  // Its bytes were handed to the network.
+  TRANSFER_STATUS_SENT = 3;
+  // Included (and final per the owner's depth).
+  TRANSFER_STATUS_CONFIRMED = 4;
+  // Refused, reverted or replaced (failure_reason).
+  TRANSFER_STATUS_FAILED = 5;
+  // Its handoff did not complete; the chain decides, never sent again automatically.
+  TRANSFER_STATUS_UNKNOWN = 6;
+}
+
+// A saved, confirmed destination address (e.g. a MetaMask wallet's BSC address).
+message WalletDestination {
+  // Stable owner identity.
+  string destination_id = 1;
+  // The operator's label.
+  string label = 2;
+  // The address, 0x hex (checksummed by the owner).
+  string address = 3;
+  // Chain identity.
+  uint64 chain_id = 4;
+  // Whether the operator confirmed it (only confirmed destinations receive).
+  bool confirmed = 5;
+  // When it was saved, unix ms.
+  uint64 created_unix_ms = 6;
+}
+
+// Params of `bsc.wallet.destination.set` (prepared).
+message WalletDestinationSetCommand {
+  // The operator's label.
+  string label = 1;
+  // The address, 0x hex.
+  string address = 2;
+  // Chain identity.
+  uint64 chain_id = 3;
+  // Remove the destination instead (its id in CommandRequest.resource_id).
+  bool remove = 4;
+}
+
+// Params of `bsc.wallet.transfer` (prepared): one manual BNB transfer from a BSC wallet.
+message WalletTransferRequest {
+  // The wallet that sends.
+  WalletRole source_role = 1;
+  // The saved destination it goes to.
+  string destination_id = 2;
+  // The destination address the operator confirmed, 0x hex (must equal the saved one).
+  string destination_address = 3;
+  // Chain identity.
+  uint64 chain_id = 4;
+  // The amount, decimal wei.
+  string amount_wei = 5;
+  // The most gas it may cost, decimal wei; the owner refuses above it.
+  string max_fee_wei = 6;
+}
+
+// A transfer or sweep as its native owner holds it.
+message WalletTransferState {
+  // The operator's or the sweep's request.
+  string request_id = 1;
+  // The owner's durable intent.
+  string command_id = 2;
+  // The wallet that sends.
+  WalletRole source_role = 3;
+  // Its address, 0x hex.
+  string source_address = 4;
+  // The destination address, 0x hex.
+  string destination_address = 5;
+  // Chain identity.
+  uint64 chain_id = 6;
+  // The amount, decimal wei.
+  string amount_wei = 7;
+  // The fee: estimated while pending, the receipt's once included, decimal wei.
+  optional string fee_wei = 8;
+  // The nonce it uses; absent before the owner assigned one.
+  optional uint64 nonce = 9;
+  // Its transaction hash, 0x hex; empty before signing.
+  string tx_hash = 10;
+  // Its lifecycle.
+  TransferStatus status = 11;
+  // Why it failed or is unknown; empty otherwise.
+  string failure_reason = 12;
+  // Creation time, unix ms.
+  uint64 created_unix_ms = 13;
+  // Last change, unix ms.
+  uint64 updated_unix_ms = 14;
+  // The sweep policy version that caused it; absent for a manual transfer.
+  optional uint64 policy_version = 15;
+}
+
+// The chain receipt of a transfer or sweep.
+message WalletTransferReceipt {
+  // The request.
+  string request_id = 1;
+  // Its final or current lifecycle state.
+  TransferStatus status = 2;
+  // Its transaction hash, 0x hex.
+  string tx_hash = 3;
+  // The including block.
+  optional uint64 block_number = 4;
+  // That block's header time.
+  SourcedTime block_time = 5;
+  // Gas used.
+  optional uint64 gas_used = 6;
+  // The fee paid, decimal wei.
+  optional string fee_wei = 7;
+  // The owner's reason (a revert, a replacement); empty when confirmed.
+  string reason = 8;
+}
+
+// The automatic transfer above a threshold, as its native owner holds it.
+message WalletSweepPolicy {
+  // Whether it is enabled.
+  bool enabled = 1;
+  // The wallet it sweeps.
+  WalletRole source_role = 2;
+  // The saved destination it sweeps to.
+  string destination_id = 3;
+  // That destination's address, 0x hex.
+  string destination_address = 4;
+  // The balance above which it sweeps, decimal wei.
+  string threshold_wei = 5;
+  // What always stays in the wallet, decimal wei (below threshold_wei).
+  string retain_wei = 6;
+  // The policy version: the compare-and-swap of the next change.
+  uint64 policy_version = 7;
+  // The last sweep it caused; absent before any.
+  WalletTransferState last_execution = 8;
+  // The request that wrote this version.
+  string request_id = 9;
+}
+
+// Params of `bsc.wallet.sweep.set` (prepared).
+message WalletSweepPolicySetCommand {
+  // Whether it is enabled.
+  bool enabled = 1;
+  // The wallet it sweeps.
+  WalletRole source_role = 2;
+  // The saved, confirmed destination.
+  string destination_id = 3;
+  // The balance above which it sweeps, decimal wei.
+  string threshold_wei = 4;
+  // What always stays in the wallet, decimal wei.
+  string retain_wei = 5;
+}
+
+// The BSC treasury state of the native wallet owner.
+message WalletTreasuryState {
+  // Whether the native owner answered.
+  Availability availability = 1;
+  // Why it is not AVAILABLE.
+  string unavailable_reason = 2;
+  // The owner and its policy version.
+  OwnerProvenance provenance = 3;
+  // The current balances of the BSC wallets.
+  repeated WalletBalanceSnapshot balances = 4;
+  // The saved destinations.
+  repeated WalletDestination destinations = 5;
+  // The automatic transfer; absent without one.
+  WalletSweepPolicy sweep = 6;
+  // Pending and recent transfers, newest first (bounded; the history query has all).
+  repeated WalletTransferState transfers = 7;
+  // The wallet policy version: the compare-and-swap of a destination, transfer or sweep change.
+  uint64 wallet_policy_version = 8;
+}
+
+// A read of the treasury state.
+message WalletTreasuryQuery {
+  // Only these wallets; empty: every BSC wallet.
+  repeated WalletRole roles = 1;
+}

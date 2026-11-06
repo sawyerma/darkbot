@@ -1,0 +1,320 @@
+syntax = "proto3";
+package darkbot.bsc.v1;
+
+import "darkbot/bsc/v1/common.proto";
+
+// V8 LIVE trade history (BSC-V8-07…10, FE-V8-11, Bindings §14.1/§14.3 item 7/§14.4 M4). Prepared
+// contracts: no producer yet. One row per LIVE lot, joined natively from the append-only LIVE
+// ledger (Fact/Position/Tx), the Strategy C journal (Y), the LiveAttempt record, the market
+// journal (T/F) and the verified ingress sightings by lot, transaction and run identity. Every
+// value is the native owner's; the browser computes no economics. The 17 V8 table columns (token,
+// status, market, invest, pnl, roi, buy, sell, hold, source, lead, send, ack, gas, placement, exit,
+// tx) map to fields of TradeRow; which columns show and in what order is a frontend preference.
+// A value without an attributed native fact stays absent; an aggregate (the G0.4 census
+// lead_p95_us, the LIVE path's latency p99) is never a row's value.
+// Read through BscQueryRequest (query.proto); BscLiveState stays the bounded current state.
+
+// The ledger state of a lot (LivePosition.state plus the owner's write-off and unknown).
+enum TradeStatus {
+  // Not set by any producer; never displayed as a value.
+  TRADE_STATUS_UNSPECIFIED = 0;
+  // The BUY was released, the chain has not included it.
+  TRADE_STATUS_PENDING = 1;
+  // The BUY is included; the position is held.
+  TRADE_STATUS_OPEN = 2;
+  // An exit step is released.
+  TRADE_STATUS_EXITING = 3;
+  // The SELL is included.
+  TRADE_STATUS_CLOSED = 4;
+  // The BUY failed (reverted, dropped, replaced); its gas is the loss.
+  TRADE_STATUS_FAILED = 5;
+  // The operator wrote the lot off (input and gas lost); never a normal SELL.
+  TRADE_STATUS_WRITTEN_OFF = 6;
+  // The owner cannot decide (an UNKNOWN handoff, unreadable facts).
+  TRADE_STATUS_UNKNOWN = 7;
+}
+
+// Why a position ended.
+enum ExitReason {
+  // Not set by any producer; never displayed as a value.
+  EXIT_REASON_UNSPECIFIED = 0;
+  // Still held: no exit yet.
+  EXIT_REASON_NONE = 1;
+  // The net target multiple was reached.
+  EXIT_REASON_TARGET = 2;
+  // The net stop multiple was reached.
+  EXIT_REASON_STOP = 3;
+  // The hold timeout ran out.
+  EXIT_REASON_TIMEOUT = 4;
+  // The token's creator sold (creator-sell exit).
+  EXIT_REASON_CREATOR_SELL = 5;
+  // The operator's EXIT_NOW.
+  EXIT_REASON_OPERATOR_EXIT = 6;
+  // The operator's WRITE_OFF.
+  EXIT_REASON_WRITE_OFF = 7;
+  // The BUY failed; nothing to exit.
+  EXIT_REASON_BUY_FAILED = 8;
+  // The token migrated to its DEX and was exited there (DEX exit).
+  EXIT_REASON_DEX_MIGRATED = 9;
+  // An exit whose reason the owner holds in exit_reason_detail only.
+  EXIT_REASON_OTHER = 10;
+}
+
+// Where an exit reason comes from.
+enum ExitReasonSource {
+  // Not set by any producer; never displayed as a value.
+  EXIT_REASON_SOURCE_UNSPECIFIED = 0;
+  // The Strategy C journal's exit decision (Y record).
+  EXIT_REASON_SOURCE_STRATEGY_JOURNAL = 1;
+  // An operator fact of the LIVE ledger (EXIT_NOW, WRITE_OFF).
+  EXIT_REASON_SOURCE_LEDGER_OPERATOR = 2;
+  // A chain fact of the LIVE ledger (a failed BUY, a DEX-routed SELL).
+  EXIT_REASON_SOURCE_LEDGER_CHAIN = 3;
+  // No fact names it.
+  EXIT_REASON_SOURCE_UNKNOWN = 4;
+}
+
+// Where an own BUY landed relative to the launch (the ledger's PLACED fact).
+enum TradePlacement {
+  // Not set by any producer; never displayed as a value.
+  TRADE_PLACEMENT_UNSPECIFIED = 0;
+  // No PLACED fact (yet).
+  TRADE_PLACEMENT_UNKNOWN = 1;
+  // First other-than-launch BUY of the token in the launch's block, from the qualified verdict.
+  TRADE_PLACEMENT_FIRST = 2;
+  // In the launch's block after other BUYs.
+  TRADE_PLACEMENT_LATE = 3;
+  // In another block than the launch.
+  TRADE_PLACEMENT_OTHER_BLOCK = 4;
+  // Included without tokens received.
+  TRADE_PLACEMENT_NO_TOKENS = 5;
+}
+
+// One lot's row of the trade table (the 17 V8 columns and their identity).
+message TradeRow {
+  // The lot: its BUY's transaction hash, 0x hex (a token bought again is another lot).
+  string lot = 1;
+  // Column token: the token address, 0x hex (authoritative; no symbol without checked metadata).
+  string token = 2;
+  // Column status: the ledger state.
+  TradeStatus status = 3;
+  // Column market: the venue its BUY traded on (BSC_VENUE_FLAP, BSC_VENUE_FOUR_CLASSIC,
+  // BSC_VENUE_OPENFOUR), from live_ledger Position.venue.
+  string venue = 4;
+  // BSC_EXEC (C3) or BSC_STRATEGY_C.
+  string component = 5;
+  // Column invest: the BUY's input, decimal wei.
+  string input_wei = 6;
+  // The SELL's proceeds, decimal wei; absent while not closed.
+  optional string proceeds_wei = 7;
+  // True when the SELL is included without the Portal's trade event (proceeds counted as 0, PnL
+  // a lower bound).
+  bool proceeds_unknown = 8;
+  // Column pnl: proceeds − input − every gas and proven fee, signed decimal wei; absent while open.
+  optional string pnl_wei = 9;
+  // Column roi: pnl over input, parts per million, signed, computed natively; absent with pnl.
+  optional sint64 roi_ppm = 10;
+  // Column buy: the BUY's time (its block header; the local send time is in TradeDetail).
+  SourcedTime buy_time = 11;
+  // Column sell: the SELL's time (its block header); absent unix_ms while not closed.
+  SourcedTime sell_time = 12;
+  // Column hold: SELL block time − BUY block time, ms, natively; absent while open.
+  optional uint64 hold_ms = 13;
+  // Column source: the ingress source of the first verified full sighting attributed to this lot;
+  // empty without an attributed sighting (a Strategy C BUY has a decision, not a trigger).
+  string first_source = 14;
+  // Column lead: that sighting's lead before the launch block's header time, microseconds
+  // (negative: after it); absent without an attributed sighting. Never the producer's T0.
+  optional sint64 lead_before_block_us = 15;
+  // Column send: detection (ingress or decision) to the first qualified send, ns, on the runtime
+  // clock of the release record; absent without one.
+  optional uint64 detect_to_send_ns = 16;
+  // Column ack: the first qualified send to the first acknowledgement, ns; absent without one.
+  optional uint64 send_to_ack_ns = 17;
+  // Column gas: gas of every included or reverted transaction of the lot, decimal wei.
+  string gas_wei = 18;
+  // Other proven fees (taxes, builder tips), decimal wei; absent when none is proven.
+  optional string fees_wei = 19;
+  // Column placement: from the qualified PLACED fact only.
+  TradePlacement placement = 20;
+  // Column exit: why it ended.
+  ExitReason exit_reason = 21;
+  // Where the exit reason comes from.
+  ExitReasonSource exit_reason_source = 22;
+  // The owner's native exit text (the journal's or the fact's); empty without one.
+  string exit_reason_detail = 23;
+  // Column tx: the BUY transaction hash, 0x hex.
+  string buy_tx_hash = 24;
+  // The SELL transaction hash, 0x hex; empty while not sold.
+  string sell_tx_hash = 25;
+  // The run whose journal holds its release; absent without a release record.
+  optional uint64 run = 26;
+  // The ledger version the row was read at.
+  uint64 ledger_version = 27;
+  // How far the row is proven (UNRESOLVED during a receipt or reorg window).
+  DataQuality quality = 28;
+  // Why the quality is not VERIFIED.
+  repeated string quality_reasons = 29;
+}
+
+// One transaction of a lot and what the chain made of it.
+message TradeTransaction {
+  // Transaction hash, 0x hex.
+  string tx_hash = 1;
+  // BUY, APPROVE, SELL or BURN.
+  string intent = 2;
+  // The buyer's nonce it used.
+  uint64 nonce = 3;
+  // RELEASED, UNKNOWN, INCLUDED, REVERTED, REPLACED or ORPHANED.
+  string state = 4;
+  // The block that included it; absent while not included.
+  optional uint64 block_number = 5;
+  // That block's header time.
+  SourcedTime block_time = 6;
+  // Its gas, decimal wei; absent while not included.
+  optional string gas_wei = 7;
+  // RECEIPT when the receipt recovery decided it; empty otherwise.
+  string source = 8;
+  // The local time its bytes were handed to the first adapter.
+  SourcedTime released = 9;
+}
+
+// One ingress source's sighting of the lot's launch.
+message TradeSighting {
+  // The source ID (BSC_INGRESS_GETH, …).
+  string source = 1;
+  // FULL (the full transaction) or HASH_ONLY.
+  string capability = 2;
+  // The local wall-clock time of the sighting.
+  SourcedTime seen = 3;
+  // Lead before the launch block's header time, microseconds (negative: after it).
+  optional sint64 lead_before_block_us = 4;
+  // Whether this is the first verified full sighting.
+  bool first_verified = 5;
+}
+
+// The full detail of one lot.
+message TradeDetail {
+  // Whether the native owner answered.
+  Availability availability = 1;
+  // Why it is not AVAILABLE.
+  string unavailable_reason = 2;
+  // The owner and the ledger snapshot.
+  OwnerProvenance provenance = 3;
+  // The row.
+  TradeRow row = 4;
+  // Every transaction of the lot in nonce order.
+  repeated TradeTransaction transactions = 5;
+  // The launch's sightings per source; empty for a lot without an attributed launch.
+  repeated TradeSighting sightings = 6;
+  // The launch transaction hash, 0x hex; empty without a launch (Strategy C).
+  string launch_hash = 7;
+  // The launch's block; absent without one.
+  optional uint64 launch_block = 8;
+  // The launch block's header time.
+  SourcedTime launch_time = 9;
+  // The runtime clock of the local timings; absent without a release record.
+  optional uint64 clock_id = 10;
+  // Whether T0 is the producer's exact time (never without its witness).
+  bool t0_exact = 11;
+  // Detection on that clock, ns.
+  optional uint64 t_detect_ns = 12;
+  // Selection on that clock, ns.
+  optional uint64 t_select_ns = 13;
+  // The first qualified send on that clock, ns.
+  optional uint64 t_send_ns = 14;
+  // The first acknowledgement on that clock, ns.
+  optional uint64 t_ack_ns = 15;
+  // The launch's transaction index in its block.
+  optional uint64 launch_index = 16;
+  // The BUY's transaction index in its block.
+  optional uint64 own_index = 17;
+  // Other traders' BUYs between the launch and the own BUY.
+  optional uint64 buys_before = 18;
+  // Tokens the BUY received, decimal token units.
+  optional string tokens = 19;
+  // The grant generation its BUY was admitted under.
+  optional uint64 grant_generation = 20;
+  // The settings or profile revision its entry took (Strategy C); empty for C3.
+  string config_sha256 = 21;
+  // The operator decisions the ledger takes of this lot now (RESUME, WRITE_OFF, EXIT_NOW).
+  repeated string decisions = 22;
+}
+
+// The order of a trade page.
+enum TradeSort {
+  // Not set: ACTIVE_FIRST.
+  TRADE_SORT_UNSPECIFIED = 0;
+  // Pending, open and exiting first, then the rest; each group newest BUY first (V8 default).
+  TRADE_SORT_ACTIVE_FIRST = 1;
+  // Newest BUY first.
+  TRADE_SORT_NEWEST = 2;
+  // Oldest BUY first.
+  TRADE_SORT_OLDEST = 3;
+}
+
+// A bounded, cursor-paged, read-only query of the LIVE trades.
+message TradeHistoryQuery {
+  // Only these states; empty: every state.
+  repeated TradeStatus statuses = 1;
+  // Only gains (pnl > 0) or only losses (pnl < 0) among CLOSED; unset: both.
+  optional bool gains = 2;
+  // Only these venues; empty: every venue.
+  repeated string venues = 3;
+  // BUY time from, unix ms.
+  optional uint64 from_unix_ms = 4;
+  // BUY time to, unix ms.
+  optional uint64 to_unix_ms = 5;
+  // A token address or transaction hash (lot, BUY or SELL), exact 0x hex or a prefix of it.
+  string search = 6;
+  // The order.
+  TradeSort sort = 7;
+  // The previous page's next_cursor; empty: the first page.
+  string cursor = 8;
+  // At most this many rows; the owner caps it.
+  uint32 limit = 9;
+}
+
+// The counts of the whole filtered result (V8 trade summary).
+message TradeCounts {
+  // PENDING and UNKNOWN (PEND).
+  uint64 pending = 1;
+  // OPEN and EXITING (RUN).
+  uint64 running = 2;
+  // CLOSED with a gain (WIN).
+  uint64 wins = 3;
+  // CLOSED with a loss (LOSS).
+  uint64 losses = 4;
+  // CLOSED without gain or loss.
+  uint64 flat = 5;
+  // FAILED.
+  uint64 failed = 6;
+  // WRITTEN_OFF.
+  uint64 written_off = 7;
+}
+
+// One page of trades, bound to one ledger snapshot (no gap, no duplicate across pages).
+message TradeHistoryPage {
+  // Whether the native owner answered.
+  Availability availability = 1;
+  // Why it is not AVAILABLE.
+  string unavailable_reason = 2;
+  // The owner and the ledger version the cursor is bound to.
+  OwnerProvenance provenance = 3;
+  // The rows.
+  repeated TradeRow rows = 4;
+  // The cursor of the next page; empty on the last one.
+  string next_cursor = 5;
+  // Whether another page follows.
+  bool has_more = 6;
+  // Rows matching the query in the snapshot.
+  uint64 total = 7;
+  // The counts of the whole filtered result.
+  TradeCounts counts = 8;
+}
+
+// A read of one lot.
+message TradeDetailQuery {
+  // The lot, 0x hex.
+  string lot = 1;
+}

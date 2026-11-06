@@ -23,7 +23,8 @@ export const READ_TIMEOUT_MS = Math.ceil(COMMAND_TIMEOUT_MS / 10);
 const options: RequestInit = { credentials: "same-origin", cache: "no-store" };
 const errorText = (error: unknown) => error instanceof Error ? error.message : String(error);
 
-async function session(): Promise<string> {
+/** The session's CSRF token (one bootstrap per request; shared with the bounded BSC query client). */
+export async function session(): Promise<string> {
   const r = await fetch("/api/v1/session", { ...options, signal: AbortSignal.timeout(READ_TIMEOUT_MS) });
   const token = r.headers.get("x-csrf-token");
   if (!r.ok || !token) throw new Error("Session unavailable");

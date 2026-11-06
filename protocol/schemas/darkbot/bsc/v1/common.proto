@@ -1,0 +1,163 @@
+syntax = "proto3";
+package darkbot.bsc.v1;
+
+import "darkbot/bsc/v1/status.proto";
+
+// V8 (06.11.2026, BSC-V8-09, FE-V8-17): the shared vocabulary of the prepared V8 contracts
+// (training.proto, history.proto, wallet.proto, watch.proto, query.proto). A prepared contract
+// is generated and tested before its native producer exists; until the native owner answers, the
+// frontend shows its function as NOT_IMPLEMENTED or UNAVAILABLE, never a value. Amounts are exact
+// decimal wei text (signed where a loss is possible), never floating point; every time names its
+// unit and its clock; an absent optional field is unknown, never zero.
+
+// Whether the native owner answers for a V8 projection or action.
+enum Availability {
+  // Not set by any producer; never displayed as a value.
+  AVAILABILITY_UNSPECIFIED = 0;
+  // The native owner answered; the values are its own.
+  AVAILABILITY_AVAILABLE = 1;
+  // The owner exists but cannot answer now (reason given): its state unreadable, stale or detached.
+  AVAILABILITY_UNAVAILABLE = 2;
+  // No native owner implements it yet (the BSC-V8 checklist names the missing one).
+  AVAILABILITY_NOT_IMPLEMENTED = 3;
+}
+
+// How far the values of a row or projection are proven by native evidence.
+enum DataQuality {
+  // Not set by any producer; never displayed as a value.
+  DATA_QUALITY_UNSPECIFIED = 0;
+  // Every value comes from identified native evidence.
+  DATA_QUALITY_VERIFIED = 1;
+  // Some values are missing; each missing field stays absent, never zero.
+  DATA_QUALITY_INCOMPLETE = 2;
+  // The chain has not decided yet (UNKNOWN handoff, receipt window, reorg depth).
+  DATA_QUALITY_UNRESOLVED = 3;
+  // Older than the owner's freshness rule.
+  DATA_QUALITY_STALE = 4;
+  // Independent sources disagree (e.g. the second chain source DISAGREES).
+  DATA_QUALITY_CONFLICT = 5;
+}
+
+// The clock a time was taken on. Times of different clocks are never subtracted.
+enum TimeSource {
+  // Not set by any producer; never displayed as a value.
+  TIME_SOURCE_UNSPECIFIED = 0;
+  // The block header's own timestamp (BSC block time, ms); not the producer's T0.
+  TIME_SOURCE_BLOCK_HEADER = 1;
+  // The host wall clock at a local event (sighting, send, answer).
+  TIME_SOURCE_LOCAL_WALL = 2;
+  // The runtime's monotonic clock (clock_id of the release record); only differences on one
+  // clock are meaningful.
+  TIME_SOURCE_RUNTIME_MONOTONIC = 3;
+  // An exact producer T0 from an original execution witness (t0_exact).
+  TIME_SOURCE_PRODUCER_WITNESS = 4;
+}
+
+// A point in time with the clock it was taken on.
+message SourcedTime {
+  // Unix milliseconds; absent while unknown.
+  optional uint64 unix_ms = 1;
+  // The clock of unix_ms.
+  TimeSource source = 2;
+  // The block it refers to, when it is a block time.
+  optional uint64 block_number = 3;
+}
+
+// Who produced a V8 projection, from what, and how far it is proven.
+message OwnerProvenance {
+  // The native owner, e.g. "bsc_runtime live ledger", "bsc_runtime strategy settings".
+  string owner = 1;
+  // The owner's version the values were read at (ledger version, settings generation, policy
+  // version); the snapshot a cursor and a compare-and-swap are bound to.
+  uint64 owner_version = 2;
+  // When the owner produced this projection, unix milliseconds.
+  uint64 observed_unix_ms = 3;
+  // The native record it was read from; absent when it is the owner's in-memory state.
+  Evidence evidence = 4;
+  // How far the values are proven.
+  DataQuality quality = 5;
+  // Why the quality is not VERIFIED, in the owner's order.
+  repeated string quality_reasons = 6;
+  // NATIVE_CREATED, LEGACY_IMPORTED_AUDITED or UNKNOWN, as NativeRecord.provenance.
+  string provenance = 7;
+}
+
+// The quantity of a performance series.
+enum PerformanceMetric {
+  // Not set by any producer; never displayed as a value.
+  PERFORMANCE_METRIC_UNSPECIFIED = 0;
+  // Cumulative realized net PnL of closed trades, signed decimal wei (no transfers).
+  PERFORMANCE_METRIC_REALIZED_NET_PNL = 1;
+  // A wallet's balance including transfers, decimal wei.
+  PERFORMANCE_METRIC_WALLET_BALANCE = 2;
+  // A wallet's trading PnL excluding transfers, signed decimal wei.
+  PERFORMANCE_METRIC_WALLET_TRADING_PNL = 3;
+  // A training run's cumulative PAPER net result, signed decimal wei (no real funds).
+  PERFORMANCE_METRIC_TRAINING_NET_RESULT = 4;
+}
+
+// What a performance series is about.
+enum PerformanceScope {
+  // Not set by any producer; never displayed as a value.
+  PERFORMANCE_SCOPE_UNSPECIFIED = 0;
+  // The LIVE ledger's trades.
+  PERFORMANCE_SCOPE_LIVE = 1;
+  // One BSC wallet (scope_id = its role).
+  PERFORMANCE_SCOPE_WALLET = 2;
+  // Every BSC wallet together.
+  PERFORMANCE_SCOPE_ALL_WALLETS = 3;
+  // One training run (scope_id = its run_id).
+  PERFORMANCE_SCOPE_TRAINING_RUN = 4;
+  // One training profile across its runs (scope_id = its profile_id).
+  PERFORMANCE_SCOPE_TRAINING_PROFILE = 5;
+}
+
+// One point of a performance series, from verified snapshots and trade facts only.
+message PerformancePoint {
+  // When the value holds.
+  SourcedTime at = 1;
+  // The value at that time, exact (signed) decimal wei.
+  string value_wei = 2;
+  // The fact that produced the point (trade lot, transfer request, balance snapshot); empty for
+  // a period boundary.
+  string fact_id = 3;
+  // How far this point is proven.
+  DataQuality quality = 4;
+}
+
+// A time series of one metric, reconstructible from the owner's facts; never a demo curve.
+message PerformanceSeries {
+  // Whether the native owner answered.
+  Availability availability = 1;
+  // Why it is not AVAILABLE.
+  string unavailable_reason = 2;
+  // The owner and snapshot the series was read at.
+  OwnerProvenance provenance = 3;
+  // The quantity.
+  PerformanceMetric metric = 4;
+  // What it is about.
+  PerformanceScope scope = 5;
+  // The run, profile or wallet role the scope names; empty for LIVE and ALL_WALLETS.
+  string scope_id = 6;
+  // The points in time order.
+  repeated PerformancePoint points = 7;
+  // The value before the first point (the period's opening balance or PnL), decimal wei;
+  // absent when the basis is unknown.
+  optional string opening_wei = 8;
+}
+
+// A bounded read of one performance series.
+message PerformanceSeriesQuery {
+  // The quantity.
+  PerformanceMetric metric = 1;
+  // What it is about.
+  PerformanceScope scope = 2;
+  // The run, profile or wallet role the scope names.
+  string scope_id = 3;
+  // Start of the period, unix ms; absent: the owner's first fact.
+  optional uint64 from_unix_ms = 4;
+  // End of the period, unix ms; absent: now.
+  optional uint64 to_unix_ms = 5;
+  // At most this many points; the owner caps it and says so in the series.
+  uint32 max_points = 6;
+}
