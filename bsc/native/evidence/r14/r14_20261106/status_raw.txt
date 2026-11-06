@@ -1,0 +1,202 @@
+== 30-min run final status (run30, 2026-11-06T22:07:39)
+sources[0].health = "OFF"
+sources[0].full = 0
+sources[0].hash_only = 0
+sources[0].rejected = 0
+sources[0].dropped = 0
+sources[0].first_any = 0
+sources[0].first_full = 0
+sources[1].health = "OFF"
+sources[1].full = 338954
+sources[1].hash_only = 0
+sources[1].rejected = 1699
+sources[1].dropped = 0
+sources[1].first_any = 184714
+sources[1].first_full = 195495
+sources[1].queue_max_ns = 202249208
+sources[1].queue_mean_ns = 148699
+sources[2].health = "OFF"
+sources[2].full = 0
+sources[2].hash_only = 58009
+sources[2].rejected = 0
+sources[2].dropped = 0
+sources[2].first_any = 16057
+sources[2].first_full = 0
+sources[2].queue_max_ns = 202274292
+sources[2].queue_mean_ns = 112801
+sources[3].health = "OFF"
+sources[3].full = 0
+sources[3].hash_only = 0
+sources[3].rejected = 0
+sources[3].dropped = 0
+sources[3].first_any = 0
+sources[3].first_full = 0
+sources[4].health = "OFF"
+sources[4].full = 0
+sources[4].hash_only = 0
+sources[4].rejected = 0
+sources[4].dropped = 0
+sources[4].first_any = 0
+sources[4].first_full = 0
+canonical.state = "STOPPED"
+canonical.blocks = 4011
+canonical.reorgs = 0
+canonical.resyncs = 0
+canonical.rpc_errors = 0
+canonical.blocks_skipped = 0
+state.held_txs = 233385
+state.held_senders = 44007
+exec.state = "EXHAUSTED"
+strategy.state = "SHADOW"
+strategy.exits_creator_sell = 0
+strategy.exits_target = 0
+strategy.exits_stop = 0
+strategy.exits_timeout = 0
+== run30 replay-proof
+records = 5240
+status_launches = 4
+status_match = true
+verdict = "PASS"
+status_counters_match = true
+== run30 capture-quality
+verdict = "CLEAN"
+acceptance_reasons[0] = "no pending transaction from the native geth source"
+acceptance_reasons[1] = "native source connected 0 s of the 1804 s capture window, shorter than the planned 1800 s"
+== run30 strategy-replay
+verdict = "PASS"
+records = 5240
+== run30 census
+== 3 h run final status (soak)
+sources[0].full = 0
+sources[0].rejected = 0
+sources[0].dropped = 0
+sources[0].first_full = 0
+sources[1].full = 2996582
+sources[1].rejected = 12611
+sources[1].dropped = 0
+sources[1].first_full = 1631606
+sources[1].queue_max_ns = 149083458
+sources[1].queue_mean_ns = 172436
+sources[2].full = 0
+sources[2].rejected = 0
+sources[2].dropped = 0
+sources[2].first_full = 0
+sources[3].full = 0
+sources[3].rejected = 0
+sources[3].dropped = 0
+sources[3].first_full = 0
+sources[4].full = 0
+sources[4].rejected = 0
+sources[4].dropped = 0
+sources[4].first_full = 0
+canonical.blocks = 24026
+canonical.reorgs = 0
+canonical.resyncs = 0
+canonical.rpc_errors = 0
+canonical.blocks_skipped = 0
+state.held_txs = 262144
+state.held_senders = 116074
+== diag run2 final status
+sources[1].full = 114684
+sources[1].hash_only = 0
+sources[1].rejected = 502
+sources[1].first_any = 66858
+sources[1].queue_max_ns = 15782750
+sources[1].queue_mean_ns = 136385
+sources[2].full = 0
+sources[2].hash_only = 28833
+sources[2].rejected = 0
+sources[2].first_any = 11650
+sources[2].queue_max_ns = 10970167
+sources[2].queue_mean_ns = 33710
+== diag run3 final status
+sources[1].full = 55085
+sources[1].hash_only = 0
+sources[1].rejected = 235
+sources[1].first_any = 39137
+sources[1].queue_max_ns = 45538709
+sources[1].queue_mean_ns = 157116
+sources[2].full = 0
+sources[2].hash_only = 9960
+sources[2].rejected = 0
+sources[2].first_any = 2696
+sources[2].queue_max_ns = 4334333
+sources[2].queue_mean_ns = 33690
+== diag run4 final status
+sources[1].full = 50488
+sources[1].hash_only = 0
+sources[1].rejected = 225
+sources[1].first_any = 36303
+sources[1].queue_max_ns = 14875458
+sources[1].queue_mean_ns = 171177
+sources[2].full = 0
+sources[2].hash_only = 8701
+sources[2].rejected = 0
+sources[2].first_any = 2613
+sources[2].queue_max_ns = 13184709
+sources[2].queue_mean_ns = 35387
+== diag run5 final status
+sources[1].full = 53086
+sources[1].hash_only = 0
+sources[1].rejected = 233
+sources[1].first_any = 36398
+sources[1].queue_max_ns = 174154083
+sources[1].queue_mean_ns = 221201
+sources[2].full = 0
+sources[2].hash_only = 14364
+sources[2].rejected = 0
+sources[2].first_any = 6348
+sources[2].queue_max_ns = 10503166
+sources[2].queue_mean_ns = 75532
+== diag status record sizes (run3 DIAGLEN, bytes)
+5068 5302 
+== diag C2 checkpoint size (run2)
+219208 bytes
+== diag stop sections (last 3 s, excluded from diag_sections.txt)
+run2/runtime.log reconcile 24867
+run2/runtime.log canonical 86896
+run2/runtime.log checkpoint 13967
+run3/runtime.log reconcile 1219
+run3/runtime.log apply_canonical 1027
+run3/runtime.log drain_canonical 1492
+run3/runtime.log status.replace 1913
+run3/runtime.log status 3132
+run3/runtime.log status.replace 1476
+run3/runtime.log status 2618
+run3/runtime.log reconcile 2663
+run3/runtime.log event 4453
+run3/runtime.log canonical 99410
+run3/runtime.log status.replace 1086
+run3/runtime.log status 7052
+run3/runtime.log checkpoint 12140
+run4/runtime.log apply_canonical 1044
+run4/runtime.log drain_canonical 1202
+run4/runtime.log status 1152
+run4/runtime.log reconcile 36008
+run4/runtime.log canonical 59367
+run4/runtime.log status.replace 4963
+run4/runtime.log status 6538
+run4/runtime.log checkpoint 11847
+diag/run5_runtime.log status.bytes 1517
+diag/run5_runtime.log status.replace 1097
+diag/run5_runtime.log status 5851
+diag/run5_runtime.log status.replace 1551
+diag/run5_runtime.log status 2906
+diag/run5_runtime.log checkpoint 1611
+diag/run5_runtime.log status.replace 1436
+diag/run5_runtime.log status 2934
+diag/run5_runtime.log reconcile 177149
+diag/run5_runtime.log canonical 193216
+diag/run5_runtime.log status.replace 4986
+diag/run5_runtime.log status 7101
+diag/run5_runtime.log checkpoint 11324
+== host memory at the diagnosis (2026-11-06T23:54:11)
+vm.swapusage: total = 14336.00M  used = 12647.44M  free = 1688.56M  (encrypted)
+System-wide memory free percentage: 91%
+== 3 h run launch counters (soak final status)
+canonical.flap_launches = 400
+canonical.four_launches = 202
+== host memory size
+hw.memsize: 137438953472
+hw.ncpu: 16
+machdep.cpu.brand_string: Apple M4 Max

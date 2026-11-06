@@ -462,20 +462,26 @@ test("the LIVE tab sets a Strategy C setting at the stored generation; the runni
   await expect(page.getByTestId("bsc-live-strategy-BSC_STRATEGY_C_MAX_OPEN-effective")).toHaveText("3 · stored value effective at the next start");
   await expect(page.getByTestId("bsc-live-strategy-BSC_STRATEGY_C_HOLD_MS-stored")).toHaveText("— (configuration file)");
   // A choice needs a choice; the value goes as typed, the native owner decides it.
-  await expect(page.getByTestId("bsc-live-strategy-BSC_STRATEGY_C_CREATOR_SELL_EXIT-set")).toBeDisabled();
-  await page.getByTestId("bsc-live-strategy-BSC_STRATEGY_C_CREATOR_SELL_EXIT-input").selectOption("DISABLED");
-  await page.getByTestId("bsc-live-strategy-BSC_STRATEGY_C_CREATOR_SELL_EXIT-set").click();
+  await page.getByTestId("bsc-live-strategy-key").selectOption("BSC_STRATEGY_C_CREATOR_SELL_EXIT");
+  await expect(page.getByTestId("bsc-live-strategy-set")).toBeDisabled();
+  await page.getByTestId("bsc-live-strategy-value").selectOption("DISABLED");
+  await page.getByTestId("bsc-live-strategy-set").click();
   await expect(page.getByTestId("bsc-live-strategy-dialog")).toContainText("nächsten Start von Strategy C");
   await expect(page.getByTestId("bsc-live-strategy-request")).toHaveText("BSC_STRATEGY_C_CREATOR_SELL_EXIT=DISABLED");
   await page.getByTestId("bsc-live-strategy-confirm").click();
   await expect(page.getByTestId("bsc-live-strategy-receipt")).toContainText("outcome=APPLIED bsc.strategy.set");
-  await page.getByTestId("bsc-live-strategy-BSC_STRATEGY_C_FILTERS-input").fill("buy_count:3:");
-  await page.getByTestId("bsc-live-strategy-BSC_STRATEGY_C_FILTERS-set").click();
+  await page.getByTestId("bsc-live-strategy-key").selectOption("BSC_STRATEGY_C_FILTERS");
+  await page.getByTestId("bsc-live-strategy-value").fill("buy_count:3:");
+  await page.getByTestId("bsc-live-strategy-set").click();
   await page.getByTestId("bsc-live-strategy-confirm").click();
   await expect(page.getByTestId("bsc-live-strategy-receipt")).toContainText("outcome=APPLIED bsc.strategy.set");
   expect(sent.map(r => [r.action, r.resourceId, r.params.length, r.expected?.version])).toEqual([
     ["bsc.strategy.set", "BSC_STRATEGY_C_CREATOR_SELL_EXIT:DISABLED", 0, { case: "profileVersion", value: 5n }],
     ["bsc.strategy.set", "BSC_STRATEGY_C_FILTERS:buy_count:3:", 0, { case: "profileVersion", value: 5n }],
   ]);
+  // R14: the LIVE tab fits a phone's width (390 px), the settings form included.
+  await page.setViewportSize({ width: 390, height: 844 });
+  const [scroll, width] = await page.evaluate(() => [document.documentElement.scrollWidth, window.innerWidth]);
+  expect(scroll).toBeLessThanOrEqual(width + 1);
   expect(errors).toEqual([]);
 });

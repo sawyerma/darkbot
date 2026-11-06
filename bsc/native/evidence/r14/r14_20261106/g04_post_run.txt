@@ -1,0 +1,32 @@
+== replay-proof 1793088319858
+replay proof of run 1793088319858: PARTIAL (segments 1, records 2856, last sequence 2855, manifest match true, sightings Flap 4 Four 5 OpenFour 0 undecodable 0, other pending 257 (to venues 257), census COMPLETE deterministic true, runtime Flap counter not of this run)
+no comparable runtime status of this run (absent, another run's or another version): its counters are not compared
+exit 2
+== capture-quality 1793088319858
+capture quality of run 1793088319858: NOT_CLEAN (Phase F acceptance NOT_MET; native connected 0 s of the 359 s window, planned 604800 s, native source false, replay PARTIAL)
+replay proof PARTIAL
+replay: no comparable runtime status of this run (absent, another run's or another version): its counters are not compared
+acceptance: not CLEAN
+acceptance: no pending transaction from the native geth source
+acceptance: native source connected 0 s of the 359 s capture window, shorter than the planned 604800 s
+exit 2
+== strategy-replay 1793088319858
+strategy replay of run 1793088319858: PASS (records 2856, starts 1, outputs journaled 27 replayed 27; inputs: trades 1431, terms 189, migrations 0, incomplete 0; launches 27, passed 1, rejected 18, data incomplete 0, not tracked 7, slot limit 0, creator sold 0; PAPER entered 1, cancelled 0, exits creator-sell 0 target 0 stop 0 timeout 0; gains 0 (0 wei), losses 0 (0 wei), unresolved 0, open at the end 1 (not valued); positions 1 (eligible for the next block 0, a foreign BUY before or in the eligible block 1, no eligible block 0))
+
+exit 0
+== replay-proof 1793088689212
+replay proof of run 1793088689212: PASS (segments 694, records 2209208, last sequence 2209207, manifest match true, sightings Flap 4630 Four 1818 OpenFour 96 undecodable 0, other pending 73530 (to venues 73530), census COMPLETE deterministic true, runtime Flap counter 4630)
+
+exit 0
+== capture-quality 1793088689212
+145 canonical resyncs
+432549 canonical blocks not followed
+the Four.meme deployment drifted from the freeze (74 probes)
+acceptance: not CLEAN
+acceptance: no pending transaction from the native geth source
+acceptance: native source connected 0 s of the 416416 s capture window, shorter than the planned 604800 s
+exit 2
+== strategy-replay 1793088689212
+strategy replay of run 1793088689212: PASS (records 2209208, starts 1, outputs journaled 29697 replayed 29697; inputs: trades 883506, terms 190579, migrations 192, incomplete 146; launches 26993, passed 920, rejected 17336, data incomplete 31, not tracked 8618, slot limit 77, creator sold 11; PAPER entered 912, cancelled 8, exits creator-sell 136 target 60 stop 28 timeout 495; gains 148 (895529527345195463 wei), losses 571 (1086553793525594942 wei), unresolved 193, open at the end 0 (not valued); positions 920 (eligible for the next block 845, a foreign BUY before or in the eligible block 81, 
+
+exit 0

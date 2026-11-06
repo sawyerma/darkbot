@@ -12,8 +12,9 @@ pub const ECONOMIC_LIVE_DISABLED: &str = "ECONOMIC_LIVE_DISABLED";
 /// LIVE acquisition (G0.8) and source (G0.4) conditions.
 pub const C2_OPERATIONAL_NOT_AUTHORIZED: &str = "C2_OPERATIONAL_NOT_AUTHORIZED";
 pub const SOURCE_ACCESS_UNQUALIFIED: &str = "SOURCE_ACCESS_UNQUALIFIED";
-/// Four.meme Classic (R12c) and OpenFour (R12d) have their PAPER path but
-/// no LIVE path yet: their requested LIVE stays blocked for this reason.
+/// Before SC4 d (4248ff12) a requested LIVE of a Four.meme venue stayed
+/// blocked for this reason; since then it is the LIVE gate's, as Flap's.
+/// Kept so that generations written before it read.
 pub const FOUR_EXECUTION_PATH_MISSING: &str = "FOUR_EXECUTION_PATH_MISSING";
 /// A switch ENABLED in an earlier boot session: every restart disables it.
 pub const RESET_BY_RESTART: &str = "RESET_BY_RESTART";

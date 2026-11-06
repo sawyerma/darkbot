@@ -140,13 +140,13 @@ await until(async()=> /HEALTHY[\s\S]*sealed segments \d+ · durable to sequence/
  // v5.27.0) it waits for C2's nonce fact of the PAPER sender (every 20 blocks) and arms its fenced
  // lanes; a live Portal past it fails closed as DEPLOYMENT_DRIFT with the observed version and arms nothing.
  // Plan v9 §2.3: Flap launches reach C3 and Strategy C only while the Flap venue is SHADOW (Monitoring §2);
- // Four Classic (R12c) and OpenFour (R12d) have their C3 PAPER path in SHADOW, but no LIVE path: a requested LIVE is BLOCKED with that reason.
+ // Four Classic (R12c) and OpenFour (R12d) have their C3 PAPER path in SHADOW; since SC4 d a Four.meme venue's LIVE is the LIVE gate's, as Flap's (global LIVE switch off here).
  await until(async()=> (await srcLine('BSC_VENUE_FLAP').innerText()).includes('OFF'),'Flap venue OFF initially');
  await requestSource('BSC_VENUE_FLAP','SHADOW','source=BSC_VENUE_FLAP requested=SHADOW effective=SHADOW','bsc-venue-receipt');
  // The CAS of the next request is the pushed generation 5 (a request on the old one is refused stale).
  await until(async()=> (await p.locator('.g-line',{hasText:'Source modes generation'}).first().innerText()).includes('5')&&(await srcLine('BSC_VENUE_FLAP').innerText()).includes('requested SHADOW'),'Flap venue SHADOW pushed (generation 5)');
- await requestSource('BSC_VENUE_OPENFOUR','LIVE','source=BSC_VENUE_OPENFOUR requested=LIVE effective=BLOCKED block_reason=FOUR_EXECUTION_PATH_MISSING','bsc-venue-receipt');
- await until(async()=> (await p.locator('.g-line',{hasText:'Source modes generation'}).first().innerText()).includes('6')&&(await srcLine('BSC_VENUE_OPENFOUR').innerText()).includes('FOUR_EXECUTION_PATH_MISSING'),'venues pushed (generation 6)');
+ await requestSource('BSC_VENUE_OPENFOUR','LIVE','source=BSC_VENUE_OPENFOUR requested=LIVE effective=BLOCKED block_reason=ECONOMIC_LIVE_DISABLED','bsc-venue-receipt');
+ await until(async()=> (await p.locator('.g-line',{hasText:'Source modes generation'}).first().innerText()).includes('6')&&(await srcLine('BSC_VENUE_OPENFOUR').innerText()).includes('ECONOMIC_LIVE_DISABLED'),'venues pushed (generation 6)');
  assert((await srcLine('BSC_VENUE_FLAP').innerText()).includes('last set by '),'venue shows the request that set it');
  // Plan v9 §2.5: the global runtime mode (Launch / BUY §5), OFF initially, bounds the components:
  // PAPER lets the C3 path run to the PAPER sink (zero-balance PAPER identity, nothing sent).

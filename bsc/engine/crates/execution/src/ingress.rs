@@ -283,12 +283,17 @@ impl IngressCore {
     /// above `max_launch_calldata` is refused as oversized.
     pub fn new(capacity: usize, max_launch_calldata: usize) -> Self {
         let capacity = capacity.max(1);
+        // R14 A3: the two maps take twice the hashes they hold, so the
+        // churn of a full window (one in, one out) never resizes them: at
+        // `capacity` the tombstones made a 262144-hash map double once,
+        // ~2.3 h into a run, and that insert stalled the ingress loop 7.7 ms
+        // (twice the room: no resize at all, the size the map grew to anyway).
         IngressCore {
             capacity,
             order: VecDeque::with_capacity(capacity),
-            seen: HashMap::with_capacity(capacity),
+            seen: HashMap::with_capacity(capacity.saturating_mul(2)),
             forgotten: VecDeque::with_capacity(capacity),
-            forgotten_set: HashMap::with_capacity(capacity),
+            forgotten_set: HashMap::with_capacity(capacity.saturating_mul(2)),
             gone_until_us: None,
             gone_unclocked: false,
             stats: [SourceStats::default(); 5],
@@ -1136,6 +1141,93 @@ mod tests {
         // Memory stays bounded.
         assert_eq!((core.seen.len(), core.forgotten.len()), (2, 2));
         assert!(core.forgotten_set.len() <= 2);
+    }
+
+    /// R14 A3: a full window churning (one hash in, the oldest out) never
+    /// resizes its maps: neither grows past the room it was made with (a
+    /// resize doubles it; tombstones only lower the reported room).
+    #[test]
+    fn a_churning_window_never_resizes_its_maps() {
+        let mut core = IngressCore::new(4_096, MAX_CALLDATA);
+        let room = (core.seen.capacity(), core.forgotten_set.capacity());
+        // The most room either reported while churning (after a resize it
+        // falls again as tombstones take it).
+        let mut most = room;
+        for n in 0..100_000u32 {
+            let mut hash = [0u8; 32];
+            hash[..4].copy_from_slice(&n.to_le_bytes());
+            core.observe(
+                SourceId::Drpc,
+                Observation::HashOnly { hash },
+                u64::from(n),
+                Some(u64::from(n)),
+            );
+            most = (
+                most.0.max(core.seen.capacity()),
+                most.1.max(core.forgotten_set.capacity()),
+            );
+        }
+        assert_eq!(core.seen.len(), 4_096);
+        assert_eq!(most, room);
+    }
+
+    /// R14 (endurance, 06.11.): the dedup window at its configured bound
+    /// (`BSC_RUNTIME_DEDUP_HASHES`) under at least the 3 h run's load (2.997 M
+    /// full sightings, 1.632 M first): 3 M sightings of 1.65 M distinct
+    /// hashes, five of six seen again by a second source, as fast as
+    /// the core takes them. Neither map resizes; the slowest sighting and
+    /// those over 100 µs are printed.
+    #[test]
+    #[ignore = "R14 endurance load; run in release"]
+    fn the_window_under_the_endurance_runs_load_never_resizes() {
+        let config = include_str!("../../../../config/ingress.public.env");
+        let capacity: usize = crate::sources::config_value(config, "BSC_RUNTIME_DEDUP_HASHES")
+            .unwrap()
+            .unwrap()
+            .parse()
+            .unwrap();
+        let mut core = IngressCore::new(capacity, MAX_CALLDATA);
+        let room = (core.seen.capacity(), core.forgotten_set.capacity());
+        let mut most = room;
+        let mut state = 0x9E37_79B9_7F4A_7C15u64;
+        let mut next = || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        };
+        let (mut worst, mut slow, mut total) = (0u128, 0u64, 0u64);
+        let mut again: Option<[u8; 32]> = None;
+        let mut observe = |core: &mut IngressCore, source, hash, n: u64| {
+            let at = std::time::Instant::now();
+            core.observe(source, Observation::HashOnly { hash }, n, Some(n));
+            let took = at.elapsed().as_nanos();
+            worst = worst.max(took);
+            slow += u64::from(took > 100_000);
+            total += 1;
+        };
+        for n in 0..1_650_000u64 {
+            let mut hash = [0u8; 32];
+            for w in hash.chunks_mut(8) {
+                w.copy_from_slice(&next().to_le_bytes());
+            }
+            observe(&mut core, SourceId::PublicNode, hash, n);
+            if let Some(h) = again.take() {
+                observe(&mut core, SourceId::Drpc, h, n);
+            }
+            if n % 6 != 0 {
+                again = Some(hash);
+            }
+            most = (
+                most.0.max(core.seen.capacity()),
+                most.1.max(core.forgotten_set.capacity()),
+            );
+        }
+        println!(
+            "dedup window {capacity}: {total} sightings, room {room:?}, most {most:?}, slowest {worst} ns, over 100 us {slow}"
+        );
+        assert!(total >= 2_997_000);
+        assert_eq!(most, room);
     }
 
     #[test]

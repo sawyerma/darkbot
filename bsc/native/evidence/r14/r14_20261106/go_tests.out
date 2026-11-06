@@ -1,0 +1,13 @@
+go version go1.25.0 darwin/arm64
+== go test -race ./darkbot/fastlane
+# github.com/ethereum/go-ethereum/darkbot/fastlane.test
+ld: warning: '/private/var/folders/hc/2j77cvl53nn7zvvb1y_pvprr0000gn/T/go-link-3304818773/000026.o' has malformed LC_DYSYMTAB, expected 98 undefined symbols to start at index 1626, found 95 undefined symbols starting at index 1626
+ok  	github.com/ethereum/go-ethereum/darkbot/fastlane	2.088s
+exit 0
+== go test ./eth/protocols/eth ./eth ./core
+ok  	github.com/ethereum/go-ethereum/eth/protocols/eth	2.690s
+ok  	github.com/ethereum/go-ethereum/eth	12.047s
+ok  	github.com/ethereum/go-ethereum/core	159.610s
+exit 0
+== go build ./cmd/geth
+exit 0

@@ -1,0 +1,8 @@
+journal 1793997453193: 1 PAPER BUYs (end)
+MEASURE ingress→decoded (queue wait, loop work, decode): n=1 p50=47250 p95=47250 p99=47250 max=47250 ns; >=1ms 0 >=3ms 0
+MEASURE decoded→admitted: n=1 p50=52708 p95=52708 p99=52708 max=52708 ns; >=1ms 0 >=3ms 0
+MEASURE admitted→signed: n=1 p50=101375 p95=101375 p99=101375 max=101375 ns; >=1ms 0 >=3ms 0
+MEASURE signed→sink: n=1 p50=43375 p95=43375 p99=43375 max=43375 ns; >=1ms 0 >=3ms 0
+MEASURE ingress→sink: n=1 p50=244708 p95=244708 p99=244708 max=244708 ns; >=1ms 0 >=3ms 0
+.
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s

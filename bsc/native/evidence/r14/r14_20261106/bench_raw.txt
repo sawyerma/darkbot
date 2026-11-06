@@ -1,0 +1,12 @@
+== churn microbenchmark (rustc -O, scratch/r14/churn_bench.rs), 3 runs
+prealloc 262144: capacity 458752 -> 916631, worst insert 8279 us at op 1129980, ops over 100 us 1 (104 B per entry)
+prealloc 524288: capacity 917504 -> 884747, worst insert 17 us at op 12450, ops over 100 us 0 (104 B per entry)
+prealloc 262144: capacity 458752 -> 916513, worst insert 8095 us at op 1128562, ops over 100 us 2 (104 B per entry)
+prealloc 524288: capacity 917504 -> 884054, worst insert 18 us at op 1118295, ops over 100 us 0 (104 B per entry)
+prealloc 262144: capacity 458752 -> 916627, worst insert 9020 us at op 1135005, ops over 100 us 1 (104 B per entry)
+prealloc 524288: capacity 917504 -> 884427, worst insert 1931 us at op 894671, ops over 100 us 2 (104 B per entry)
+== Canonical::put copy cost (rustc -O, scratch/r14/clone_bench.rs)
+clone of a 49-byte payload: 16 ns (98000000)
+clone of a 169-byte payload: 15 ns (338000000)
+clone of a 233-byte payload: 17 ns (466000000)
+clone of a 400-byte payload: 30 ns (800000000)

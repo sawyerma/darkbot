@@ -225,27 +225,32 @@ export const STRATEGY = "bsc-live-strategy";
  *  runtime configuration and stores it at once. Effective at the next start of Strategy C. */
 export function StrategySettingsActions({ view }: { view: StrategySettingsView }) {
   const { busy } = useSourceControl();
-  const [values, setValues] = useState<Record<string, string>>({});
+  const [id, setId] = useState(view.rows[0]?.id ?? "");
+  const [value, setValue] = useState("");
   const [target, setTarget] = useState<{ id: string; label: string; value: string; generation: bigint } | null>(null);
+  const row = view.rows.find(r => r.id === id);
+  const shown = (v: string | undefined, none: string) => v === undefined ? none : v === "" ? "(empty)" : v;
   return <>
     <table className="bsc-table" data-testid={`${STRATEGY}-settings`}><tbody>
-      {view.rows.map(r => {
-        const value = values[r.id] ?? "";
-        const edit = (v: string) => setValues({ ...values, [r.id]: v });
-        return <tr key={r.id} data-testid={`${STRATEGY}-${r.id}`}>
-          <td>{r.label}<br /><span className="g-muted">{r.id}</span></td>
-          <td data-testid={`${STRATEGY}-${r.id}-stored`}>{r.stored === undefined ? "— (configuration file)" : r.stored === "" ? "(empty)" : r.stored}</td>
-          <td data-testid={`${STRATEGY}-${r.id}-effective`}>{!view.running ? "— (not running)" : r.effective === undefined ? "—" : r.effective === "" ? "(empty)" : r.effective}{r.pending ? " · stored value effective at the next start" : ""}</td>
-          <td>{r.choices
-            ? <select aria-label={`New ${r.label}`} value={value} onChange={e => edit(e.target.value)} disabled={!view.available || busy} data-testid={`${STRATEGY}-${r.id}-input`}>
-              <option value="">choose…</option>{r.choices.map(c => <option key={c} value={c}>{c}</option>)}</select>
-            : <input aria-label={`New ${r.label}`} value={value} onChange={e => edit(e.target.value.trim())} disabled={!view.available || busy} data-testid={`${STRATEGY}-${r.id}-input`} />}
-            <button className="g-secondary" aria-label={`Set ${r.label}`} disabled={!view.available || busy || (!!r.choices && value === "")}
-              title={view.available ? `Set at generation ${view.generation.toString()}` : view.reason} data-testid={`${STRATEGY}-${r.id}-set`}
-              onClick={() => setTarget({ id: r.id, label: r.label, value, generation: view.generation })}>Set</button></td>
-        </tr>;
-      })}
+      {view.rows.map(r => <tr key={r.id} data-testid={`${STRATEGY}-${r.id}`}>
+        <td>{r.label}<br /><span className="g-muted">{r.id}</span></td>
+        <td data-testid={`${STRATEGY}-${r.id}-stored`}>{shown(r.stored, "— (configuration file)")}</td>
+        <td data-testid={`${STRATEGY}-${r.id}-effective`}>{view.running ? shown(r.effective, "—") : "— (not running)"}{r.pending ? " · stored value effective at the next start" : ""}</td>
+      </tr>)}
     </tbody></table>
+    {/* R14 (mobile): one form row under the table, as the other LIVE controls. */}
+    <div className="bsc-filter" data-testid={`${STRATEGY}-controls`}>
+      <select aria-label="Strategy C setting" value={id} onChange={e => { setId(e.target.value); setValue(""); }} disabled={!view.available || busy} data-testid={`${STRATEGY}-key`}>
+        {view.rows.map(r => <option key={r.id} value={r.id}>{r.label}</option>)}
+      </select>
+      {row?.choices
+        ? <select aria-label={`New ${row.label}`} value={value} onChange={e => setValue(e.target.value)} disabled={!view.available || busy} data-testid={`${STRATEGY}-value`}>
+          <option value="">choose…</option>{row.choices.map(c => <option key={c} value={c}>{c}</option>)}</select>
+        : <input aria-label={`New ${row?.label ?? "value"}`} value={value} onChange={e => setValue(e.target.value.trim())} disabled={!view.available || busy} data-testid={`${STRATEGY}-value`} />}
+      <button className="g-secondary" aria-label={`Set ${row?.label ?? "setting"}`} disabled={!view.available || busy || !row || (!!row.choices && value === "")}
+        title={view.available ? `Set at generation ${view.generation.toString()}` : view.reason} data-testid={`${STRATEGY}-set`}
+        onClick={() => { if (row) setTarget({ id: row.id, label: row.label, value, generation: view.generation }); }}>Set</button>
+    </div>
     <Confirm open={!!target} testId={STRATEGY} title={`${target?.label ?? ""} auf „${target?.value ?? ""}“ setzen?`} onClose={() => setTarget(null)}
       onConfirm={() => { if (target) void strategySettingCommand(STRATEGY, target.id, target.value, target.generation); }}>
       <p>Die native Verwaltung prüft den Wert mit der Runtime-Konfiguration und speichert ihn sofort; wirksam wird er beim nächsten Start von Strategy C (Einschalten oder Neustart der Runtime). Echte Positionen, die Strategy C selbst gekauft hat, behalten die Exit-Werte ihres Einstiegs (Ziel, Stop, Haltedauer, Creator-Sell-Exit), auch über Neustarts; andere echte Lots (C3, übernommen, ohne gespeicherte Einstiegswerte) entscheidet Strategy C nach den Werten ihres jeweiligen Starts; PAPER-Positionen enden mit jedem Stopp oder Neustart der Strategie. Ein leerer Wert ist ein Wert, keine Rückkehr zur Konfigurationsdatei. Generation {target?.generation.toString()}.</p>

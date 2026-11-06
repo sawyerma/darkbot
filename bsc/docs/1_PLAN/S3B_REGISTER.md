@@ -37,7 +37,7 @@ Jeder §3b-Fall mit seinem Nachweis auf dem aktuellen Code. PASS heißt: der gen
 | C16 | gn `one_shared_attempt_authority_is_consumed_before_the_latch_and_returned_only_unsent`, `a_crash_anywhere_after_the_authority_is_consumed_never_releases_the_attempt` | U | PASS (Läufer mit echtem Owner tabu: OS-Home-Regel) |
 | C17, C18 | rp `owner_races_replays_and_an_unreadable_owner_fail_closed`; so `concurrent_writers_of_one_generation_have_one_winner`, `receipts_are_recovered_only_for_the_same_request` | P, U | PASS |
 | C19 | rp (unlesbarer Owner beendet die Runtime mit STOP-Grund); so `a_missing_unreadable_or_tampered_state_refuses_every_switch`; fremdes HOME `bsc/tools/test_g06a_state_pin.cjs` C; veraltete GUI-Projektion `frontend/src/features/bsc/model/sources.test.ts` (STALE) | P, U | PASS |
-| C20 | F0-VAR, `frontend/tests/bsc.spec.ts`; Release-Browser-E2E `ops/tests/bsc_control_test.py` zuletzt PASS `4b0139ee`/`0ac597ca` | U | OPEN: Release-E2E liest öffentliche RPCs (verboten) → hermetische Variante R14 |
+| C20 | F0-VAR, `frontend/tests/bsc.spec.ts`; Release-Browser-E2E `ops/tests/bsc_control_test.py` zuletzt PASS `4b0139ee`/`0ac597ca` | U | Release-E2E PASS T112 (öffentliche RPC-Lesungen per einmaliger Nutzerfreigabe 06.11.); hermetische Variante OPEN |
 | Crash/Disk-full | rp `a_killed_runtime_restarts_disabled_with_its_limit_and_journal`, `a_full_disk_stops_the_runtime_and_its_run_reads_incomplete` (macOS-Disk-Image) | P | PASS |
 
 **Offen/extern:**

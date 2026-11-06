@@ -1,0 +1,61 @@
+TREE=49468d8543503791 22:54:41
+== interop
+c13_lifecycle_interop exit 0 1 pass-lines; C1_3_GO_RUST_LIFECYCLE_INTEROP_PASS
+c14_ingress_interop exit 0 1 pass-lines; C1_4_GO_RUST_INGRESS_INTEROP_PASS
+== release sets 23:03:44
+built 5/5
+sha256 bsc_runtime aa3c3d8ecb3196574df400dd42e5a6cb21a1c0f8ad7386b7e31970e477fcb73e
+sha256 bsc-status-reporter a507f134be98506280a78a0d0a0ec64182550feb43d20ce06aec9d42a0133e07
+sha256 g08_mainnet_verify 1b3935895a4212b05323abf0e14a794262234c029dcf1b31334b2ef6a9a099b8
+sha256 g07_pre_live_readiness a6986969ca0ef000914c96bfe0932e74c12bf57aefaa2c88a0fd41c2e5c48cc1
+sha256 g07_candidate 23881c699bd9a5bcd337d95954ba5e4587149879117ec2d7f0cde7fab07964b6
+sha256 g07_mainnet_self_launch_buy b781fc57f73033ca55a98f73e150d003801ffafb71bb408b9afcbe3c810f658b
+sha256 g07_builder_probe ac6a7cc2de7621e8eb36e3c04a00b015ed9bda57a99ac8d3ae51468b06885027
+sha256 g07_attempt_authority dffccd0e74de6075308ef2f29d637645a4d3334e91196181608d6e8d564ed9fa
+sha256 dbrec_show 91e3b4d845e6a65479c61f7d708971d25d2c10c5e2f1779e54f9d97f67a971db
+== config-check 23:04:07
+config=OK sha256=1e5ca2f7ab3981b1da2304fc008c1402c65757456cc33c1c72ad4219cb255379 live=OFF
+== replay 23:04:07
+r14 rep1 h 1793049942243 0.088s
+r14 rep1 p8a 1793074421330 0.055s
+r14 rep1 p8b 1793062591241 0.052s
+r14 rep1 g04 1793088319858 0.06s
+r14 rep1 g04 1793088689212 5.955s
+r14 rep1 four 1793889940032 0.061s
+r14_1_four_1793889940032 TEXT_SAME record-diff-lines-besides-hash/time=2
+r14_1_g04_1793088319858 TEXT_SAME record-diff-lines-besides-hash/time=2
+r14_1_g04_1793088689212 TEXT_SAME record-diff-lines-besides-hash/time=2
+r14_1_h_1793049942243 TEXT_SAME record-diff-lines-besides-hash/time=2
+r14_1_p8a_1793074421330 TEXT_SAME record-diff-lines-besides-hash/time=2
+r14_1_p8b_1793062591241 TEXT_SAME record-diff-lines-besides-hash/time=2
+== latency 23:04:13
+c3_paper_latency exit 0
+cold first launch: 345875 ns; deadline misses: 0; allocations per BUY 5..=9
+recover+C2 pending: n=2000 min=18125 mean=19949 p50=19333 p95=22917 p99=26000 p99.9=71583 max=130750 ns; >=0.5ms 0 >=1ms 0 >=3ms 0
+decode: n=2000 min=125 mean=191 p50=167 p95=250 p99=833 p99.9=1417 max=6125 ns; >=0.5ms 0 >=1ms 0 >=3ms 0
+profile+snapshot+admission: n=2000 min=333 mean=429 p50=416 p95=500 p99=1000 p99.9=5667 max=11500 ns; >=0.5ms 0 >=1ms 0 >=3ms 0
+expectation+build+sign: n=2000 min=28458 mean=30246 p50=29375 p95=33125 p99=38625 p99.9=151000 max=276500 ns; >=0.5ms 0 >=1ms 0 >=3ms 0
+lane prepare (final BUY check): n=2000 min=17291 mean=18894 p50=18459 p95=21875 p99=24750 p99.9=35750 max=141125 ns; >=0.5ms 0 >=1ms 0 >=3ms 0
+plan+frame: n=2000 min=3625 mean=3942 p50=3792 p95=4000 p99=7875 p99.9=27208 max=56167 ns; >=0.5ms 0 >=1ms 0 >=3ms 0
+dispatch to the sink: n=2000 min=208 mean=265 p50=250 p95=333 p99=625 p99.9=1166 max=4750 ns; >=0.5ms 0 >=1ms 0 >=3ms 0
+journal record: n=2000 min=417 mean=1566 p50=1167 p95=2709 p99=4666 p99.9=7417 max=8042 ns; >=0.5ms 0 >=1ms 0 >=3ms 0
+T_ingress -> T_shadow_sink: n=2000 min=68917 mean=73919 p50=72125 p95=79375 p99=98167 p99.9=294375 max=436458 ns; >=0.5ms 0 >=1ms 0 >=3ms 0
+strategy_paper_latency exit 0
+cold first entry: 321541 ns; allocations per entry and exit 10..=10
+strategy_buy_decided_to_sink: n=2000 min=46542 mean=49533 p50=48834 p95=53166 p99=59459 p99.9=77917 max=122458 ns; >=0.5ms 0 >=1ms 0
+strategy_exit_triggered_to_sell_sink: n=2000 min=91500 mean=102255 p50=102250 p95=107500 p99=112000 p99.9=171667 max=182375 ns; >=0.5ms 0 >=1ms 0
+f_ingest_latency exit 0
+Phase F local ingest latency, 100000 samples per stage after 1000 warm-up, this machine (clock floor p50 0 ns; recorder lost 0):
+recognize_other: n=100000 min=0 mean=67 p50=83 p95=84 p99=84 p99.9=167 p99.99=209 max=3583 ns; >=0.5ms 0 >=1ms 0 >=3ms 0
+recognize_flap_launch: n=100000 min=83 mean=148 p50=125 p95=167 p99=209 p99.9=291 p99.99=4750 max=29875 ns; >=0.5ms 0 >=1ms 0 >=3ms 0
+recognize_four_launch: n=100000 min=125 mean=184 p50=167 p95=209 p99=250 p99.9=292 p99.99=3084 max=10791 ns; >=0.5ms 0 >=1ms 0 >=3ms 0
+four_pending_token: n=100000 min=416 mean=511 p50=500 p95=542 p99=625 p99.9=3084 p99.99=7542 max=12541 ns; >=0.5ms 0 >=1ms 0 >=3ms 0
+ingress_first_sighting: n=100000 min=125 mean=228 p50=208 p95=250 p99=667 p99.9=3041 p99.99=7542 max=13000 ns; >=0.5ms 0 >=1ms 0 >=3ms 0
+recorder_enqueue: n=100000 min=0 mean=109 p50=42 p95=625 p99=875 p99.9=2209 p99.99=6000 max=8167 ns; >=0.5ms 0 >=1ms 0 >=3ms 0
+egress_latency exit 0
+cold first dispatch: 14250 ns; allocations per dispatch 0..=0
+dispatch_start_to_queue_commit: n=2000 min=1916 mean=2021 p50=2000 p95=2083 p99=3000 p99.9=5458 max=6583 ns; >=0.5ms 0 >=1ms 0
+write_check_to_queue_commit: n=2000 min=1791 mean=1900 p50=1875 p95=1958 p99=2875 p99.9=5333 max=6458 ns; >=0.5ms 0 >=1ms 0
+hotpath_alloc exit 0
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+TREE_END=49468d8543503791 23:04:34

@@ -1,0 +1,17 @@
+
+Running 12 tests using 1 worker
+
+  ✓   1 tests/bsc.spec.ts:59:1 › the six tabs fail closed without a gateway: UNKNOWN, never 0, no control acts (664ms)
+  ✓   2 tests/bsc.spec.ts:102:1 › LIVE comes from bsc.live.state alone and the grant offers only its grantable sources (497ms)
+  ✓   3 tests/bsc.spec.ts:143:1 › the campaign verdict and its attempts as recorded, evidence only (REV.1.0 R2b) (215ms)
+  ✓   4 tests/bsc.spec.ts:197:1 › a campaign section beyond the state is INVALID, never no evaluation or no attempt (REV.1.0 R2b re-check F3) (194ms)
+  ✓   5 tests/bsc.spec.ts:217:1 › the LIVE tab names the undecided and stranded lots, the receipt recovery and each transaction's source (REV.1.0 R1/R3b) (196ms)
+  ✓   6 tests/bsc.spec.ts:271:1 › the LIVE tab shows the path's counters, the second source and the presence; a revoke names the exits it ends (REV.1.0 R10) (265ms)
+  ✓   7 tests/bsc.spec.ts:304:1 › every BSC control has an accessible name and the tabs follow the keyboard (REV.1.0 R10 a11y) (580ms)
+  ✓   8 tests/bsc.spec.ts:320:1 › the LIVE tab's operator decisions go at the state their dialog opened on (REV.1.0 R3b, Audit A) (520ms)
+  ✓   9 tests/bsc.spec.ts:365:1 › the LIVE tab's operator decisions stay locked without their switch ON or the ledger's version (REV.1.0 R3b review M2) (205ms)
+  ✓  10 tests/bsc.spec.ts:392:1 › an unreadable LIVE ledger offers its lowest entry's quarantine at the owner generation, only with owner state (REV.1.0 R3b) (353ms)
+  ✓  11 tests/bsc.spec.ts:414:1 › an unreadable campaign verdict is INVALID, an exact T0 leaves only the local-times notice (REV.1.0 R2b review L7) (188ms)
+  ✓  12 tests/bsc.spec.ts:440:1 › the LIVE tab sets a Strategy C setting at the stored generation; the running strategy keeps its start's (frontend package 06.11.) (539ms)
+
+  12 passed (5.0s)

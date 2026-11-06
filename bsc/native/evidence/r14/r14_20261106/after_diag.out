@@ -1,0 +1,15 @@
+== churn microbenchmark (rustc -O, room = capacity vs 2x capacity, 262144, 1.2M churn ops)
+prealloc 262144: capacity 458752 -> 916553, worst insert 7744 us at op 1133609, ops over 100 us 1 (104 B per entry)
+prealloc 524288: capacity 917504 -> 884061, worst insert 104 us at op 498033, ops over 100 us 1 (104 B per entry)
+ingress.rs = worktree's
+== mutant seen: room = capacity
+thread 'ingress::tests::a_churning_window_never_resizes_its_maps' (111265962) panicked at crates/execution/src/ingress.rs:1171:9:
+assertion `left == right` failed
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 577 filtered out; finished in 0.16s
+== mutant forgotten_set: room = capacity
+thread 'ingress::tests::a_churning_window_never_resizes_its_maps' (111266340) panicked at crates/execution/src/ingress.rs:1171:9:
+assertion `left == right` failed
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 577 filtered out; finished in 0.16s
+== unmutated
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 577 filtered out; finished in 0.15s
+restored

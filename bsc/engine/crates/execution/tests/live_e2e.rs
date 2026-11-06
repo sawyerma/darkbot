@@ -122,8 +122,13 @@ fn write_evidence(root: &Path, ev: &str, verdict: &str) {
     use darkbot_bsc_record::schema::{bsc_runtime, g06a, g07, g08};
     fs::create_dir_all(root.join(ev)).unwrap();
     fs::create_dir_all(root.join("bsc/config")).unwrap();
-    // Audit E 3.2: the parity floor the qualification reads.
-    fs::write(root.join("bsc/config/ingress.public.env"), SHIPPED).unwrap();
+    // Audit E 3.2: the parity floor the qualification reads: the shipped
+    // configuration, unless the root has its own (R14: the browser E2E's
+    // snapshot, its PAPER identity and census interval, must stay).
+    let config = root.join("bsc/config/ingress.public.env");
+    if !config.exists() {
+        fs::write(config, SHIPPED).unwrap();
+    }
     let pin = bsc_mainnet_v5_27_2();
     let portal = Value::Address(pin.portal.into_array());
     let implementation = Value::Address(pin.portal_implementation.into_array());

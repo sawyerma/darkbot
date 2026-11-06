@@ -1,0 +1,37 @@
+== cargo fmt --all --check (bsc/engine), files with differences, paths normalized (#[path] includes resolved):
+bsc/engine/crates/execution/src/acceptance_contract.rs
+bsc/engine/crates/execution/src/bin/g06a_preflight_record.rs
+bsc/engine/crates/execution/src/bin/g06a_preflight_record/coverage.rs
+bsc/engine/crates/execution/src/bin/g07_mainnet_self_launch_buy/builder_submission.rs
+bsc/engine/crates/execution/src/bin/g07_mainnet_self_launch_buy/inputs.rs
+bsc/engine/crates/execution/src/bin/g07_mainnet_self_launch_buy/transactions.rs
+bsc/engine/crates/execution/src/bin/g07_pre_live_readiness.rs
+bsc/engine/crates/execution/src/chain_follower/mod.rs
+bsc/engine/crates/execution/src/lib.rs
+bsc/engine/crates/execution/src/qualification_capture.rs
+bsc/engine/crates/execution/tests/acceptance_guard.rs
+bsc/engine/crates/execution/tests/g06a_dry_handoff.rs
+bsc/engine/crates/execution/tests/g07_no_send.rs
+bsc/engine/crates/execution/tests/runtime_signal.rs
+bsc/engine/crates/execution/tests/support/requalification.rs
+bsc/engine/crates/journal/src/format.rs
+bsc/engine/crates/journal/src/lib.rs
+bsc/engine/crates/journal/src/recorder.rs
+bsc/engine/crates/journal/src/replay.rs
+bsc/engine/crates/journal/src/span_tests.rs
+bsc/engine/crates/legacy_import/src/lib.rs
+bsc/engine/crates/qualification/build.rs
+bsc/engine/crates/qualification/src/bin/g06a_builder_policy_record.rs
+bsc/engine/crates/qualification/src/bin/g06a_requal_check.rs
+bsc/engine/crates/qualification/src/bin/g06a_self_launch_bundle.rs
+bsc/engine/crates/qualification/src/bin/g08_mainnet_verify.rs
+bsc/engine/crates/qualification/src/bin/g08_producer_timing.rs
+bsc/engine/crates/qualification/tests/g08_binary_records.rs
+bsc/engine/crates/qualification/tests/g08_reads_g07_evidence.rs
+bsc/engine/crates/qualification/tests/provenance_clock.rs
+bsc/engine/crates/qualification/tests/readiness_job.rs
+bsc/engine/crates/record/src/schema/g06a.rs
+bsc/engine/crates/record/src/schema/g08.rs
+count 33
+== identical to the 33 pre-REV.1.0 files left unformatted by the user decision 06.11.: True
+== gateway cargo fmt --check: exit 0

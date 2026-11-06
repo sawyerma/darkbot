@@ -1,0 +1,8 @@
+CODE_TREE=0d147c385c26039f 00:27:28
+BUILD_RC=0
+debug E2E_EXIT=0 00:43:01
+release E2E_EXIT=0 00:50:03
+vitest exit 0       Tests  161 passed (161)
+playwright bsc exit 0   12 passed (5.0s) 
+type-check exit 0
+CODE_TREE_END=0d147c385c26039f 00:50:12

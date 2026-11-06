@@ -1498,3 +1498,62 @@ fn end_of_block_cost_with_many_observed_tokens() {
         tokens.len()
     );
 }
+
+/// R14 A2 measurement (release, `--ignored`): the engine's cost of one
+/// trade among `n` followed tokens (the token's lookup, its book, its
+/// observation), 100 buyers' trades per token recorded first so only the
+/// engine is timed; 400 tokens against 1 isolates what the lookup adds.
+#[test]
+#[ignore = "A2 measurement; run in release"]
+fn trade_cost_with_many_followed_tokens() {
+    let per_trade = |n: u32| {
+        let mut c = Chain::new(Config {
+            observation_ms: u64::MAX / 4,
+            ..config("buy_count:1000000:")
+        });
+        let tokens: Vec<[u8; 20]> = (0..n)
+            .map(|i| {
+                let mut t = [0x22; 20];
+                t[..4].copy_from_slice(&i.to_be_bytes());
+                t
+            })
+            .collect();
+        for token in &tokens {
+            c.launch(*token, 5_000_000_000_000_000);
+        }
+        let trades = 100 * n;
+        let mut inputs = Vec::with_capacity(trades as usize);
+        for k in 0..trades {
+            let token = tokens[(k % n) as usize];
+            c.tx += 1;
+            let (block, tx) = (c.block, c.tx);
+            let book = c.book(token);
+            let eth = U256::from(1_000_000_000_000u64);
+            let q = quote_native_buy(&book.buy_inputs(eth).unwrap()).unwrap();
+            let mut trader = [0x33; 20];
+            trader[..4].copy_from_slice(&k.to_be_bytes());
+            let trade = Trade {
+                block_number: block,
+                tx_index: tx,
+                log_index: 0,
+                sell: false,
+                trader,
+                amount: q.output_amount,
+                eth,
+                fee: q.protocol_fee,
+            };
+            book.apply(&trade);
+            inputs.push(Input::Trade { token, trade });
+        }
+        let start = std::time::Instant::now();
+        for input in inputs {
+            c.engine.step(input);
+        }
+        start.elapsed().as_nanos() / u128::from(trades)
+    };
+    // Warm-up, then the measured runs.
+    per_trade(400);
+    let counts = [1u32, 5, 50, 400];
+    let costs: Vec<u128> = counts.iter().map(|n| per_trade(*n)).collect();
+    println!("trade among followed tokens {counts:?}: {costs:?} ns");
+}
