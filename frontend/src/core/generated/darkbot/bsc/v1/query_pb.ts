@@ -8,7 +8,7 @@ import type { Availability, PerformanceSeries, PerformanceSeriesQuery } from "./
 import { file_darkbot_bsc_v1_common } from "./common_pb";
 import type { TradeDetail, TradeDetailQuery, TradeHistoryPage, TradeHistoryQuery } from "./history_pb";
 import { file_darkbot_bsc_v1_history } from "./history_pb";
-import type { TrainingProfiles, TrainingProfilesQuery, TrainingRunPage, TrainingRunQuery } from "./training_pb";
+import type { StrategyCSettingsQuery, StrategyCSettingsState, TrainingProfiles, TrainingProfilesQuery, TrainingRunPage, TrainingRunQuery } from "./training_pb";
 import { file_darkbot_bsc_v1_training } from "./training_pb";
 import type { WalletHistoryPage, WalletHistoryQuery, WalletTreasuryQuery, WalletTreasuryState } from "./wallet_pb";
 import { file_darkbot_bsc_v1_wallet } from "./wallet_pb";
@@ -20,7 +20,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file darkbot/bsc/v1/query.proto.
  */
 export const file_darkbot_bsc_v1_query: GenFile = /*@__PURE__*/
-  fileDesc("ChpkYXJrYm90L2JzYy92MS9xdWVyeS5wcm90bxIOZGFya2JvdC5ic2MudjEi+AMKD0JzY1F1ZXJ5UmVxdWVzdBISCgpyZXF1ZXN0X2lkGAEgASgJEjMKBnRyYWRlcxgCIAEoCzIhLmRhcmtib3QuYnNjLnYxLlRyYWRlSGlzdG9yeVF1ZXJ5SAASMQoFdHJhZGUYAyABKAsyIC5kYXJrYm90LmJzYy52MS5UcmFkZURldGFpbFF1ZXJ5SAASOQoNdHJhaW5pbmdfcnVucxgEIAEoCzIgLmRhcmtib3QuYnNjLnYxLlRyYWluaW5nUnVuUXVlcnlIABJCChF0cmFpbmluZ19wcm9maWxlcxgFIAEoCzIlLmRhcmtib3QuYnNjLnYxLlRyYWluaW5nUHJvZmlsZXNRdWVyeUgAEj4KEHdhbGxldF9tb3ZlbWVudHMYBiABKAsyIi5kYXJrYm90LmJzYy52MS5XYWxsZXRIaXN0b3J5UXVlcnlIABI3Cgh0cmVhc3VyeRgHIAEoCzIjLmRhcmtib3QuYnNjLnYxLldhbGxldFRyZWFzdXJ5UXVlcnlIABI4CgZzZXJpZXMYCCABKAsyJi5kYXJrYm90LmJzYy52MS5QZXJmb3JtYW5jZVNlcmllc1F1ZXJ5SAASLgoFd2F0Y2gYCSABKAsyHS5kYXJrYm90LmJzYy52MS5Cc2NXYXRjaFF1ZXJ5SABCBwoFcXVlcnkiuAQKEEJzY1F1ZXJ5UmVzcG9uc2USEgoKcmVxdWVzdF9pZBgBIAEoCRIyCgxhdmFpbGFiaWxpdHkYAiABKA4yHC5kYXJrYm90LmJzYy52MS5BdmFpbGFiaWxpdHkSGgoSdW5hdmFpbGFibGVfcmVhc29uGAMgASgJEjIKBnRyYWRlcxgEIAEoCzIgLmRhcmtib3QuYnNjLnYxLlRyYWRlSGlzdG9yeVBhZ2VIABIsCgV0cmFkZRgFIAEoCzIbLmRhcmtib3QuYnNjLnYxLlRyYWRlRGV0YWlsSAASOAoNdHJhaW5pbmdfcnVucxgGIAEoCzIfLmRhcmtib3QuYnNjLnYxLlRyYWluaW5nUnVuUGFnZUgAEj0KEXRyYWluaW5nX3Byb2ZpbGVzGAcgASgLMiAuZGFya2JvdC5ic2MudjEuVHJhaW5pbmdQcm9maWxlc0gAEj0KEHdhbGxldF9tb3ZlbWVudHMYCCABKAsyIS5kYXJrYm90LmJzYy52MS5XYWxsZXRIaXN0b3J5UGFnZUgAEjcKCHRyZWFzdXJ5GAkgASgLMiMuZGFya2JvdC5ic2MudjEuV2FsbGV0VHJlYXN1cnlTdGF0ZUgAEjMKBnNlcmllcxgKIAEoCzIhLmRhcmtib3QuYnNjLnYxLlBlcmZvcm1hbmNlU2VyaWVzSAASLgoFd2F0Y2gYCyABKAsyHS5kYXJrYm90LmJzYy52MS5Cc2NXYXRjaFN0YXRlSABCCAoGcmVzdWx0QnoKEmNvbS5kYXJrYm90LmJzYy52MUIKUXVlcnlQcm90b1ABogIDREJYqgIORGFya2JvdC5Cc2MuVjHKAg5EYXJrYm90XEJzY1xWMeICGkRhcmtib3RcQnNjXFYxXEdQQk1ldGFkYXRh6gIQRGFya2JvdDo6QnNjOjpWMWIGcHJvdG8z", [file_darkbot_bsc_v1_common, file_darkbot_bsc_v1_history, file_darkbot_bsc_v1_training, file_darkbot_bsc_v1_wallet, file_darkbot_bsc_v1_watch]);
+  fileDesc("ChpkYXJrYm90L2JzYy92MS9xdWVyeS5wcm90bxIOZGFya2JvdC5ic2MudjEivQQKD0JzY1F1ZXJ5UmVxdWVzdBISCgpyZXF1ZXN0X2lkGAEgASgJEjMKBnRyYWRlcxgCIAEoCzIhLmRhcmtib3QuYnNjLnYxLlRyYWRlSGlzdG9yeVF1ZXJ5SAASMQoFdHJhZGUYAyABKAsyIC5kYXJrYm90LmJzYy52MS5UcmFkZURldGFpbFF1ZXJ5SAASOQoNdHJhaW5pbmdfcnVucxgEIAEoCzIgLmRhcmtib3QuYnNjLnYxLlRyYWluaW5nUnVuUXVlcnlIABJCChF0cmFpbmluZ19wcm9maWxlcxgFIAEoCzIlLmRhcmtib3QuYnNjLnYxLlRyYWluaW5nUHJvZmlsZXNRdWVyeUgAEj4KEHdhbGxldF9tb3ZlbWVudHMYBiABKAsyIi5kYXJrYm90LmJzYy52MS5XYWxsZXRIaXN0b3J5UXVlcnlIABI3Cgh0cmVhc3VyeRgHIAEoCzIjLmRhcmtib3QuYnNjLnYxLldhbGxldFRyZWFzdXJ5UXVlcnlIABI4CgZzZXJpZXMYCCABKAsyJi5kYXJrYm90LmJzYy52MS5QZXJmb3JtYW5jZVNlcmllc1F1ZXJ5SAASLgoFd2F0Y2gYCSABKAsyHS5kYXJrYm90LmJzYy52MS5Cc2NXYXRjaFF1ZXJ5SAASQwoRc3RyYXRlZ3lfc2V0dGluZ3MYCiABKAsyJi5kYXJrYm90LmJzYy52MS5TdHJhdGVneUNTZXR0aW5nc1F1ZXJ5SABCBwoFcXVlcnki/QQKEEJzY1F1ZXJ5UmVzcG9uc2USEgoKcmVxdWVzdF9pZBgBIAEoCRIyCgxhdmFpbGFiaWxpdHkYAiABKA4yHC5kYXJrYm90LmJzYy52MS5BdmFpbGFiaWxpdHkSGgoSdW5hdmFpbGFibGVfcmVhc29uGAMgASgJEjIKBnRyYWRlcxgEIAEoCzIgLmRhcmtib3QuYnNjLnYxLlRyYWRlSGlzdG9yeVBhZ2VIABIsCgV0cmFkZRgFIAEoCzIbLmRhcmtib3QuYnNjLnYxLlRyYWRlRGV0YWlsSAASOAoNdHJhaW5pbmdfcnVucxgGIAEoCzIfLmRhcmtib3QuYnNjLnYxLlRyYWluaW5nUnVuUGFnZUgAEj0KEXRyYWluaW5nX3Byb2ZpbGVzGAcgASgLMiAuZGFya2JvdC5ic2MudjEuVHJhaW5pbmdQcm9maWxlc0gAEj0KEHdhbGxldF9tb3ZlbWVudHMYCCABKAsyIS5kYXJrYm90LmJzYy52MS5XYWxsZXRIaXN0b3J5UGFnZUgAEjcKCHRyZWFzdXJ5GAkgASgLMiMuZGFya2JvdC5ic2MudjEuV2FsbGV0VHJlYXN1cnlTdGF0ZUgAEjMKBnNlcmllcxgKIAEoCzIhLmRhcmtib3QuYnNjLnYxLlBlcmZvcm1hbmNlU2VyaWVzSAASLgoFd2F0Y2gYCyABKAsyHS5kYXJrYm90LmJzYy52MS5Cc2NXYXRjaFN0YXRlSAASQwoRc3RyYXRlZ3lfc2V0dGluZ3MYDCABKAsyJi5kYXJrYm90LmJzYy52MS5TdHJhdGVneUNTZXR0aW5nc1N0YXRlSABCCAoGcmVzdWx0QnoKEmNvbS5kYXJrYm90LmJzYy52MUIKUXVlcnlQcm90b1ABogIDREJYqgIORGFya2JvdC5Cc2MuVjHKAg5EYXJrYm90XEJzY1xWMeICGkRhcmtib3RcQnNjXFYxXEdQQk1ldGFkYXRh6gIQRGFya2JvdDo6QnNjOjpWMWIGcHJvdG8z", [file_darkbot_bsc_v1_common, file_darkbot_bsc_v1_history, file_darkbot_bsc_v1_training, file_darkbot_bsc_v1_wallet, file_darkbot_bsc_v1_watch]);
 
 /**
  * One bounded query.
@@ -104,6 +104,14 @@ export type BscQueryRequest = Message<"darkbot.bsc.v1.BscQueryRequest"> & {
      */
     value: BscWatchQuery;
     case: "watch";
+  } | {
+    /**
+     * The stored and running Strategy C configuration.
+     *
+     * @generated from field: darkbot.bsc.v1.StrategyCSettingsQuery strategy_settings = 10;
+     */
+    value: StrategyCSettingsQuery;
+    case: "strategySettings";
   } | { case: undefined; value?: undefined };
 };
 
@@ -210,6 +218,14 @@ export type BscQueryResponse = Message<"darkbot.bsc.v1.BscQueryResponse"> & {
      */
     value: BscWatchState;
     case: "watch";
+  } | {
+    /**
+     * The stored and running Strategy C configuration.
+     *
+     * @generated from field: darkbot.bsc.v1.StrategyCSettingsState strategy_settings = 12;
+     */
+    value: StrategyCSettingsState;
+    case: "strategySettings";
   } | { case: undefined; value?: undefined };
 };
 

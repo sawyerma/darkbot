@@ -2,7 +2,7 @@ import { fromBinary, toBinary, type DescMessage, type MessageShape } from "@bufb
 import { BscQueryRequestSchema, BscQueryResponseSchema } from "@/core/generated/darkbot/bsc/v1/query_pb";
 import { PerformanceSeriesSchema } from "@/core/generated/darkbot/bsc/v1/common_pb";
 import { TradeDetailSchema } from "@/core/generated/darkbot/bsc/v1/history_pb";
-import { StrategyCSettingsSetAllCommandSchema, StrategyCSettingsStateSchema, TrainingProfilesSchema, TrainingRunPageSchema, TrainingRunStartCommandSchema } from "@/core/generated/darkbot/bsc/v1/training_pb";
+import { LiveStrategySelectCommandSchema, StrategyCSettingsSetAllCommandSchema, StrategyCSettingsStateSchema, TrainingProfilesSchema, TrainingRunPageSchema, TrainingRunStartCommandSchema } from "@/core/generated/darkbot/bsc/v1/training_pb";
 import { WalletHistoryPageSchema, WalletSweepPolicySetCommandSchema, WalletTransferRequestSchema, WalletTreasuryStateSchema } from "@/core/generated/darkbot/bsc/v1/wallet_pb";
 import { BscWatchStateSchema } from "@/core/generated/darkbot/bsc/v1/watch_pb";
 
@@ -30,6 +30,7 @@ export const V8_CONTRACTS = {
   training_profiles: TrainingProfilesSchema,
   training_run_page: TrainingRunPageSchema,
   training_run_start_command: TrainingRunStartCommandSchema,
+  live_strategy_select_command: LiveStrategySelectCommandSchema,
   wallet_history_page: WalletHistoryPageSchema,
   treasury_state: WalletTreasuryStateSchema,
   wallet_transfer_request: WalletTransferRequestSchema,

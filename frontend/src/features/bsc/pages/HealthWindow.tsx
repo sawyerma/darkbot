@@ -1,6 +1,6 @@
-import { useEffect, useRef } from "react";
+import { useRef } from "react";
 import type { HealthEntry, HealthGroup, HealthView } from "../model/health";
-import { Badge, Icon } from "./V8";
+import { Badge, Icon, useModalKeys } from "./V8";
 
 /** FE-V8-02: the small Health pill top right (like Project_0's), opening the separate window. */
 export function HealthPill({ view, onOpen }: { view: HealthView; onOpen: () => void }) {
@@ -24,16 +24,11 @@ function Group({ g }: { g: HealthGroup }) {
 /** The Health window: every connection and service at once, no submenus (the reference's V6). */
 export function HealthWindow({ view, onClose }: { view: HealthView; onClose: () => void }) {
   const close = useRef<HTMLButtonElement>(null);
-  useEffect(() => {
-    const before = document.activeElement as HTMLElement | null;
-    close.current?.focus();
-    const key = (ev: KeyboardEvent) => { if (ev.key === "Escape") onClose(); };
-    document.addEventListener("keydown", key);
-    return () => { document.removeEventListener("keydown", key); before?.focus?.(); };
-  }, [onClose]);
+  const layer = useRef<HTMLElement>(null);
+  useModalKeys(close, layer, onClose);
   return <div className="drawer-area health-overlay" data-testid="bsc-health-window">
     <button type="button" className="backdrop" aria-label="Close health window" onClick={onClose} />
-    <section className="health-window" role="dialog" aria-modal="true" aria-labelledby="health-window-title" aria-describedby="health-window-intro">
+    <section ref={layer} className="health-window" role="dialog" aria-modal="true" aria-labelledby="health-window-title" aria-describedby="health-window-intro">
       <header className="health-window-head"><div><div className="caps">DARKBOT · BSC</div><h2 id="health-window-title">Health · Connections & services</h2><div className="small" id="health-window-intro">All connections visible without submenus.</div></div>
         <div className="health-window-actions"><Badge label={view.alerts ? `${view.alerts} alerts` : view.severity === "ok" ? "All checked" : "Incomplete"} tone={view.alerts ? "bad" : view.severity === "ok" ? "good" : "warn"} />
           <button ref={close} type="button" className="round" aria-label="Close health window" onClick={onClose}><Icon name="x" size="s" /></button></div>

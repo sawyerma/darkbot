@@ -30,7 +30,8 @@ export function TrainingPanel({ goto }: { goto: (v: BscView) => void }) {
   const [period, setPeriod] = useState<"7T" | "30T" | "All">("7T");
   const [runMode, setRunMode] = useState<"duration" | "iterations" | "continuous">("duration");
   const profiles = useBscQuery("training_profiles", { case: "trainingProfiles", value: {} });
-  const series = useBscQuery(`training-series:${period}`, { case: "series", value: { metric: PerformanceMetric.TRAINING_NET_RESULT, scope: PerformanceScope.TRAINING_PROFILE } });
+  const from = period === "All" ? undefined : BigInt(nowMs - (period === "7T" ? 7 : 30) * 86_400_000);
+  const series = useBscQuery(`training-series:${period}`, { case: "series", value: { metric: PerformanceMetric.TRAINING_NET_RESULT, scope: PerformanceScope.TRAINING_PROFILE, fromUnixMs: from } });
   const settings = strategySettingsView(records, status?.warnings ?? [], nowMs);
   const { form } = useMemo(() => formOf(settings), [settings]);
   const runtime = runtimeView(records, nowMs).view;
@@ -38,7 +39,8 @@ export function TrainingPanel({ goto }: { goto: (v: BscView) => void }) {
   const rt = new Map(records.find(r => r.schema === RUNTIME_SCHEMA)?.fields.map(x => [x.name, x.value]) ?? []);
   const fresh = runtime.state === "RUNNING";
   const y = (k: string) => fresh ? rt.get(`strategy[0].${k}`) : undefined;
-  const running = fresh && (y("state") ?? "OFF") !== "OFF";
+  // Running only in a running mode; SETTINGS_REFUSED / GAS_EVIDENCE_REFUSED did not start it.
+  const running = fresh && ["SHADOW", "PAPER", "LIVE"].includes(y("state") ?? "");
   const gains = y("gain_wei"), losses = y("loss_wei");
 
   if (open) return <>

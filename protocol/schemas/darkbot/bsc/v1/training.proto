@@ -19,6 +19,7 @@ import "darkbot/bsc/v1/common.proto";
 //   bsc.training.profile.delete   TrainingProfileDeleteCommand    expected profile_version = profile revision
 //   bsc.training.run.start        TrainingRunStartCommand         expected profile_version = profile revision
 //   bsc.training.run.stop         TrainingRunStopCommand          resource_id = run_id
+//   bsc.live.strategy.select      LiveStrategySelectCommand       expected profile_version = the bound revision
 
 // The creator selling before the BUY fills (BSC_STRATEGY_C_CREATOR_SOLD_BEFORE_FILL).
 enum CreatorSoldBeforeFill {
@@ -60,7 +61,7 @@ message StrategyFeatureSpec {
   string name = 1;
   // Its position in features.rs NAMES.
   uint32 index = 2;
-  // Native unit: count, wei, ratio, percent or milliseconds.
+  // Native unit: count, bnb (decimal BNB at 18 places), ratio, percent or milliseconds.
   string unit = 3;
   // Decimal places a bound may have (BNB amounts 18, ratios BSC_STRATEGY_C_RATIO_PLACES).
   uint32 places = 4;
@@ -313,7 +314,8 @@ enum TrainingRunStatus {
   TRAINING_RUN_STATUS_UNKNOWN = 7;
 }
 
-// The results of one training run, from its native journal; UNKNOWN stays absent, never zero.
+// The results of one training run, from its native journal; counts are the journal's, its quality says
+// how complete; net_wei stays absent while unresolved, never zero.
 message TrainingResult {
   // Launches the strategy evaluated.
   uint64 evaluated = 1;
@@ -357,6 +359,11 @@ message TrainingResult {
   uint64 lost_records = 20;
   // Ingress messages dropped.
   uint64 ingress_dropped = 21;
+  // How far these counts are proven (INCOMPLETE while the run's journal is not sealed or has gaps);
+  // a result the owner cannot read at all is the whole message absent.
+  DataQuality quality = 22;
+  // Why the quality is not VERIFIED.
+  repeated string quality_reasons = 23;
 }
 
 // One training run of a profile revision.
@@ -403,12 +410,32 @@ message TrainingRunStartCommand {
   repeated string venues = 3;
   // Its bound.
   TrainingRunPlan plan = 4;
+  // For REPLAY: the recorded run or journal identity the owner replays (its own catalogue);
+  // empty for PAPER and SHADOW.
+  string replay_source = 5;
 }
 
 // Params of `bsc.training.run.stop` (prepared); CommandRequest.resource_id names the run.
 message TrainingRunStopCommand {
   // Why the operator stops it (free text, diagnostic only).
   string reason = 1;
+}
+
+// Params of `bsc.live.strategy.select` (prepared, FE-V8-09): LIVE takes one profile revision as ONE
+// atomic Strategy C configuration, or the custom settings; never a local draft.
+message LiveStrategySelectCommand {
+  // The profile; empty: the custom settings (StrategyCSettingsSetAllCommand) stay in effect.
+  string profile_id = 1;
+  // The revision bound (it must be the profile's current one).
+  uint64 profile_revision = 2;
+  // SHA-256 of that revision's configuration the operator saw, lowercase hex.
+  string config_sha256 = 3;
+}
+
+// A read of the stored and running Strategy C configuration.
+message StrategyCSettingsQuery {
+  // Also the filterable feature catalogue (StrategyFeatureSpec).
+  bool include_features = 1;
 }
 
 // A bounded, cursor-paged read of training runs.

@@ -66,7 +66,9 @@
     - [TradeStatus](#darkbot-bsc-v1-TradeStatus)
 
 - [darkbot/bsc/v1/training.proto](#darkbot_bsc_v1_training-proto)
+    - [LiveStrategySelectCommand](#darkbot-bsc-v1-LiveStrategySelectCommand)
     - [StrategyCSettings](#darkbot-bsc-v1-StrategyCSettings)
+    - [StrategyCSettingsQuery](#darkbot-bsc-v1-StrategyCSettingsQuery)
     - [StrategyCSettingsSetAllCommand](#darkbot-bsc-v1-StrategyCSettingsSetAllCommand)
     - [StrategyCSettingsState](#darkbot-bsc-v1-StrategyCSettingsState)
     - [StrategyFeatureSpec](#darkbot-bsc-v1-StrategyFeatureSpec)
@@ -1630,6 +1632,24 @@ The ledger state of a lot (LivePosition.state plus the owner&#39;s write-off and
 
 
 
+<a name="darkbot-bsc-v1-LiveStrategySelectCommand"></a>
+
+### LiveStrategySelectCommand
+Params of `bsc.live.strategy.select` (prepared, FE-V8-09): LIVE takes one profile revision as ONE
+atomic Strategy C configuration, or the custom settings; never a local draft.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| profile_id | [string](#string) |  | The profile; empty: the custom settings (StrategyCSettingsSetAllCommand) stay in effect. |
+| profile_revision | [uint64](#uint64) |  | The revision bound (it must be the profile&#39;s current one). |
+| config_sha256 | [string](#string) |  | SHA-256 of that revision&#39;s configuration the operator saw, lowercase hex. |
+
+
+
+
+
+
 <a name="darkbot-bsc-v1-StrategyCSettings"></a>
 
 ### StrategyCSettings
@@ -1652,6 +1672,21 @@ the configuration file&#39;s value (the native owner&#39;s rule); a profile stor
 | ratio_places | [uint32](#uint32) | optional | BSC_STRATEGY_C_RATIO_PLACES: decimal places of ratios and multiples (read-only). |
 | fill_delay_blocks | [uint32](#uint32) | optional | BSC_STRATEGY_C_FILL_DELAY_BLOCKS (read-only, configuration file). |
 | gas_price_wei | [string](#string) | optional | BSC_STRATEGY_C_GAS_PRICE_WEI (read-only, configuration file), decimal wei. |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-StrategyCSettingsQuery"></a>
+
+### StrategyCSettingsQuery
+A read of the stored and running Strategy C configuration.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| include_features | [bool](#bool) |  | Also the filterable feature catalogue (StrategyFeatureSpec). |
 
 
 
@@ -1711,7 +1746,7 @@ One filterable native feature as the owner defines it (no frontend list of units
 | ----- | ---- | ----- | ----------- |
 | name | [string](#string) |  | The native feature name. |
 | index | [uint32](#uint32) |  | Its position in features.rs NAMES. |
-| unit | [string](#string) |  | Native unit: count, wei, ratio, percent or milliseconds. |
+| unit | [string](#string) |  | Native unit: count, bnb (decimal BNB at 18 places), ratio, percent or milliseconds. |
 | places | [uint32](#uint32) |  | Decimal places a bound may have (BNB amounts 18, ratios BSC_STRATEGY_C_RATIO_PLACES). |
 | signed | [bool](#bool) |  | Whether a bound may be negative (signed features such as net_buy_flow_bnb, price_change). |
 | filterable | [bool](#bool) |  | False for provider_gap_flag: a data-quality flag, never a filter. |
@@ -1873,7 +1908,8 @@ A bounded read of the training profiles.
 <a name="darkbot-bsc-v1-TrainingResult"></a>
 
 ### TrainingResult
-The results of one training run, from its native journal; UNKNOWN stays absent, never zero.
+The results of one training run, from its native journal; counts are the journal&#39;s, its quality says
+how complete; net_wei stays absent while unresolved, never zero.
 
 
 | Field | Type | Label | Description |
@@ -1899,6 +1935,8 @@ The results of one training run, from its native journal; UNKNOWN stays absent, 
 | observable_ms | [uint64](#uint64) | optional | The observed market time with complete coverage, ms. |
 | lost_records | [uint64](#uint64) |  | Records lost by the capture. |
 | ingress_dropped | [uint64](#uint64) |  | Ingress messages dropped. |
+| quality | [DataQuality](#darkbot-bsc-v1-DataQuality) |  | How far these counts are proven (INCOMPLETE while the run&#39;s journal is not sealed or has gaps); a result the owner cannot read at all is the whole message absent. |
+| quality_reasons | [string](#string) | repeated | Why the quality is not VERIFIED. |
 
 
 
@@ -2001,6 +2039,7 @@ Params of `bsc.training.run.start` (prepared).
 | mode | [TrainingRunMode](#darkbot-bsc-v1-TrainingRunMode) |  | How it executes. |
 | venues | [string](#string) | repeated | The venues it trains on (a subset of the profile&#39;s). |
 | plan | [TrainingRunPlan](#darkbot-bsc-v1-TrainingRunPlan) |  | Its bound. |
+| replay_source | [string](#string) |  | For REPLAY: the recorded run or journal identity the owner replays (its own catalogue); empty for PAPER and SHADOW. |
 
 
 
@@ -2668,6 +2707,7 @@ One bounded query.
 | treasury | [WalletTreasuryQuery](#darkbot-bsc-v1-WalletTreasuryQuery) |  | The treasury state. |
 | series | [PerformanceSeriesQuery](#darkbot-bsc-v1-PerformanceSeriesQuery) |  | One performance series. |
 | watch | [BscWatchQuery](#darkbot-bsc-v1-BscWatchQuery) |  | The WATCH projection (REV.2.0). |
+| strategy_settings | [StrategyCSettingsQuery](#darkbot-bsc-v1-StrategyCSettingsQuery) |  | The stored and running Strategy C configuration. |
 
 
 
@@ -2693,6 +2733,7 @@ The answer to one query.
 | treasury | [WalletTreasuryState](#darkbot-bsc-v1-WalletTreasuryState) |  | The treasury state. |
 | series | [PerformanceSeries](#darkbot-bsc-v1-PerformanceSeries) |  | One performance series. |
 | watch | [BscWatchState](#darkbot-bsc-v1-BscWatchState) |  | The WATCH projection (REV.2.0). |
+| strategy_settings | [StrategyCSettingsState](#darkbot-bsc-v1-StrategyCSettingsState) |  | The stored and running Strategy C configuration. |
 
 
 

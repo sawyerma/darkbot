@@ -56,8 +56,9 @@ export function healthView({ gateway, statusTopic, status, live, records, nowMs 
 
   const system: HealthEntry[] = [
     { id: "gateway", name: "Gateway", detail: "User interface connection",
-      state: gateway === "OPEN" ? "ok" : gateway === "STALE" || gateway === "CONNECTING" || gateway === "HANDSHAKE" ? "warn" : gateway === "BLOCKED" ? "down" : "unknown",
-      status: gateway === "OPEN" ? (statusTopic === "LIVE" ? "Connected" : `Connected · status ${statusTopic.toLowerCase()}`) : gateway === "BLOCKED" ? "Refused" : gateway === "STALE" ? "Stale" : gateway === "IDLE" ? "Not connected" : "Connecting" },
+      // The connection alone is not green: the BSC status must be current too.
+      state: gateway === "OPEN" ? (statusTopic === "LIVE" ? "ok" : "warn") : gateway === "STALE" || gateway === "CONNECTING" || gateway === "HANDSHAKE" ? "warn" : gateway === "BLOCKED" || gateway === "CLOSED" ? "down" : "unknown",
+      status: gateway === "OPEN" ? (statusTopic === "LIVE" ? "Connected" : `Connected · status ${statusTopic.toLowerCase()}`) : gateway === "BLOCKED" ? "Refused" : gateway === "CLOSED" ? "Disconnected" : gateway === "STALE" ? "Stale" : gateway === "IDLE" ? "Not connected" : "Connecting" },
     { id: "engine", name: "Trading engine", detail: runtime.state === "NOT_RUNNING" ? "Rust runtime process · no status record" : `Rust runtime process · mode ${runtime.mode}`,
       state: runtime.state === "RUNNING" ? "ok" : runtime.state === "STALE" ? "warn" : "unknown",
       status: runtime.state === "RUNNING" ? "Running" : runtime.state === "STALE" ? "Status stale" : "Not reported" },
@@ -108,8 +109,9 @@ export function healthView({ gateway, statusTopic, status, live, records, nowMs 
   const portals: HealthEntry[] = control.venues.map(v => {
     if (v.id === "BSC_VENUE_FLAP" && r && (r.portalVersionBound || r.portalVersionObserved)) {
       const changed = r.codeHashChanged === true || (!!r.portalVersionBound && !!r.portalVersionObserved && r.portalVersionBound !== r.portalVersionObserved);
+      // A change the readiness comparison saw is evidence; "unchanged" is only as of that comparison, no WATCH.
       return { id: v.id, name: "Flap · Portal", detail: `Version ${r.portalVersionBound || "?"} → ${r.portalVersionObserved || "?"} (readiness comparison)`,
-        state: changed ? "update" : r.codeHashChanged === false ? "ok" : "unknown", status: changed ? "Version review" : r.codeHashChanged === false ? "Unchanged" : "Not compared" };
+        state: changed ? "update" : "unknown", status: changed ? "Version review" : r.codeHashChanged === false ? "Unchanged at readiness" : "Not compared" };
     }
     if (v.id === "BSC_VENUE_FOUR_CLASSIC" && f.has("canonical[0].four_deployment")) {
       return { id: v.id, name: "Four Classic · Portal", detail: `Deployment ${f.get("canonical[0].four_deployment")} (runtime)`, state: "unknown", status: "Not monitored (REV.2.0)" };
@@ -125,7 +127,10 @@ export function healthView({ gateway, statusTopic, status, live, records, nowMs 
   ];
   const all = groups.flatMap(g => g.entries);
   const alerts = all.filter(e => e.state === "down" || e.state === "warn" || e.state === "update").length;
-  const systemUnknown = system.some(e => e.state === "unknown");
-  const severity = all.some(e => e.state === "down" || e.state === "update") ? "critical" : alerts > 0 || systemUnknown ? "warn" : "ok";
+  // Green only with every reported entry healthy or off and nothing missing: an unknown entry or an
+  // empty group (no sources, no builders) is not healthy. The portals stay unknown until WATCH (REV.2.0)
+  // and do not hold the pill amber on their own.
+  const missing = groups.some(g => g.id !== "portals" && (!g.entries.length || g.entries.some(e => e.state === "unknown")));
+  const severity = all.some(e => e.state === "down" || e.state === "update") ? "critical" : alerts > 0 || missing ? "warn" : "ok";
   return { groups, severity, alerts };
 }

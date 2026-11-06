@@ -21,7 +21,7 @@ import { StrategyEditor } from "./StrategyEditor";
 import { useNativeRecords } from "./useNativeRecords";
 import { useNowMs } from "./useNowMs";
 import { queryReason, useBscQuery } from "./useBscQuery";
-import { Badge, DetailLine, Drawer, Icon, PanelHead, StateBadge, TopHeading, bnb, signTone, signedBnbText } from "./V8";
+import { Badge, DetailLine, Drawer, Icon, PanelHead, StateBadge, TopHeading, Wei, signTone, signedBnbText } from "./V8";
 
 const STRATEGY = "bsc-live-strategy";
 const COLUMNS_KEY = "bsc_trade_columns_v8";
@@ -29,10 +29,11 @@ const PAGE = 6;
 const NO_PROFILES = "Training modules need their native profile owner (BSC-V8-01); Live uses the native Strategy C configuration.";
 const ONE_AT_A_TIME = "Saving several settings at once needs the atomic set of the native owner (BSC-V8-04): save one change at a time.";
 
+// The column choice is a display preference of this browser: a comma-separated id list (no JSON).
 function loadColumns(): TradeColumn[] {
-  try { const raw = localStorage.getItem(COLUMNS_KEY); return raw ? safeColumns(JSON.parse(raw)) : [...TRADE_COL_DEFAULT]; } catch { return [...TRADE_COL_DEFAULT]; }
+  try { const raw = localStorage.getItem(COLUMNS_KEY); return raw ? safeColumns(raw.split(",")) : [...TRADE_COL_DEFAULT]; } catch { return [...TRADE_COL_DEFAULT]; }
 }
-function saveColumns(c: readonly TradeColumn[]) { try { localStorage.setItem(COLUMNS_KEY, JSON.stringify(c)); } catch { /* a UI preference only */ } }
+function saveColumns(c: readonly TradeColumn[]) { try { localStorage.setItem(COLUMNS_KEY, c.join(",")); } catch { /* a UI preference only */ } }
 
 function cell(t: TradeView, id: TradeColumn) {
   const a = t.attempt;
@@ -41,8 +42,8 @@ function cell(t: TradeView, id: TradeColumn) {
     case "token": return <><strong className="mono">{t.token.slice(0, 8)}…{t.token.slice(-4)}</strong><span className="tdmuted">{t.component === "BSC_STRATEGY_C" ? "Strategy C" : t.component === "BSC_EXEC" ? "C3" : t.component}</span></>;
     case "status": return <Badge label={t.label} tone={LABEL_TONE[t.label]} />;
     case "market": return "—";
-    case "invest": return `${bnb(t.inputWei)} BNB`;
-    case "pnl": return t.pnlWei === undefined ? "—" : `${t.proceedsUnknown ? "≥ " : ""}${signedBnbText(t.pnlWei)}`;
+    case "invest": return <Wei wei={t.inputWei} />;
+    case "pnl": return t.pnlWei === undefined ? "—" : <>{t.proceedsUnknown ? "≥ " : ""}<Wei wei={t.pnlWei} signed /></>;
     case "roi": return "—";
     case "buy": return clock ? <>{clock.time}<span className="tdmuted">{clock.date}</span></> : "—";
     case "sell": return "—";
@@ -51,7 +52,7 @@ function cell(t: TradeView, id: TradeColumn) {
     case "lead": return "—";
     case "send": return nsToMs(a?.ingressToSendNs);
     case "ack": return nsToMs(a?.sendToAckNs);
-    case "gas": return `${bnb(t.gasWei)} BNB`;
+    case "gas": return <Wei wei={t.gasWei} />;
     case "placement": return a?.placed || "—";
     case "exit": return "—";
     case "tx": return <span className="mono">{t.lot.slice(0, 10)}…</span>;
@@ -64,14 +65,14 @@ function cell(t: TradeView, id: TradeColumn) {
 export function LivePanel() {
   useTopic(TopicId.BSC_LIVE_STATE);
   useTopic(TopicId.BSC_MONITORING_STATE);
-  const { projection: live } = useBscStore(selectLive);
+  const { projection: live, status: liveTopic } = useBscStore(selectLive);
   const { projection: status } = useBscStore(selectStatus);
   const records = useNativeRecords();
   const nowMs = useNowMs();
   const { busy } = useSourceControl();
   const [layer, setLayer] = useState<"controls" | "limits" | "columns" | "ledger" | { trade: string } | null>(null);
   const [mode, setMode] = useState<"module" | "manual">("manual");
-  const trading = tradingState(live);
+  const trading = tradingState(live, liveTopic);
   const settings = useMemo(() => strategySettingsView(records, status?.warnings ?? [], nowMs), [records, status?.warnings, nowMs]);
   const native = useMemo(() => formOf(settings), [settings]);
   // The operator's draft over the native values: shown as the owner holds them until edited.
@@ -79,7 +80,8 @@ export function LivePanel() {
   const form = draft ?? native.form;
   const edited = draft !== null;
   const diff = changes(settings, form);
-  const one = "changed" in diff && diff.changed.length === 1 ? diff.changed[0] : undefined;
+  const filterError = "changed" in diff ? diff.filterError : undefined;
+  const one = "changed" in diff && !filterError && diff.changed.length === 1 ? diff.changed[0] : undefined;
   const [confirm, setConfirm] = useState<{ key: string; value: string; generation: bigint } | null>(null);
   const control = sourceControlView(records, nowMs);
   const venues = control.venues.filter(v => v.effective !== "OFF").map(v => venueName(v.id)).join(", ") || "No venue";
@@ -128,7 +130,7 @@ export function LivePanel() {
       {native.filterError ? <p className="tiny v8-unavailable">Stored filters unreadable here: {native.filterError}</p> : null}
       <div className="editor-footer">
         <span className="small" data-testid={`${STRATEGY}-generation`}>{!settings.available ? `Native owner ${settings.reason}` : `Saved generation ${settings.generation.toString()}${settings.running ? ` · ${settings.startedGeneration?.toString() ?? "?"} in effect` : " · applies at the next start"}`}
-          {"error" in diff ? ` · ${diff.error}` : "changed" in diff && diff.changed.length > 1 ? ` · ${ONE_AT_A_TIME}` : ""}</span>
+          {"error" in diff ? ` · ${diff.error}` : filterError ? ` · ${filterError}` : "changed" in diff && diff.changed.length > 1 ? ` · ${ONE_AT_A_TIME}` : ""}</span>
         <div className="editor-actions">
           <button type="button" className="btn quiet" disabled={!edited} onClick={() => setDraft(null)}>Reset</button>
           <button type="button" className="btn primary" disabled={!settings.available || busy || !one} title={one ? `${one.key} at generation ${settings.generation.toString()}` : "changed" in diff && diff.changed.length > 1 ? ONE_AT_A_TIME : "No change"}
@@ -150,11 +152,11 @@ export function LivePanel() {
         <select className="select" aria-label="Filter by market" disabled title="Per-lot venue needs the native trade history (BSC-V8-07/10)"><option>All markets</option></select>
         <select className="select" aria-label="Filter by time" disabled title="Per-lot times need the native trade history (BSC-V8-07/10)"><option>All dates</option></select>
       </div>
-      <div className="trade-summary"><span><i className="trade-dot open" />{c.run} RUN</span><span><i className="trade-dot unknown" />{c.pend} PEND</span><span><i className="trade-dot closed" />{c.win} WIN</span><span><i className="trade-dot loss" />{c.loss} LOSS</span><span className="tiny">Active first · current LIVE ledger</span></div>
+      <div className="trade-summary"><span><i className="trade-dot open" />{live ? c.run : "—"} RUN</span><span><i className="trade-dot unknown" />{live ? c.pend : "—"} PEND</span><span><i className="trade-dot closed" />{live ? c.win : "—"} WIN</span><span><i className="trade-dot loss" />{live ? c.loss : "—"} LOSS</span><span className="tiny">Active first · current LIVE ledger</span></div>
       <div className="table-wrap trade-flow-wrap"><table className="trade-flow-table"><thead><tr>{columns.map(id => <th key={id} className={RIGHT_ALIGNED.has(id) ? "right" : undefined}>{TRADE_COLUMNS.find(x => x.id === id)?.short ?? id}</th>)}<th /></tr></thead>
-        <tbody>{visible.length ? visible.map(t => <tr key={t.lot} data-open tabIndex={0} role="button" data-testid="bsc-trade-row" data-lot={t.lot} aria-label={`Trade ${t.token} ${t.label}`} onClick={() => setLayer({ trade: t.lot })} onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setLayer({ trade: t.lot }); } }}>
+        <tbody>{visible.length ? visible.map(t => <tr key={t.lot} data-open data-testid="bsc-trade-row" data-lot={t.lot} onClick={() => setLayer({ trade: t.lot })}>
           {columns.map(id => <td key={id} className={`trade-col-${id}${RIGHT_ALIGNED.has(id) ? " right nowrap" : ""}${id === "pnl" ? ` ${signTone(t.pnlWei)}` : ""}`} data-label={TRADE_COLUMNS.find(x => x.id === id)?.label}>{cell(t, id)}</td>)}
-          <td className="trade-row-action"><Icon name="chevron" size="s" /></td></tr>)
+          <td className="trade-row-action"><button type="button" className="link" aria-label={`Trade ${t.token} ${t.label}: details`} onClick={e => { e.stopPropagation(); setLayer({ trade: t.lot }); }}><Icon name="chevron" size="s" /></button></td></tr>)
           : <tr><td colSpan={columns.length + 1}><div className="empty">{live ? "No matching trades." : "No LIVE owner state."}</div></td></tr>}</tbody></table></div>
       <p className="tiny trade-footnote">*Lead is relative to the block header timestamp, not an exact block production time; per-trade venue, sell time, hold, lead, ROI and exit reason come with the native trade history. Click a trade for its transactions and decisions.</p>
       <div className="table-footer"><span>{visible.length} of {shownRows.length} trades · full history: {history.kind === "ANSWER" ? "available" : queryReason(history, "the native trade history (BSC-V8-07/10)")}</span>
@@ -223,9 +225,10 @@ export function LivePanel() {
       <DetailLine label="Token" value={<span className="mono">{trade.token}</span>} />
       <DetailLine label="Component" value={trade.component} />
       <DetailLine label="Buy block time" value={blockClock(trade.buyMs) ? `${blockClock(trade.buyMs)!.date} ${blockClock(trade.buyMs)!.time} UTC (block header)` : "—"} />
-      <DetailLine label="Investment" value={`${bnb(trade.inputWei, 6)} BNB`} />
-      <DetailLine label="Sell proceeds" value={trade.proceedsWei === undefined ? "—" : trade.proceedsUnknown ? "unknown" : `${bnb(trade.proceedsWei, 6)} BNB`} />
-      <DetailLine label="Network fees" value={`${bnb(trade.gasWei, 6)} BNB`} />
+      <DetailLine label="Tokens received" value={trade.tokens || "—"} />
+      <DetailLine label="Investment" value={<Wei wei={trade.inputWei} places={6} />} />
+      <DetailLine label="Sell proceeds" value={trade.proceedsWei === undefined ? "—" : trade.proceedsUnknown ? "unknown" : <Wei wei={trade.proceedsWei} places={6} />} />
+      <DetailLine label="Network fees" value={<Wei wei={trade.gasWei} places={6} />} />
       <h3 style={{ marginTop: 18 }}>Detection and execution</h3>
       <DetailLine label="First source" value={trade.attempt?.trigger ? sourceName(trade.attempt.trigger) : "—"} />
       <DetailLine label="Ingress → send" value={nsToMs(trade.attempt?.ingressToSendNs)} />
@@ -236,6 +239,7 @@ export function LivePanel() {
       {trade.decisions.length ? <LiveLotActions lot={trade.lot} decisions={trade.decisions} version={decisions.version} exitNow={decisions.exitNow} /> : <p className="small">No operator decision the ledger takes of this lot now.</p>}
       <Receipt testId={LIVE_LOT} />
       <h3 style={{ marginTop: 18 }}>Transactions</h3>
+      {trade.sharedToken ? <p className="small">Other lots of this token exist: only this lot's BUY is attributable here; every transaction is under Receipts.</p> : null}
       {trade.transactions.map(t => <div key={t.txHash} className="detail-line"><span className="muted">{t.intent} · nonce {t.nonce.toString()} · {t.state}{t.blockNumber !== undefined ? ` · block ${t.blockNumber.toString()}` : ""}{t.burnable || t.burnRequested ? " · nonce burn under Receipts" : ""}</span>
         <strong className="mono">{t.txHash.slice(0, 18)}…</strong></div>)}
       <DetailLine label="Lot (BUY transaction)" value={<span className="mono">{trade.lot}</span>} />

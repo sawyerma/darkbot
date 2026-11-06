@@ -36,14 +36,19 @@ export function safeColumns(ids: unknown): TradeColumn[] {
   return list.includes("token") ? list : ["token", ...list];
 }
 
-export type TradeLabel = "RUN" | "PEND" | "WIN" | "LOSS" | "DONE" | "FAIL" | "UNKN";
+export type TradeLabel = "RUN" | "PEND" | "WIN" | "LOSS" | "DONE" | "FAIL" | "WOFF" | "UNKN";
 export interface TradeView {
   lot: string; token: string; label: TradeLabel; state: string; component: string;
+  /** Tokens the BUY received, decimal. */
+  tokens: string;
   inputWei: string; proceedsWei?: string; gasWei: string; pnlWei?: string; proceedsUnknown: boolean;
   /** The evaluated attempt of this lot's BUY; absent without one. */
   attempt?: LiveAttemptView;
-  /** The lot's transactions (the BUY's hash, then the token's later ones). */
+  /** The lot's transactions: its BUY, and the token's others only when no other lot of the token
+   *  exists (the state names no lot per transaction). */
   transactions: LiveTransactionView[];
+  /** Other lots of the same token exist: its later transactions are not attributable here. */
+  sharedToken: boolean;
   decisions: string[];
   /** The BUY block's header time, unix ms (from the attempt). */
   buyMs?: bigint;
@@ -57,14 +62,16 @@ export function tradeLabel(p: LivePositionView): TradeLabel {
   if (p.state === "OPEN" || p.state === "EXITING") return "RUN";
   if (p.state === "PENDING") return "PEND";
   if (p.state === "FAILED") return "FAIL";
+  // An operator's write-off: input and gas lost, a final state (never pending, never a normal SELL).
+  if (p.state === "WRITTEN_OFF") return "WOFF";
   if (p.state !== "CLOSED") return "UNKN";
   if (isPos(p.pnlWei)) return "WIN";
   if (p.proceedsUnknown) return "UNKN";
   if (isNeg(p.pnlWei)) return "LOSS";
   return p.pnlWei === undefined ? "UNKN" : "DONE";
 }
-export const LABEL_TONE: Record<TradeLabel, "blue" | "warn" | "good" | "bad" | ""> = { RUN: "blue", PEND: "warn", WIN: "good", LOSS: "bad", DONE: "", FAIL: "bad", UNKN: "warn" };
-const ORDER: Record<TradeLabel, number> = { RUN: 0, PEND: 1, UNKN: 2, WIN: 3, LOSS: 3, DONE: 3, FAIL: 4 };
+export const LABEL_TONE: Record<TradeLabel, "blue" | "warn" | "good" | "bad" | ""> = { RUN: "blue", PEND: "warn", WIN: "good", LOSS: "bad", DONE: "", FAIL: "bad", WOFF: "bad", UNKN: "warn" };
+const ORDER: Record<TradeLabel, number> = { RUN: 0, PEND: 1, UNKN: 2, WIN: 3, LOSS: 3, DONE: 3, WOFF: 3, FAIL: 4 };
 
 /** Every lot of the ledger, active first (RUN, PEND, UNKN), then the closed; newest BUY first
  *  inside a group where the attempt names its block time, else ledger order reversed. */
@@ -73,8 +80,9 @@ export function tradeViews(live: BscLiveView | null): TradeView[] {
   const byTx = new Map(live.attempts.map(a => [a.tx.toLowerCase(), a]));
   const rows = live.positions.map((p, i): TradeView & { i: number } => {
     const attempt = byTx.get(p.lot.toLowerCase());
-    const own = live.transactions.filter(t => t.txHash.toLowerCase() === p.lot.toLowerCase() || t.token.toLowerCase() === p.token.toLowerCase());
-    return { i, lot: p.lot, token: p.token, label: tradeLabel(p), state: p.state, component: p.component, inputWei: p.inputWei,
+    const sharedToken = live.positions.filter(q => q.token.toLowerCase() === p.token.toLowerCase()).length > 1;
+    const own = live.transactions.filter(t => t.txHash.toLowerCase() === p.lot.toLowerCase() || (!sharedToken && t.token.toLowerCase() === p.token.toLowerCase()));
+    return { i, lot: p.lot, token: p.token, tokens: p.tokens, sharedToken, label: tradeLabel(p), state: p.state, component: p.component, inputWei: p.inputWei,
       proceedsWei: p.state === "CLOSED" ? p.proceedsWei : undefined, gasWei: p.gasWei, pnlWei: p.pnlWei, proceedsUnknown: p.proceedsUnknown,
       attempt, transactions: own, decisions: p.decisions, buyMs: attempt?.blockMs };
   });
@@ -87,13 +95,13 @@ export function filterTrades(rows: readonly TradeView[], f: TradeFilter): TradeV
   const q = f.search.trim().toLowerCase();
   return rows.filter(r => {
     const s = f.status === "all" || (f.status === "open" && r.label === "RUN") || (f.status === "unknown" && (r.label === "PEND" || r.label === "UNKN"))
-      || (f.status === "win" && r.label === "WIN") || (f.status === "loss" && (r.label === "LOSS" || r.label === "FAIL")) || (f.status === "closed" && r.state === "CLOSED");
+      || (f.status === "win" && r.label === "WIN") || (f.status === "loss" && (r.label === "LOSS" || r.label === "FAIL" || r.label === "WOFF")) || (f.status === "closed" && (r.state === "CLOSED" || r.state === "WRITTEN_OFF"));
     return s && (!q || [r.token, r.lot, ...r.transactions.map(t => t.txHash)].some(v => v.toLowerCase().includes(q)));
   });
 }
 export const counts = (rows: readonly TradeView[]) => ({
   run: rows.filter(r => r.label === "RUN").length, pend: rows.filter(r => r.label === "PEND" || r.label === "UNKN").length,
-  win: rows.filter(r => r.label === "WIN").length, loss: rows.filter(r => r.label === "LOSS" || r.label === "FAIL").length,
+  win: rows.filter(r => r.label === "WIN").length, loss: rows.filter(r => r.label === "LOSS" || r.label === "FAIL" || r.label === "WOFF").length,
 });
 
 /** ns as ms text with two places, exact integer arithmetic. */

@@ -37,7 +37,9 @@ export const FILTER_KEYS: readonly string[] = FILTER_GROUPS.flatMap(g => g.items
 export interface FilterValue { on: boolean; min: string; max: string }
 export type Filters = Record<string, FilterValue>;
 
-const DECIMAL = /^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$/;
+/** A bound as the native parser (trading/src/strategy/fixed.rs `parse`) takes it: digits, an optional
+ *  fraction, an optional minus; the places are its check. */
+const DECIMAL = /^-?[0-9]+(?:\.[0-9]+)?$/;
 
 /** BSC_STRATEGY_C_FILTERS → one entry per filterable feature (disabled when not named). */
 export function parseFilters(text: string): { filters: Filters } | { error: string } {
@@ -59,8 +61,8 @@ export function serializeFilters(filters: Filters): { text: string } | { error: 
   for (const key of FILTER_KEYS) {
     const f = filters[key];
     if (!f?.on) continue;
+    // Both bounds empty is a valid rule (`feature::`): the feature must not be NULL.
     const min = f.min.trim().replace(",", "."), max = f.max.trim().replace(",", ".");
-    if (!min && !max) return { error: `${key}: set at least one bound for an enabled filter` };
     for (const b of [min, max]) if (b && !DECIMAL.test(b)) return { error: `${key}: ${b} is no exact decimal` };
     out.push(`${key}:${min}:${max}`);
   }
@@ -129,8 +131,9 @@ export function formOf(view: StrategySettingsView): { form: StrategyForm; filter
   };
 }
 
-/** The native requests the form differs in from the native values, each `KEY=value`. */
-export function changes(view: StrategySettingsView, form: StrategyForm): { changed: { key: string; value: string }[] } | { error: string } {
+/** The native requests the form differs in from the native values, each `KEY=value`. An invalid
+ *  filter edit refuses the filters only (`filterError`), never the other keys. */
+export function changes(view: StrategySettingsView, form: StrategyForm): { changed: { key: string; value: string }[]; filterError?: string } | { error: string } {
   const v = nativeValues(view);
   const out: { key: string; value: string }[] = [];
   const add = (key: string, value: string) => { if (value !== (v[key] ?? "")) out.push({ key, value }); };
@@ -147,13 +150,12 @@ export function changes(view: StrategySettingsView, form: StrategyForm): { chang
   add(KEY_OF.maxOpen, form.maxOpen.trim());
   add(KEY_OF.creatorSoldBeforeFill, form.creatorSoldBeforeFill);
   add(KEY_OF.creatorSellExit, form.creatorSellExit);
+  // Untouched filters keep the owner's own text (its spacing, its spelling, even one the form cannot show).
+  const shown = formOf(view).form.filters;
+  if (FILTER_KEYS.every(k => JSON.stringify(form.filters[k]) === JSON.stringify(shown[k]))) return { changed: out };
   const filters = serializeFilters(form.filters);
-  if ("error" in filters) return filters;
-  // An unchanged rule set keeps the owner's own text (its spacing and bound spelling).
-  const before = parseFilters(v[KEY_OF.filters] ?? "");
-  const beforeText = "filters" in before ? serializeFilters(before.filters) : null;
-  const unchanged = !!beforeText && "text" in beforeText && beforeText.text === filters.text;
-  if (!unchanged) add(KEY_OF.filters, filters.text);
+  if ("error" in filters) return { changed: out, filterError: filters.error };
+  add(KEY_OF.filters, filters.text);
   return { changed: out };
 }
 

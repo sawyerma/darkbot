@@ -7,17 +7,18 @@
 use darkbot_gateway::proto::bsc::v1::{
     bsc_query_request, bsc_query_response, Availability, BscQueryRequest, BscQueryResponse,
     BscWatchState, ChainTxStatus, CreatorSellExit, CreatorSoldBeforeFill, DataQuality, Evidence,
-    ExitReason, ExitReasonSource, OwnerProvenance, PerformanceMetric, PerformancePoint,
-    PerformanceScope, PerformanceSeries, RequalificationState, SettingsApplyStatus, SourcedTime,
-    StrategyCSettings, StrategyCSettingsSetAllCommand, StrategyCSettingsState, StrategyFeatureSpec,
-    StrategyFilterRule, TimeSource, TradeCounts, TradeDetail, TradeHistoryPage, TradeHistoryQuery,
-    TradePlacement, TradeRow, TradeSighting, TradeSort, TradeStatus, TradeTransaction,
-    TrainingProfile, TrainingProfileStatus, TrainingProfiles, TrainingResult, TrainingRun,
-    TrainingRunMode, TrainingRunPage, TrainingRunPlan, TrainingRunStartCommand, TrainingRunStatus,
-    TrainingRunStopKind, TransferStatus, WalletBalanceSnapshot, WalletDestination,
-    WalletHistoryPage, WalletMovement, WalletMovementKind, WalletRole, WalletSweepPolicy,
-    WalletSweepPolicySetCommand, WalletTransferRequest, WalletTransferState, WalletTreasuryState,
-    WatchSubjectKind, WatchSubjectState, WatchVerdict,
+    ExitReason, ExitReasonSource, LiveStrategySelectCommand, OwnerProvenance, PerformanceMetric,
+    PerformancePoint, PerformanceScope, PerformanceSeries, RequalificationState,
+    SettingsApplyStatus, SourcedTime, StrategyCSettings, StrategyCSettingsSetAllCommand,
+    StrategyCSettingsState, StrategyFeatureSpec, StrategyFilterRule, TimeSource, TradeCounts,
+    TradeDetail, TradeHistoryPage, TradeHistoryQuery, TradePlacement, TradeRow, TradeSighting,
+    TradeSort, TradeStatus, TradeTransaction, TrainingProfile, TrainingProfileStatus,
+    TrainingProfiles, TrainingResult, TrainingRun, TrainingRunMode, TrainingRunPage,
+    TrainingRunPlan, TrainingRunStartCommand, TrainingRunStatus, TrainingRunStopKind,
+    TransferStatus, WalletBalanceSnapshot, WalletDestination, WalletHistoryPage, WalletMovement,
+    WalletMovementKind, WalletRole, WalletSweepPolicy, WalletSweepPolicySetCommand,
+    WalletTransferRequest, WalletTransferState, WalletTreasuryState, WatchSubjectKind,
+    WatchSubjectState, WatchVerdict,
 };
 use prost::Message;
 use std::{fs, path::PathBuf};
@@ -315,7 +316,7 @@ fn bsc_v8_contract_golden_bytes() {
                 .map(|(i, f)| StrategyFeatureSpec {
                     name: (*f).into(),
                     index: i as u32,
-                    unit: if f.ends_with("_bnb") { "wei" } else { "count" }.into(),
+                    unit: if f.ends_with("_bnb") { "bnb" } else { "count" }.into(),
                     places: if f.ends_with("_bnb") { 18 } else { 0 },
                     signed: *f == "net_buy_flow_bnb" || *f == "price_change",
                     filterable: true,
@@ -419,6 +420,8 @@ fn bsc_v8_contract_golden_bytes() {
                         observable_ms: Some(0),
                         lost_records: 0,
                         ingress_dropped: u64::MAX,
+                        quality: DataQuality::Incomplete as i32,
+                        quality_reasons: vec!["JOURNAL_NOT_SEALED".into()],
                     }),
                     provenance: provenance("bsc_runtime training runs", DataQuality::Unresolved),
                     request_id: "req-2".into(),
@@ -464,6 +467,16 @@ fn bsc_v8_contract_golden_bytes() {
                 duration_ms: None,
                 max_launches: Some(100),
             }),
+            replay_source: String::new(),
+        }
+        .encode_to_vec(),
+    );
+    check(
+        "live_strategy_select_command",
+        LiveStrategySelectCommand {
+            profile_id: "p1".into(),
+            profile_revision: u64::MAX,
+            config_sha256: "01".repeat(32),
         }
         .encode_to_vec(),
     );

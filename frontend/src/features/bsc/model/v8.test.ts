@@ -42,7 +42,10 @@ describe("V8 Strategy C form: exact conversions, the native filter string", () =
     expect(parseFilters("buy_count:1:,buy_count:2:")).toHaveProperty("error");
     expect(parseFilters("buy_count:1")).toHaveProperty("error");
     const empty = Object.fromEntries(FILTER_KEYS.map(k => [k, { on: false, min: "", max: "" }]));
-    expect(serializeFilters({ ...empty, sell_count: { on: true, min: "", max: "" } })).toHaveProperty("error");
+    // As the native parser: an enabled rule without bounds (`feature::`, NULL fails) and leading zeros.
+    expect(serializeFilters({ ...empty, sell_count: { on: true, min: "", max: "" } })).toEqual({ text: "sell_count::" });
+    expect(serializeFilters({ ...empty, buy_count: { on: true, min: "03", max: "" } })).toEqual({ text: "buy_count:03:" });
+    expect(serializeFilters({ ...empty, buy_count: { on: true, min: "1.", max: "" } })).toHaveProperty("error");
     expect(serializeFilters({ ...empty, net_buy_flow_bnb: { on: true, min: "-0.5", max: "" } })).toEqual({ text: "net_buy_flow_bnb:-0.5:" });
     expect(FILTER_KEYS).toHaveLength(15);
     expect(FILTER_KEYS).not.toContain("provider_gap_flag");
@@ -57,6 +60,12 @@ describe("V8 Strategy C form: exact conversions, the native filter string", () =
     expect(changes(settings, { ...form, stake: "0.25" })).toEqual({ changed: [{ key: "BSC_STRATEGY_C_INPUT_WEI", value: "250000000000000000" }] });
     expect(changes(settings, { ...form, stake: "0.1", hold: "1.5", target: "1.50" })).toEqual({ changed: [
       { key: "BSC_STRATEGY_C_TARGET_NET_MULTIPLE", value: "1.50" }, { key: "BSC_STRATEGY_C_HOLD_MS", value: "1500" }] });
+    // An invalid filter edit refuses the filters only; a stored rule set the form cannot show blocks nothing.
+    const bad = { ...form, filters: { ...form.filters, sell_count: { on: true, min: "x", max: "" } } };
+    expect(changes(settings, { ...bad, stake: "0.25" })).toEqual({ changed: [{ key: "BSC_STRATEGY_C_INPUT_WEI", value: "250000000000000000" }], filterError: "sell_count: x is no exact decimal" });
+    const odd = strategySettingsView([rec(SOURCE_SCHEMA, { generation: "1", "sources[0].source_id": "BSC_INGRESS_GETH" }),
+      rec(SETTINGS_SCHEMA, { generation: "1", "settings[0].id": "BSC_STRATEGY_C_FILTERS", "settings[0].value": "not:a:filter:rule" })], [], 0);
+    expect(changes(odd, { ...formOf(odd).form, maxOpen: "2" })).toEqual({ changed: [{ key: "BSC_STRATEGY_C_MAX_OPEN", value: "2" }] });
   });
 });
 
@@ -72,6 +81,7 @@ describe("V8 trades: labels from the ledger state and the native PnL sign only",
     expect(tradeLabel(pos({ pnlWei: undefined }))).toBe("UNKN");
     expect(tradeLabel(pos({ pnlWei: "-7", proceedsUnknown: true }))).toBe("UNKN");
     expect(tradeLabel(pos({ pnlWei: "7", proceedsUnknown: true }))).toBe("WIN");
+    expect(tradeLabel(pos({ state: "WRITTEN_OFF", pnlWei: "-1001" }))).toBe("WOFF");
   });
   it("puts active lots first and joins only the attempt of the lot's own BUY", () => {
     const l = live({ positions: [pos({ lot: "0xA1", pnlWei: "1" }), pos({ lot: "0xB2", state: "OPEN" })],
@@ -82,6 +92,11 @@ describe("V8 trades: labels from the ledger state and the native PnL sign only",
     expect(rows[1]?.attempt).toBeUndefined();
     expect(counts(rows)).toEqual({ run: 1, pend: 0, win: 1, loss: 0 });
     expect(filterTrades(rows, { search: "0xa1", status: "all" }).map(r => r.lot)).toEqual(["0xA1"]);
+    // Two lots of one token: each shows only its own BUY, never the other's transactions.
+    const two = tradeViews(live({ positions: [pos({ lot: "0x01", token: "0xt" }), pos({ lot: "0x02", token: "0xt", state: "WRITTEN_OFF" })],
+      transactions: [{ txHash: "0x01", token: "0xt" }, { txHash: "0x02", token: "0xt" }, { txHash: "0x03", token: "0xt" }] as never }));
+    expect(two.map(r => [r.lot, r.transactions.map(t => t.txHash), r.sharedToken])).toEqual([["0x01", ["0x01"], true], ["0x02", ["0x02"], true]]);
+    expect(counts(two).loss).toBe(1);
   });
   it("keeps only known columns, token always, and formats ns exactly", () => {
     expect(safeColumns(["pnl", "bogus", "pnl"])).toEqual(["token", "pnl"]);
@@ -105,6 +120,8 @@ describe("V8 monitoring and overview from the native records", () => {
     expect(tradingState(null).label).toBe("Trading UNKNOWN");
     expect(tradingState(live({ gate: "CLEAR", pathState: "BLOCKED" })).label).toBe("Trading OFF");
     expect(tradingState(live({ gate: "CLEAR", pathState: "ARMED" })).label).toBe("Trading ON");
+    // A stale or detached LIVE state is never ON.
+    expect(tradingState(live({ gate: "CLEAR", pathState: "ARMED" }), "DETACHED").label).toBe("Trading UNKNOWN");
     const w = { launcherAddress: "0xAA", buyerAddress: "0xaa", launcherBalanceWei: "5", buyerBalanceWei: "5" } as BscWalletsView;
     expect(capital(w).totalWei).toBe("5");
     expect(capital({ ...w, buyerAddress: "0xbb" }).totalWei).toBe("10");
@@ -133,5 +150,10 @@ describe("V8 Health: native states, nothing unknown is green", () => {
     expect(none.groups.flatMap(g => g.entries).some(e => e.state === "ok")).toBe(false);
     expect(none.severity).not.toBe("ok");
     expect(none.groups.find(g => g.id === "portals")!.entries).toEqual([]);
+    // Sources healthy but no builder reported: not green; a gateway with a stale status: amber.
+    const partial = healthView({ gateway: "OPEN", statusTopic: "STALE", status: null, live: null, nowMs: now,
+      records: [modes, runtime({ "sources[0].source_id": "BSC_INGRESS_GETH", "sources[0].health": "HEALTHY", "canonical[0].state": "FOLLOWING" })] });
+    expect(partial.groups[0]!.entries.find(e => e.id === "gateway")?.state).toBe("warn");
+    expect(partial.severity).not.toBe("ok");
   });
 });

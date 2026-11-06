@@ -4,14 +4,14 @@ import { useTopic } from "@/core/realtime/hooks";
 import { selectLive, selectStatus, selectWallets, useBscStore } from "../store/bscStore";
 import { switchRow, type SwitchRow } from "../model/switches";
 import { Line } from "@/shared/ui/graphite/Rows";
-import { capital } from "../model/overview";
+import { capital, pnlLowerBound } from "../model/overview";
 import { SwitchActions } from "../SwitchActions";
 import { PerformanceMetric, PerformanceScope, WalletMovementKind } from "../api/bscV8Adapter";
 import { timestamp, ValueState } from "./EvidenceRows";
 import { PlacedSection } from "./PlacedSection";
 import { useNativeRecords } from "./useNativeRecords";
 import { queryReason, useBscQuery } from "./useBscQuery";
-import { DetailLine, Drawer, Icon, PanelHead, Stat, TopHeading, bnb, signTone, signedBnbText } from "./V8";
+import { DetailLine, Drawer, Icon, PanelHead, Stat, TopHeading, Wei, bnb, signTone, signedBnbText } from "./V8";
 
 type WalletId = "launcher" | "buyer";
 
@@ -69,8 +69,8 @@ export function WalletsPanel() {
   return <>
     <TopHeading title="Wallets" subtitle="Balances, transfers and PnL history." />
     <div className="grid cols2">
-      <Stat label="Balance" value={cap.totalWei === undefined ? "—" : `${bnb(cap.totalWei, 2)} BNB`} note={`All wallets · ${cap.detail}`} testId="bsc-wallets-balance" />
-      <Stat label="Realized net PnL" value={live ? signedBnbText(live.realizedPnlWei) : "—"} note="Net trading PnL (LIVE ledger)" accent={signTone(live?.realizedPnlWei)} testId="bsc-wallets-pnl" />
+      <Stat label="Balance" value={cap.totalWei === undefined ? "—" : `${bnb(cap.totalWei, 2)} BNB`} note={`All wallets · ${cap.detail}`} testId="bsc-wallets-balance" title={cap.totalWei ? `${cap.totalWei} wei` : undefined} />
+      <Stat label="Realized net PnL" value={live ? `${pnlLowerBound(live) ? "≥ " : ""}${signedBnbText(live.realizedPnlWei)}` : "—"} note={pnlLowerBound(live) ? "Net trading PnL (LIVE ledger) · lower bound: a SELL without the Portal trade event" : "Net trading PnL (LIVE ledger)"} accent={signTone(live?.realizedPnlWei)} testId="bsc-wallets-pnl" title={live ? `${live.realizedPnlWei} wei` : undefined} />
     </div>
     <div className="grid wideleft mtl">
       <div className="card pad">
@@ -92,6 +92,8 @@ export function WalletsPanel() {
         {pick ? <>
           <DetailLine label="Address" value={<span className="wallet-address">{pick.address || "—"}</span>} />
           <DetailLine label="Balance source" value={`${pick.source} · ${pick.id === "buyer" && w?.liveBalanceWei !== undefined ? "current runtime status" : timestamp(w?.observedUnixS)}`} />
+          {pick.id === "buyer" && w?.liveBalanceWei !== undefined ? <DetailLine label="Snapshot balance" value={<Wei wei={w.buyerBalanceWei} places={6} />} /> : null}
+          <DetailLine label="Exact balance" value={<Wei wei={pick.balance} places={18} />} />
           <DetailLine label={pick.id === "buyer" ? "Allow trading" : "Allow test launches"} value={<ValueState state={(pick.id === "buyer" ? buyer : launcher).effective} />} />
           <SwitchActions rows={[pick.id === "buyer" ? buyer : launcher]} testId={`bsc-wallet-${pick.id}`} action="bsc.wallet.set" />
           <DetailLine label="Required balance" value={(pick.id === "buyer" ? w?.requiredBuyerWei : w?.requiredLauncherWei) === undefined ? "—" : `${bnb(pick.id === "buyer" ? w?.requiredBuyerWei : w?.requiredLauncherWei)} BNB`} />

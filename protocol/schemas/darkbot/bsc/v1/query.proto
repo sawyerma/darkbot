@@ -40,6 +40,8 @@ message BscQueryRequest {
     PerformanceSeriesQuery series = 8;
     // The WATCH projection (REV.2.0).
     BscWatchQuery watch = 9;
+    // The stored and running Strategy C configuration.
+    StrategyCSettingsQuery strategy_settings = 10;
   }
 }
 
@@ -69,5 +71,7 @@ message BscQueryResponse {
     PerformanceSeries series = 10;
     // The WATCH projection (REV.2.0).
     BscWatchState watch = 11;
+    // The stored and running Strategy C configuration.
+    StrategyCSettingsState strategy_settings = 12;
   }
 }

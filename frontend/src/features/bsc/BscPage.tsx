@@ -72,12 +72,12 @@ export default function BscPage() {
             <button type="button" className="round" title="Settings" aria-label="Settings" data-testid="bsc-settings-open" onClick={() => setLayer("settings")}><Icon name="settings" size="s" /></button>
           </div>
         </header>
-        <main className="wrap" id="bsc-content">
+        <section className="wrap" id="bsc-content" aria-label="BSC area">
           {view === "overview" ? <OverviewPanel goto={goto} /> : null}
           {view === "training" ? <TrainingPanel goto={goto} /> : null}
           {view === "live" ? <LivePanel /> : null}
           {view === "wallets" ? <WalletsPanel /> : null}
-        </main>
+        </section>
       </div>
     </div>
     {layer === "health" ? <HealthWindow view={health} onClose={close} /> : null}

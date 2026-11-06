@@ -1,7 +1,7 @@
 import { TopicId } from "@/core/realtime";
 import { useTopic } from "@/core/realtime/hooks";
 import { selectLive, selectStatus, selectWallets, useBscStore } from "../store/bscStore";
-import { capital, lastSignalMs, openPositions, pendingTransactions, tradingState } from "../model/overview";
+import { capital, lastSignalMs, openPositions, pendingTransactions, pnlLowerBound, tradingState } from "../model/overview";
 import { runtimeView } from "../model/sources";
 import { strategySettingsView } from "../model/strategySettings";
 import type { BscView } from "../BscPage";
@@ -12,12 +12,13 @@ import { Badge, Icon, PanelHead, SystemMetric, TopHeading, bnb, signTone, signed
 /** V8 Overview (FE-V8-03): one compact system status, the pending notice and the two jumps. */
 export function OverviewPanel({ goto }: { goto: (v: BscView) => void }) {
   useTopic(TopicId.BSC_WALLETS_STATE);
-  const { projection: live } = useBscStore(selectLive);
+  const { projection: live, status: liveTopic } = useBscStore(selectLive);
   const { projection: wallets } = useBscStore(selectWallets);
   const { projection: status } = useBscStore(selectStatus);
   const records = useNativeRecords();
   const nowMs = useNowMs();
-  const trading = tradingState(live);
+  const trading = tradingState(live, liveTopic);
+  const lowerBound = pnlLowerBound(live);
   const signal = lastSignalMs(records, nowMs);
   const cap = capital(wallets);
   const pending = pendingTransactions(live);
@@ -32,8 +33,8 @@ export function OverviewPanel({ goto }: { goto: (v: BscView) => void }) {
         <SystemMetric label="RPC latency · p95" value="—" unit="ms" testId="bsc-metric-rpc" />
         <SystemMetric label="Decision latency · p95" value="—" unit="ms" testId="bsc-metric-decision" />
         <SystemMetric label="Last market signal" value={signal === undefined ? "—" : signal < 1000 ? `${signal}` : `${Math.round(signal / 1000)}`} unit={signal === undefined ? "s" : signal < 1000 ? "ms" : "s"} testId="bsc-metric-signal" />
-        <SystemMetric label="Realized net PnL" value={live ? signedBnbText(live.realizedPnlWei) : "—"} accent={signTone(live?.realizedPnlWei)} testId="bsc-metric-pnl" />
-        <SystemMetric label="Total balance" value={cap.totalWei === undefined ? "—" : bnb(cap.totalWei, 2)} unit="BNB" testId="bsc-metric-balance" />
+        <SystemMetric label={lowerBound ? "Realized net PnL · lower bound" : "Realized net PnL"} value={live ? `${lowerBound ? "≥ " : ""}${signedBnbText(live.realizedPnlWei)}` : "—"} accent={signTone(live?.realizedPnlWei)} testId="bsc-metric-pnl" title={live ? `${live.realizedPnlWei} wei${lowerBound ? " (a SELL without the Portal trade event counts its proceeds as 0)" : ""}` : undefined} />
+        <SystemMetric label="Total balance" value={cap.totalWei === undefined ? "—" : bnb(cap.totalWei, 2)} unit="BNB" testId="bsc-metric-balance" title={cap.totalWei ? `${cap.totalWei} wei` : undefined} />
       </div>
       <div className="tiny" style={{ padding: "0 24px 17px" }}>{runtime.state === "RUNNING" ? `Runtime ${runtime.mode}` : runtime.state === "STALE" ? "Runtime status stale" : "Runtime not reported"} · {cap.detail} · unreported latencies remain blank.</div>
     </div>
@@ -42,7 +43,7 @@ export function OverviewPanel({ goto }: { goto: (v: BscView) => void }) {
       <button type="button" className="link" onClick={() => goto("live")}>View <Icon name="chevron" size="s" /></button>
     </div> : null}
     <div className="grid cols2 mtl">
-      <div className="card pad dashboard-jump"><div><h2>Live trading</h2><p>{trading.label === "Trading ON" ? "Trading running" : trading.label === "Trading OFF" ? "Currently off" : "State unknown"} · {open} open {open === 1 ? "position" : "positions"}</p></div>
+      <div className="card pad dashboard-jump"><div><h2>Live trading</h2><p>{trading.label === "Trading ON" ? "Trading running" : trading.label === "Trading OFF" ? "Currently off" : "State unknown"} · {live ? `${open} open ${open === 1 ? "position" : "positions"}` : "open positions —"}</p></div>
         <button type="button" className="btn quiet" onClick={() => goto("live")}>Open Live <Icon name="chevron" size="s" /></button></div>
       <div className="card pad dashboard-jump"><div><h2>Training</h2><p>Strategy C {strategy.state === "UNKNOWN" ? "state unknown" : strategy.state.toLowerCase()} · training modules not implemented</p></div>
         <button type="button" className="btn quiet" onClick={() => goto("training")}>Open Training <Icon name="chevron" size="s" /></button></div>

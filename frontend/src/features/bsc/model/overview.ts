@@ -5,8 +5,10 @@ import { RUNTIME_SCHEMA, runtimeView } from "./sources";
 
 export type TradingState = { label: "Trading ON" | "Trading OFF" | "Trading UNKNOWN"; tone: "good" | "" | "warn"; detail: string };
 
-/** ON only while the owner's LIVE gate is CLEAR and the runtime's LIVE path is ARMED. */
-export function tradingState(live: BscLiveView | null): TradingState {
+/** ON only while the owner's LIVE gate is CLEAR and the runtime's LIVE path is ARMED, read from a
+ *  current bsc.live.state (`topic` LIVE): a stale or detached state is UNKNOWN, never ON. */
+export function tradingState(live: BscLiveView | null, topic = "LIVE"): TradingState {
+  if (topic !== "LIVE") return { label: "Trading UNKNOWN", tone: "warn", detail: `LIVE state ${topic.toLowerCase()}` };
   if (!live || live.gate === "UNKNOWN" || live.gate === "") return { label: "Trading UNKNOWN", tone: "warn", detail: "No readable LIVE owner state" };
   if (live.gate === "CLEAR" && live.pathState === "ARMED") return { label: "Trading ON", tone: "good", detail: live.grant?.exitOnly ? "Exits only (EXIT-ONLY grant)" : "LIVE path armed under the grant" };
   return { label: "Trading OFF", tone: "", detail: live.blockers[0] ?? live.pathReason ?? "LIVE gate blocked" };
@@ -40,5 +42,7 @@ export function capital(w: BscWalletsView | null): Capital {
 
 /** Released transactions the chain has not decided (RELEASED, UNKNOWN). */
 export const pendingTransactions = (live: BscLiveView | null) => (live?.transactions ?? []).filter(t => t.state === "RELEASED" || t.state === "UNKNOWN").length;
+/** The realized PnL is a lower bound while a closed position's proceeds are unknown (FE-V8-03). */
+export const pnlLowerBound = (live: BscLiveView | null) => !!live?.positions.some(p => p.proceedsUnknown);
 /** Positions held now (OPEN, EXITING). */
 export const openPositions = (live: BscLiveView | null) => (live?.positions ?? []).filter(p => p.state === "OPEN" || p.state === "EXITING").length;

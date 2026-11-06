@@ -1,4 +1,5 @@
 import { useEffect, useRef, type ReactNode } from "react";
+import type React from "react";
 import { statusTone } from "../model/status";
 
 // V8 (FE-V8-01): the building blocks of frontend/design/reference/bsc_graphite_v8_approved.html in
@@ -50,30 +51,55 @@ export function TopHeading({ title, subtitle, actions }: { title: string; subtit
 export function PanelHead({ title, extra }: { title: string; extra?: ReactNode }) {
   return <div className="topline"><h2>{title}</h2>{extra}</div>;
 }
-export function SystemMetric({ label, value, unit, accent, testId }: { label: string; value: string; unit?: string; accent?: "up" | "down" | ""; testId?: string }) {
-  return <div className="system-metric" data-testid={testId}><span className="name">{label}</span><strong className={`mono ${accent ?? ""}`}>{value} <span className="unit">{unit ?? ""}</span></strong></div>;
+export function SystemMetric({ label, value, unit, accent, testId, title }: { label: string; value: string; unit?: string; accent?: "up" | "down" | ""; testId?: string; title?: string }) {
+  return <div className="system-metric" data-testid={testId}><span className="name">{label}</span><strong className={`mono ${accent ?? ""}`} title={title}>{value} <span className="unit">{unit ?? ""}</span></strong></div>;
 }
-export function Stat({ label, value, note, accent, testId }: { label: string; value: string; note: string; accent?: "up" | "down" | ""; testId?: string }) {
-  return <div className="card stat" data-testid={testId}><span className="label">{label}</span><b className={`mono ${accent ?? ""}`}>{value}</b><small>{note}</small></div>;
+export function Stat({ label, value, note, accent, testId, title }: { label: string; value: string; note: string; accent?: "up" | "down" | ""; testId?: string; title?: string }) {
+  return <div className="card stat" data-testid={testId}><span className="label">{label}</span><b className={`mono ${accent ?? ""}`} title={title}>{value}</b><small>{note}</small></div>;
+}
+/** An exact wei amount shown as BNB, the exact wei in its title. */
+export function Wei({ wei, places, signed }: { wei: string | undefined; places?: number; signed?: boolean }) {
+  return <span title={wei ? `${wei} wei` : undefined}>{signed ? signedBnbText(wei, places) : wei === undefined || wei === "" ? "—" : `${bnb(wei, places)} BNB`}</span>;
 }
 export function DetailLine({ label, value, testId }: { label: string; value: ReactNode; testId?: string }) {
   return <div className="detail-line" data-testid={testId}><span className="muted">{label}</span><strong>{value}</strong></div>;
+}
+
+/** A modal layer's keyboard: focus to `first` once on open and back on close, Escape closes (not
+ *  while a confirmation dialog above it takes the key), Tab stays inside. Runs once per opening: a
+ *  re-render (the page clock) never moves the focus. */
+export function useModalKeys(first: React.RefObject<HTMLElement | null>, layer: React.RefObject<HTMLElement | null>, onClose: () => void) {
+  const close = useRef(onClose);
+  close.current = onClose;
+  useEffect(() => {
+    const before = document.activeElement as HTMLElement | null;
+    first.current?.focus();
+    const key = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        if (e.defaultPrevented || document.querySelector("[role=alertdialog]")) return;
+        close.current();
+      } else if (e.key === "Tab" && layer.current) {
+        const items = [...layer.current.querySelectorAll<HTMLElement>("button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])")];
+        const a = items[0], z = items[items.length - 1];
+        if (!a || !z) return;
+        if (e.shiftKey && document.activeElement === a) { e.preventDefault(); z.focus(); }
+        else if (!e.shiftKey && document.activeElement === z) { e.preventDefault(); a.focus(); }
+      }
+    };
+    document.addEventListener("keydown", key);
+    return () => { document.removeEventListener("keydown", key); before?.focus?.(); };
+  }, [first, layer]);
 }
 
 /** A side drawer of the reference: backdrop, header with kicker and title, content, footer.
  *  Escape and the backdrop close it; focus moves to its close button and returns on close. */
 export function Drawer({ title, kicker, wide, footer, onClose, children, testId }: { title: string; kicker: string; wide?: boolean; footer?: ReactNode; onClose: () => void; children: ReactNode; testId?: string }) {
   const close = useRef<HTMLButtonElement>(null);
-  useEffect(() => {
-    const before = document.activeElement as HTMLElement | null;
-    close.current?.focus();
-    const key = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    document.addEventListener("keydown", key);
-    return () => { document.removeEventListener("keydown", key); before?.focus?.(); };
-  }, [onClose]);
+  const layer = useRef<HTMLElement>(null);
+  useModalKeys(close, layer, onClose);
   return <div className="drawer-area" data-testid={testId}>
     <button type="button" className="backdrop" aria-label="Close" onClick={onClose} />
-    <section className={`drawer${wide ? " wide" : ""}`} role="dialog" aria-modal="true" aria-label={title}>
+    <section ref={layer} className={`drawer${wide ? " wide" : ""}`} role="dialog" aria-modal="true" aria-label={title}>
       <header className="drawer-head"><div><span className="caps">{kicker}</span><h2>{title}</h2></div>
         <button ref={close} type="button" className="round" aria-label="Close" onClick={onClose}><Icon name="x" size="s" /></button></header>
       <div className="drawer-content">{children}</div>
@@ -83,7 +109,7 @@ export function Drawer({ title, kicker, wide, footer, onClose, children, testId 
 }
 
 /** Exact decimal wei as BNB text, without floating point: integer division of the wei string.
- *  `places` digits are shown (truncated, never rounded up); the full wei stays in the title. */
+ *  `places` digits are shown (truncated, never rounded up); callers show the full wei as a title. */
 export function bnb(wei: string | undefined, places = 3): string {
   if (wei === undefined || wei === "") return "—";
   const m = /^(-?)([0-9]+)$/.exec(wei);
