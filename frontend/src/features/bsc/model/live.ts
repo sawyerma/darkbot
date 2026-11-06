@@ -221,7 +221,7 @@ export function campaignRows(c: LiveCampaignView): CountRow[] {
 }
 
 /** ECMAScript's largest time value (ms). */
-const MAX_DATE_MS = 8_640_000_000_000_000n;
+export const MAX_DATE_MS = 8_640_000_000_000_000n;
 /** A unix-ms time as ISO; beyond the date range its raw value (never a thrown error). */
 export function unixMs(v: bigint | undefined): string {
   if (v === undefined) return "—";

@@ -12,10 +12,11 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file darkbot/bsc/v1/wallet.proto.
  */
 export const file_darkbot_bsc_v1_wallet: GenFile = /*@__PURE__*/
-  fileDesc("ChtkYXJrYm90L2JzYy92MS93YWxsZXQucHJvdG8SDmRhcmtib3QuYnNjLnYxIsgECg5XYWxsZXRNb3ZlbWVudBITCgttb3ZlbWVudF9pZBgBIAEoCRIoCgRyb2xlGAIgASgOMhouZGFya2JvdC5ic2MudjEuV2FsbGV0Um9sZRIWCg53YWxsZXRfYWRkcmVzcxgDIAEoCRIQCghjaGFpbl9pZBgEIAEoBBIwCgRraW5kGAUgASgOMiIuZGFya2JvdC5ic2MudjEuV2FsbGV0TW92ZW1lbnRLaW5kEhwKFGNvdW50ZXJwYXJ0eV9hZGRyZXNzGAYgASgJEjUKEWNvdW50ZXJwYXJ0eV9yb2xlGAcgASgOMhouZGFya2JvdC5ic2MudjEuV2FsbGV0Um9sZRISCgphbW91bnRfd2VpGAggASgJEg8KB2ZlZV93ZWkYCSABKAkSDwoHdHhfaGFzaBgKIAEoCRISCgVub25jZRgLIAEoBEgAiAEBEhkKDGJsb2NrX251bWJlchgMIAEoBEgBiAEBEi8KCmJsb2NrX3RpbWUYDSABKAsyGy5kYXJrYm90LmJzYy52MS5Tb3VyY2VkVGltZRItCgZzdGF0dXMYDiABKA4yHS5kYXJrYm90LmJzYy52MS5DaGFpblR4U3RhdHVzEg4KBm9yaWdpbhgPIAEoCRILCgNsb3QYECABKAkSGwoTdHJhbnNmZXJfcmVxdWVzdF9pZBgRIAEoCRIsCgdxdWFsaXR5GBIgASgOMhsuZGFya2JvdC5ic2MudjEuRGF0YVF1YWxpdHlCCAoGX25vbmNlQg8KDV9ibG9ja19udW1iZXIi7AIKFVdhbGxldEJhbGFuY2VTbmFwc2hvdBIoCgRyb2xlGAEgASgOMhouZGFya2JvdC5ic2MudjEuV2FsbGV0Um9sZRIPCgdhZGRyZXNzGAIgASgJEhAKCGNoYWluX2lkGAMgASgEEhMKC2JhbGFuY2Vfd2VpGAQgASgJEhkKDHJlc2VydmVkX3dlaRgFIAEoCUgAiAEBEhoKDWF2YWlsYWJsZV93ZWkYBiABKAlIAYgBARIZCgxibG9ja19udW1iZXIYByABKARIAogBARItCghvYnNlcnZlZBgIIAEoCzIbLmRhcmtib3QuYnNjLnYxLlNvdXJjZWRUaW1lEg4KBnNvdXJjZRgJIAEoCRIsCgdxdWFsaXR5GAogASgOMhsuZGFya2JvdC5ic2MudjEuRGF0YVF1YWxpdHlCDwoNX3Jlc2VydmVkX3dlaUIQCg5fYXZhaWxhYmxlX3dlaUIPCg1fYmxvY2tfbnVtYmVyIuUBChJXYWxsZXRIaXN0b3J5UXVlcnkSKQoFcm9sZXMYASADKA4yGi5kYXJrYm90LmJzYy52MS5XYWxsZXRSb2xlEjEKBWtpbmRzGAIgAygOMiIuZGFya2JvdC5ic2MudjEuV2FsbGV0TW92ZW1lbnRLaW5kEhkKDGZyb21fdW5peF9tcxgDIAEoBEgAiAEBEhcKCnRvX3VuaXhfbXMYBCABKARIAYgBARIOCgZjdXJzb3IYBSABKAkSDQoFbGltaXQYBiABKA1CDwoNX2Zyb21fdW5peF9tc0INCgtfdG9fdW5peF9tcyKgAgoRV2FsbGV0SGlzdG9yeVBhZ2USMgoMYXZhaWxhYmlsaXR5GAEgASgOMhwuZGFya2JvdC5ic2MudjEuQXZhaWxhYmlsaXR5EhoKEnVuYXZhaWxhYmxlX3JlYXNvbhgCIAEoCRIzCgpwcm92ZW5hbmNlGAMgASgLMh8uZGFya2JvdC5ic2MudjEuT3duZXJQcm92ZW5hbmNlEjEKCW1vdmVtZW50cxgEIAMoCzIeLmRhcmtib3QuYnNjLnYxLldhbGxldE1vdmVtZW50EhMKC25leHRfY3Vyc29yGAUgASgJEhAKCGhhc19tb3JlGAYgASgIEhUKDWRlcG9zaXRlZF93ZWkYByABKAkSFQoNd2l0aGRyYXduX3dlaRgIIAEoCSKJAQoRV2FsbGV0RGVzdGluYXRpb24SFgoOZGVzdGluYXRpb25faWQYASABKAkSDQoFbGFiZWwYAiABKAkSDwoHYWRkcmVzcxgDIAEoCRIQCghjaGFpbl9pZBgEIAEoBBIRCgljb25maXJtZWQYBSABKAgSFwoPY3JlYXRlZF91bml4X21zGAYgASgEIl8KG1dhbGxldERlc3RpbmF0aW9uU2V0Q29tbWFuZBINCgVsYWJlbBgBIAEoCRIPCgdhZGRyZXNzGAIgASgJEhAKCGNoYWluX2lkGAMgASgEEg4KBnJlbW92ZRgEIAEoCCK4AQoVV2FsbGV0VHJhbnNmZXJSZXF1ZXN0Ei8KC3NvdXJjZV9yb2xlGAEgASgOMhouZGFya2JvdC5ic2MudjEuV2FsbGV0Um9sZRIWCg5kZXN0aW5hdGlvbl9pZBgCIAEoCRIbChNkZXN0aW5hdGlvbl9hZGRyZXNzGAMgASgJEhAKCGNoYWluX2lkGAQgASgEEhIKCmFtb3VudF93ZWkYBSABKAkSEwoLbWF4X2ZlZV93ZWkYBiABKAkixAMKE1dhbGxldFRyYW5zZmVyU3RhdGUSEgoKcmVxdWVzdF9pZBgBIAEoCRISCgpjb21tYW5kX2lkGAIgASgJEi8KC3NvdXJjZV9yb2xlGAMgASgOMhouZGFya2JvdC5ic2MudjEuV2FsbGV0Um9sZRIWCg5zb3VyY2VfYWRkcmVzcxgEIAEoCRIbChNkZXN0aW5hdGlvbl9hZGRyZXNzGAUgASgJEhAKCGNoYWluX2lkGAYgASgEEhIKCmFtb3VudF93ZWkYByABKAkSFAoHZmVlX3dlaRgIIAEoCUgAiAEBEhIKBW5vbmNlGAkgASgESAGIAQESDwoHdHhfaGFzaBgKIAEoCRIuCgZzdGF0dXMYCyABKA4yHi5kYXJrYm90LmJzYy52MS5UcmFuc2ZlclN0YXR1cxIWCg5mYWlsdXJlX3JlYXNvbhgMIAEoCRIXCg9jcmVhdGVkX3VuaXhfbXMYDSABKAQSFwoPdXBkYXRlZF91bml4X21zGA4gASgEEhsKDnBvbGljeV92ZXJzaW9uGA8gASgESAKIAQFCCgoIX2ZlZV93ZWlCCAoGX25vbmNlQhEKD19wb2xpY3lfdmVyc2lvbiKfAgoVV2FsbGV0VHJhbnNmZXJSZWNlaXB0EhIKCnJlcXVlc3RfaWQYASABKAkSLgoGc3RhdHVzGAIgASgOMh4uZGFya2JvdC5ic2MudjEuVHJhbnNmZXJTdGF0dXMSDwoHdHhfaGFzaBgDIAEoCRIZCgxibG9ja19udW1iZXIYBCABKARIAIgBARIvCgpibG9ja190aW1lGAUgASgLMhsuZGFya2JvdC5ic2MudjEuU291cmNlZFRpbWUSFQoIZ2FzX3VzZWQYBiABKARIAYgBARIUCgdmZWVfd2VpGAcgASgJSAKIAQESDgoGcmVhc29uGAggASgJQg8KDV9ibG9ja19udW1iZXJCCwoJX2dhc191c2VkQgoKCF9mZWVfd2VpIp4CChFXYWxsZXRTd2VlcFBvbGljeRIPCgdlbmFibGVkGAEgASgIEi8KC3NvdXJjZV9yb2xlGAIgASgOMhouZGFya2JvdC5ic2MudjEuV2FsbGV0Um9sZRIWCg5kZXN0aW5hdGlvbl9pZBgDIAEoCRIbChNkZXN0aW5hdGlvbl9hZGRyZXNzGAQgASgJEhUKDXRocmVzaG9sZF93ZWkYBSABKAkSEgoKcmV0YWluX3dlaRgGIAEoCRIWCg5wb2xpY3lfdmVyc2lvbhgHIAEoBBI7Cg5sYXN0X2V4ZWN1dGlvbhgIIAEoCzIjLmRhcmtib3QuYnNjLnYxLldhbGxldFRyYW5zZmVyU3RhdGUSEgoKcmVxdWVzdF9pZBgJIAEoCSKiAQobV2FsbGV0U3dlZXBQb2xpY3lTZXRDb21tYW5kEg8KB2VuYWJsZWQYASABKAgSLwoLc291cmNlX3JvbGUYAiABKA4yGi5kYXJrYm90LmJzYy52MS5XYWxsZXRSb2xlEhYKDmRlc3RpbmF0aW9uX2lkGAMgASgJEhUKDXRocmVzaG9sZF93ZWkYBCABKAkSEgoKcmV0YWluX3dlaRgFIAEoCSKVAwoTV2FsbGV0VHJlYXN1cnlTdGF0ZRIyCgxhdmFpbGFiaWxpdHkYASABKA4yHC5kYXJrYm90LmJzYy52MS5BdmFpbGFiaWxpdHkSGgoSdW5hdmFpbGFibGVfcmVhc29uGAIgASgJEjMKCnByb3ZlbmFuY2UYAyABKAsyHy5kYXJrYm90LmJzYy52MS5Pd25lclByb3ZlbmFuY2USNwoIYmFsYW5jZXMYBCADKAsyJS5kYXJrYm90LmJzYy52MS5XYWxsZXRCYWxhbmNlU25hcHNob3QSNwoMZGVzdGluYXRpb25zGAUgAygLMiEuZGFya2JvdC5ic2MudjEuV2FsbGV0RGVzdGluYXRpb24SMAoFc3dlZXAYBiABKAsyIS5kYXJrYm90LmJzYy52MS5XYWxsZXRTd2VlcFBvbGljeRI2Cgl0cmFuc2ZlcnMYByADKAsyIy5kYXJrYm90LmJzYy52MS5XYWxsZXRUcmFuc2ZlclN0YXRlEh0KFXdhbGxldF9wb2xpY3lfdmVyc2lvbhgIIAEoBCJAChNXYWxsZXRUcmVhc3VyeVF1ZXJ5EikKBXJvbGVzGAEgAygOMhouZGFya2JvdC5ic2MudjEuV2FsbGV0Um9sZSp0CgpXYWxsZXRSb2xlEhsKF1dBTExFVF9ST0xFX1VOU1BFQ0lGSUVEEAASGAoUV0FMTEVUX1JPTEVfTEFVTkNIRVIQARIVChFXQUxMRVRfUk9MRV9CVVlFUhACEhgKFFdBTExFVF9ST0xFX0VYVEVSTkFMEAMqlAIKEldhbGxldE1vdmVtZW50S2luZBIkCiBXQUxMRVRfTU9WRU1FTlRfS0lORF9VTlNQRUNJRklFRBAAEiAKHFdBTExFVF9NT1ZFTUVOVF9LSU5EX0RFUE9TSVQQARIjCh9XQUxMRVRfTU9WRU1FTlRfS0lORF9XSVRIRFJBV0FMEAISKgomV0FMTEVUX01PVkVNRU5UX0tJTkRfSU5URVJOQUxfVFJBTlNGRVIQAxIiCh5XQUxMRVRfTU9WRU1FTlRfS0lORF9UUkFERV9CVVkQBBIjCh9XQUxMRVRfTU9WRU1FTlRfS0lORF9UUkFERV9TRUxMEAUSHAoYV0FMTEVUX01PVkVNRU5UX0tJTkRfRkVFEAYq/QEKDUNoYWluVHhTdGF0dXMSHwobQ0hBSU5fVFhfU1RBVFVTX1VOU1BFQ0lGSUVEEAASGwoXQ0hBSU5fVFhfU1RBVFVTX1BFTkRJTkcQARIcChhDSEFJTl9UWF9TVEFUVVNfSU5DTFVERUQQAhIZChVDSEFJTl9UWF9TVEFUVVNfRklOQUwQAxIcChhDSEFJTl9UWF9TVEFUVVNfUkVWRVJURUQQBBIcChhDSEFJTl9UWF9TVEFUVVNfUkVQTEFDRUQQBRIcChhDSEFJTl9UWF9TVEFUVVNfT1JQSEFORUQQBhIbChdDSEFJTl9UWF9TVEFUVVNfVU5LTk9XThAHKtsBCg5UcmFuc2ZlclN0YXR1cxIfChtUUkFOU0ZFUl9TVEFUVVNfVU5TUEVDSUZJRUQQABIZChVUUkFOU0ZFUl9TVEFUVVNfRFJBRlQQARIbChdUUkFOU0ZFUl9TVEFUVVNfUEVORElORxACEhgKFFRSQU5TRkVSX1NUQVRVU19TRU5UEAMSHQoZVFJBTlNGRVJfU1RBVFVTX0NPTkZJUk1FRBAEEhoKFlRSQU5TRkVSX1NUQVRVU19GQUlMRUQQBRIbChdUUkFOU0ZFUl9TVEFUVVNfVU5LTk9XThAGQnsKEmNvbS5kYXJrYm90LmJzYy52MUILV2FsbGV0UHJvdG9QAaICA0RCWKoCDkRhcmtib3QuQnNjLlYxygIORGFya2JvdFxCc2NcVjHiAhpEYXJrYm90XEJzY1xWMVxHUEJNZXRhZGF0YeoCEERhcmtib3Q6OkJzYzo6VjFiBnByb3RvMw", [file_darkbot_bsc_v1_common]);
+  fileDesc("ChtkYXJrYm90L2JzYy92MS93YWxsZXQucHJvdG8SDmRhcmtib3QuYnNjLnYxIvgECg5XYWxsZXRNb3ZlbWVudBITCgttb3ZlbWVudF9pZBgBIAEoCRIoCgRyb2xlGAIgASgOMhouZGFya2JvdC5ic2MudjEuV2FsbGV0Um9sZRIWCg53YWxsZXRfYWRkcmVzcxgDIAEoCRIQCghjaGFpbl9pZBgEIAEoBBIwCgRraW5kGAUgASgOMiIuZGFya2JvdC5ic2MudjEuV2FsbGV0TW92ZW1lbnRLaW5kEhwKFGNvdW50ZXJwYXJ0eV9hZGRyZXNzGAYgASgJEjUKEWNvdW50ZXJwYXJ0eV9yb2xlGAcgASgOMhouZGFya2JvdC5ic2MudjEuV2FsbGV0Um9sZRISCgphbW91bnRfd2VpGAggASgJEg8KB2ZlZV93ZWkYCSABKAkSDwoHdHhfaGFzaBgKIAEoCRISCgVub25jZRgLIAEoBEgAiAEBEhkKDGJsb2NrX251bWJlchgMIAEoBEgBiAEBEi8KCmJsb2NrX3RpbWUYDSABKAsyGy5kYXJrYm90LmJzYy52MS5Tb3VyY2VkVGltZRItCgZzdGF0dXMYDiABKA4yHS5kYXJrYm90LmJzYy52MS5DaGFpblR4U3RhdHVzEg4KBm9yaWdpbhgPIAEoCRILCgNsb3QYECABKAkSGwoTdHJhbnNmZXJfcmVxdWVzdF9pZBgRIAEoCRIsCgdxdWFsaXR5GBIgASgOMhsuZGFya2JvdC5ic2MudjEuRGF0YVF1YWxpdHkSGwoOcG9saWN5X3ZlcnNpb24YEyABKARIAogBAUIICgZfbm9uY2VCDwoNX2Jsb2NrX251bWJlckIRCg9fcG9saWN5X3ZlcnNpb24i7AIKFVdhbGxldEJhbGFuY2VTbmFwc2hvdBIoCgRyb2xlGAEgASgOMhouZGFya2JvdC5ic2MudjEuV2FsbGV0Um9sZRIPCgdhZGRyZXNzGAIgASgJEhAKCGNoYWluX2lkGAMgASgEEhMKC2JhbGFuY2Vfd2VpGAQgASgJEhkKDHJlc2VydmVkX3dlaRgFIAEoCUgAiAEBEhoKDWF2YWlsYWJsZV93ZWkYBiABKAlIAYgBARIZCgxibG9ja19udW1iZXIYByABKARIAogBARItCghvYnNlcnZlZBgIIAEoCzIbLmRhcmtib3QuYnNjLnYxLlNvdXJjZWRUaW1lEg4KBnNvdXJjZRgJIAEoCRIsCgdxdWFsaXR5GAogASgOMhsuZGFya2JvdC5ic2MudjEuRGF0YVF1YWxpdHlCDwoNX3Jlc2VydmVkX3dlaUIQCg5fYXZhaWxhYmxlX3dlaUIPCg1fYmxvY2tfbnVtYmVyItQECg1XYWxsZXRBY2NvdW50EigKBHJvbGUYASABKA4yGi5kYXJrYm90LmJzYy52MS5XYWxsZXRSb2xlEg8KB2FkZHJlc3MYAiABKAkSEAoIY2hhaW5faWQYAyABKAQSNgoHYmFsYW5jZRgEIAEoCzIlLmRhcmtib3QuYnNjLnYxLldhbGxldEJhbGFuY2VTbmFwc2hvdBIeChFjYXBpdGFsX2Jhc2lzX3dlaRgFIAEoCUgAiAEBEiEKFHJlYWxpemVkX25ldF9wbmxfd2VpGAYgASgJSAGIAQESIwoWdHJhbnNmZXJyZWRfcHJvZml0X3dlaRgHIAEoCUgCiAEBEiUKGHVudHJhbnNmZXJyZWRfcHJvZml0X3dlaRgIIAEoCUgDiAEBEiAKE3Byb2ZpdF9yZWNlaXZlZF93ZWkYCSABKAlIBIgBARIeChFvdGhlcl9jYXBpdGFsX3dlaRgKIAEoCUgFiAEBEhcKCm5leHRfbm9uY2UYCyABKARIBogBARIRCglvd25lcl9rZXkYDCABKAgSDQoFc3RhdGUYDSABKAkSDgoGcmVhc29uGA4gASgJQhQKEl9jYXBpdGFsX2Jhc2lzX3dlaUIXChVfcmVhbGl6ZWRfbmV0X3BubF93ZWlCGQoXX3RyYW5zZmVycmVkX3Byb2ZpdF93ZWlCGwoZX3VudHJhbnNmZXJyZWRfcHJvZml0X3dlaUIWChRfcHJvZml0X3JlY2VpdmVkX3dlaUIUChJfb3RoZXJfY2FwaXRhbF93ZWlCDQoLX25leHRfbm9uY2Ui5QEKEldhbGxldEhpc3RvcnlRdWVyeRIpCgVyb2xlcxgBIAMoDjIaLmRhcmtib3QuYnNjLnYxLldhbGxldFJvbGUSMQoFa2luZHMYAiADKA4yIi5kYXJrYm90LmJzYy52MS5XYWxsZXRNb3ZlbWVudEtpbmQSGQoMZnJvbV91bml4X21zGAMgASgESACIAQESFwoKdG9fdW5peF9tcxgEIAEoBEgBiAEBEg4KBmN1cnNvchgFIAEoCRINCgVsaW1pdBgGIAEoDUIPCg1fZnJvbV91bml4X21zQg0KC190b191bml4X21zIp8CChFXYWxsZXRIaXN0b3J5UGFnZRIyCgxhdmFpbGFiaWxpdHkYASABKA4yHC5kYXJrYm90LmJzYy52MS5BdmFpbGFiaWxpdHkSGgoSdW5hdmFpbGFibGVfcmVhc29uGAIgASgJEjMKCnByb3ZlbmFuY2UYAyABKAsyHy5kYXJrYm90LmJzYy52MS5Pd25lclByb3ZlbmFuY2USMQoJbW92ZW1lbnRzGAQgAygLMh4uZGFya2JvdC5ic2MudjEuV2FsbGV0TW92ZW1lbnQSEwoLbmV4dF9jdXJzb3IYBSABKAkSEAoIaGFzX21vcmUYBiABKAgSFQoNZGVwb3NpdGVkX3dlaRgHIAEoCRIUCgxwYWlkX291dF93ZWkYCCABKAkiiQEKEVdhbGxldERlc3RpbmF0aW9uEhYKDmRlc3RpbmF0aW9uX2lkGAEgASgJEg0KBWxhYmVsGAIgASgJEg8KB2FkZHJlc3MYAyABKAkSEAoIY2hhaW5faWQYBCABKAQSEQoJY29uZmlybWVkGAUgASgIEhcKD2NyZWF0ZWRfdW5peF9tcxgGIAEoBCJyChtXYWxsZXREZXN0aW5hdGlvblNldENvbW1hbmQSDQoFbGFiZWwYASABKAkSDwoHYWRkcmVzcxgCIAEoCRIQCghjaGFpbl9pZBgDIAEoBBIOCgZyZW1vdmUYBCABKAgSEQoJY29uZmlybWVkGAUgASgIIlUKGFdhbGxldEZ1bmRUcmFkaW5nQ29tbWFuZBISCgphbW91bnRfd2VpGAEgASgJEhMKC21heF9mZWVfd2VpGAIgASgJEhAKCGNoYWluX2lkGAMgASgEIoUBChNXYWxsZXRQYXlvdXRDb21tYW5kEhYKDmRlc3RpbmF0aW9uX2lkGAEgASgJEhsKE2Rlc3RpbmF0aW9uX2FkZHJlc3MYAiABKAkSEAoIY2hhaW5faWQYAyABKAQSEgoKYW1vdW50X3dlaRgEIAEoCRITCgttYXhfZmVlX3dlaRgFIAEoCSLsBAoTV2FsbGV0VHJhbnNmZXJTdGF0ZRISCgpyZXF1ZXN0X2lkGAEgASgJEhIKCmNvbW1hbmRfaWQYAiABKAkSMAoEa2luZBgDIAEoDjIiLmRhcmtib3QuYnNjLnYxLldhbGxldE1vdmVtZW50S2luZBIvCgtzb3VyY2Vfcm9sZRgEIAEoDjIaLmRhcmtib3QuYnNjLnYxLldhbGxldFJvbGUSFgoOc291cmNlX2FkZHJlc3MYBSABKAkSNAoQZGVzdGluYXRpb25fcm9sZRgGIAEoDjIaLmRhcmtib3QuYnNjLnYxLldhbGxldFJvbGUSGwoTZGVzdGluYXRpb25fYWRkcmVzcxgHIAEoCRIQCghjaGFpbl9pZBgIIAEoBBISCgphbW91bnRfd2VpGAkgASgJEhQKB2ZlZV93ZWkYCiABKAlIAIgBARISCgVub25jZRgLIAEoBEgBiAEBEg8KB3R4X2hhc2gYDCABKAkSLgoGc3RhdHVzGA0gASgOMh4uZGFya2JvdC5ic2MudjEuVHJhbnNmZXJTdGF0dXMSFgoOZmFpbHVyZV9yZWFzb24YDiABKAkSFwoPY3JlYXRlZF91bml4X21zGA8gASgEEhcKD3VwZGF0ZWRfdW5peF9tcxgQIAEoBBIbCg5wb2xpY3lfdmVyc2lvbhgRIAEoBEgCiAEBEhkKDGJsb2NrX251bWJlchgSIAEoBEgDiAEBEhIKCnRyaWdnZXJfaWQYEyABKAlCCgoIX2ZlZV93ZWlCCAoGX25vbmNlQhEKD19wb2xpY3lfdmVyc2lvbkIPCg1fYmxvY2tfbnVtYmVyIp8CChVXYWxsZXRUcmFuc2ZlclJlY2VpcHQSEgoKcmVxdWVzdF9pZBgBIAEoCRIuCgZzdGF0dXMYAiABKA4yHi5kYXJrYm90LmJzYy52MS5UcmFuc2ZlclN0YXR1cxIPCgd0eF9oYXNoGAMgASgJEhkKDGJsb2NrX251bWJlchgEIAEoBEgAiAEBEi8KCmJsb2NrX3RpbWUYBSABKAsyGy5kYXJrYm90LmJzYy52MS5Tb3VyY2VkVGltZRIVCghnYXNfdXNlZBgGIAEoBEgBiAEBEhQKB2ZlZV93ZWkYByABKAlIAogBARIOCgZyZWFzb24YCCABKAlCDwoNX2Jsb2NrX251bWJlckILCglfZ2FzX3VzZWRCCgoIX2ZlZV93ZWkiVwoMUG9saWN5QW1vdW50EhMKCWZpeGVkX3dlaRgBIAEoCUgAEhMKCWZpeGVkX2V1chgCIAEoCUgAEhMKCXNoYXJlX2JwcxgDIAEoDUgAQggKBmFtb3VudCKBBAoUUHJvZml0VHJhbnNmZXJQb2xpY3kSDwoHZW5hYmxlZBgBIAEoCBIpCiF0aHJlc2hvbGRfcmVhbGl6ZWRfbmV0X3Byb2ZpdF93ZWkYAiABKAkSLAoGYW1vdW50GAMgASgLMhwuZGFya2JvdC5ic2MudjEuUG9saWN5QW1vdW50Eh0KFWJ1eWVyX21pbl9jYXBpdGFsX3dlaRgEIAEoCRIZChFidXllcl9yZXNlcnZlX3dlaRgFIAEoCRIWCg5wb2xpY3lfdmVyc2lvbhgGIAEoBBIZChFzZXR0bGVtZW50X2N1cnNvchgHIAEoCRISCgpyZXF1ZXN0X2lkGAggASgJEjoKDWxhc3RfdHJhbnNmZXIYCSABKAsyIy5kYXJrYm90LmJzYy52MS5XYWxsZXRUcmFuc2ZlclN0YXRlEiUKGHVudHJhbnNmZXJyZWRfcHJvZml0X3dlaRgKIAEoCUgAiAEBEh0KEHRvX3RocmVzaG9sZF93ZWkYCyABKAlIAYgBARIeChFlZmZlY3RpdmVfdmVyc2lvbhgMIAEoBEgCiAEBEhQKDGJsb2NrX3JlYXNvbhgNIAEoCUIbChlfdW50cmFuc2ZlcnJlZF9wcm9maXRfd2VpQhMKEV90b190aHJlc2hvbGRfd2VpQhQKEl9lZmZlY3RpdmVfdmVyc2lvbiLEAQoeUHJvZml0VHJhbnNmZXJQb2xpY3lTZXRDb21tYW5kEg8KB2VuYWJsZWQYASABKAgSKQohdGhyZXNob2xkX3JlYWxpemVkX25ldF9wcm9maXRfd2VpGAIgASgJEiwKBmFtb3VudBgDIAEoCzIcLmRhcmtib3QuYnNjLnYxLlBvbGljeUFtb3VudBIdChVidXllcl9taW5fY2FwaXRhbF93ZWkYBCABKAkSGQoRYnV5ZXJfcmVzZXJ2ZV93ZWkYBSABKAkimgQKEE1haW5QYXlvdXRQb2xpY3kSDwoHZW5hYmxlZBgBIAEoCBIWCg5kZXN0aW5hdGlvbl9pZBgCIAEoCRIbChNkZXN0aW5hdGlvbl9hZGRyZXNzGAMgASgJEigKBHVuaXQYBCABKA4yGi5kYXJrYm90LmJzYy52MS5Qb2xpY3lVbml0EiQKHHRocmVzaG9sZF9hdmFpbGFibGVfbWFpbl93ZWkYBSABKAkSGgoNdGhyZXNob2xkX2V1chgGIAEoCUgAiAEBEiwKBmFtb3VudBgHIAEoCzIcLmRhcmtib3QuYnNjLnYxLlBvbGljeUFtb3VudBISCgpyZXRhaW5fd2VpGAggASgJEhYKDnBvbGljeV92ZXJzaW9uGAkgASgEEhYKDnRyaWdnZXJfY3Vyc29yGAogASgJEhIKCnJlcXVlc3RfaWQYCyABKAkSOAoLbGFzdF9wYXlvdXQYDCABKAsyIy5kYXJrYm90LmJzYy52MS5XYWxsZXRUcmFuc2ZlclN0YXRlEh8KEmF2YWlsYWJsZV9tYWluX3dlaRgNIAEoCUgBiAEBEh4KEWVmZmVjdGl2ZV92ZXJzaW9uGA4gASgESAKIAQESFAoMYmxvY2tfcmVhc29uGA8gASgJQhAKDl90aHJlc2hvbGRfZXVyQhUKE19hdmFpbGFibGVfbWFpbl93ZWlCFAoSX2VmZmVjdGl2ZV92ZXJzaW9uIqICChpNYWluUGF5b3V0UG9saWN5U2V0Q29tbWFuZBIPCgdlbmFibGVkGAEgASgIEhYKDmRlc3RpbmF0aW9uX2lkGAIgASgJEigKBHVuaXQYAyABKA4yGi5kYXJrYm90LmJzYy52MS5Qb2xpY3lVbml0EiQKHHRocmVzaG9sZF9hdmFpbGFibGVfbWFpbl93ZWkYBCABKAkSGgoNdGhyZXNob2xkX2V1chgFIAEoCUgAiAEBEiwKBmFtb3VudBgGIAEoCzIcLmRhcmtib3QuYnNjLnYxLlBvbGljeUFtb3VudBISCgpyZXRhaW5fd2VpGAcgASgJEhsKE2Rlc3RpbmF0aW9uX2FkZHJlc3MYCCABKAlCEAoOX3RocmVzaG9sZF9ldXIitAEKCUZpYXRRdW90ZRIQCghjdXJyZW5jeRgBIAEoCRIUCgxmaWF0X3Blcl9ibmIYAiABKAkSLQoIb2JzZXJ2ZWQYAyABKAsyGy5kYXJrYm90LmJzYy52MS5Tb3VyY2VkVGltZRIOCgZzb3VyY2UYBCABKAkSLAoHcXVhbGl0eRgFIAEoDjIbLmRhcmtib3QuYnNjLnYxLkRhdGFRdWFsaXR5EhIKCm1heF9hZ2VfbXMYBiABKAQiwAQKE1dhbGxldFRyZWFzdXJ5U3RhdGUSMgoMYXZhaWxhYmlsaXR5GAEgASgOMhwuZGFya2JvdC5ic2MudjEuQXZhaWxhYmlsaXR5EhoKEnVuYXZhaWxhYmxlX3JlYXNvbhgCIAEoCRIzCgpwcm92ZW5hbmNlGAMgASgLMh8uZGFya2JvdC5ic2MudjEuT3duZXJQcm92ZW5hbmNlEi8KCGFjY291bnRzGAQgAygLMh0uZGFya2JvdC5ic2MudjEuV2FsbGV0QWNjb3VudBI3CgxkZXN0aW5hdGlvbnMYBSADKAsyIS5kYXJrYm90LmJzYy52MS5XYWxsZXREZXN0aW5hdGlvbhI7Cg1wcm9maXRfcG9saWN5GAYgASgLMiQuZGFya2JvdC5ic2MudjEuUHJvZml0VHJhbnNmZXJQb2xpY3kSNwoNcGF5b3V0X3BvbGljeRgHIAEoCzIgLmRhcmtib3QuYnNjLnYxLk1haW5QYXlvdXRQb2xpY3kSNgoJdHJhbnNmZXJzGAggAygLMiMuZGFya2JvdC5ic2MudjEuV2FsbGV0VHJhbnNmZXJTdGF0ZRIYChB0cmVhc3VyeV92ZXJzaW9uGAkgASgEEiwKCWV1cl9xdW90ZRgKIAEoCzIZLmRhcmtib3QuYnNjLnYxLkZpYXRRdW90ZRImChl0cmFuc2Zlcl9mZWVfZXN0aW1hdGVfd2VpGAsgASgJSACIAQFCHAoaX3RyYW5zZmVyX2ZlZV9lc3RpbWF0ZV93ZWkiQAoTV2FsbGV0VHJlYXN1cnlRdWVyeRIpCgVyb2xlcxgBIAMoDjIaLmRhcmtib3QuYnNjLnYxLldhbGxldFJvbGUqigEKCldhbGxldFJvbGUSGwoXV0FMTEVUX1JPTEVfVU5TUEVDSUZJRUQQABIYChRXQUxMRVRfUk9MRV9MQVVOQ0hFUhABEhUKEVdBTExFVF9ST0xFX0JVWUVSEAISGAoUV0FMTEVUX1JPTEVfRVhURVJOQUwQAxIUChBXQUxMRVRfUk9MRV9NQUlOEAQqjAMKEldhbGxldE1vdmVtZW50S2luZBIkCiBXQUxMRVRfTU9WRU1FTlRfS0lORF9VTlNQRUNJRklFRBAAEiAKHFdBTExFVF9NT1ZFTUVOVF9LSU5EX0RFUE9TSVQQARIoCiRXQUxMRVRfTU9WRU1FTlRfS0lORF9DQVBJVEFMX0ZVTkRJTkcQAhIoCiRXQUxMRVRfTU9WRU1FTlRfS0lORF9QUk9GSVRfVFJBTlNGRVIQAxImCiJXQUxMRVRfTU9WRU1FTlRfS0lORF9QQVlPVVRfTUFOVUFMEAQSJAogV0FMTEVUX01PVkVNRU5UX0tJTkRfUEFZT1VUX0FVVE8QBRIiCh5XQUxMRVRfTU9WRU1FTlRfS0lORF9UUkFERV9CVVkQBhIjCh9XQUxMRVRfTU9WRU1FTlRfS0lORF9UUkFERV9TRUxMEAcSHAoYV0FMTEVUX01PVkVNRU5UX0tJTkRfRkVFEAgSJQohV0FMTEVUX01PVkVNRU5UX0tJTkRfRVhURVJOQUxfT1VUEAkq/QEKDUNoYWluVHhTdGF0dXMSHwobQ0hBSU5fVFhfU1RBVFVTX1VOU1BFQ0lGSUVEEAASGwoXQ0hBSU5fVFhfU1RBVFVTX1BFTkRJTkcQARIcChhDSEFJTl9UWF9TVEFUVVNfSU5DTFVERUQQAhIZChVDSEFJTl9UWF9TVEFUVVNfRklOQUwQAxIcChhDSEFJTl9UWF9TVEFUVVNfUkVWRVJURUQQBBIcChhDSEFJTl9UWF9TVEFUVVNfUkVQTEFDRUQQBRIcChhDSEFJTl9UWF9TVEFUVVNfT1JQSEFORUQQBhIbChdDSEFJTl9UWF9TVEFUVVNfVU5LTk9XThAHKtsBCg5UcmFuc2ZlclN0YXR1cxIfChtUUkFOU0ZFUl9TVEFUVVNfVU5TUEVDSUZJRUQQABIZChVUUkFOU0ZFUl9TVEFUVVNfRFJBRlQQARIbChdUUkFOU0ZFUl9TVEFUVVNfUEVORElORxACEhgKFFRSQU5TRkVSX1NUQVRVU19TRU5UEAMSHQoZVFJBTlNGRVJfU1RBVFVTX0NPTkZJUk1FRBAEEhoKFlRSQU5TRkVSX1NUQVRVU19GQUlMRUQQBRIbChdUUkFOU0ZFUl9TVEFUVVNfVU5LTk9XThAGKlMKClBvbGljeVVuaXQSGwoXUE9MSUNZX1VOSVRfVU5TUEVDSUZJRUQQABITCg9QT0xJQ1lfVU5JVF9CTkIQARITCg9QT0xJQ1lfVU5JVF9FVVIQAkJ7ChJjb20uZGFya2JvdC5ic2MudjFCC1dhbGxldFByb3RvUAGiAgNEQliqAg5EYXJrYm90LkJzYy5WMcoCDkRhcmtib3RcQnNjXFYx4gIaRGFya2JvdFxCc2NcVjFcR1BCTWV0YWRhdGHqAhBEYXJrYm90OjpCc2M6OlYxYgZwcm90bzM", [file_darkbot_bsc_v1_common]);
 
 /**
- * One wallet movement, proven by its block and receipt.
+ * One wallet movement, proven by its block and receipt; an internal transfer is one movement in
+ * each of the two ledgers.
  *
  * @generated from message darkbot.bsc.v1.WalletMovement
  */
@@ -42,7 +43,7 @@ export type WalletMovement = Message<"darkbot.bsc.v1.WalletMovement"> & {
   walletAddress: string;
 
   /**
-   * Chain identity.
+   * Chain identity (56 BSC Mainnet; 97 Chapel never mixed with it).
    *
    * @generated from field: uint64 chain_id = 4;
    */
@@ -119,7 +120,7 @@ export type WalletMovement = Message<"darkbot.bsc.v1.WalletMovement"> & {
   status: ChainTxStatus;
 
   /**
-   * The native fact it comes from: LIVE_LEDGER, TRANSFER_OWNER or CHAIN_BACKFILL.
+   * The native fact it comes from: LIVE_LEDGER, TREASURY_OWNER or CHAIN_BACKFILL.
    *
    * @generated from field: string origin = 15;
    */
@@ -133,7 +134,7 @@ export type WalletMovement = Message<"darkbot.bsc.v1.WalletMovement"> & {
   lot: string;
 
   /**
-   * The transfer or sweep request of a withdrawal; empty otherwise.
+   * The transfer request of a funding, profit transfer or payout; empty otherwise.
    *
    * @generated from field: string transfer_request_id = 17;
    */
@@ -145,6 +146,13 @@ export type WalletMovement = Message<"darkbot.bsc.v1.WalletMovement"> & {
    * @generated from field: darkbot.bsc.v1.DataQuality quality = 18;
    */
   quality: DataQuality;
+
+  /**
+   * The policy version that caused an automatic transfer; absent otherwise.
+   *
+   * @generated from field: optional uint64 policy_version = 19;
+   */
+  policyVersion?: bigint;
 };
 
 /**
@@ -182,14 +190,15 @@ export type WalletBalanceSnapshot = Message<"darkbot.bsc.v1.WalletBalanceSnapsho
   chainId: bigint;
 
   /**
-   * The balance, decimal wei.
+   * The confirmed balance, decimal wei.
    *
    * @generated from field: string balance_wei = 4;
    */
   balanceWei: string;
 
   /**
-   * Of it reserved (open trades' budget, a pending transfer), decimal wei; absent when unknown.
+   * Of it reserved (open positions, exit and gas budgets, pending transfers), decimal wei; absent
+   * when unknown.
    *
    * @generated from field: optional string reserved_wei = 5;
    */
@@ -217,7 +226,7 @@ export type WalletBalanceSnapshot = Message<"darkbot.bsc.v1.WalletBalanceSnapsho
   observed?: SourcedTime;
 
   /**
-   * The reader (LIVE_PROBE, READINESS_SNAPSHOT, TRANSFER_OWNER).
+   * The reader (LIVE_PROBE, READINESS_SNAPSHOT, TREASURY_OWNER).
    *
    * @generated from field: string source = 9;
    */
@@ -239,13 +248,125 @@ export const WalletBalanceSnapshotSchema: GenMessage<WalletBalanceSnapshot> = /*
   messageDesc(file_darkbot_bsc_v1_wallet, 1);
 
 /**
+ * One DarkBot account with its economics, as the native owner separates them.
+ *
+ * @generated from message darkbot.bsc.v1.WalletAccount
+ */
+export type WalletAccount = Message<"darkbot.bsc.v1.WalletAccount"> & {
+  /**
+   * The account.
+   *
+   * @generated from field: darkbot.bsc.v1.WalletRole role = 1;
+   */
+  role: WalletRole;
+
+  /**
+   * Its address, 0x hex; empty while the owner has none configured.
+   *
+   * @generated from field: string address = 2;
+   */
+  address: string;
+
+  /**
+   * Chain identity.
+   *
+   * @generated from field: uint64 chain_id = 3;
+   */
+  chainId: bigint;
+
+  /**
+   * Its confirmed balance.
+   *
+   * @generated from field: darkbot.bsc.v1.WalletBalanceSnapshot balance = 4;
+   */
+  balance?: WalletBalanceSnapshot;
+
+  /**
+   * BUYER: the trading capital basis (deposits and fundings minus capital taken out), decimal wei.
+   *
+   * @generated from field: optional string capital_basis_wei = 5;
+   */
+  capitalBasisWei?: string;
+
+  /**
+   * BUYER: realized net trading PnL after losses, gas and fees, signed decimal wei.
+   *
+   * @generated from field: optional string realized_net_pnl_wei = 6;
+   */
+  realizedNetPnlWei?: string;
+
+  /**
+   * BUYER: realized net profit already transferred to Main, decimal wei.
+   *
+   * @generated from field: optional string transferred_profit_wei = 7;
+   */
+  transferredProfitWei?: string;
+
+  /**
+   * BUYER: realized net profit not yet transferred (never below zero), decimal wei.
+   *
+   * @generated from field: optional string untransferred_profit_wei = 8;
+   */
+  untransferredProfitWei?: string;
+
+  /**
+   * MAIN: profit received from the Buyer (policy A), decimal wei.
+   *
+   * @generated from field: optional string profit_received_wei = 9;
+   */
+  profitReceivedWei?: string;
+
+  /**
+   * MAIN: everything else on Main (deposits, returns): capital, never trading profit, decimal wei.
+   *
+   * @generated from field: optional string other_capital_wei = 10;
+   */
+  otherCapitalWei?: string;
+
+  /**
+   * The account's next nonce; absent when unknown.
+   *
+   * @generated from field: optional uint64 next_nonce = 11;
+   */
+  nextNonce?: bigint;
+
+  /**
+   * Whether the native owner holds this account's key (never for EXTERNAL).
+   *
+   * @generated from field: bool owner_key = 12;
+   */
+  ownerKey: boolean;
+
+  /**
+   * NOT_CONFIGURED, READY, LOCKED (a wallet or economic switch off) or UNKNOWN, with the owner's reason.
+   *
+   * @generated from field: string state = 13;
+   */
+  state: string;
+
+  /**
+   * Why it is not READY.
+   *
+   * @generated from field: string reason = 14;
+   */
+  reason: string;
+};
+
+/**
+ * Describes the message darkbot.bsc.v1.WalletAccount.
+ * Use `create(WalletAccountSchema)` to create a new message.
+ */
+export const WalletAccountSchema: GenMessage<WalletAccount> = /*@__PURE__*/
+  messageDesc(file_darkbot_bsc_v1_wallet, 2);
+
+/**
  * A bounded, cursor-paged, read-only query of wallet movements.
  *
  * @generated from message darkbot.bsc.v1.WalletHistoryQuery
  */
 export type WalletHistoryQuery = Message<"darkbot.bsc.v1.WalletHistoryQuery"> & {
   /**
-   * Only these wallets; empty: every BSC wallet.
+   * Only these wallets; empty: every DarkBot wallet.
    *
    * @generated from field: repeated darkbot.bsc.v1.WalletRole roles = 1;
    */
@@ -292,7 +413,7 @@ export type WalletHistoryQuery = Message<"darkbot.bsc.v1.WalletHistoryQuery"> & 
  * Use `create(WalletHistoryQuerySchema)` to create a new message.
  */
 export const WalletHistoryQuerySchema: GenMessage<WalletHistoryQuery> = /*@__PURE__*/
-  messageDesc(file_darkbot_bsc_v1_wallet, 2);
+  messageDesc(file_darkbot_bsc_v1_wallet, 3);
 
 /**
  * One page of wallet movements, newest first, bound to one owner snapshot.
@@ -343,18 +464,18 @@ export type WalletHistoryPage = Message<"darkbot.bsc.v1.WalletHistoryPage"> & {
   hasMore: boolean;
 
   /**
-   * Deposits of the whole filtered result, decimal wei.
+   * External deposits of the whole filtered result, decimal wei.
    *
    * @generated from field: string deposited_wei = 7;
    */
   depositedWei: string;
 
   /**
-   * Withdrawals of the whole filtered result, decimal wei (a positive amount).
+   * Payouts to external addresses of the whole filtered result, decimal wei (a positive amount).
    *
-   * @generated from field: string withdrawn_wei = 8;
+   * @generated from field: string paid_out_wei = 8;
    */
-  withdrawnWei: string;
+  paidOutWei: string;
 };
 
 /**
@@ -362,10 +483,10 @@ export type WalletHistoryPage = Message<"darkbot.bsc.v1.WalletHistoryPage"> & {
  * Use `create(WalletHistoryPageSchema)` to create a new message.
  */
 export const WalletHistoryPageSchema: GenMessage<WalletHistoryPage> = /*@__PURE__*/
-  messageDesc(file_darkbot_bsc_v1_wallet, 3);
+  messageDesc(file_darkbot_bsc_v1_wallet, 4);
 
 /**
- * A saved, confirmed destination address (e.g. a MetaMask wallet's BSC address).
+ * A saved, confirmed external destination (e.g. a MetaMask wallet's BSC address).
  *
  * @generated from message darkbot.bsc.v1.WalletDestination
  */
@@ -418,7 +539,7 @@ export type WalletDestination = Message<"darkbot.bsc.v1.WalletDestination"> & {
  * Use `create(WalletDestinationSchema)` to create a new message.
  */
 export const WalletDestinationSchema: GenMessage<WalletDestination> = /*@__PURE__*/
-  messageDesc(file_darkbot_bsc_v1_wallet, 4);
+  messageDesc(file_darkbot_bsc_v1_wallet, 5);
 
 /**
  * Params of `bsc.wallet.destination.set` (prepared).
@@ -453,6 +574,14 @@ export type WalletDestinationSetCommand = Message<"darkbot.bsc.v1.WalletDestinat
    * @generated from field: bool remove = 4;
    */
   remove: boolean;
+
+  /**
+   * The operator confirmed this exact address and chain (required to save; only a confirmed
+   * destination receives).
+   *
+   * @generated from field: bool confirmed = 5;
+   */
+  confirmed: boolean;
 };
 
 /**
@@ -460,72 +589,101 @@ export type WalletDestinationSetCommand = Message<"darkbot.bsc.v1.WalletDestinat
  * Use `create(WalletDestinationSetCommandSchema)` to create a new message.
  */
 export const WalletDestinationSetCommandSchema: GenMessage<WalletDestinationSetCommand> = /*@__PURE__*/
-  messageDesc(file_darkbot_bsc_v1_wallet, 5);
+  messageDesc(file_darkbot_bsc_v1_wallet, 6);
 
 /**
- * Params of `bsc.wallet.transfer` (prepared): one manual BNB transfer from a BSC wallet.
+ * Params of `bsc.wallet.fund_trading` (prepared, path 1): Main → the fixed Buyer address; capital.
  *
- * @generated from message darkbot.bsc.v1.WalletTransferRequest
+ * @generated from message darkbot.bsc.v1.WalletFundTradingCommand
  */
-export type WalletTransferRequest = Message<"darkbot.bsc.v1.WalletTransferRequest"> & {
-  /**
-   * The wallet that sends.
-   *
-   * @generated from field: darkbot.bsc.v1.WalletRole source_role = 1;
-   */
-  sourceRole: WalletRole;
-
-  /**
-   * The saved destination it goes to.
-   *
-   * @generated from field: string destination_id = 2;
-   */
-  destinationId: string;
-
-  /**
-   * The destination address the operator confirmed, 0x hex (must equal the saved one).
-   *
-   * @generated from field: string destination_address = 3;
-   */
-  destinationAddress: string;
-
-  /**
-   * Chain identity.
-   *
-   * @generated from field: uint64 chain_id = 4;
-   */
-  chainId: bigint;
-
+export type WalletFundTradingCommand = Message<"darkbot.bsc.v1.WalletFundTradingCommand"> & {
   /**
    * The amount, decimal wei.
    *
-   * @generated from field: string amount_wei = 5;
+   * @generated from field: string amount_wei = 1;
    */
   amountWei: string;
 
   /**
    * The most gas it may cost, decimal wei; the owner refuses above it.
    *
-   * @generated from field: string max_fee_wei = 6;
+   * @generated from field: string max_fee_wei = 2;
+   */
+  maxFeeWei: string;
+
+  /**
+   * Chain identity (the owner refuses another).
+   *
+   * @generated from field: uint64 chain_id = 3;
+   */
+  chainId: bigint;
+};
+
+/**
+ * Describes the message darkbot.bsc.v1.WalletFundTradingCommand.
+ * Use `create(WalletFundTradingCommandSchema)` to create a new message.
+ */
+export const WalletFundTradingCommandSchema: GenMessage<WalletFundTradingCommand> = /*@__PURE__*/
+  messageDesc(file_darkbot_bsc_v1_wallet, 7);
+
+/**
+ * Params of `bsc.wallet.payout` (prepared, path 3): Main → a saved, confirmed external destination.
+ *
+ * @generated from message darkbot.bsc.v1.WalletPayoutCommand
+ */
+export type WalletPayoutCommand = Message<"darkbot.bsc.v1.WalletPayoutCommand"> & {
+  /**
+   * The saved destination.
+   *
+   * @generated from field: string destination_id = 1;
+   */
+  destinationId: string;
+
+  /**
+   * Its address as the operator confirmed it, 0x hex (must equal the saved one).
+   *
+   * @generated from field: string destination_address = 2;
+   */
+  destinationAddress: string;
+
+  /**
+   * Chain identity.
+   *
+   * @generated from field: uint64 chain_id = 3;
+   */
+  chainId: bigint;
+
+  /**
+   * The amount, decimal wei.
+   *
+   * @generated from field: string amount_wei = 4;
+   */
+  amountWei: string;
+
+  /**
+   * The most gas it may cost, decimal wei; the owner refuses above it.
+   *
+   * @generated from field: string max_fee_wei = 5;
    */
   maxFeeWei: string;
 };
 
 /**
- * Describes the message darkbot.bsc.v1.WalletTransferRequest.
- * Use `create(WalletTransferRequestSchema)` to create a new message.
+ * Describes the message darkbot.bsc.v1.WalletPayoutCommand.
+ * Use `create(WalletPayoutCommandSchema)` to create a new message.
  */
-export const WalletTransferRequestSchema: GenMessage<WalletTransferRequest> = /*@__PURE__*/
-  messageDesc(file_darkbot_bsc_v1_wallet, 6);
+export const WalletPayoutCommandSchema: GenMessage<WalletPayoutCommand> = /*@__PURE__*/
+  messageDesc(file_darkbot_bsc_v1_wallet, 8);
 
 /**
- * A transfer or sweep as its native owner holds it.
+ * A transfer as its native owner holds it (any of the four paths).
  *
  * @generated from message darkbot.bsc.v1.WalletTransferState
  */
 export type WalletTransferState = Message<"darkbot.bsc.v1.WalletTransferState"> & {
   /**
-   * The operator's or the sweep's request.
+   * The request that created it: the operator's CommandRequest.request_id, or for an automatic
+   * transfer the owner's own request for its trigger (never a policy's request_id).
    *
    * @generated from field: string request_id = 1;
    */
@@ -539,95 +697,125 @@ export type WalletTransferState = Message<"darkbot.bsc.v1.WalletTransferState"> 
   commandId: string;
 
   /**
+   * The path.
+   *
+   * @generated from field: darkbot.bsc.v1.WalletMovementKind kind = 3;
+   */
+  kind: WalletMovementKind;
+
+  /**
    * The wallet that sends.
    *
-   * @generated from field: darkbot.bsc.v1.WalletRole source_role = 3;
+   * @generated from field: darkbot.bsc.v1.WalletRole source_role = 4;
    */
   sourceRole: WalletRole;
 
   /**
    * Its address, 0x hex.
    *
-   * @generated from field: string source_address = 4;
+   * @generated from field: string source_address = 5;
    */
   sourceAddress: string;
 
   /**
+   * The receiving wallet's role (BUYER, MAIN or EXTERNAL).
+   *
+   * @generated from field: darkbot.bsc.v1.WalletRole destination_role = 6;
+   */
+  destinationRole: WalletRole;
+
+  /**
    * The destination address, 0x hex.
    *
-   * @generated from field: string destination_address = 5;
+   * @generated from field: string destination_address = 7;
    */
   destinationAddress: string;
 
   /**
    * Chain identity.
    *
-   * @generated from field: uint64 chain_id = 6;
+   * @generated from field: uint64 chain_id = 8;
    */
   chainId: bigint;
 
   /**
    * The amount, decimal wei.
    *
-   * @generated from field: string amount_wei = 7;
+   * @generated from field: string amount_wei = 9;
    */
   amountWei: string;
 
   /**
    * The fee: estimated while pending, the receipt's once included, decimal wei.
    *
-   * @generated from field: optional string fee_wei = 8;
+   * @generated from field: optional string fee_wei = 10;
    */
   feeWei?: string;
 
   /**
    * The nonce it uses; absent before the owner assigned one.
    *
-   * @generated from field: optional uint64 nonce = 9;
+   * @generated from field: optional uint64 nonce = 11;
    */
   nonce?: bigint;
 
   /**
    * Its transaction hash, 0x hex; empty before signing.
    *
-   * @generated from field: string tx_hash = 10;
+   * @generated from field: string tx_hash = 12;
    */
   txHash: string;
 
   /**
    * Its lifecycle.
    *
-   * @generated from field: darkbot.bsc.v1.TransferStatus status = 11;
+   * @generated from field: darkbot.bsc.v1.TransferStatus status = 13;
    */
   status: TransferStatus;
 
   /**
    * Why it failed or is unknown; empty otherwise.
    *
-   * @generated from field: string failure_reason = 12;
+   * @generated from field: string failure_reason = 14;
    */
   failureReason: string;
 
   /**
    * Creation time, unix ms.
    *
-   * @generated from field: uint64 created_unix_ms = 13;
+   * @generated from field: uint64 created_unix_ms = 15;
    */
   createdUnixMs: bigint;
 
   /**
    * Last change, unix ms.
    *
-   * @generated from field: uint64 updated_unix_ms = 14;
+   * @generated from field: uint64 updated_unix_ms = 16;
    */
   updatedUnixMs: bigint;
 
   /**
-   * The sweep policy version that caused it; absent for a manual transfer.
+   * The policy version that caused it; absent for a manual transfer.
    *
-   * @generated from field: optional uint64 policy_version = 15;
+   * @generated from field: optional uint64 policy_version = 17;
    */
   policyVersion?: bigint;
+
+  /**
+   * The including block; absent while not included.
+   *
+   * @generated from field: optional uint64 block_number = 18;
+   */
+  blockNumber?: bigint;
+
+  /**
+   * An automatic transfer's economic trigger (policy A: the settlement id of the closed, chain-
+   * confirmed lots it settles; policy B: the qualified balance event): at most one intent per
+   * trigger. Empty for a manual transfer.
+   *
+   * @generated from field: string trigger_id = 19;
+   */
+  triggerId: string;
 };
 
 /**
@@ -635,10 +823,10 @@ export type WalletTransferState = Message<"darkbot.bsc.v1.WalletTransferState"> 
  * Use `create(WalletTransferStateSchema)` to create a new message.
  */
 export const WalletTransferStateSchema: GenMessage<WalletTransferState> = /*@__PURE__*/
-  messageDesc(file_darkbot_bsc_v1_wallet, 7);
+  messageDesc(file_darkbot_bsc_v1_wallet, 9);
 
 /**
- * The chain receipt of a transfer or sweep.
+ * The chain receipt of a transfer.
  *
  * @generated from message darkbot.bsc.v1.WalletTransferReceipt
  */
@@ -705,136 +893,456 @@ export type WalletTransferReceipt = Message<"darkbot.bsc.v1.WalletTransferReceip
  * Use `create(WalletTransferReceiptSchema)` to create a new message.
  */
 export const WalletTransferReceiptSchema: GenMessage<WalletTransferReceipt> = /*@__PURE__*/
-  messageDesc(file_darkbot_bsc_v1_wallet, 8);
+  messageDesc(file_darkbot_bsc_v1_wallet, 10);
 
 /**
- * The automatic transfer above a threshold, as its native owner holds it.
+ * How much an automatic transfer moves: a fixed amount or a share of what is eligible.
  *
- * @generated from message darkbot.bsc.v1.WalletSweepPolicy
+ * @generated from message darkbot.bsc.v1.PolicyAmount
  */
-export type WalletSweepPolicy = Message<"darkbot.bsc.v1.WalletSweepPolicy"> & {
+export type PolicyAmount = Message<"darkbot.bsc.v1.PolicyAmount"> & {
   /**
-   * Whether it is enabled.
+   * Fixed or share.
+   *
+   * @generated from oneof darkbot.bsc.v1.PolicyAmount.amount
+   */
+  amount: {
+    /**
+     * A fixed amount, decimal wei (POLICY_UNIT_BNB).
+     *
+     * @generated from field: string fixed_wei = 1;
+     */
+    value: string;
+    case: "fixedWei";
+  } | {
+    /**
+     * A fixed EUR equivalent, decimal (POLICY_UNIT_EUR).
+     *
+     * @generated from field: string fixed_eur = 2;
+     */
+    value: string;
+    case: "fixedEur";
+  } | {
+    /**
+     * A share of the eligible amount, basis points (1…10000).
+     *
+     * @generated from field: uint32 share_bps = 3;
+     */
+    value: number;
+    case: "shareBps";
+  } | { case: undefined; value?: undefined };
+};
+
+/**
+ * Describes the message darkbot.bsc.v1.PolicyAmount.
+ * Use `create(PolicyAmountSchema)` to create a new message.
+ */
+export const PolicyAmountSchema: GenMessage<PolicyAmount> = /*@__PURE__*/
+  messageDesc(file_darkbot_bsc_v1_wallet, 11);
+
+/**
+ * Policy A (path 2): Buyer → Main automatic profit transfer, on REALIZED NET trading profit.
+ *
+ * @generated from message darkbot.bsc.v1.ProfitTransferPolicy
+ */
+export type ProfitTransferPolicy = Message<"darkbot.bsc.v1.ProfitTransferPolicy"> & {
+  /**
+   * Whether it is enabled (default off).
    *
    * @generated from field: bool enabled = 1;
    */
   enabled: boolean;
 
   /**
-   * The wallet it sweeps.
+   * The realized net profit (after losses, gas and fees, since the last transfer) above which it
+   * transfers, decimal wei.
    *
-   * @generated from field: darkbot.bsc.v1.WalletRole source_role = 2;
+   * @generated from field: string threshold_realized_net_profit_wei = 2;
    */
-  sourceRole: WalletRole;
+  thresholdRealizedNetProfitWei: string;
 
   /**
-   * The saved destination it sweeps to.
+   * How much of the untransferred profit it moves.
    *
-   * @generated from field: string destination_id = 3;
+   * @generated from field: darkbot.bsc.v1.PolicyAmount amount = 3;
+   */
+  amount?: PolicyAmount;
+
+  /**
+   * The trading capital that always stays on the Buyer, decimal wei.
+   *
+   * @generated from field: string buyer_min_capital_wei = 4;
+   */
+  buyerMinCapitalWei: string;
+
+  /**
+   * The exit and gas reserve that always stays on the Buyer, decimal wei.
+   *
+   * @generated from field: string buyer_reserve_wei = 5;
+   */
+  buyerReserveWei: string;
+
+  /**
+   * Its version: the compare-and-swap of its next change.
+   *
+   * @generated from field: uint64 policy_version = 6;
+   */
+  policyVersion: bigint;
+
+  /**
+   * The ledger position up to which profit is settled (no profit transferred twice).
+   *
+   * @generated from field: string settlement_cursor = 7;
+   */
+  settlementCursor: string;
+
+  /**
+   * The request that wrote this version.
+   *
+   * @generated from field: string request_id = 8;
+   */
+  requestId: string;
+
+  /**
+   * The last transfer it caused; absent before any.
+   *
+   * @generated from field: darkbot.bsc.v1.WalletTransferState last_transfer = 9;
+   */
+  lastTransfer?: WalletTransferState;
+
+  /**
+   * Realized net profit not yet transferred, as the owner computes it now, decimal wei.
+   *
+   * @generated from field: optional string untransferred_profit_wei = 10;
+   */
+  untransferredProfitWei?: string;
+
+  /**
+   * What is still missing to the threshold, decimal wei (0: the next settled profit triggers).
+   *
+   * @generated from field: optional string to_threshold_wei = 11;
+   */
+  toThresholdWei?: string;
+
+  /**
+   * The version in effect at the owner (a stored version applies once the owner took it).
+   *
+   * @generated from field: optional uint64 effective_version = 12;
+   */
+  effectiveVersion?: bigint;
+
+  /**
+   * The owner's reason it does not act (DISABLED, NO_AUTHORIZATION, ECONOMIC_LIVE_DISABLED, …).
+   *
+   * @generated from field: string block_reason = 13;
+   */
+  blockReason: string;
+};
+
+/**
+ * Describes the message darkbot.bsc.v1.ProfitTransferPolicy.
+ * Use `create(ProfitTransferPolicySchema)` to create a new message.
+ */
+export const ProfitTransferPolicySchema: GenMessage<ProfitTransferPolicy> = /*@__PURE__*/
+  messageDesc(file_darkbot_bsc_v1_wallet, 12);
+
+/**
+ * Params of `bsc.wallet.profit_policy.set` (prepared).
+ *
+ * @generated from message darkbot.bsc.v1.ProfitTransferPolicySetCommand
+ */
+export type ProfitTransferPolicySetCommand = Message<"darkbot.bsc.v1.ProfitTransferPolicySetCommand"> & {
+  /**
+   * Enable or disable.
+   *
+   * @generated from field: bool enabled = 1;
+   */
+  enabled: boolean;
+
+  /**
+   * The realized net profit threshold, decimal wei.
+   *
+   * @generated from field: string threshold_realized_net_profit_wei = 2;
+   */
+  thresholdRealizedNetProfitWei: string;
+
+  /**
+   * Fixed amount (wei) or share.
+   *
+   * @generated from field: darkbot.bsc.v1.PolicyAmount amount = 3;
+   */
+  amount?: PolicyAmount;
+
+  /**
+   * The capital that stays on the Buyer, decimal wei.
+   *
+   * @generated from field: string buyer_min_capital_wei = 4;
+   */
+  buyerMinCapitalWei: string;
+
+  /**
+   * The exit and gas reserve that stays on the Buyer, decimal wei.
+   *
+   * @generated from field: string buyer_reserve_wei = 5;
+   */
+  buyerReserveWei: string;
+};
+
+/**
+ * Describes the message darkbot.bsc.v1.ProfitTransferPolicySetCommand.
+ * Use `create(ProfitTransferPolicySetCommandSchema)` to create a new message.
+ */
+export const ProfitTransferPolicySetCommandSchema: GenMessage<ProfitTransferPolicySetCommand> = /*@__PURE__*/
+  messageDesc(file_darkbot_bsc_v1_wallet, 13);
+
+/**
+ * Policy B (path 4): Main → external automatic payout, on the FREE Main balance.
+ *
+ * @generated from message darkbot.bsc.v1.MainPayoutPolicy
+ */
+export type MainPayoutPolicy = Message<"darkbot.bsc.v1.MainPayoutPolicy"> & {
+  /**
+   * Whether it is enabled (default off).
+   *
+   * @generated from field: bool enabled = 1;
+   */
+  enabled: boolean;
+
+  /**
+   * The saved, confirmed destination.
+   *
+   * @generated from field: string destination_id = 2;
    */
   destinationId: string;
 
   /**
    * That destination's address, 0x hex.
    *
-   * @generated from field: string destination_address = 4;
+   * @generated from field: string destination_address = 3;
    */
   destinationAddress: string;
 
   /**
-   * The balance above which it sweeps, decimal wei.
+   * The unit it is configured in.
    *
-   * @generated from field: string threshold_wei = 5;
+   * @generated from field: darkbot.bsc.v1.PolicyUnit unit = 4;
    */
-  thresholdWei: string;
+  unit: PolicyUnit;
 
   /**
-   * What always stays in the wallet, decimal wei (below threshold_wei).
+   * The free Main balance above which it pays out, decimal wei (EUR mode: the owner's current
+   * conversion of threshold_eur).
    *
-   * @generated from field: string retain_wei = 6;
+   * @generated from field: string threshold_available_main_wei = 5;
+   */
+  thresholdAvailableMainWei: string;
+
+  /**
+   * EUR mode: the operator's threshold, decimal EUR; absent in BNB mode.
+   *
+   * @generated from field: optional string threshold_eur = 6;
+   */
+  thresholdEur?: string;
+
+  /**
+   * How much it pays out.
+   *
+   * @generated from field: darkbot.bsc.v1.PolicyAmount amount = 7;
+   */
+  amount?: PolicyAmount;
+
+  /**
+   * What always stays on Main (gas and minimum reserve), decimal wei.
+   *
+   * @generated from field: string retain_wei = 8;
    */
   retainWei: string;
 
   /**
-   * The policy version: the compare-and-swap of the next change.
+   * Its version: the compare-and-swap of its next change.
    *
-   * @generated from field: uint64 policy_version = 7;
+   * @generated from field: uint64 policy_version = 9;
    */
   policyVersion: bigint;
 
   /**
-   * The last sweep it caused; absent before any.
+   * The last qualified balance event it acted on (one payout per event).
    *
-   * @generated from field: darkbot.bsc.v1.WalletTransferState last_execution = 8;
+   * @generated from field: string trigger_cursor = 10;
    */
-  lastExecution?: WalletTransferState;
+  triggerCursor: string;
 
   /**
    * The request that wrote this version.
    *
-   * @generated from field: string request_id = 9;
+   * @generated from field: string request_id = 11;
    */
   requestId: string;
+
+  /**
+   * The last payout it caused; absent before any.
+   *
+   * @generated from field: darkbot.bsc.v1.WalletTransferState last_payout = 12;
+   */
+  lastPayout?: WalletTransferState;
+
+  /**
+   * The free Main balance now, decimal wei.
+   *
+   * @generated from field: optional string available_main_wei = 13;
+   */
+  availableMainWei?: string;
+
+  /**
+   * The version in effect at the owner.
+   *
+   * @generated from field: optional uint64 effective_version = 14;
+   */
+  effectiveVersion?: bigint;
+
+  /**
+   * The owner's reason it does not act.
+   *
+   * @generated from field: string block_reason = 15;
+   */
+  blockReason: string;
 };
 
 /**
- * Describes the message darkbot.bsc.v1.WalletSweepPolicy.
- * Use `create(WalletSweepPolicySchema)` to create a new message.
+ * Describes the message darkbot.bsc.v1.MainPayoutPolicy.
+ * Use `create(MainPayoutPolicySchema)` to create a new message.
  */
-export const WalletSweepPolicySchema: GenMessage<WalletSweepPolicy> = /*@__PURE__*/
-  messageDesc(file_darkbot_bsc_v1_wallet, 9);
+export const MainPayoutPolicySchema: GenMessage<MainPayoutPolicy> = /*@__PURE__*/
+  messageDesc(file_darkbot_bsc_v1_wallet, 14);
 
 /**
- * Params of `bsc.wallet.sweep.set` (prepared).
+ * Params of `bsc.wallet.payout_policy.set` (prepared).
  *
- * @generated from message darkbot.bsc.v1.WalletSweepPolicySetCommand
+ * @generated from message darkbot.bsc.v1.MainPayoutPolicySetCommand
  */
-export type WalletSweepPolicySetCommand = Message<"darkbot.bsc.v1.WalletSweepPolicySetCommand"> & {
+export type MainPayoutPolicySetCommand = Message<"darkbot.bsc.v1.MainPayoutPolicySetCommand"> & {
   /**
-   * Whether it is enabled.
+   * Enable or disable.
    *
    * @generated from field: bool enabled = 1;
    */
   enabled: boolean;
 
   /**
-   * The wallet it sweeps.
-   *
-   * @generated from field: darkbot.bsc.v1.WalletRole source_role = 2;
-   */
-  sourceRole: WalletRole;
-
-  /**
    * The saved, confirmed destination.
    *
-   * @generated from field: string destination_id = 3;
+   * @generated from field: string destination_id = 2;
    */
   destinationId: string;
 
   /**
-   * The balance above which it sweeps, decimal wei.
+   * The unit (EUR only with a qualified native quote).
    *
-   * @generated from field: string threshold_wei = 4;
+   * @generated from field: darkbot.bsc.v1.PolicyUnit unit = 3;
    */
-  thresholdWei: string;
+  unit: PolicyUnit;
 
   /**
-   * What always stays in the wallet, decimal wei.
+   * BNB mode: the free Main balance threshold, decimal wei.
    *
-   * @generated from field: string retain_wei = 5;
+   * @generated from field: string threshold_available_main_wei = 4;
+   */
+  thresholdAvailableMainWei: string;
+
+  /**
+   * EUR mode: the threshold, decimal EUR.
+   *
+   * @generated from field: optional string threshold_eur = 5;
+   */
+  thresholdEur?: string;
+
+  /**
+   * Fixed amount or share.
+   *
+   * @generated from field: darkbot.bsc.v1.PolicyAmount amount = 6;
+   */
+  amount?: PolicyAmount;
+
+  /**
+   * What always stays on Main, decimal wei.
+   *
+   * @generated from field: string retain_wei = 7;
    */
   retainWei: string;
+
+  /**
+   * The destination's address as the operator confirmed it, 0x hex (must equal the saved one).
+   *
+   * @generated from field: string destination_address = 8;
+   */
+  destinationAddress: string;
 };
 
 /**
- * Describes the message darkbot.bsc.v1.WalletSweepPolicySetCommand.
- * Use `create(WalletSweepPolicySetCommandSchema)` to create a new message.
+ * Describes the message darkbot.bsc.v1.MainPayoutPolicySetCommand.
+ * Use `create(MainPayoutPolicySetCommandSchema)` to create a new message.
  */
-export const WalletSweepPolicySetCommandSchema: GenMessage<WalletSweepPolicySetCommand> = /*@__PURE__*/
-  messageDesc(file_darkbot_bsc_v1_wallet, 10);
+export const MainPayoutPolicySetCommandSchema: GenMessage<MainPayoutPolicySetCommand> = /*@__PURE__*/
+  messageDesc(file_darkbot_bsc_v1_wallet, 15);
 
 /**
- * The BSC treasury state of the native wallet owner.
+ * A native fiat quote of BNB, the only basis of an EUR setting.
+ *
+ * @generated from message darkbot.bsc.v1.FiatQuote
+ */
+export type FiatQuote = Message<"darkbot.bsc.v1.FiatQuote"> & {
+  /**
+   * ISO currency, e.g. EUR.
+   *
+   * @generated from field: string currency = 1;
+   */
+  currency: string;
+
+  /**
+   * Fiat per BNB, decimal.
+   *
+   * @generated from field: string fiat_per_bnb = 2;
+   */
+  fiatPerBnb: string;
+
+  /**
+   * When it was observed.
+   *
+   * @generated from field: darkbot.bsc.v1.SourcedTime observed = 3;
+   */
+  observed?: SourcedTime;
+
+  /**
+   * Its source.
+   *
+   * @generated from field: string source = 4;
+   */
+  source: string;
+
+  /**
+   * How far it is proven (STALE beyond max_age_ms).
+   *
+   * @generated from field: darkbot.bsc.v1.DataQuality quality = 5;
+   */
+  quality: DataQuality;
+
+  /**
+   * The owner's freshness bound, ms.
+   *
+   * @generated from field: uint64 max_age_ms = 6;
+   */
+  maxAgeMs: bigint;
+};
+
+/**
+ * Describes the message darkbot.bsc.v1.FiatQuote.
+ * Use `create(FiatQuoteSchema)` to create a new message.
+ */
+export const FiatQuoteSchema: GenMessage<FiatQuote> = /*@__PURE__*/
+  messageDesc(file_darkbot_bsc_v1_wallet, 16);
+
+/**
+ * The BSC wallet state of the native treasury owner (accounts, destinations, both policies).
  *
  * @generated from message darkbot.bsc.v1.WalletTreasuryState
  */
@@ -854,46 +1362,68 @@ export type WalletTreasuryState = Message<"darkbot.bsc.v1.WalletTreasuryState"> 
   unavailableReason: string;
 
   /**
-   * The owner and its policy version.
+   * The owner.
    *
    * @generated from field: darkbot.bsc.v1.OwnerProvenance provenance = 3;
    */
   provenance?: OwnerProvenance;
 
   /**
-   * The current balances of the BSC wallets.
+   * MAIN, BUYER and the separate LAUNCHER.
    *
-   * @generated from field: repeated darkbot.bsc.v1.WalletBalanceSnapshot balances = 4;
+   * @generated from field: repeated darkbot.bsc.v1.WalletAccount accounts = 4;
    */
-  balances: WalletBalanceSnapshot[];
+  accounts: WalletAccount[];
 
   /**
-   * The saved destinations.
+   * The saved external destinations.
    *
    * @generated from field: repeated darkbot.bsc.v1.WalletDestination destinations = 5;
    */
   destinations: WalletDestination[];
 
   /**
-   * The automatic transfer; absent without one.
+   * Policy A (Buyer → Main profit transfer); absent before it was ever set.
    *
-   * @generated from field: darkbot.bsc.v1.WalletSweepPolicy sweep = 6;
+   * @generated from field: darkbot.bsc.v1.ProfitTransferPolicy profit_policy = 6;
    */
-  sweep?: WalletSweepPolicy;
+  profitPolicy?: ProfitTransferPolicy;
 
   /**
-   * Pending and recent transfers, newest first (bounded; the history query has all).
+   * Policy B (Main → external payout); absent before it was ever set.
    *
-   * @generated from field: repeated darkbot.bsc.v1.WalletTransferState transfers = 7;
+   * @generated from field: darkbot.bsc.v1.MainPayoutPolicy payout_policy = 7;
+   */
+  payoutPolicy?: MainPayoutPolicy;
+
+  /**
+   * Pending and recent transfers of every path, newest first (bounded; the history has all).
+   *
+   * @generated from field: repeated darkbot.bsc.v1.WalletTransferState transfers = 8;
    */
   transfers: WalletTransferState[];
 
   /**
-   * The wallet policy version: the compare-and-swap of a destination, transfer or sweep change.
+   * The treasury version: the compare-and-swap of a destination change, a funding or a payout.
    *
-   * @generated from field: uint64 wallet_policy_version = 8;
+   * @generated from field: uint64 treasury_version = 9;
    */
-  walletPolicyVersion: bigint;
+  treasuryVersion: bigint;
+
+  /**
+   * The native BNB/EUR quote; absent without a qualified price owner (then no EUR setting).
+   *
+   * @generated from field: darkbot.bsc.v1.FiatQuote eur_quote = 10;
+   */
+  eurQuote?: FiatQuote;
+
+  /**
+   * The owner's current fee estimate of one plain BNB transfer (gas limit × gas price), decimal
+   * wei; absent when unknown (then no manual transfer is offered).
+   *
+   * @generated from field: optional string transfer_fee_estimate_wei = 11;
+   */
+  transferFeeEstimateWei?: string;
 };
 
 /**
@@ -901,7 +1431,7 @@ export type WalletTreasuryState = Message<"darkbot.bsc.v1.WalletTreasuryState"> 
  * Use `create(WalletTreasuryStateSchema)` to create a new message.
  */
 export const WalletTreasuryStateSchema: GenMessage<WalletTreasuryState> = /*@__PURE__*/
-  messageDesc(file_darkbot_bsc_v1_wallet, 11);
+  messageDesc(file_darkbot_bsc_v1_wallet, 17);
 
 /**
  * A read of the treasury state.
@@ -910,7 +1440,7 @@ export const WalletTreasuryStateSchema: GenMessage<WalletTreasuryState> = /*@__P
  */
 export type WalletTreasuryQuery = Message<"darkbot.bsc.v1.WalletTreasuryQuery"> & {
   /**
-   * Only these wallets; empty: every BSC wallet.
+   * Only these wallets; empty: every DarkBot wallet.
    *
    * @generated from field: repeated darkbot.bsc.v1.WalletRole roles = 1;
    */
@@ -922,10 +1452,10 @@ export type WalletTreasuryQuery = Message<"darkbot.bsc.v1.WalletTreasuryQuery"> 
  * Use `create(WalletTreasuryQuerySchema)` to create a new message.
  */
 export const WalletTreasuryQuerySchema: GenMessage<WalletTreasuryQuery> = /*@__PURE__*/
-  messageDesc(file_darkbot_bsc_v1_wallet, 12);
+  messageDesc(file_darkbot_bsc_v1_wallet, 18);
 
 /**
- * A BSC wallet's role.
+ * A wallet's role.
  *
  * @generated from enum darkbot.bsc.v1.WalletRole
  */
@@ -938,25 +1468,32 @@ export enum WalletRole {
   UNSPECIFIED = 0,
 
   /**
-   * The launcher wallet (funding, test launches).
+   * The G0.7 launcher wallet (controlled test launches only).
    *
    * @generated from enum value: WALLET_ROLE_LAUNCHER = 1;
    */
   LAUNCHER = 1,
 
   /**
-   * The buyer wallet (LIVE trading).
+   * The trading account (the LIVE buyer wallet).
    *
    * @generated from enum value: WALLET_ROLE_BUYER = 2;
    */
   BUYER = 2,
 
   /**
-   * An address outside DarkBot (a deposit's sender, a transfer's destination).
+   * An address outside DarkBot (a deposit's sender, a payout's receiver); no key in DarkBot.
    *
    * @generated from enum value: WALLET_ROLE_EXTERNAL = 3;
    */
   EXTERNAL = 3,
+
+  /**
+   * The main account / treasury (its key only at the native BSC owner).
+   *
+   * @generated from enum value: WALLET_ROLE_MAIN = 4;
+   */
+  MAIN = 4,
 }
 
 /**
@@ -966,7 +1503,8 @@ export const WalletRoleSchema: GenEnum<WalletRole> = /*@__PURE__*/
   enumDesc(file_darkbot_bsc_v1_wallet, 0);
 
 /**
- * What a wallet movement is, economically separated (no double count of internal transfers).
+ * What a wallet movement is, economically separated (capital never counted as profit, an internal
+ * transfer never counted twice).
  *
  * @generated from enum darkbot.bsc.v1.WalletMovementKind
  */
@@ -979,46 +1517,67 @@ export enum WalletMovementKind {
   UNSPECIFIED = 0,
 
   /**
-   * BNB received from outside DarkBot.
+   * BNB received from outside DarkBot (capital, never trading profit).
    *
    * @generated from enum value: WALLET_MOVEMENT_KIND_DEPOSIT = 1;
    */
   DEPOSIT = 1,
 
   /**
-   * BNB sent outside DarkBot (a transfer or sweep).
+   * Main → Buyer manual capital funding (path 1).
    *
-   * @generated from enum value: WALLET_MOVEMENT_KIND_WITHDRAWAL = 2;
+   * @generated from enum value: WALLET_MOVEMENT_KIND_CAPITAL_FUNDING = 2;
    */
-  WITHDRAWAL = 2,
+  CAPITAL_FUNDING = 2,
 
   /**
-   * BNB between the launcher and the buyer (counted once, in neither PnL).
+   * Buyer → Main automatic profit transfer (path 2, policy A).
    *
-   * @generated from enum value: WALLET_MOVEMENT_KIND_INTERNAL_TRANSFER = 3;
+   * @generated from enum value: WALLET_MOVEMENT_KIND_PROFIT_TRANSFER = 3;
    */
-  INTERNAL_TRANSFER = 3,
+  PROFIT_TRANSFER = 3,
+
+  /**
+   * Main → external manual payout (path 3).
+   *
+   * @generated from enum value: WALLET_MOVEMENT_KIND_PAYOUT_MANUAL = 4;
+   */
+  PAYOUT_MANUAL = 4,
+
+  /**
+   * Main → external automatic payout (path 4, policy B).
+   *
+   * @generated from enum value: WALLET_MOVEMENT_KIND_PAYOUT_AUTO = 5;
+   */
+  PAYOUT_AUTO = 5,
 
   /**
    * A trade BUY's input.
    *
-   * @generated from enum value: WALLET_MOVEMENT_KIND_TRADE_BUY = 4;
+   * @generated from enum value: WALLET_MOVEMENT_KIND_TRADE_BUY = 6;
    */
-  TRADE_BUY = 4,
+  TRADE_BUY = 6,
 
   /**
    * A trade SELL's proceeds.
    *
-   * @generated from enum value: WALLET_MOVEMENT_KIND_TRADE_SELL = 5;
+   * @generated from enum value: WALLET_MOVEMENT_KIND_TRADE_SELL = 7;
    */
-  TRADE_SELL = 5,
+  TRADE_SELL = 7,
 
   /**
    * Gas or a proven fee without its own movement.
    *
-   * @generated from enum value: WALLET_MOVEMENT_KIND_FEE = 6;
+   * @generated from enum value: WALLET_MOVEMENT_KIND_FEE = 8;
    */
-  FEE = 6,
+  FEE = 8,
+
+  /**
+   * BNB that left the wallet by a transaction no DarkBot owner made.
+   *
+   * @generated from enum value: WALLET_MOVEMENT_KIND_EXTERNAL_OUT = 9;
+   */
+  EXTERNAL_OUT = 9,
 }
 
 /**
@@ -1097,7 +1656,7 @@ export const ChainTxStatusSchema: GenEnum<ChainTxStatus> = /*@__PURE__*/
   enumDesc(file_darkbot_bsc_v1_wallet, 2);
 
 /**
- * The lifecycle of a transfer or sweep, from native evidence only.
+ * The lifecycle of a transfer, from native evidence only.
  *
  * @generated from enum darkbot.bsc.v1.TransferStatus
  */
@@ -1157,3 +1716,38 @@ export enum TransferStatus {
  */
 export const TransferStatusSchema: GenEnum<TransferStatus> = /*@__PURE__*/
   enumDesc(file_darkbot_bsc_v1_wallet, 3);
+
+/**
+ * The unit an automatic policy is configured in.
+ *
+ * @generated from enum darkbot.bsc.v1.PolicyUnit
+ */
+export enum PolicyUnit {
+  /**
+   * Not set: BNB.
+   *
+   * @generated from enum value: POLICY_UNIT_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * BNB (wei on chain).
+   *
+   * @generated from enum value: POLICY_UNIT_BNB = 1;
+   */
+  BNB = 1,
+
+  /**
+   * EUR equivalent: accepted only with a qualified, fresh native BNB/EUR quote; the transaction is
+   * still BNB/wei, converted by the native owner at the trigger.
+   *
+   * @generated from enum value: POLICY_UNIT_EUR = 2;
+   */
+  EUR = 2,
+}
+
+/**
+ * Describes the enum darkbot.bsc.v1.PolicyUnit.
+ */
+export const PolicyUnitSchema: GenEnum<PolicyUnit> = /*@__PURE__*/
+  enumDesc(file_darkbot_bsc_v1_wallet, 4);

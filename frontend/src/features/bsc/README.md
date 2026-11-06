@@ -14,6 +14,12 @@ under the owner's LIVE gate for the operator's granted scope, and the browser si
   golden bytes `protocol/golden/bsc/v8`). Their bounded query (`core/realtime/bscQuery.ts`,
   `POST /api/v1/bsc/query`) answers NOT_IMPLEMENTED/UNAVAILABLE until the native owner exists; the UI then
   shows the function disabled with its reason, never data of its own.
+- **Wallets** (`pages/Wallet*.tsx`, `model/wallets.ts`): Accounts → Balances → Manual transfers → Automatic
+  profit transfer (policy A) → Automatic payout (policy B) → Transaction history → Balance & profit. Main,
+  Trading (Buyer), External (receive-only, no MetaMask connection) and the separate G0.7 launcher are never
+  summed. Funding, payout, destinations and both policies go to the native treasury owner as typed commands
+  at its version (`walletCommand`), offered only while it answers the treasury query; an open (PENDING/SENT/
+  UNKNOWN) transfer locks its path. Drafts live in the view only.
 - **Placement:** every native field keeps its section from `frontend/contracts/bsc-fields.json`
   (`model/placement.generated.ts`, `check:bsc-fields`); the pre-V8 groups (Overview, Launch / BUY,
   Monitoring, Analytics) render in the Settings drawer, the LIVE groups in the Live drawers.
@@ -24,7 +30,7 @@ under the owner's LIVE gate for the operator's granted scope, and the browser si
   Wei amounts are exact (`pages/V8.tsx` `bnb()`, `model/strategyForm.ts`), never floating point.
 
 Tests:
-- `src/features/bsc/**/*.test.ts` (incl. `model/v8.test.ts`, `api/bsc-v8-golden.test.ts`) and
+- `src/features/bsc/**/*.test.ts` (incl. `model/v8.test.ts`, `model/wallets.test.ts`, `api/bsc-v8-golden.test.ts`) and
   `src/core/realtime/bscControl.test.ts`
 - `tests/bsc.spec.ts` (`npm run test:bsc`) and `tests/visual/bsc-v8.spec.ts` (`npm run visual`)
 - the real gateway→browser run `ops/tests/bsc_control_test.py`

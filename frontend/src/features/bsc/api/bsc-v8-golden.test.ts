@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readdirSync, readFileSync } from "node:fs";
 import { classify } from "@/core/realtime/bscQuery";
-import { Availability, DataQuality, ExitReason, TimeSource, TradePlacement, TradeStatus, TransferStatus, TrainingRunStopKind, V8_CONTRACTS, decodeV8, encodeV8, type V8ContractName } from "./bscV8Adapter";
+import { Availability, DataQuality, ExitReason, TimeSource, TradePlacement, TradeStatus, TransferStatus, TrainingRunStopKind, PolicyUnit, WalletRole, V8_CONTRACTS, decodeV8, encodeV8, type V8ContractName } from "./bscV8Adapter";
 
 // BSC-V8-09 / FE-V8-17: the prepared V8 contracts, Rust↔TS. gateway/tests/bsc_v8_goldens.rs
 // encodes the bytes with prost; here protobuf-es decodes them, the values survive exactly (u64
@@ -66,11 +66,40 @@ describe("prepared BSC V8 contracts (Rust golden bytes)", () => {
 
   it("keeps an unknown transfer unknown and an absent fee absent", () => {
     const t = decodeV8("treasury_state", golden("treasury_state"));
-    expect(t.sweep?.lastExecution?.status).toBe(TransferStatus.UNKNOWN);
-    expect(t.sweep?.lastExecution?.feeWei).toBeUndefined();
-    expect(t.balances[0]?.reservedWei).toBeUndefined();
-    expect(t.balances[0]?.availableWei).toBe("0");
+    expect(t.profitPolicy?.lastTransfer?.status).toBe(TransferStatus.UNKNOWN);
+    expect(t.profitPolicy?.lastTransfer?.feeWei).toBeUndefined();
+    expect(t.profitPolicy?.lastTransfer?.triggerId).toBe("settle-7");
+    expect(t.payoutPolicy?.lastPayout?.status).toBe(TransferStatus.CONFIRMED);
+    expect(t.payoutPolicy?.lastPayout?.feeWei).toBe("0");
+    expect(t.accounts[0]?.balance?.reservedWei).toBeUndefined();
+    expect(t.accounts[0]?.balance?.availableWei).toBe("0");
     expect(t.provenance?.quality).toBe(DataQuality.STALE);
+  });
+
+  it("separates the accounts and the two independent policies", () => {
+    const t = decodeV8("treasury_state", golden("treasury_state"));
+    expect(t.accounts.map(a => a.role)).toEqual([WalletRole.MAIN, WalletRole.BUYER, WalletRole.LAUNCHER]);
+    const buyer = t.accounts[1];
+    expect(buyer?.realizedNetPnlWei).toBe(`-${U256_MAX}`);
+    expect(buyer?.untransferredProfitWei).toBe("0");
+    expect(buyer?.profitReceivedWei).toBeUndefined();
+    expect(t.accounts[0]?.otherCapitalWei).toBe("0");
+    expect(t.accounts[2]?.balance).toBeUndefined();
+    expect(t.profitPolicy?.amount?.amount).toEqual({ case: "shareBps", value: 10000 });
+    expect(t.profitPolicy?.toThresholdWei).toBeUndefined();
+    expect(t.payoutPolicy?.amount?.amount).toEqual({ case: "fixedWei", value: "0" });
+    expect(t.payoutPolicy?.unit).toBe(PolicyUnit.BNB);
+    expect(t.payoutPolicy?.thresholdEur).toBeUndefined();
+    expect(t.eurQuote).toMatchObject({ currency: "EUR", fiatPerBnb: "612.40", quality: DataQuality.STALE, maxAgeMs: 60000n });
+    expect(t.eurQuote?.observed?.blockNumber).toBeUndefined();
+    expect(t.transferFeeEstimateWei).toBe("21000000000000");
+    expect(t.treasuryVersion).toBe(U64_MAX);
+    const eur = decodeV8("payout_policy_set_command", golden("payout_policy_set_command"));
+    expect(eur.unit).toBe(PolicyUnit.EUR);
+    expect(eur.thresholdEur).toBe("1000.00");
+    expect(eur.amount?.amount).toEqual({ case: "fixedEur", value: "0.01" });
+    const fund = decodeV8("fund_trading_command", golden("fund_trading_command"));
+    expect(fund.amountWei).toBe(U256_MAX);
   });
 
   it("keeps the run plans and an unresolved net result absent", () => {

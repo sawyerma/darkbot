@@ -100,3 +100,7 @@
 /* The reference's Mode column: the native owner's three modes per source, in the row. */
 .bsc-v8 .v8-mode-cell .bsc-filter { margin: 4px 0 0; justify-content: flex-end; gap: 4px; flex-wrap: nowrap; }
 .bsc-v8 .v8-mode-cell .g-secondary { min-height: 26px; padding: 4px 7px; font-size: 10.5px; }
+/* V8 Wallets (operator order 06.11.): three accounts in the reference's wallet row, one per line on a phone. */
+.bsc-v8 .wallet-tabs.v8-three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+@media (max-width: 760px) { .bsc-v8 .wallet-tabs.v8-three { grid-template-columns: 1fr; } }
+.bsc-v8 .field > .label { font-size: 12px; color: var(--v8-field-label-fg); }

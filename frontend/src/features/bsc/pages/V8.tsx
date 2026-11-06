@@ -117,7 +117,7 @@ export function bnb(wei: string | undefined, places = 3): string {
   const [, sign, digits] = m;
   const padded = (digits ?? "0").padStart(19, "0");
   const whole = padded.slice(0, -18).replace(/^0+(?=\d)/, "");
-  const frac = padded.slice(-18, -18 + places);
+  const frac = padded.slice(-18).slice(0, places);
   return `${sign}${whole}${places ? `.${frac}` : ""}`;
 }
 /** Signed wei as "+x.xxx BNB" / "−x.xxx BNB" (the reference's amount()). */

@@ -97,21 +97,28 @@
     - [TrainingRunStopKind](#darkbot-bsc-v1-TrainingRunStopKind)
 
 - [darkbot/bsc/v1/wallet.proto](#darkbot_bsc_v1_wallet-proto)
+    - [FiatQuote](#darkbot-bsc-v1-FiatQuote)
+    - [MainPayoutPolicy](#darkbot-bsc-v1-MainPayoutPolicy)
+    - [MainPayoutPolicySetCommand](#darkbot-bsc-v1-MainPayoutPolicySetCommand)
+    - [PolicyAmount](#darkbot-bsc-v1-PolicyAmount)
+    - [ProfitTransferPolicy](#darkbot-bsc-v1-ProfitTransferPolicy)
+    - [ProfitTransferPolicySetCommand](#darkbot-bsc-v1-ProfitTransferPolicySetCommand)
+    - [WalletAccount](#darkbot-bsc-v1-WalletAccount)
     - [WalletBalanceSnapshot](#darkbot-bsc-v1-WalletBalanceSnapshot)
     - [WalletDestination](#darkbot-bsc-v1-WalletDestination)
     - [WalletDestinationSetCommand](#darkbot-bsc-v1-WalletDestinationSetCommand)
+    - [WalletFundTradingCommand](#darkbot-bsc-v1-WalletFundTradingCommand)
     - [WalletHistoryPage](#darkbot-bsc-v1-WalletHistoryPage)
     - [WalletHistoryQuery](#darkbot-bsc-v1-WalletHistoryQuery)
     - [WalletMovement](#darkbot-bsc-v1-WalletMovement)
-    - [WalletSweepPolicy](#darkbot-bsc-v1-WalletSweepPolicy)
-    - [WalletSweepPolicySetCommand](#darkbot-bsc-v1-WalletSweepPolicySetCommand)
+    - [WalletPayoutCommand](#darkbot-bsc-v1-WalletPayoutCommand)
     - [WalletTransferReceipt](#darkbot-bsc-v1-WalletTransferReceipt)
-    - [WalletTransferRequest](#darkbot-bsc-v1-WalletTransferRequest)
     - [WalletTransferState](#darkbot-bsc-v1-WalletTransferState)
     - [WalletTreasuryQuery](#darkbot-bsc-v1-WalletTreasuryQuery)
     - [WalletTreasuryState](#darkbot-bsc-v1-WalletTreasuryState)
 
     - [ChainTxStatus](#darkbot-bsc-v1-ChainTxStatus)
+    - [PolicyUnit](#darkbot-bsc-v1-PolicyUnit)
     - [TransferStatus](#darkbot-bsc-v1-TransferStatus)
     - [WalletMovementKind](#darkbot-bsc-v1-WalletMovementKind)
     - [WalletRole](#darkbot-bsc-v1-WalletRole)
@@ -1294,7 +1301,7 @@ What a performance series is about.
 | ---- | ------ | ----------- |
 | PERFORMANCE_SCOPE_UNSPECIFIED | 0 | Not set by any producer; never displayed as a value. |
 | PERFORMANCE_SCOPE_LIVE | 1 | The LIVE ledger&#39;s trades. |
-| PERFORMANCE_SCOPE_WALLET | 2 | One BSC wallet (scope_id = its role). |
+| PERFORMANCE_SCOPE_WALLET | 2 | One BSC wallet (scope_id = its WalletRole name, e.g. WALLET_ROLE_MAIN). |
 | PERFORMANCE_SCOPE_ALL_WALLETS | 3 | Every BSC wallet together. |
 | PERFORMANCE_SCOPE_TRAINING_RUN | 4 | One training run (scope_id = its run_id). |
 | PERFORMANCE_SCOPE_TRAINING_PROFILE | 5 | One training profile across its runs (scope_id = its profile_id). |
@@ -2179,6 +2186,168 @@ What ends a training run.
 
 
 
+<a name="darkbot-bsc-v1-FiatQuote"></a>
+
+### FiatQuote
+A native fiat quote of BNB, the only basis of an EUR setting.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| currency | [string](#string) |  | ISO currency, e.g. EUR. |
+| fiat_per_bnb | [string](#string) |  | Fiat per BNB, decimal. |
+| observed | [SourcedTime](#darkbot-bsc-v1-SourcedTime) |  | When it was observed. |
+| source | [string](#string) |  | Its source. |
+| quality | [DataQuality](#darkbot-bsc-v1-DataQuality) |  | How far it is proven (STALE beyond max_age_ms). |
+| max_age_ms | [uint64](#uint64) |  | The owner&#39;s freshness bound, ms. |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-MainPayoutPolicy"></a>
+
+### MainPayoutPolicy
+Policy B (path 4): Main → external automatic payout, on the FREE Main balance.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| enabled | [bool](#bool) |  | Whether it is enabled (default off). |
+| destination_id | [string](#string) |  | The saved, confirmed destination. |
+| destination_address | [string](#string) |  | That destination&#39;s address, 0x hex. |
+| unit | [PolicyUnit](#darkbot-bsc-v1-PolicyUnit) |  | The unit it is configured in. |
+| threshold_available_main_wei | [string](#string) |  | The free Main balance above which it pays out, decimal wei (EUR mode: the owner&#39;s current conversion of threshold_eur). |
+| threshold_eur | [string](#string) | optional | EUR mode: the operator&#39;s threshold, decimal EUR; absent in BNB mode. |
+| amount | [PolicyAmount](#darkbot-bsc-v1-PolicyAmount) |  | How much it pays out. |
+| retain_wei | [string](#string) |  | What always stays on Main (gas and minimum reserve), decimal wei. |
+| policy_version | [uint64](#uint64) |  | Its version: the compare-and-swap of its next change. |
+| trigger_cursor | [string](#string) |  | The last qualified balance event it acted on (one payout per event). |
+| request_id | [string](#string) |  | The request that wrote this version. |
+| last_payout | [WalletTransferState](#darkbot-bsc-v1-WalletTransferState) |  | The last payout it caused; absent before any. |
+| available_main_wei | [string](#string) | optional | The free Main balance now, decimal wei. |
+| effective_version | [uint64](#uint64) | optional | The version in effect at the owner. |
+| block_reason | [string](#string) |  | The owner&#39;s reason it does not act. |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-MainPayoutPolicySetCommand"></a>
+
+### MainPayoutPolicySetCommand
+Params of `bsc.wallet.payout_policy.set` (prepared).
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| enabled | [bool](#bool) |  | Enable or disable. |
+| destination_id | [string](#string) |  | The saved, confirmed destination. |
+| unit | [PolicyUnit](#darkbot-bsc-v1-PolicyUnit) |  | The unit (EUR only with a qualified native quote). |
+| threshold_available_main_wei | [string](#string) |  | BNB mode: the free Main balance threshold, decimal wei. |
+| threshold_eur | [string](#string) | optional | EUR mode: the threshold, decimal EUR. |
+| amount | [PolicyAmount](#darkbot-bsc-v1-PolicyAmount) |  | Fixed amount or share. |
+| retain_wei | [string](#string) |  | What always stays on Main, decimal wei. |
+| destination_address | [string](#string) |  | The destination&#39;s address as the operator confirmed it, 0x hex (must equal the saved one). |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-PolicyAmount"></a>
+
+### PolicyAmount
+How much an automatic transfer moves: a fixed amount or a share of what is eligible.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| fixed_wei | [string](#string) |  | A fixed amount, decimal wei (POLICY_UNIT_BNB). |
+| fixed_eur | [string](#string) |  | A fixed EUR equivalent, decimal (POLICY_UNIT_EUR). |
+| share_bps | [uint32](#uint32) |  | A share of the eligible amount, basis points (1…10000). |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-ProfitTransferPolicy"></a>
+
+### ProfitTransferPolicy
+Policy A (path 2): Buyer → Main automatic profit transfer, on REALIZED NET trading profit.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| enabled | [bool](#bool) |  | Whether it is enabled (default off). |
+| threshold_realized_net_profit_wei | [string](#string) |  | The realized net profit (after losses, gas and fees, since the last transfer) above which it transfers, decimal wei. |
+| amount | [PolicyAmount](#darkbot-bsc-v1-PolicyAmount) |  | How much of the untransferred profit it moves. |
+| buyer_min_capital_wei | [string](#string) |  | The trading capital that always stays on the Buyer, decimal wei. |
+| buyer_reserve_wei | [string](#string) |  | The exit and gas reserve that always stays on the Buyer, decimal wei. |
+| policy_version | [uint64](#uint64) |  | Its version: the compare-and-swap of its next change. |
+| settlement_cursor | [string](#string) |  | The ledger position up to which profit is settled (no profit transferred twice). |
+| request_id | [string](#string) |  | The request that wrote this version. |
+| last_transfer | [WalletTransferState](#darkbot-bsc-v1-WalletTransferState) |  | The last transfer it caused; absent before any. |
+| untransferred_profit_wei | [string](#string) | optional | Realized net profit not yet transferred, as the owner computes it now, decimal wei. |
+| to_threshold_wei | [string](#string) | optional | What is still missing to the threshold, decimal wei (0: the next settled profit triggers). |
+| effective_version | [uint64](#uint64) | optional | The version in effect at the owner (a stored version applies once the owner took it). |
+| block_reason | [string](#string) |  | The owner&#39;s reason it does not act (DISABLED, NO_AUTHORIZATION, ECONOMIC_LIVE_DISABLED, …). |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-ProfitTransferPolicySetCommand"></a>
+
+### ProfitTransferPolicySetCommand
+Params of `bsc.wallet.profit_policy.set` (prepared).
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| enabled | [bool](#bool) |  | Enable or disable. |
+| threshold_realized_net_profit_wei | [string](#string) |  | The realized net profit threshold, decimal wei. |
+| amount | [PolicyAmount](#darkbot-bsc-v1-PolicyAmount) |  | Fixed amount (wei) or share. |
+| buyer_min_capital_wei | [string](#string) |  | The capital that stays on the Buyer, decimal wei. |
+| buyer_reserve_wei | [string](#string) |  | The exit and gas reserve that stays on the Buyer, decimal wei. |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-WalletAccount"></a>
+
+### WalletAccount
+One DarkBot account with its economics, as the native owner separates them.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| role | [WalletRole](#darkbot-bsc-v1-WalletRole) |  | The account. |
+| address | [string](#string) |  | Its address, 0x hex; empty while the owner has none configured. |
+| chain_id | [uint64](#uint64) |  | Chain identity. |
+| balance | [WalletBalanceSnapshot](#darkbot-bsc-v1-WalletBalanceSnapshot) |  | Its confirmed balance. |
+| capital_basis_wei | [string](#string) | optional | BUYER: the trading capital basis (deposits and fundings minus capital taken out), decimal wei. |
+| realized_net_pnl_wei | [string](#string) | optional | BUYER: realized net trading PnL after losses, gas and fees, signed decimal wei. |
+| transferred_profit_wei | [string](#string) | optional | BUYER: realized net profit already transferred to Main, decimal wei. |
+| untransferred_profit_wei | [string](#string) | optional | BUYER: realized net profit not yet transferred (never below zero), decimal wei. |
+| profit_received_wei | [string](#string) | optional | MAIN: profit received from the Buyer (policy A), decimal wei. |
+| other_capital_wei | [string](#string) | optional | MAIN: everything else on Main (deposits, returns): capital, never trading profit, decimal wei. |
+| next_nonce | [uint64](#uint64) | optional | The account&#39;s next nonce; absent when unknown. |
+| owner_key | [bool](#bool) |  | Whether the native owner holds this account&#39;s key (never for EXTERNAL). |
+| state | [string](#string) |  | NOT_CONFIGURED, READY, LOCKED (a wallet or economic switch off) or UNKNOWN, with the owner&#39;s reason. |
+| reason | [string](#string) |  | Why it is not READY. |
+
+
+
+
+
+
 <a name="darkbot-bsc-v1-WalletBalanceSnapshot"></a>
 
 ### WalletBalanceSnapshot
@@ -2190,12 +2359,12 @@ A wallet balance at one block, with its age and source.
 | role | [WalletRole](#darkbot-bsc-v1-WalletRole) |  | The wallet. |
 | address | [string](#string) |  | Its address, 0x hex. |
 | chain_id | [uint64](#uint64) |  | Chain identity. |
-| balance_wei | [string](#string) |  | The balance, decimal wei. |
-| reserved_wei | [string](#string) | optional | Of it reserved (open trades&#39; budget, a pending transfer), decimal wei; absent when unknown. |
+| balance_wei | [string](#string) |  | The confirmed balance, decimal wei. |
+| reserved_wei | [string](#string) | optional | Of it reserved (open positions, exit and gas budgets, pending transfers), decimal wei; absent when unknown. |
 | available_wei | [string](#string) | optional | Of it freely available, decimal wei; absent when unknown. |
 | block_number | [uint64](#uint64) | optional | The block it was read at. |
 | observed | [SourcedTime](#darkbot-bsc-v1-SourcedTime) |  | When it was read. |
-| source | [string](#string) |  | The reader (LIVE_PROBE, READINESS_SNAPSHOT, TRANSFER_OWNER). |
+| source | [string](#string) |  | The reader (LIVE_PROBE, READINESS_SNAPSHOT, TREASURY_OWNER). |
 | quality | [DataQuality](#darkbot-bsc-v1-DataQuality) |  | How far it is proven (STALE when older than the owner&#39;s freshness rule). |
 
 
@@ -2206,7 +2375,7 @@ A wallet balance at one block, with its age and source.
 <a name="darkbot-bsc-v1-WalletDestination"></a>
 
 ### WalletDestination
-A saved, confirmed destination address (e.g. a MetaMask wallet&#39;s BSC address).
+A saved, confirmed external destination (e.g. a MetaMask wallet&#39;s BSC address).
 
 
 | Field | Type | Label | Description |
@@ -2235,6 +2404,24 @@ Params of `bsc.wallet.destination.set` (prepared).
 | address | [string](#string) |  | The address, 0x hex. |
 | chain_id | [uint64](#uint64) |  | Chain identity. |
 | remove | [bool](#bool) |  | Remove the destination instead (its id in CommandRequest.resource_id). |
+| confirmed | [bool](#bool) |  | The operator confirmed this exact address and chain (required to save; only a confirmed destination receives). |
+
+
+
+
+
+
+<a name="darkbot-bsc-v1-WalletFundTradingCommand"></a>
+
+### WalletFundTradingCommand
+Params of `bsc.wallet.fund_trading` (prepared, path 1): Main → the fixed Buyer address; capital.
+
+
+| Field | Type | Label | Description |
+| ----- | ---- | ----- | ----------- |
+| amount_wei | [string](#string) |  | The amount, decimal wei. |
+| max_fee_wei | [string](#string) |  | The most gas it may cost, decimal wei; the owner refuses above it. |
+| chain_id | [uint64](#uint64) |  | Chain identity (the owner refuses another). |
 
 
 
@@ -2255,8 +2442,8 @@ One page of wallet movements, newest first, bound to one owner snapshot.
 | movements | [WalletMovement](#darkbot-bsc-v1-WalletMovement) | repeated | The movements. |
 | next_cursor | [string](#string) |  | The cursor of the next page; empty on the last one. |
 | has_more | [bool](#bool) |  | Whether another page follows. |
-| deposited_wei | [string](#string) |  | Deposits of the whole filtered result, decimal wei. |
-| withdrawn_wei | [string](#string) |  | Withdrawals of the whole filtered result, decimal wei (a positive amount). |
+| deposited_wei | [string](#string) |  | External deposits of the whole filtered result, decimal wei. |
+| paid_out_wei | [string](#string) |  | Payouts to external addresses of the whole filtered result, decimal wei (a positive amount). |
 
 
 
@@ -2271,7 +2458,7 @@ A bounded, cursor-paged, read-only query of wallet movements.
 
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
-| roles | [WalletRole](#darkbot-bsc-v1-WalletRole) | repeated | Only these wallets; empty: every BSC wallet. |
+| roles | [WalletRole](#darkbot-bsc-v1-WalletRole) | repeated | Only these wallets; empty: every DarkBot wallet. |
 | kinds | [WalletMovementKind](#darkbot-bsc-v1-WalletMovementKind) | repeated | Only these kinds; empty: every kind. |
 | from_unix_ms | [uint64](#uint64) | optional | Block time from, unix ms. |
 | to_unix_ms | [uint64](#uint64) | optional | Block time to, unix ms. |
@@ -2286,7 +2473,8 @@ A bounded, cursor-paged, read-only query of wallet movements.
 <a name="darkbot-bsc-v1-WalletMovement"></a>
 
 ### WalletMovement
-One wallet movement, proven by its block and receipt.
+One wallet movement, proven by its block and receipt; an internal transfer is one movement in
+each of the two ledgers.
 
 
 | Field | Type | Label | Description |
@@ -2294,7 +2482,7 @@ One wallet movement, proven by its block and receipt.
 | movement_id | [string](#string) |  | Stable owner identity of the movement. |
 | role | [WalletRole](#darkbot-bsc-v1-WalletRole) |  | The wallet it belongs to. |
 | wallet_address | [string](#string) |  | That wallet&#39;s address, 0x hex. |
-| chain_id | [uint64](#uint64) |  | Chain identity. |
+| chain_id | [uint64](#uint64) |  | Chain identity (56 BSC Mainnet; 97 Chapel never mixed with it). |
 | kind | [WalletMovementKind](#darkbot-bsc-v1-WalletMovementKind) |  | What it is. |
 | counterparty_address | [string](#string) |  | The other side, 0x hex; empty for a fee. |
 | counterparty_role | [WalletRole](#darkbot-bsc-v1-WalletRole) |  | The other side&#39;s role. |
@@ -2305,52 +2493,30 @@ One wallet movement, proven by its block and receipt.
 | block_number | [uint64](#uint64) | optional | The including block; absent while not included. |
 | block_time | [SourcedTime](#darkbot-bsc-v1-SourcedTime) |  | That block&#39;s header time. |
 | status | [ChainTxStatus](#darkbot-bsc-v1-ChainTxStatus) |  | What the chain made of it. |
-| origin | [string](#string) |  | The native fact it comes from: LIVE_LEDGER, TRANSFER_OWNER or CHAIN_BACKFILL. |
+| origin | [string](#string) |  | The native fact it comes from: LIVE_LEDGER, TREASURY_OWNER or CHAIN_BACKFILL. |
 | lot | [string](#string) |  | The lot of a trade movement; empty otherwise. |
-| transfer_request_id | [string](#string) |  | The transfer or sweep request of a withdrawal; empty otherwise. |
+| transfer_request_id | [string](#string) |  | The transfer request of a funding, profit transfer or payout; empty otherwise. |
 | quality | [DataQuality](#darkbot-bsc-v1-DataQuality) |  | How far it is proven. |
+| policy_version | [uint64](#uint64) | optional | The policy version that caused an automatic transfer; absent otherwise. |
 
 
 
 
 
 
-<a name="darkbot-bsc-v1-WalletSweepPolicy"></a>
+<a name="darkbot-bsc-v1-WalletPayoutCommand"></a>
 
-### WalletSweepPolicy
-The automatic transfer above a threshold, as its native owner holds it.
-
-
-| Field | Type | Label | Description |
-| ----- | ---- | ----- | ----------- |
-| enabled | [bool](#bool) |  | Whether it is enabled. |
-| source_role | [WalletRole](#darkbot-bsc-v1-WalletRole) |  | The wallet it sweeps. |
-| destination_id | [string](#string) |  | The saved destination it sweeps to. |
-| destination_address | [string](#string) |  | That destination&#39;s address, 0x hex. |
-| threshold_wei | [string](#string) |  | The balance above which it sweeps, decimal wei. |
-| retain_wei | [string](#string) |  | What always stays in the wallet, decimal wei (below threshold_wei). |
-| policy_version | [uint64](#uint64) |  | The policy version: the compare-and-swap of the next change. |
-| last_execution | [WalletTransferState](#darkbot-bsc-v1-WalletTransferState) |  | The last sweep it caused; absent before any. |
-| request_id | [string](#string) |  | The request that wrote this version. |
-
-
-
-
-
-
-<a name="darkbot-bsc-v1-WalletSweepPolicySetCommand"></a>
-
-### WalletSweepPolicySetCommand
-Params of `bsc.wallet.sweep.set` (prepared).
+### WalletPayoutCommand
+Params of `bsc.wallet.payout` (prepared, path 3): Main → a saved, confirmed external destination.
 
 
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
-| enabled | [bool](#bool) |  | Whether it is enabled. |
-| source_role | [WalletRole](#darkbot-bsc-v1-WalletRole) |  | The wallet it sweeps. |
-| destination_id | [string](#string) |  | The saved, confirmed destination. |
-| threshold_wei | [string](#string) |  | The balance above which it sweeps, decimal wei. |
-| retain_wei | [string](#string) |  | What always stays in the wallet, decimal wei. |
+| destination_id | [string](#string) |  | The saved destination. |
+| destination_address | [string](#string) |  | Its address as the operator confirmed it, 0x hex (must equal the saved one). |
+| chain_id | [uint64](#uint64) |  | Chain identity. |
+| amount_wei | [string](#string) |  | The amount, decimal wei. |
+| max_fee_wei | [string](#string) |  | The most gas it may cost, decimal wei; the owner refuses above it. |
 
 
 
@@ -2360,7 +2526,7 @@ Params of `bsc.wallet.sweep.set` (prepared).
 <a name="darkbot-bsc-v1-WalletTransferReceipt"></a>
 
 ### WalletTransferReceipt
-The chain receipt of a transfer or sweep.
+The chain receipt of a transfer.
 
 
 | Field | Type | Label | Description |
@@ -2379,38 +2545,20 @@ The chain receipt of a transfer or sweep.
 
 
 
-<a name="darkbot-bsc-v1-WalletTransferRequest"></a>
-
-### WalletTransferRequest
-Params of `bsc.wallet.transfer` (prepared): one manual BNB transfer from a BSC wallet.
-
-
-| Field | Type | Label | Description |
-| ----- | ---- | ----- | ----------- |
-| source_role | [WalletRole](#darkbot-bsc-v1-WalletRole) |  | The wallet that sends. |
-| destination_id | [string](#string) |  | The saved destination it goes to. |
-| destination_address | [string](#string) |  | The destination address the operator confirmed, 0x hex (must equal the saved one). |
-| chain_id | [uint64](#uint64) |  | Chain identity. |
-| amount_wei | [string](#string) |  | The amount, decimal wei. |
-| max_fee_wei | [string](#string) |  | The most gas it may cost, decimal wei; the owner refuses above it. |
-
-
-
-
-
-
 <a name="darkbot-bsc-v1-WalletTransferState"></a>
 
 ### WalletTransferState
-A transfer or sweep as its native owner holds it.
+A transfer as its native owner holds it (any of the four paths).
 
 
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
-| request_id | [string](#string) |  | The operator&#39;s or the sweep&#39;s request. |
+| request_id | [string](#string) |  | The request that created it: the operator&#39;s CommandRequest.request_id, or for an automatic transfer the owner&#39;s own request for its trigger (never a policy&#39;s request_id). |
 | command_id | [string](#string) |  | The owner&#39;s durable intent. |
+| kind | [WalletMovementKind](#darkbot-bsc-v1-WalletMovementKind) |  | The path. |
 | source_role | [WalletRole](#darkbot-bsc-v1-WalletRole) |  | The wallet that sends. |
 | source_address | [string](#string) |  | Its address, 0x hex. |
+| destination_role | [WalletRole](#darkbot-bsc-v1-WalletRole) |  | The receiving wallet&#39;s role (BUYER, MAIN or EXTERNAL). |
 | destination_address | [string](#string) |  | The destination address, 0x hex. |
 | chain_id | [uint64](#uint64) |  | Chain identity. |
 | amount_wei | [string](#string) |  | The amount, decimal wei. |
@@ -2421,7 +2569,9 @@ A transfer or sweep as its native owner holds it.
 | failure_reason | [string](#string) |  | Why it failed or is unknown; empty otherwise. |
 | created_unix_ms | [uint64](#uint64) |  | Creation time, unix ms. |
 | updated_unix_ms | [uint64](#uint64) |  | Last change, unix ms. |
-| policy_version | [uint64](#uint64) | optional | The sweep policy version that caused it; absent for a manual transfer. |
+| policy_version | [uint64](#uint64) | optional | The policy version that caused it; absent for a manual transfer. |
+| block_number | [uint64](#uint64) | optional | The including block; absent while not included. |
+| trigger_id | [string](#string) |  | An automatic transfer&#39;s economic trigger (policy A: the settlement id of the closed, chain- confirmed lots it settles; policy B: the qualified balance event): at most one intent per trigger. Empty for a manual transfer. |
 
 
 
@@ -2436,7 +2586,7 @@ A read of the treasury state.
 
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
-| roles | [WalletRole](#darkbot-bsc-v1-WalletRole) | repeated | Only these wallets; empty: every BSC wallet. |
+| roles | [WalletRole](#darkbot-bsc-v1-WalletRole) | repeated | Only these wallets; empty: every DarkBot wallet. |
 
 
 
@@ -2446,19 +2596,22 @@ A read of the treasury state.
 <a name="darkbot-bsc-v1-WalletTreasuryState"></a>
 
 ### WalletTreasuryState
-The BSC treasury state of the native wallet owner.
+The BSC wallet state of the native treasury owner (accounts, destinations, both policies).
 
 
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
 | availability | [Availability](#darkbot-bsc-v1-Availability) |  | Whether the native owner answered. |
 | unavailable_reason | [string](#string) |  | Why it is not AVAILABLE. |
-| provenance | [OwnerProvenance](#darkbot-bsc-v1-OwnerProvenance) |  | The owner and its policy version. |
-| balances | [WalletBalanceSnapshot](#darkbot-bsc-v1-WalletBalanceSnapshot) | repeated | The current balances of the BSC wallets. |
-| destinations | [WalletDestination](#darkbot-bsc-v1-WalletDestination) | repeated | The saved destinations. |
-| sweep | [WalletSweepPolicy](#darkbot-bsc-v1-WalletSweepPolicy) |  | The automatic transfer; absent without one. |
-| transfers | [WalletTransferState](#darkbot-bsc-v1-WalletTransferState) | repeated | Pending and recent transfers, newest first (bounded; the history query has all). |
-| wallet_policy_version | [uint64](#uint64) |  | The wallet policy version: the compare-and-swap of a destination, transfer or sweep change. |
+| provenance | [OwnerProvenance](#darkbot-bsc-v1-OwnerProvenance) |  | The owner. |
+| accounts | [WalletAccount](#darkbot-bsc-v1-WalletAccount) | repeated | MAIN, BUYER and the separate LAUNCHER. |
+| destinations | [WalletDestination](#darkbot-bsc-v1-WalletDestination) | repeated | The saved external destinations. |
+| profit_policy | [ProfitTransferPolicy](#darkbot-bsc-v1-ProfitTransferPolicy) |  | Policy A (Buyer → Main profit transfer); absent before it was ever set. |
+| payout_policy | [MainPayoutPolicy](#darkbot-bsc-v1-MainPayoutPolicy) |  | Policy B (Main → external payout); absent before it was ever set. |
+| transfers | [WalletTransferState](#darkbot-bsc-v1-WalletTransferState) | repeated | Pending and recent transfers of every path, newest first (bounded; the history has all). |
+| treasury_version | [uint64](#uint64) |  | The treasury version: the compare-and-swap of a destination change, a funding or a payout. |
+| eur_quote | [FiatQuote](#darkbot-bsc-v1-FiatQuote) |  | The native BNB/EUR quote; absent without a qualified price owner (then no EUR setting). |
+| transfer_fee_estimate_wei | [string](#string) | optional | The owner&#39;s current fee estimate of one plain BNB transfer (gas limit × gas price), decimal wei; absent when unknown (then no manual transfer is offered). |
 
 
 
@@ -2485,10 +2638,23 @@ What the chain made of a wallet transaction.
 
 
 
+<a name="darkbot-bsc-v1-PolicyUnit"></a>
+
+### PolicyUnit
+The unit an automatic policy is configured in.
+
+| Name | Number | Description |
+| ---- | ------ | ----------- |
+| POLICY_UNIT_UNSPECIFIED | 0 | Not set: BNB. |
+| POLICY_UNIT_BNB | 1 | BNB (wei on chain). |
+| POLICY_UNIT_EUR | 2 | EUR equivalent: accepted only with a qualified, fresh native BNB/EUR quote; the transaction is still BNB/wei, converted by the native owner at the trigger. |
+
+
+
 <a name="darkbot-bsc-v1-TransferStatus"></a>
 
 ### TransferStatus
-The lifecycle of a transfer or sweep, from native evidence only.
+The lifecycle of a transfer, from native evidence only.
 
 | Name | Number | Description |
 | ---- | ------ | ----------- |
@@ -2505,31 +2671,36 @@ The lifecycle of a transfer or sweep, from native evidence only.
 <a name="darkbot-bsc-v1-WalletMovementKind"></a>
 
 ### WalletMovementKind
-What a wallet movement is, economically separated (no double count of internal transfers).
+What a wallet movement is, economically separated (capital never counted as profit, an internal
+transfer never counted twice).
 
 | Name | Number | Description |
 | ---- | ------ | ----------- |
 | WALLET_MOVEMENT_KIND_UNSPECIFIED | 0 | Not set by any producer; never displayed as a value. |
-| WALLET_MOVEMENT_KIND_DEPOSIT | 1 | BNB received from outside DarkBot. |
-| WALLET_MOVEMENT_KIND_WITHDRAWAL | 2 | BNB sent outside DarkBot (a transfer or sweep). |
-| WALLET_MOVEMENT_KIND_INTERNAL_TRANSFER | 3 | BNB between the launcher and the buyer (counted once, in neither PnL). |
-| WALLET_MOVEMENT_KIND_TRADE_BUY | 4 | A trade BUY&#39;s input. |
-| WALLET_MOVEMENT_KIND_TRADE_SELL | 5 | A trade SELL&#39;s proceeds. |
-| WALLET_MOVEMENT_KIND_FEE | 6 | Gas or a proven fee without its own movement. |
+| WALLET_MOVEMENT_KIND_DEPOSIT | 1 | BNB received from outside DarkBot (capital, never trading profit). |
+| WALLET_MOVEMENT_KIND_CAPITAL_FUNDING | 2 | Main → Buyer manual capital funding (path 1). |
+| WALLET_MOVEMENT_KIND_PROFIT_TRANSFER | 3 | Buyer → Main automatic profit transfer (path 2, policy A). |
+| WALLET_MOVEMENT_KIND_PAYOUT_MANUAL | 4 | Main → external manual payout (path 3). |
+| WALLET_MOVEMENT_KIND_PAYOUT_AUTO | 5 | Main → external automatic payout (path 4, policy B). |
+| WALLET_MOVEMENT_KIND_TRADE_BUY | 6 | A trade BUY&#39;s input. |
+| WALLET_MOVEMENT_KIND_TRADE_SELL | 7 | A trade SELL&#39;s proceeds. |
+| WALLET_MOVEMENT_KIND_FEE | 8 | Gas or a proven fee without its own movement. |
+| WALLET_MOVEMENT_KIND_EXTERNAL_OUT | 9 | BNB that left the wallet by a transaction no DarkBot owner made. |
 
 
 
 <a name="darkbot-bsc-v1-WalletRole"></a>
 
 ### WalletRole
-A BSC wallet&#39;s role.
+A wallet&#39;s role.
 
 | Name | Number | Description |
 | ---- | ------ | ----------- |
 | WALLET_ROLE_UNSPECIFIED | 0 | Not set by any producer; never displayed as a value. |
-| WALLET_ROLE_LAUNCHER | 1 | The launcher wallet (funding, test launches). |
-| WALLET_ROLE_BUYER | 2 | The buyer wallet (LIVE trading). |
-| WALLET_ROLE_EXTERNAL | 3 | An address outside DarkBot (a deposit&#39;s sender, a transfer&#39;s destination). |
+| WALLET_ROLE_LAUNCHER | 1 | The G0.7 launcher wallet (controlled test launches only). |
+| WALLET_ROLE_BUYER | 2 | The trading account (the LIVE buyer wallet). |
+| WALLET_ROLE_EXTERNAL | 3 | An address outside DarkBot (a deposit&#39;s sender, a payout&#39;s receiver); no key in DarkBot. |
+| WALLET_ROLE_MAIN | 4 | The main account / treasury (its key only at the native BSC owner). |
 
 
 

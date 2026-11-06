@@ -6,6 +6,7 @@
 // projection and stay "—" here. The status label is a display of the ledger state and the sign
 // of the native PnL only.
 import type { BscLiveView, LiveAttemptView, LivePositionView, LiveTransactionView } from "./types";
+import { MAX_DATE_MS } from "./live";
 
 export const TRADE_COLUMNS = [
   { id: "token", label: "Token", short: "Token" },
@@ -112,7 +113,7 @@ export function nsToMs(ns: bigint | undefined): string {
 }
 /** A unix-ms block time as time and date (UTC; the block header's own clock). */
 export function blockClock(ms: bigint | undefined): { time: string; date: string } | null {
-  if (ms === undefined || ms <= 0n) return null;
+  if (ms === undefined || ms <= 0n || ms > MAX_DATE_MS) return null;
   const d = new Date(Number(ms));
   return { time: d.toISOString().slice(11, 19), date: d.toISOString().slice(0, 10) };
 }

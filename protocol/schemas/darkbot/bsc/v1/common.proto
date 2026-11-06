@@ -102,7 +102,7 @@ enum PerformanceScope {
   PERFORMANCE_SCOPE_UNSPECIFIED = 0;
   // The LIVE ledger's trades.
   PERFORMANCE_SCOPE_LIVE = 1;
-  // One BSC wallet (scope_id = its role).
+  // One BSC wallet (scope_id = its WalletRole name, e.g. WALLET_ROLE_MAIN).
   PERFORMANCE_SCOPE_WALLET = 2;
   // Every BSC wallet together.
   PERFORMANCE_SCOPE_ALL_WALLETS = 3;

@@ -3,47 +3,74 @@ package darkbot.bsc.v1;
 
 import "darkbot/bsc/v1/common.proto";
 
-// V8 Wallets: finance history, transfers and the automatic transfer (BSC-V8-13…17,
-// FE-V8-13…16, Bindings §14.1/§14.4 M5). Prepared contracts: no producer yet. The BSC wallet
-// switches (BscWalletsState.*_control, `bsc.wallet.set`) are permissions, never transfers; a
-// transfer or sweep needs its own persisted, authorized native BSC owner (allowlist, fee, nonce,
-// reserve, signer, durable receipt, crash recovery, idempotency). Project_0's treasury is never
-// the BSC authority. A MetaMask wallet is an external BSC destination address only; DarkBot holds
-// no MetaMask connection. Nothing here signs or sends; the browser never sees a key.
+// V8 Wallets: accounts, the four money paths and the two independent automatic policies
+// (BSC-V8-13…17, FE-V8-13…16, Bindings §14.1/§14.4 M5, BSC PHASENPLAN §C/C.1, operator decision
+// 06.11.2026). Prepared contracts: no producer yet.
+//
+// Accounts: MAIN (the separate BSC main account / treasury: capital management, receives the
+// trading profit), BUYER (the trading account: trading capital, BUY/SELL, realized PnL), EXTERNAL (an
+// operator-confirmed BSC/MetaMask receiving address; its private key is never in DarkBot) and the
+// G0.7 LAUNCHER (separate test function, never part of a profit or payout path).
+// The four paths, each its own native action:
+//   1. Main → Buyer, manual capital funding (fixed Buyer target; capital, never profit);
+//   2. Buyer → Main, automatic profit transfer: policy A on REALIZED NET trading profit (after losses,
+//      gas and fees, never deposits, open or unknown PnL), not on the Buyer balance;
+//   3. Main → external, manual payout;
+//   4. Main → external, automatic payout: policy B on the FREE Main balance (Main may hold capital too:
+//      its balance is never shown as trading profit).
+// Policies A and B are independent (own switch, threshold, amount, reserve, version). On chain only
+// BNB/wei; an EUR threshold or amount is accepted only with a qualified, fresh native BNB/EUR quote
+// (eur_quote), otherwise BNB. The automatic paths run in the native owner, never on a browser timer:
+// per new qualified event and policy cursor at most one deduplicated intent. The BSC wallet switches
+// (`bsc.wallet.set`) stay permissions, never transfers; Project_0's treasury is never the authority.
 //
 // Prepared actions (POST /api/v1/command; NOT registered until the native owner implements them):
-//   bsc.wallet.destination.set   WalletDestinationSetCommand    expected wallet_policy_version
-//   bsc.wallet.transfer          WalletTransferRequest          expected wallet_policy_version
-//   bsc.wallet.sweep.set         WalletSweepPolicySetCommand    expected wallet_policy_version
+//   bsc.wallet.destination.set     WalletDestinationSetCommand     expected wallet_policy_version = treasury_version
+//   bsc.wallet.fund_trading        WalletFundTradingCommand        expected wallet_policy_version = treasury_version
+//   bsc.wallet.payout              WalletPayoutCommand             expected wallet_policy_version = treasury_version
+//   bsc.wallet.profit_policy.set   ProfitTransferPolicySetCommand  expected wallet_policy_version = policy A's version
+//   bsc.wallet.payout_policy.set   MainPayoutPolicySetCommand      expected wallet_policy_version = policy B's version
+// CommandRequest.resource_id is the destination id for a payout and a destination removal and
+// empty otherwise (the Buyer target of a funding is the owner's, never chosen by the browser). A
+// policy never stored has version 0: its first set expects 0.
 
-// A BSC wallet's role.
+// A wallet's role.
 enum WalletRole {
   // Not set by any producer; never displayed as a value.
   WALLET_ROLE_UNSPECIFIED = 0;
-  // The launcher wallet (funding, test launches).
+  // The G0.7 launcher wallet (controlled test launches only).
   WALLET_ROLE_LAUNCHER = 1;
-  // The buyer wallet (LIVE trading).
+  // The trading account (the LIVE buyer wallet).
   WALLET_ROLE_BUYER = 2;
-  // An address outside DarkBot (a deposit's sender, a transfer's destination).
+  // An address outside DarkBot (a deposit's sender, a payout's receiver); no key in DarkBot.
   WALLET_ROLE_EXTERNAL = 3;
+  // The main account / treasury (its key only at the native BSC owner).
+  WALLET_ROLE_MAIN = 4;
 }
 
-// What a wallet movement is, economically separated (no double count of internal transfers).
+// What a wallet movement is, economically separated (capital never counted as profit, an internal
+// transfer never counted twice).
 enum WalletMovementKind {
   // Not set by any producer; never displayed as a value.
   WALLET_MOVEMENT_KIND_UNSPECIFIED = 0;
-  // BNB received from outside DarkBot.
+  // BNB received from outside DarkBot (capital, never trading profit).
   WALLET_MOVEMENT_KIND_DEPOSIT = 1;
-  // BNB sent outside DarkBot (a transfer or sweep).
-  WALLET_MOVEMENT_KIND_WITHDRAWAL = 2;
-  // BNB between the launcher and the buyer (counted once, in neither PnL).
-  WALLET_MOVEMENT_KIND_INTERNAL_TRANSFER = 3;
+  // Main → Buyer manual capital funding (path 1).
+  WALLET_MOVEMENT_KIND_CAPITAL_FUNDING = 2;
+  // Buyer → Main automatic profit transfer (path 2, policy A).
+  WALLET_MOVEMENT_KIND_PROFIT_TRANSFER = 3;
+  // Main → external manual payout (path 3).
+  WALLET_MOVEMENT_KIND_PAYOUT_MANUAL = 4;
+  // Main → external automatic payout (path 4, policy B).
+  WALLET_MOVEMENT_KIND_PAYOUT_AUTO = 5;
   // A trade BUY's input.
-  WALLET_MOVEMENT_KIND_TRADE_BUY = 4;
+  WALLET_MOVEMENT_KIND_TRADE_BUY = 6;
   // A trade SELL's proceeds.
-  WALLET_MOVEMENT_KIND_TRADE_SELL = 5;
+  WALLET_MOVEMENT_KIND_TRADE_SELL = 7;
   // Gas or a proven fee without its own movement.
-  WALLET_MOVEMENT_KIND_FEE = 6;
+  WALLET_MOVEMENT_KIND_FEE = 8;
+  // BNB that left the wallet by a transaction no DarkBot owner made.
+  WALLET_MOVEMENT_KIND_EXTERNAL_OUT = 9;
 }
 
 // What the chain made of a wallet transaction.
@@ -66,7 +93,8 @@ enum ChainTxStatus {
   CHAIN_TX_STATUS_UNKNOWN = 7;
 }
 
-// One wallet movement, proven by its block and receipt.
+// One wallet movement, proven by its block and receipt; an internal transfer is one movement in
+// each of the two ledgers.
 message WalletMovement {
   // Stable owner identity of the movement.
   string movement_id = 1;
@@ -74,7 +102,7 @@ message WalletMovement {
   WalletRole role = 2;
   // That wallet's address, 0x hex.
   string wallet_address = 3;
-  // Chain identity.
+  // Chain identity (56 BSC Mainnet; 97 Chapel never mixed with it).
   uint64 chain_id = 4;
   // What it is.
   WalletMovementKind kind = 5;
@@ -96,14 +124,16 @@ message WalletMovement {
   SourcedTime block_time = 13;
   // What the chain made of it.
   ChainTxStatus status = 14;
-  // The native fact it comes from: LIVE_LEDGER, TRANSFER_OWNER or CHAIN_BACKFILL.
+  // The native fact it comes from: LIVE_LEDGER, TREASURY_OWNER or CHAIN_BACKFILL.
   string origin = 15;
   // The lot of a trade movement; empty otherwise.
   string lot = 16;
-  // The transfer or sweep request of a withdrawal; empty otherwise.
+  // The transfer request of a funding, profit transfer or payout; empty otherwise.
   string transfer_request_id = 17;
   // How far it is proven.
   DataQuality quality = 18;
+  // The policy version that caused an automatic transfer; absent otherwise.
+  optional uint64 policy_version = 19;
 }
 
 // A wallet balance at one block, with its age and source.
@@ -114,9 +144,10 @@ message WalletBalanceSnapshot {
   string address = 2;
   // Chain identity.
   uint64 chain_id = 3;
-  // The balance, decimal wei.
+  // The confirmed balance, decimal wei.
   string balance_wei = 4;
-  // Of it reserved (open trades' budget, a pending transfer), decimal wei; absent when unknown.
+  // Of it reserved (open positions, exit and gas budgets, pending transfers), decimal wei; absent
+  // when unknown.
   optional string reserved_wei = 5;
   // Of it freely available, decimal wei; absent when unknown.
   optional string available_wei = 6;
@@ -124,15 +155,47 @@ message WalletBalanceSnapshot {
   optional uint64 block_number = 7;
   // When it was read.
   SourcedTime observed = 8;
-  // The reader (LIVE_PROBE, READINESS_SNAPSHOT, TRANSFER_OWNER).
+  // The reader (LIVE_PROBE, READINESS_SNAPSHOT, TREASURY_OWNER).
   string source = 9;
   // How far it is proven (STALE when older than the owner's freshness rule).
   DataQuality quality = 10;
 }
 
+// One DarkBot account with its economics, as the native owner separates them.
+message WalletAccount {
+  // The account.
+  WalletRole role = 1;
+  // Its address, 0x hex; empty while the owner has none configured.
+  string address = 2;
+  // Chain identity.
+  uint64 chain_id = 3;
+  // Its confirmed balance.
+  WalletBalanceSnapshot balance = 4;
+  // BUYER: the trading capital basis (deposits and fundings minus capital taken out), decimal wei.
+  optional string capital_basis_wei = 5;
+  // BUYER: realized net trading PnL after losses, gas and fees, signed decimal wei.
+  optional string realized_net_pnl_wei = 6;
+  // BUYER: realized net profit already transferred to Main, decimal wei.
+  optional string transferred_profit_wei = 7;
+  // BUYER: realized net profit not yet transferred (never below zero), decimal wei.
+  optional string untransferred_profit_wei = 8;
+  // MAIN: profit received from the Buyer (policy A), decimal wei.
+  optional string profit_received_wei = 9;
+  // MAIN: everything else on Main (deposits, returns): capital, never trading profit, decimal wei.
+  optional string other_capital_wei = 10;
+  // The account's next nonce; absent when unknown.
+  optional uint64 next_nonce = 11;
+  // Whether the native owner holds this account's key (never for EXTERNAL).
+  bool owner_key = 12;
+  // NOT_CONFIGURED, READY, LOCKED (a wallet or economic switch off) or UNKNOWN, with the owner's reason.
+  string state = 13;
+  // Why it is not READY.
+  string reason = 14;
+}
+
 // A bounded, cursor-paged, read-only query of wallet movements.
 message WalletHistoryQuery {
-  // Only these wallets; empty: every BSC wallet.
+  // Only these wallets; empty: every DarkBot wallet.
   repeated WalletRole roles = 1;
   // Only these kinds; empty: every kind.
   repeated WalletMovementKind kinds = 2;
@@ -160,13 +223,13 @@ message WalletHistoryPage {
   string next_cursor = 5;
   // Whether another page follows.
   bool has_more = 6;
-  // Deposits of the whole filtered result, decimal wei.
+  // External deposits of the whole filtered result, decimal wei.
   string deposited_wei = 7;
-  // Withdrawals of the whole filtered result, decimal wei (a positive amount).
-  string withdrawn_wei = 8;
+  // Payouts to external addresses of the whole filtered result, decimal wei (a positive amount).
+  string paid_out_wei = 8;
 }
 
-// The lifecycle of a transfer or sweep, from native evidence only.
+// The lifecycle of a transfer, from native evidence only.
 enum TransferStatus {
   // Not set by any producer; never displayed as a value.
   TRANSFER_STATUS_UNSPECIFIED = 0;
@@ -184,7 +247,7 @@ enum TransferStatus {
   TRANSFER_STATUS_UNKNOWN = 6;
 }
 
-// A saved, confirmed destination address (e.g. a MetaMask wallet's BSC address).
+// A saved, confirmed external destination (e.g. a MetaMask wallet's BSC address).
 message WalletDestination {
   // Stable owner identity.
   string destination_id = 1;
@@ -210,59 +273,81 @@ message WalletDestinationSetCommand {
   uint64 chain_id = 3;
   // Remove the destination instead (its id in CommandRequest.resource_id).
   bool remove = 4;
+  // The operator confirmed this exact address and chain (required to save; only a confirmed
+  // destination receives).
+  bool confirmed = 5;
 }
 
-// Params of `bsc.wallet.transfer` (prepared): one manual BNB transfer from a BSC wallet.
-message WalletTransferRequest {
-  // The wallet that sends.
-  WalletRole source_role = 1;
-  // The saved destination it goes to.
-  string destination_id = 2;
-  // The destination address the operator confirmed, 0x hex (must equal the saved one).
-  string destination_address = 3;
-  // Chain identity.
-  uint64 chain_id = 4;
+// Params of `bsc.wallet.fund_trading` (prepared, path 1): Main → the fixed Buyer address; capital.
+message WalletFundTradingCommand {
   // The amount, decimal wei.
-  string amount_wei = 5;
+  string amount_wei = 1;
   // The most gas it may cost, decimal wei; the owner refuses above it.
-  string max_fee_wei = 6;
+  string max_fee_wei = 2;
+  // Chain identity (the owner refuses another).
+  uint64 chain_id = 3;
 }
 
-// A transfer or sweep as its native owner holds it.
+// Params of `bsc.wallet.payout` (prepared, path 3): Main → a saved, confirmed external destination.
+message WalletPayoutCommand {
+  // The saved destination.
+  string destination_id = 1;
+  // Its address as the operator confirmed it, 0x hex (must equal the saved one).
+  string destination_address = 2;
+  // Chain identity.
+  uint64 chain_id = 3;
+  // The amount, decimal wei.
+  string amount_wei = 4;
+  // The most gas it may cost, decimal wei; the owner refuses above it.
+  string max_fee_wei = 5;
+}
+
+// A transfer as its native owner holds it (any of the four paths).
 message WalletTransferState {
-  // The operator's or the sweep's request.
+  // The request that created it: the operator's CommandRequest.request_id, or for an automatic
+  // transfer the owner's own request for its trigger (never a policy's request_id).
   string request_id = 1;
   // The owner's durable intent.
   string command_id = 2;
+  // The path.
+  WalletMovementKind kind = 3;
   // The wallet that sends.
-  WalletRole source_role = 3;
+  WalletRole source_role = 4;
   // Its address, 0x hex.
-  string source_address = 4;
+  string source_address = 5;
+  // The receiving wallet's role (BUYER, MAIN or EXTERNAL).
+  WalletRole destination_role = 6;
   // The destination address, 0x hex.
-  string destination_address = 5;
+  string destination_address = 7;
   // Chain identity.
-  uint64 chain_id = 6;
+  uint64 chain_id = 8;
   // The amount, decimal wei.
-  string amount_wei = 7;
+  string amount_wei = 9;
   // The fee: estimated while pending, the receipt's once included, decimal wei.
-  optional string fee_wei = 8;
+  optional string fee_wei = 10;
   // The nonce it uses; absent before the owner assigned one.
-  optional uint64 nonce = 9;
+  optional uint64 nonce = 11;
   // Its transaction hash, 0x hex; empty before signing.
-  string tx_hash = 10;
+  string tx_hash = 12;
   // Its lifecycle.
-  TransferStatus status = 11;
+  TransferStatus status = 13;
   // Why it failed or is unknown; empty otherwise.
-  string failure_reason = 12;
+  string failure_reason = 14;
   // Creation time, unix ms.
-  uint64 created_unix_ms = 13;
+  uint64 created_unix_ms = 15;
   // Last change, unix ms.
-  uint64 updated_unix_ms = 14;
-  // The sweep policy version that caused it; absent for a manual transfer.
-  optional uint64 policy_version = 15;
+  uint64 updated_unix_ms = 16;
+  // The policy version that caused it; absent for a manual transfer.
+  optional uint64 policy_version = 17;
+  // The including block; absent while not included.
+  optional uint64 block_number = 18;
+  // An automatic transfer's economic trigger (policy A: the settlement id of the closed, chain-
+  // confirmed lots it settles; policy B: the qualified balance event): at most one intent per
+  // trigger. Empty for a manual transfer.
+  string trigger_id = 19;
 }
 
-// The chain receipt of a transfer or sweep.
+// The chain receipt of a transfer.
 message WalletTransferReceipt {
   // The request.
   string request_id = 1;
@@ -282,64 +367,175 @@ message WalletTransferReceipt {
   string reason = 8;
 }
 
-// The automatic transfer above a threshold, as its native owner holds it.
-message WalletSweepPolicy {
-  // Whether it is enabled.
+// The unit an automatic policy is configured in.
+enum PolicyUnit {
+  // Not set: BNB.
+  POLICY_UNIT_UNSPECIFIED = 0;
+  // BNB (wei on chain).
+  POLICY_UNIT_BNB = 1;
+  // EUR equivalent: accepted only with a qualified, fresh native BNB/EUR quote; the transaction is
+  // still BNB/wei, converted by the native owner at the trigger.
+  POLICY_UNIT_EUR = 2;
+}
+
+// How much an automatic transfer moves: a fixed amount or a share of what is eligible.
+message PolicyAmount {
+  // Fixed or share.
+  oneof amount {
+    // A fixed amount, decimal wei (POLICY_UNIT_BNB).
+    string fixed_wei = 1;
+    // A fixed EUR equivalent, decimal (POLICY_UNIT_EUR).
+    string fixed_eur = 2;
+    // A share of the eligible amount, basis points (1…10000).
+    uint32 share_bps = 3;
+  }
+}
+
+// Policy A (path 2): Buyer → Main automatic profit transfer, on REALIZED NET trading profit.
+message ProfitTransferPolicy {
+  // Whether it is enabled (default off).
   bool enabled = 1;
-  // The wallet it sweeps.
-  WalletRole source_role = 2;
-  // The saved destination it sweeps to.
-  string destination_id = 3;
-  // That destination's address, 0x hex.
-  string destination_address = 4;
-  // The balance above which it sweeps, decimal wei.
-  string threshold_wei = 5;
-  // What always stays in the wallet, decimal wei (below threshold_wei).
-  string retain_wei = 6;
-  // The policy version: the compare-and-swap of the next change.
-  uint64 policy_version = 7;
-  // The last sweep it caused; absent before any.
-  WalletTransferState last_execution = 8;
+  // The realized net profit (after losses, gas and fees, since the last transfer) above which it
+  // transfers, decimal wei.
+  string threshold_realized_net_profit_wei = 2;
+  // How much of the untransferred profit it moves.
+  PolicyAmount amount = 3;
+  // The trading capital that always stays on the Buyer, decimal wei.
+  string buyer_min_capital_wei = 4;
+  // The exit and gas reserve that always stays on the Buyer, decimal wei.
+  string buyer_reserve_wei = 5;
+  // Its version: the compare-and-swap of its next change.
+  uint64 policy_version = 6;
+  // The ledger position up to which profit is settled (no profit transferred twice).
+  string settlement_cursor = 7;
   // The request that wrote this version.
-  string request_id = 9;
+  string request_id = 8;
+  // The last transfer it caused; absent before any.
+  WalletTransferState last_transfer = 9;
+  // Realized net profit not yet transferred, as the owner computes it now, decimal wei.
+  optional string untransferred_profit_wei = 10;
+  // What is still missing to the threshold, decimal wei (0: the next settled profit triggers).
+  optional string to_threshold_wei = 11;
+  // The version in effect at the owner (a stored version applies once the owner took it).
+  optional uint64 effective_version = 12;
+  // The owner's reason it does not act (DISABLED, NO_AUTHORIZATION, ECONOMIC_LIVE_DISABLED, …).
+  string block_reason = 13;
 }
 
-// Params of `bsc.wallet.sweep.set` (prepared).
-message WalletSweepPolicySetCommand {
-  // Whether it is enabled.
+// Params of `bsc.wallet.profit_policy.set` (prepared).
+message ProfitTransferPolicySetCommand {
+  // Enable or disable.
   bool enabled = 1;
-  // The wallet it sweeps.
-  WalletRole source_role = 2;
-  // The saved, confirmed destination.
-  string destination_id = 3;
-  // The balance above which it sweeps, decimal wei.
-  string threshold_wei = 4;
-  // What always stays in the wallet, decimal wei.
-  string retain_wei = 5;
+  // The realized net profit threshold, decimal wei.
+  string threshold_realized_net_profit_wei = 2;
+  // Fixed amount (wei) or share.
+  PolicyAmount amount = 3;
+  // The capital that stays on the Buyer, decimal wei.
+  string buyer_min_capital_wei = 4;
+  // The exit and gas reserve that stays on the Buyer, decimal wei.
+  string buyer_reserve_wei = 5;
 }
 
-// The BSC treasury state of the native wallet owner.
+// Policy B (path 4): Main → external automatic payout, on the FREE Main balance.
+message MainPayoutPolicy {
+  // Whether it is enabled (default off).
+  bool enabled = 1;
+  // The saved, confirmed destination.
+  string destination_id = 2;
+  // That destination's address, 0x hex.
+  string destination_address = 3;
+  // The unit it is configured in.
+  PolicyUnit unit = 4;
+  // The free Main balance above which it pays out, decimal wei (EUR mode: the owner's current
+  // conversion of threshold_eur).
+  string threshold_available_main_wei = 5;
+  // EUR mode: the operator's threshold, decimal EUR; absent in BNB mode.
+  optional string threshold_eur = 6;
+  // How much it pays out.
+  PolicyAmount amount = 7;
+  // What always stays on Main (gas and minimum reserve), decimal wei.
+  string retain_wei = 8;
+  // Its version: the compare-and-swap of its next change.
+  uint64 policy_version = 9;
+  // The last qualified balance event it acted on (one payout per event).
+  string trigger_cursor = 10;
+  // The request that wrote this version.
+  string request_id = 11;
+  // The last payout it caused; absent before any.
+  WalletTransferState last_payout = 12;
+  // The free Main balance now, decimal wei.
+  optional string available_main_wei = 13;
+  // The version in effect at the owner.
+  optional uint64 effective_version = 14;
+  // The owner's reason it does not act.
+  string block_reason = 15;
+}
+
+// Params of `bsc.wallet.payout_policy.set` (prepared).
+message MainPayoutPolicySetCommand {
+  // Enable or disable.
+  bool enabled = 1;
+  // The saved, confirmed destination.
+  string destination_id = 2;
+  // The unit (EUR only with a qualified native quote).
+  PolicyUnit unit = 3;
+  // BNB mode: the free Main balance threshold, decimal wei.
+  string threshold_available_main_wei = 4;
+  // EUR mode: the threshold, decimal EUR.
+  optional string threshold_eur = 5;
+  // Fixed amount or share.
+  PolicyAmount amount = 6;
+  // What always stays on Main, decimal wei.
+  string retain_wei = 7;
+  // The destination's address as the operator confirmed it, 0x hex (must equal the saved one).
+  string destination_address = 8;
+}
+
+// A native fiat quote of BNB, the only basis of an EUR setting.
+message FiatQuote {
+  // ISO currency, e.g. EUR.
+  string currency = 1;
+  // Fiat per BNB, decimal.
+  string fiat_per_bnb = 2;
+  // When it was observed.
+  SourcedTime observed = 3;
+  // Its source.
+  string source = 4;
+  // How far it is proven (STALE beyond max_age_ms).
+  DataQuality quality = 5;
+  // The owner's freshness bound, ms.
+  uint64 max_age_ms = 6;
+}
+
+// The BSC wallet state of the native treasury owner (accounts, destinations, both policies).
 message WalletTreasuryState {
   // Whether the native owner answered.
   Availability availability = 1;
   // Why it is not AVAILABLE.
   string unavailable_reason = 2;
-  // The owner and its policy version.
+  // The owner.
   OwnerProvenance provenance = 3;
-  // The current balances of the BSC wallets.
-  repeated WalletBalanceSnapshot balances = 4;
-  // The saved destinations.
+  // MAIN, BUYER and the separate LAUNCHER.
+  repeated WalletAccount accounts = 4;
+  // The saved external destinations.
   repeated WalletDestination destinations = 5;
-  // The automatic transfer; absent without one.
-  WalletSweepPolicy sweep = 6;
-  // Pending and recent transfers, newest first (bounded; the history query has all).
-  repeated WalletTransferState transfers = 7;
-  // The wallet policy version: the compare-and-swap of a destination, transfer or sweep change.
-  uint64 wallet_policy_version = 8;
+  // Policy A (Buyer → Main profit transfer); absent before it was ever set.
+  ProfitTransferPolicy profit_policy = 6;
+  // Policy B (Main → external payout); absent before it was ever set.
+  MainPayoutPolicy payout_policy = 7;
+  // Pending and recent transfers of every path, newest first (bounded; the history has all).
+  repeated WalletTransferState transfers = 8;
+  // The treasury version: the compare-and-swap of a destination change, a funding or a payout.
+  uint64 treasury_version = 9;
+  // The native BNB/EUR quote; absent without a qualified price owner (then no EUR setting).
+  FiatQuote eur_quote = 10;
+  // The owner's current fee estimate of one plain BNB transfer (gas limit × gas price), decimal
+  // wei; absent when unknown (then no manual transfer is offered).
+  optional string transfer_fee_estimate_wei = 11;
 }
 
 // A read of the treasury state.
 message WalletTreasuryQuery {
-  // Only these wallets; empty: every BSC wallet.
+  // Only these wallets; empty: every DarkBot wallet.
   repeated WalletRole roles = 1;
 }

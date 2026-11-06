@@ -4,6 +4,8 @@ import { create, fromBinary, toBinary, type MessageInitShape } from "@bufbuild/p
 import { BscLiveStateSchema, BscMonitoringStateSchema } from "../src/core/generated/darkbot/bsc/v1/status_pb";
 import { BscQueryResponseSchema } from "../src/core/generated/darkbot/bsc/v1/query_pb";
 import { Availability } from "../src/core/generated/darkbot/bsc/v1/common_pb";
+import { BscQueryRequestSchema } from "../src/core/generated/darkbot/bsc/v1/query_pb";
+import { MainPayoutPolicySetCommandSchema, ProfitTransferPolicySetCommandSchema, TransferStatus, WalletFundTradingCommandSchema, WalletMovementKind, WalletPayoutCommandSchema, WalletTreasuryStateSchema, type WalletTreasuryState } from "../src/core/generated/darkbot/bsc/v1/wallet_pb";
 import { AckStatus, ClientMessageSchema, ServerMessageSchema, StateQuality, WelcomeStatus } from "../src/core/generated/darkbot/control/v1/stream_pb";
 import { CommandLookupResponseSchema, CommandPhase, CommandRequestSchema, CommandResponseSchema, CommandStatus, type CommandRequest } from "../src/core/generated/darkbot/control/v1/commands_pb";
 import { ProjectId, TopicClass, TopicId } from "../src/core/generated/darkbot/control/v1/topics_pb";
@@ -93,14 +95,10 @@ test("the four areas fail closed without a gateway: UNKNOWN, never 0, no control
   await expect(page.getByTestId("bsc-training-new")).toBeDisabled();
   await page.getByRole("button", { name: "Open Strategy C module" }).click();
   await expect(page.getByTestId("bsc-training-start")).toBeDisabled();
-  // Wallets: transfer and sweep stay visible, never executable.
+  // Wallets: Main, both manual transfers and both automatic rules stay visible, never executable.
   await area(page, "Wallets");
-  await page.getByRole("button", { name: "Send funds", exact: true }).click();
-  await expect(page.getByTestId("bsc-wallet-send").getByRole("button", { name: "Review transfer" })).toBeDisabled();
-  await page.keyboard.press("Escape");
-  await page.getByRole("button", { name: "Auto-transfer", exact: true }).click();
-  await expect(page.getByTestId("bsc-wallet-sweep").getByRole("button", { name: "Save rule" })).toBeDisabled();
-  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("bsc-wallet-owner")).toContainText("Treasury owner: Unavailable");
+  for (const id of ["bsc-wallet-fund-review", "bsc-wallet-send-review", "bsc-wallet-policy-a-save", "bsc-wallet-policy-b-save"]) await expect(page.getByTestId(id)).toBeDisabled();
   // Every owner request in the Settings drawer and the Live drawers is locked without owner state.
   let locked = 0;
   const lockedIn = async (scope: string) => {
@@ -604,4 +602,174 @@ test("Health shows each native state, a disabled source grey and never a missing
   // The golden builder evidence is unqualified: never green.
   await expect(page.getByTestId("bsc-health-CLUB48_BUILDER_V1")).not.toHaveAttribute("data-state", "ok");
   await expect(page.getByTestId("bsc-health-pill")).toContainText("alert");
+});
+
+// ---------------------------------------------------------------- V8 Wallets (FE-V8-13…16)
+const WALLET_SECTIONS = ["bsc-wallet-accounts", "bsc-wallet-balances", "bsc-wallet-manual", "bsc-wallet-policy-a", "bsc-wallet-policy-b", "bsc-wallet-movements-card", "bsc-wallet-history", "bsc-wallet-evidence"];
+/** The query route stand-in: the treasury as `treasury()` returns it now (the Rust golden bytes,
+ *  patched per step), every other query NOT_IMPLEMENTED. Returns the queries asked. */
+async function treasuryOwner(page: Page, treasury: (() => WalletTreasuryState) | null): Promise<string[]> {
+  const asked: string[] = [];
+  await page.route("**/api/v1/bsc/query", async (r) => {
+    const q = fromBinary(BscQueryRequestSchema, r.request().postDataBuffer()!);
+    asked.push(q.query.case ?? "");
+    const answer = q.query.case === "treasury" && treasury
+      ? create(BscQueryResponseSchema, { requestId: q.requestId, availability: Availability.AVAILABLE, result: { case: "treasury", value: treasury() } })
+      : create(BscQueryResponseSchema, { requestId: q.requestId, availability: Availability.NOT_IMPLEMENTED, unavailableReason: "BSC-V8-13" });
+    return r.fulfill({ status: 200, contentType: "application/x-protobuf", body: Buffer.from(toBinary(BscQueryResponseSchema, answer)) });
+  });
+  return asked;
+}
+const goldenTreasury = () => fromBinary(WalletTreasuryStateSchema, Buffer.from(readFileSync(new URL("../../protocol/golden/bsc/v8/treasury_state.hex", import.meta.url), "utf8").trim(), "hex"));
+const U64_MAX = 18446744073709551615n;
+const U256_MAX = "115792089237316195423570985008687907853269984665640564039457584007913129639935";
+
+test("Wallets without the treasury owner: seven sections in order, everything owner-bound disabled with its reason, exact input checks (FE-V8-13…16)", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  const sent = await commands(page);
+  const asked = await treasuryOwner(page, null);
+  await feed(page);
+  await page.goto("/bsc");
+  await area(page, "Wallets");
+  // The binding order: Accounts, Balances, Manual, Policy A, Policy B, History, Charts (then the evidence).
+  const order = await page.locator("[data-testid^=bsc-wallet-]").evaluateAll((els, ids) => els.map(e => e.getAttribute("data-testid")).filter(id => ids.includes(id ?? "")), WALLET_SECTIONS);
+  expect(order).toEqual(WALLET_SECTIONS);
+  await expect(page.getByTestId("bsc-wallet-owner")).toContainText("Not implemented yet: the native BSC treasury owner");
+  // Main and the external wallet are not configured; Trading and the launcher keep the native projection, never summed.
+  await expect(page.getByTestId("bsc-wallet-main")).toContainText("—");
+  await page.getByTestId("bsc-wallet-main").click();
+  await expect(page.getByTestId("bsc-wallet-detail-main")).toContainText("NOT_CONFIGURED");
+  await expect(page.getByTestId("bsc-wallets-balance-main")).toContainText("—");
+  await expect(page.getByTestId("bsc-wallets-untransferred")).toContainText("—");
+  await expect(page.getByTestId("bsc-wallet-launcher")).toContainText("G0.7 test launcher");
+  // Funding Main → Trading: exact wei shown, too many places refused, never offered without the owner.
+  await page.getByTestId("bsc-wallet-fund-amount").fill("0.1");
+  await expect(page.getByTestId("bsc-wallet-fund-amount-check")).toHaveText("100000000000000000 wei");
+  await page.getByTestId("bsc-wallet-fund-amount").fill("0.0000000000000000001");
+  await expect(page.getByTestId("bsc-wallet-fund-amount-check")).toContainText("at most 18 places");
+  await expect(page.getByTestId("bsc-wallet-fund-review")).toBeDisabled();
+  await expect(page.getByTestId("bsc-wallet-fund-locked")).toContainText("Not implemented yet");
+  // Payout Main → external: no saved address, the address check runs, nothing is saved without the owner.
+  await expect(page.getByTestId("bsc-wallet-send-review")).toBeDisabled();
+  await expect(page.getByTestId("bsc-wallet-send-destination")).toBeDisabled();
+  await page.getByTestId("bsc-wallet-destination-open").click();
+  await page.getByTestId("bsc-wallet-destination-address").fill("0x1234");
+  await expect(page.getByTestId("bsc-wallet-destination-check")).toContainText("40 hex digits");
+  await page.getByTestId("bsc-wallet-destination-address").fill(`0x${"0".repeat(40)}`);
+  await expect(page.getByTestId("bsc-wallet-destination-check")).toContainText("zero address");
+  await page.getByTestId("bsc-wallet-destination-address").fill(`0x${"82".repeat(20)}`);
+  await expect(page.getByTestId("bsc-wallet-destination-check")).toContainText("Format valid");
+  await expect(page.getByTestId("bsc-wallet-destination-save")).toBeDisabled();
+  await page.keyboard.press("Escape");
+  // Policy A and B: not editable without the owner's stored state (no draft over an unknown policy).
+  for (const id of ["bsc-wallet-policy-a-enabled", "bsc-wallet-policy-a-threshold", "bsc-wallet-policy-b-amount"]) await expect(page.getByTestId(id)).toBeDisabled();
+  await expect(page.getByTestId("bsc-wallet-policy-a-locked")).toContainText("Not implemented yet");
+  await expect(page.getByTestId("bsc-wallet-policy-a-save")).toBeDisabled();
+  await expect(page.getByTestId("bsc-wallet-policy-b-enabled")).not.toBeChecked();
+  await expect(page.getByTestId("bsc-wallet-policy-b-unit").getByRole("button", { name: "EUR" })).toBeDisabled();
+  await expect(page.getByTestId("bsc-wallet-policy-b-save")).toBeDisabled();
+  await expect(page.getByTestId("bsc-wallet-movements")).toContainText("Not implemented yet");
+  await expect(page.getByTestId("bsc-wallet-history")).toContainText("Not implemented yet");
+  // One request per view, no polling and no browser timer; no command left the browser.
+  const once = [...asked].sort();
+  expect(once).toEqual(["series", "treasury", "walletMovements"]);
+  await page.waitForTimeout(1500);
+  expect([...asked].sort()).toEqual(once);
+  expect(sent).toEqual([]);
+  // 390 px: no horizontal page scroll in the Wallets area.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
+  expect(errors).toEqual([]);
+});
+
+test("Wallets with the treasury owner's state: accounts apart, transfer states, one funding at the treasury version, an open transfer blocks its path (FE-V8-13…16)", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  const sent = await commands(page);
+  let step = 0;
+  let versionA = 11n;
+  const treasury = () => {
+    const s = goldenTreasury();
+    // Distinct CAS versions: the treasury's, policy A's and policy B's (1 in the golden).
+    s.treasuryVersion = 7n;
+    s.profitPolicy!.policyVersion = versionA; s.profitPolicy!.effectiveVersion = versionA;
+    const main = s.accounts[0]!.balance!;
+    main.availableWei = "1000000000000000000";
+    if (step > 0) s.transfers.unshift({ ...s.transfers[1]!, requestId: "fund-1", commandId: "intent-f-1", kind: WalletMovementKind.CAPITAL_FUNDING, status: TransferStatus.PENDING,
+      txHash: "", blockNumber: undefined, triggerId: "", policyVersion: undefined, updatedUnixMs: U64_MAX });
+    return s;
+  };
+  const asked = await treasuryOwner(page, treasury);
+  await feed(page);
+  await page.goto("/bsc");
+  await area(page, "Wallets");
+  await expect(page.getByTestId("bsc-wallet-owner")).toHaveCount(0);
+  // Accounts and economics from the owner, kept apart.
+  await expect(page.getByTestId("bsc-wallet-main")).toContainText("0x4d4d4d…4d4d4d");
+  await expect(page.getByTestId("bsc-wallet-external")).toContainText("CONFIRMED");
+  await expect(page.getByTestId("bsc-wallet-economics-main")).toContainText("Other capital");
+  await expect(page.getByTestId("bsc-wallets-pnl")).toContainText("Treasury owner");
+  // Both policies with their own state and version; the transfers with their lifecycle.
+  await expect(page.getByTestId("bsc-wallet-policy-a-state")).toHaveText("Enabled");
+  await expect(page.getByTestId("bsc-wallet-policy-a-version")).toHaveText("v11 · effective");
+  await expect(page.getByTestId("bsc-wallet-policy-a-last")).toHaveAttribute("data-status", "Unknown · the chain decides");
+  await expect(page.getByTestId("bsc-wallet-policy-b-state")).toHaveText("Disabled");
+  await expect(page.getByTestId("bsc-wallet-policy-b-version")).toHaveText("Stored v1 · effective v0");
+  await expect(page.getByTestId("bsc-wallet-policy-b-last")).toHaveAttribute("data-status", "Confirmed");
+  await expect(page.getByTestId("bsc-wallet-transfers").locator("tbody tr")).toHaveCount(2);
+  // A funding: exact amount, the owner's fee estimate as its bound, at the treasury version; one request.
+  await page.getByTestId("bsc-wallet-fund-amount").fill("0.5");
+  await expect(page.getByTestId("bsc-wallet-fund")).toContainText("0.499979 BNB");
+  await page.getByTestId("bsc-wallet-fund-review").click();
+  await expect(page.getByTestId("bsc-wallet-fund-dialog")).toContainText("500000000000000000 wei");
+  step = 1;
+  await page.getByTestId("bsc-wallet-fund-dialog-confirm").click();
+  await expect(page.getByTestId("bsc-wallet-fund-receipt")).toContainText("outcome=APPLIED bsc.wallet.fund_trading");
+  expect(sent.map(r => [r.action, r.resourceId, r.expected?.version])).toEqual([["bsc.wallet.fund_trading", "", { case: "walletPolicyVersion", value: 7n }]]);
+  expect(fromBinary(WalletFundTradingCommandSchema, sent[0]!.params)).toMatchObject({ amountWei: "500000000000000000", maxFeeWei: "21000000000000", chainId: 56n });
+  // The decided request reads the treasury once more: the funding is PENDING, no second one is offered.
+  await expect(page.getByTestId("bsc-wallet-fund-last")).toHaveAttribute("data-status", "Pending");
+  await expect(page.getByTestId("bsc-wallet-fund-review")).toBeDisabled();
+  await expect(page.getByTestId("bsc-wallet-fund-locked")).toContainText("the chain decides first, nothing is sent twice");
+  expect(asked.filter(a => a === "treasury")).toHaveLength(2);
+  // A payout to the saved, confirmed address; the profit transfer's open UNKNOWN does not block it.
+  await page.getByTestId("bsc-wallet-send-amount").fill("0.25");
+  await page.getByTestId("bsc-wallet-send-review").click();
+  await page.getByTestId("bsc-wallet-send-dialog-confirm").click();
+  await expect(page.getByTestId("bsc-wallet-send-receipt")).toContainText("outcome=APPLIED bsc.wallet.payout");
+  expect(sent[1]?.resourceId).toBe("d1");
+  expect(sent[1]?.expected?.version).toEqual({ case: "walletPolicyVersion", value: 7n });
+  // One treasury read per decided request, none while it is being sent.
+  await expect.poll(() => asked.filter(a => a === "treasury").length).toBe(3);
+  expect(fromBinary(WalletPayoutCommandSchema, sent[1]!.params)).toMatchObject({ destinationId: "d1", destinationAddress: `0x${"82".repeat(20)}`, chainId: 56n, amountWei: "250000000000000000" });
+  // Policy A at its own version, exact.
+  await page.getByTestId("bsc-wallet-policy-a-threshold").fill("0.2");
+  await expect(page.getByTestId("bsc-wallet-policy-a-check")).toHaveText(`Exact: threshold 200000000000000000 wei · 100 % · keeps ${U256_MAX} + 0 wei`);
+  await page.getByTestId("bsc-wallet-policy-a-save").click();
+  await page.getByTestId("bsc-wallet-policy-a-dialog-confirm").click();
+  await expect(page.getByTestId("bsc-wallet-policy-a-receipt")).toContainText("outcome=APPLIED bsc.wallet.profit_policy.set");
+  expect(sent[2]?.expected?.version).toEqual({ case: "walletPolicyVersion", value: 11n });
+  expect(fromBinary(ProfitTransferPolicySetCommandSchema, sent[2]!.params)).toMatchObject({ enabled: true, thresholdRealizedNetProfitWei: "200000000000000000", amount: { amount: { case: "shareBps", value: 10000 } } });
+  // Policy B, independent, at its own version 1.
+  await page.getByTestId("bsc-wallet-policy-b-amount").fill("0.3");
+  await page.getByTestId("bsc-wallet-policy-b-save").click();
+  await page.getByTestId("bsc-wallet-policy-b-dialog-confirm").click();
+  await expect(page.getByTestId("bsc-wallet-policy-b-receipt")).toContainText("outcome=APPLIED bsc.wallet.payout_policy.set");
+  expect(sent[3]?.expected?.version).toEqual({ case: "walletPolicyVersion", value: 1n });
+  expect(fromBinary(MainPayoutPolicySetCommandSchema, sent[3]!.params)).toMatchObject({ enabled: false, destinationId: "d1", destinationAddress: `0x${"82".repeat(20)}`, amount: { amount: { case: "fixedWei", value: "300000000000000000" } } });
+  // Another session moves policy A under the open edit: the edit is refused until Reset (no CAS bypass).
+  versionA = 12n;
+  await page.getByTestId("bsc-wallet-refresh").click();
+  await expect(page.getByTestId("bsc-wallet-policy-a-locked")).toContainText("The stored policy changed (v11 → v12)");
+  await expect(page.getByTestId("bsc-wallet-policy-a-save")).toBeDisabled();
+  await page.getByTestId("bsc-wallet-policy-a-reset").click();
+  await expect(page.getByTestId("bsc-wallet-policy-a-threshold")).toHaveValue("0.1");
+  // A draft lives in this view only: a reload shows the stored policy.
+  await page.getByTestId("bsc-wallet-policy-b-amount").fill("0.4");
+  await page.reload();
+  await area(page, "Wallets");
+  await expect(page.getByTestId("bsc-wallet-policy-b-amount")).toHaveValue("0");
+  expect(sent).toHaveLength(4);
+  expect(errors).toEqual([]);
 });

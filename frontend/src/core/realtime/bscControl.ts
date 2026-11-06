@@ -255,6 +255,28 @@ export async function liveDecisionCommand(origin: string, d: LiveDecision): Prom
 export async function strategySettingCommand(origin: string, id: string, value: string, generation: bigint): Promise<void> {
   await ownerSend(origin, "bsc.strategy.set", `${id}:${value}`, new Uint8Array(), { case: "profileVersion" as const, value: generation }, `${id} ${value}`);
 }
+// V8 Wallets (BSC-V8-15/16, FE-V8-15/16): the four money paths and the two policies at the native
+// treasury owner. Prepared: the gateway registers none of these actions yet, and the Wallets tab
+// offers them only while that owner answers the treasury query. The CAS is the shown
+// treasury_version (destination, funding, payout) or the policy's own version (A, B). Its own state,
+// apart from the owner controls: a decided request (any phase) releases it, since the re-read
+// treasury then shows the transfer and its open state locks that path; only a lost handoff
+// (UNKNOWN) stays locked until the treasury shows the request (`releaseWalletRequest`).
+export type WalletAction = "bsc.wallet.destination.set" | "bsc.wallet.fund_trading" | "bsc.wallet.payout" | "bsc.wallet.profit_policy.set" | "bsc.wallet.payout_policy.set";
+export const useWalletControl = create<SourceControlState>(() => ({ busy: false, receipt: null }));
+export async function walletCommand(origin: string, action: WalletAction, resourceId: string, params: Uint8Array, version: bigint, detail: string): Promise<void> {
+  if (useWalletControl.getState().busy) return;
+  const requestId = crypto.randomUUID();
+  useWalletControl.setState({ busy: true, receipt: { id: requestId, phase: "SENDING", detail, origin } });
+  const o = await send({ requestId, action, resourceId, params, expected: { version: { case: "walletPolicyVersion" as const, value: version } } }, true);
+  const phase = o.kind === "DECIDED" ? CommandPhase[o.phase] ?? "UNKNOWN" : o.kind;
+  useWalletControl.setState({ busy: o.kind === "UNKNOWN", receipt: { id: requestId, phase, detail: o.detail, origin } });
+}
+/** The treasury shows the request of an UNKNOWN handoff: it arrived, the lock ends. */
+export function releaseWalletRequest(requestId: string): void {
+  const { busy, receipt } = useWalletControl.getState();
+  if (busy && receipt?.id === requestId && receipt.phase === "UNKNOWN") useWalletControl.setState({ busy: false });
+}
 async function ownerSend(origin: string, action: OwnerAction | "bsc.live.grant" | "bsc.strategy.set" | LiveDecision["action"], resourceId: string, params: Uint8Array,
   version: { case: "walletPolicyVersion" | "configVersion" | "profileVersion"; value: bigint }, detail: string): Promise<void> {
   if (useSourceControl.getState().busy) return;

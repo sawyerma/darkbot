@@ -5,20 +5,22 @@
 //! frontend/src/features/bsc/api/bsc-v8-golden.test.ts decodes the same bytes and re-encodes
 //! them byte for byte.
 use darkbot_gateway::proto::bsc::v1::{
-    bsc_query_request, bsc_query_response, Availability, BscQueryRequest, BscQueryResponse,
-    BscWatchState, ChainTxStatus, CreatorSellExit, CreatorSoldBeforeFill, DataQuality, Evidence,
-    ExitReason, ExitReasonSource, LiveStrategySelectCommand, OwnerProvenance, PerformanceMetric,
-    PerformancePoint, PerformanceScope, PerformanceSeries, RequalificationState,
+    bsc_query_request, bsc_query_response, policy_amount, Availability, BscQueryRequest,
+    BscQueryResponse, BscWatchState, ChainTxStatus, CreatorSellExit, CreatorSoldBeforeFill,
+    DataQuality, Evidence, ExitReason, ExitReasonSource, FiatQuote, LiveStrategySelectCommand,
+    MainPayoutPolicy, MainPayoutPolicySetCommand, OwnerProvenance, PerformanceMetric,
+    PerformancePoint, PerformanceScope, PerformanceSeries, PolicyAmount, PolicyUnit,
+    ProfitTransferPolicy, ProfitTransferPolicySetCommand, RequalificationState,
     SettingsApplyStatus, SourcedTime, StrategyCSettings, StrategyCSettingsSetAllCommand,
     StrategyCSettingsState, StrategyFeatureSpec, StrategyFilterRule, TimeSource, TradeCounts,
     TradeDetail, TradeHistoryPage, TradeHistoryQuery, TradePlacement, TradeRow, TradeSighting,
     TradeSort, TradeStatus, TradeTransaction, TrainingProfile, TrainingProfileStatus,
     TrainingProfiles, TrainingResult, TrainingRun, TrainingRunMode, TrainingRunPage,
     TrainingRunPlan, TrainingRunStartCommand, TrainingRunStatus, TrainingRunStopKind,
-    TransferStatus, WalletBalanceSnapshot, WalletDestination, WalletHistoryPage, WalletMovement,
-    WalletMovementKind, WalletRole, WalletSweepPolicy, WalletSweepPolicySetCommand,
-    WalletTransferRequest, WalletTransferState, WalletTreasuryState, WatchSubjectKind,
-    WatchSubjectState, WatchVerdict,
+    TransferStatus, WalletAccount, WalletBalanceSnapshot, WalletDestination,
+    WalletDestinationSetCommand, WalletFundTradingCommand, WalletHistoryPage, WalletMovement,
+    WalletMovementKind, WalletPayoutCommand, WalletRole, WalletTransferState, WalletTreasuryState,
+    WatchSubjectKind, WatchSubjectState, WatchVerdict,
 };
 use prost::Message;
 use std::{fs, path::PathBuf};
@@ -480,12 +482,16 @@ fn bsc_v8_contract_golden_bytes() {
         }
         .encode_to_vec(),
     );
-    let transfer = WalletTransferState {
-        request_id: "sweep-1".into(),
-        command_id: "cmd-1".into(),
+    const MAIN: &str = "0x4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d";
+    const EXTERNAL: &str = "0x8282828282828282828282828282828282828282";
+    let profit_transfer = WalletTransferState {
+        request_id: "auto-a-1".into(),
+        command_id: "intent-a-1".into(),
+        kind: WalletMovementKind::ProfitTransfer as i32,
         source_role: WalletRole::Buyer as i32,
         source_address: TOKEN.into(),
-        destination_address: "0x8282828282828282828282828282828282828282".into(),
+        destination_role: WalletRole::Main as i32,
+        destination_address: MAIN.into(),
         chain_id: 56,
         amount_wei: U256_MAX.into(),
         fee_wei: None,
@@ -496,6 +502,29 @@ fn bsc_v8_contract_golden_bytes() {
         created_unix_ms: 1,
         updated_unix_ms: u64::MAX,
         policy_version: Some(u64::MAX),
+        block_number: None,
+        trigger_id: "settle-7".into(),
+    };
+    let payout = WalletTransferState {
+        request_id: "auto-b-1".into(),
+        command_id: "intent-b-1".into(),
+        kind: WalletMovementKind::PayoutAuto as i32,
+        source_role: WalletRole::Main as i32,
+        source_address: MAIN.into(),
+        destination_role: WalletRole::External as i32,
+        destination_address: EXTERNAL.into(),
+        chain_id: 56,
+        amount_wei: "1".into(),
+        fee_wei: Some("0".into()),
+        nonce: Some(u64::MAX),
+        tx_hash: LOT.into(),
+        status: TransferStatus::Confirmed as i32,
+        failure_reason: String::new(),
+        created_unix_ms: 1,
+        updated_unix_ms: 2,
+        policy_version: Some(1),
+        block_number: Some(u64::MAX),
+        trigger_id: "balance-9".into(),
     };
     check(
         "wallet_history_page",
@@ -506,11 +535,11 @@ fn bsc_v8_contract_golden_bytes() {
             movements: vec![
                 WalletMovement {
                     movement_id: "m1".into(),
-                    role: WalletRole::Launcher as i32,
-                    wallet_address: TOKEN.into(),
+                    role: WalletRole::Main as i32,
+                    wallet_address: MAIN.into(),
                     chain_id: 56,
                     kind: WalletMovementKind::Deposit as i32,
-                    counterparty_address: "0x8282828282828282828282828282828282828282".into(),
+                    counterparty_address: EXTERNAL.into(),
                     counterparty_role: WalletRole::External as i32,
                     amount_wei: U256_MAX.into(),
                     fee_wei: "0".into(),
@@ -523,79 +552,173 @@ fn bsc_v8_contract_golden_bytes() {
                     lot: String::new(),
                     transfer_request_id: String::new(),
                     quality: DataQuality::Verified as i32,
+                    policy_version: None,
                 },
                 WalletMovement {
                     movement_id: "m2".into(),
                     role: WalletRole::Buyer as i32,
-                    kind: WalletMovementKind::Withdrawal as i32,
+                    kind: WalletMovementKind::ProfitTransfer as i32,
+                    counterparty_role: WalletRole::Main as i32,
                     amount_wei: format!("-{U256_MAX}"),
                     nonce: Some(u64::MAX),
                     status: ChainTxStatus::Unknown as i32,
-                    origin: "TRANSFER_OWNER".into(),
-                    transfer_request_id: "sweep-1".into(),
+                    origin: "TREASURY_OWNER".into(),
+                    transfer_request_id: "auto-a-1".into(),
                     quality: DataQuality::Unresolved as i32,
+                    policy_version: Some(u64::MAX),
                     ..WalletMovement::default()
                 },
             ],
             next_cursor: "w2".into(),
             has_more: true,
             deposited_wei: U256_MAX.into(),
-            withdrawn_wei: U256_MAX.into(),
+            paid_out_wei: "0".into(),
         }
         .encode_to_vec(),
     );
+    let snapshot = |role: WalletRole, address: &str, balance: &str| WalletBalanceSnapshot {
+        role: role as i32,
+        address: address.into(),
+        chain_id: 56,
+        balance_wei: balance.into(),
+        reserved_wei: None,
+        available_wei: Some("0".into()),
+        block_number: Some(u64::MAX),
+        observed: Some(SourcedTime {
+            unix_ms: Some(1_793_000_000_000),
+            source: TimeSource::LocalWall as i32,
+            block_number: Some(u64::MAX),
+        }),
+        source: "TREASURY_OWNER".into(),
+        quality: DataQuality::Stale as i32,
+    };
     check(
         "treasury_state",
         WalletTreasuryState {
             availability: Availability::Available as i32,
             unavailable_reason: String::new(),
             provenance: provenance("bsc wallet owner", DataQuality::Stale),
-            balances: vec![WalletBalanceSnapshot {
-                role: WalletRole::Buyer as i32,
-                address: TOKEN.into(),
-                chain_id: 56,
-                balance_wei: U256_MAX.into(),
-                reserved_wei: None,
-                available_wei: Some("0".into()),
-                block_number: Some(u64::MAX),
-                observed: Some(SourcedTime {
-                    unix_ms: Some(1_793_000_000_000),
-                    source: TimeSource::LocalWall as i32,
-                    block_number: Some(u64::MAX),
-                }),
-                source: "LIVE_PROBE".into(),
-                quality: DataQuality::Stale as i32,
-            }],
+            accounts: vec![
+                WalletAccount {
+                    role: WalletRole::Main as i32,
+                    address: MAIN.into(),
+                    chain_id: 56,
+                    balance: Some(snapshot(WalletRole::Main, MAIN, U256_MAX)),
+                    profit_received_wei: Some(U256_MAX.into()),
+                    other_capital_wei: Some("0".into()),
+                    next_nonce: Some(u64::MAX),
+                    owner_key: true,
+                    state: "READY".into(),
+                    ..WalletAccount::default()
+                },
+                WalletAccount {
+                    role: WalletRole::Buyer as i32,
+                    address: TOKEN.into(),
+                    chain_id: 56,
+                    balance: Some(snapshot(WalletRole::Buyer, TOKEN, "1")),
+                    capital_basis_wei: Some(U256_MAX.into()),
+                    realized_net_pnl_wei: Some(format!("-{U256_MAX}")),
+                    transferred_profit_wei: Some("0".into()),
+                    untransferred_profit_wei: Some("0".into()),
+                    next_nonce: None,
+                    owner_key: true,
+                    state: "LOCKED".into(),
+                    reason: "ECONOMIC_LIVE_DISABLED".into(),
+                    ..WalletAccount::default()
+                },
+                WalletAccount {
+                    role: WalletRole::Launcher as i32,
+                    state: "NOT_CONFIGURED".into(),
+                    ..WalletAccount::default()
+                },
+            ],
             destinations: vec![WalletDestination {
                 destination_id: "d1".into(),
                 label: "MetaMask".into(),
-                address: "0x8282828282828282828282828282828282828282".into(),
+                address: EXTERNAL.into(),
                 chain_id: 56,
                 confirmed: true,
                 created_unix_ms: 1,
             }],
-            sweep: Some(WalletSweepPolicy {
+            profit_policy: Some(ProfitTransferPolicy {
                 enabled: true,
-                source_role: WalletRole::Buyer as i32,
-                destination_id: "d1".into(),
-                destination_address: "0x8282828282828282828282828282828282828282".into(),
-                threshold_wei: U256_MAX.into(),
-                retain_wei: "250000000000000000".into(),
+                threshold_realized_net_profit_wei: "100000000000000000".into(),
+                amount: Some(PolicyAmount {
+                    amount: Some(policy_amount::Amount::ShareBps(10_000)),
+                }),
+                buyer_min_capital_wei: U256_MAX.into(),
+                buyer_reserve_wei: "0".into(),
                 policy_version: u64::MAX,
-                last_execution: Some(transfer.clone()),
-                request_id: "pol-1".into(),
+                settlement_cursor: "settle-7".into(),
+                request_id: "pol-a-1".into(),
+                last_transfer: Some(profit_transfer.clone()),
+                untransferred_profit_wei: Some("0".into()),
+                to_threshold_wei: None,
+                effective_version: Some(u64::MAX),
+                block_reason: String::new(),
             }),
-            transfers: vec![transfer],
-            wallet_policy_version: u64::MAX,
+            payout_policy: Some(MainPayoutPolicy {
+                enabled: false,
+                destination_id: "d1".into(),
+                destination_address: EXTERNAL.into(),
+                unit: PolicyUnit::Bnb as i32,
+                threshold_available_main_wei: U256_MAX.into(),
+                threshold_eur: None,
+                amount: Some(PolicyAmount {
+                    amount: Some(policy_amount::Amount::FixedWei("0".into())),
+                }),
+                retain_wei: "250000000000000000".into(),
+                policy_version: 1,
+                trigger_cursor: "balance-9".into(),
+                request_id: "pol-b-1".into(),
+                last_payout: Some(payout.clone()),
+                available_main_wei: None,
+                effective_version: Some(0),
+                block_reason: "DISABLED".into(),
+            }),
+            transfers: vec![profit_transfer, payout],
+            treasury_version: u64::MAX,
+            eur_quote: Some(FiatQuote {
+                currency: "EUR".into(),
+                fiat_per_bnb: "612.40".into(),
+                observed: Some(SourcedTime {
+                    unix_ms: Some(1_793_000_000_000),
+                    source: TimeSource::LocalWall as i32,
+                    block_number: None,
+                }),
+                source: "NATIVE_PRICE_OWNER".into(),
+                quality: DataQuality::Stale as i32,
+                max_age_ms: 60_000,
+            }),
+            transfer_fee_estimate_wei: Some("21000000000000".into()),
         }
         .encode_to_vec(),
     );
     check(
-        "wallet_transfer_request",
-        WalletTransferRequest {
-            source_role: WalletRole::Launcher as i32,
+        "destination_set_command",
+        WalletDestinationSetCommand {
+            label: "MetaMask".into(),
+            address: EXTERNAL.into(),
+            chain_id: 56,
+            remove: false,
+            confirmed: true,
+        }
+        .encode_to_vec(),
+    );
+    check(
+        "fund_trading_command",
+        WalletFundTradingCommand {
+            amount_wei: U256_MAX.into(),
+            max_fee_wei: "0".into(),
+            chain_id: 56,
+        }
+        .encode_to_vec(),
+    );
+    check(
+        "payout_command",
+        WalletPayoutCommand {
             destination_id: "d1".into(),
-            destination_address: "0x8282828282828282828282828282828282828282".into(),
+            destination_address: EXTERNAL.into(),
             chain_id: 56,
             amount_wei: "1".into(),
             max_fee_wei: U256_MAX.into(),
@@ -603,13 +726,31 @@ fn bsc_v8_contract_golden_bytes() {
         .encode_to_vec(),
     );
     check(
-        "sweep_set_command",
-        WalletSweepPolicySetCommand {
+        "profit_policy_set_command",
+        ProfitTransferPolicySetCommand {
+            enabled: true,
+            threshold_realized_net_profit_wei: "0".into(),
+            amount: Some(PolicyAmount {
+                amount: Some(policy_amount::Amount::ShareBps(1)),
+            }),
+            buyer_min_capital_wei: U256_MAX.into(),
+            buyer_reserve_wei: "1".into(),
+        }
+        .encode_to_vec(),
+    );
+    check(
+        "payout_policy_set_command",
+        MainPayoutPolicySetCommand {
             enabled: false,
-            source_role: WalletRole::Buyer as i32,
             destination_id: "d1".into(),
-            threshold_wei: "1000000000000000000".into(),
-            retain_wei: "0".into(),
+            unit: PolicyUnit::Eur as i32,
+            threshold_available_main_wei: String::new(),
+            threshold_eur: Some("1000.00".into()),
+            amount: Some(PolicyAmount {
+                amount: Some(policy_amount::Amount::FixedEur("0.01".into())),
+            }),
+            retain_wei: U256_MAX.into(),
+            destination_address: EXTERNAL.into(),
         }
         .encode_to_vec(),
     );

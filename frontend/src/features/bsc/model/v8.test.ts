@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { bnbToWei, changes, formOf, msToSeconds, parseFilters, secondsToMs, serializeFilters, weiToBnb, FILTER_KEYS } from "./strategyForm";
-import { counts, filterTrades, nsToMs, safeColumns, tradeLabel, tradeViews } from "./trades";
+import { blockClock, counts, filterTrades, nsToMs, safeColumns, tradeLabel, tradeViews } from "./trades";
 import { share, usToMs, detection, CENSUS_SCHEMA } from "./monitor";
 import { capital, pendingTransactions, tradingState } from "./overview";
 import { healthView } from "./health";
@@ -103,6 +103,9 @@ describe("V8 trades: labels from the ledger state and the native PnL sign only",
     expect(safeColumns("x")).toEqual(["token"]);
     expect(nsToMs(420_000n)).toBe("0.42 ms");
     expect(nsToMs(undefined)).toBe("—");
+    // A block time beyond the JS date range is no time, never a thrown RangeError.
+    expect(blockClock(18446744073709551615n)).toBeNull();
+    expect(blockClock(1793000000000n)).toEqual({ time: "07:33:20", date: "2026-10-26" });
   });
 });
 

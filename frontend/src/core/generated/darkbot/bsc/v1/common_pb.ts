@@ -497,7 +497,7 @@ export enum PerformanceScope {
   LIVE = 1,
 
   /**
-   * One BSC wallet (scope_id = its role).
+   * One BSC wallet (scope_id = its WalletRole name, e.g. WALLET_ROLE_MAIN).
    *
    * @generated from enum value: PERFORMANCE_SCOPE_WALLET = 2;
    */
