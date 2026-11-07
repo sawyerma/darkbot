@@ -31,6 +31,12 @@ pub struct Limits {
     /// past it the outcome is unknown and the command stays PENDING_RECONCILE. The browser waits
     /// longer (frontend `COMMAND_TIMEOUT_MS`), so this answer comes first.
     pub controller_timeout_ms: u64,
+    /// BSC-V8: longest wait for one `bsc-status-reporter --query` answer of
+    /// `POST /api/v1/bsc/query` (read-only; no answer within it: unavailable).
+    pub bsc_query_timeout_ms: u64,
+    /// BSC-V8: the largest `bsc-status-reporter --query` answer taken (one bounded page); a
+    /// larger one is unavailable, never truncated.
+    pub bsc_query_max_answer_bytes: usize,
 }
 
 /// A request stamped within the window and forgotten no earlier than this after its receipt can
@@ -60,6 +66,8 @@ impl Default for Limits {
             command_ledger_records: 1024,
             launchd_query_timeout_ms: 2_000,
             controller_timeout_ms: 50_000,
+            bsc_query_timeout_ms: 5_000,
+            bsc_query_max_answer_bytes: 1_048_576,
         }
     }
 }
@@ -96,11 +104,21 @@ impl Limits {
     fn with_control_env(mut self) -> Result<Self, ConfigError> {
         const QUERY: &str = "DARKBOT_GATEWAY_LAUNCHD_QUERY_TIMEOUT_MS";
         const CONTROLLER: &str = "DARKBOT_GATEWAY_CONTROLLER_TIMEOUT_MS";
+        const BSC_QUERY: &str = "DARKBOT_GATEWAY_BSC_QUERY_TIMEOUT_MS";
+        const BSC_ANSWER: &str = "DARKBOT_GATEWAY_BSC_QUERY_MAX_ANSWER_BYTES";
         self.launchd_query_timeout_ms = parse_u64(QUERY, self.launchd_query_timeout_ms)?;
         self.controller_timeout_ms = parse_u64(CONTROLLER, self.controller_timeout_ms)?;
+        self.bsc_query_timeout_ms = parse_u64(BSC_QUERY, self.bsc_query_timeout_ms)?;
+        self.bsc_query_max_answer_bytes = usize::try_from(parse_u64(
+            BSC_ANSWER,
+            self.bsc_query_max_answer_bytes as u64,
+        )?)
+        .unwrap_or(0);
         for (key, value) in [
             (QUERY, self.launchd_query_timeout_ms),
             (CONTROLLER, self.controller_timeout_ms),
+            (BSC_QUERY, self.bsc_query_timeout_ms),
+            (BSC_ANSWER, self.bsc_query_max_answer_bytes as u64),
         ] {
             if value == 0 {
                 return Err(ConfigError::Invalid {
@@ -364,6 +382,26 @@ mod tests {
         assert!(Limits::default().with_control_env().is_err());
         std::env::remove_var("DARKBOT_GATEWAY_LAUNCHD_QUERY_TIMEOUT_MS");
         std::env::remove_var("DARKBOT_GATEWAY_CONTROLLER_TIMEOUT_MS");
+        // BSC-V8: the query's wait and answer bound alike.
+        assert_eq!(
+            (l.bsc_query_timeout_ms, l.bsc_query_max_answer_bytes),
+            (5_000, 1_048_576)
+        );
+        std::env::set_var("DARKBOT_GATEWAY_BSC_QUERY_TIMEOUT_MS", "900");
+        std::env::set_var("DARKBOT_GATEWAY_BSC_QUERY_MAX_ANSWER_BYTES", "2048");
+        let o = Limits::default().with_control_env().unwrap();
+        assert_eq!(
+            (o.bsc_query_timeout_ms, o.bsc_query_max_answer_bytes),
+            (900, 2048)
+        );
+        for key in [
+            "DARKBOT_GATEWAY_BSC_QUERY_TIMEOUT_MS",
+            "DARKBOT_GATEWAY_BSC_QUERY_MAX_ANSWER_BYTES",
+        ] {
+            std::env::set_var(key, "0");
+            assert!(Limits::default().with_control_env().is_err(), "{key}=0");
+            std::env::remove_var(key);
+        }
     }
     #[test]
     fn a_non_loopback_bind_needs_the_explicit_opt_in() {

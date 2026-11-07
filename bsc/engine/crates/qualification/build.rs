@@ -113,9 +113,26 @@ fn locked(lock: &str, name: &str) -> String {
 
 #[cfg(feature = "status-reporter")]
 fn compile_status_protocol() -> Result<(), Box<dyn std::error::Error>> {
-    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../../protocol/schemas");
-    let files = ["darkbot/control/v1/topics.proto", "darkbot/control/v1/stream.proto", "darkbot/control/v1/engine_feed.proto", "darkbot/bsc/v1/status.proto"];
-    for file in files { println!("cargo:rerun-if-changed={}", root.join(file).display()); }
-    prost_build::Config::new().compile_fds(protox::compile(files.iter().map(|f|root.join(f)), [root.as_path()])?)?;
+    let root =
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../../protocol/schemas");
+    let files = [
+        "darkbot/control/v1/topics.proto",
+        "darkbot/control/v1/stream.proto",
+        "darkbot/control/v1/engine_feed.proto",
+        "darkbot/bsc/v1/status.proto",
+        "darkbot/bsc/v1/common.proto",
+        "darkbot/bsc/v1/training.proto",
+        "darkbot/bsc/v1/history.proto",
+        "darkbot/bsc/v1/wallet.proto",
+        "darkbot/bsc/v1/watch.proto",
+        "darkbot/bsc/v1/query.proto",
+    ];
+    for file in files {
+        println!("cargo:rerun-if-changed={}", root.join(file).display());
+    }
+    prost_build::Config::new().compile_fds(protox::compile(
+        files.iter().map(|f| root.join(f)),
+        [root.as_path()],
+    )?)?;
     Ok(())
 }

@@ -181,6 +181,27 @@ pub fn gas_limits_cover(
     Ok(())
 }
 
+/// BSC-V8 (settings query): each bounded settable Strategy C key's unit and
+/// inclusive bounds, as the parser applies them (one table: the parser takes
+/// its bounds here, the settings query shows them).
+pub const STRATEGY_SETTING_BOUNDS: [(&str, &str, u64, u64); 5] = [
+    ("BSC_STRATEGY_C_OBSERVATION_MS", "ms", 0, 3_600_000),
+    ("BSC_STRATEGY_C_FIRST_BUYER_WINDOW", "count", 1, 100),
+    ("BSC_STRATEGY_C_HOLD_MS", "ms", 1, 86_400_000),
+    ("BSC_STRATEGY_C_MAX_OPEN", "count", 1, 1_000),
+    ("BSC_STRATEGY_C_INPUT_WEI", "wei", 1, u64::MAX),
+];
+
+/// The bounds of `key` in [`STRATEGY_SETTING_BOUNDS`] (review: a key
+/// without them is an error, never a silent range).
+fn strategy_bounds(key: &str) -> Result<(u64, u64), String> {
+    STRATEGY_SETTING_BOUNDS
+        .iter()
+        .find(|(k, ..)| *k == key)
+        .map(|(_, _, lo, hi)| (*lo, *hi))
+        .ok_or_else(|| format!("{key}: no bounds"))
+}
+
 /// The validated runtime configuration (`bsc/config/ingress.public.env`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RuntimeConfig {
@@ -1143,10 +1164,15 @@ impl RuntimeConfig {
                 };
                 StrategyConfig {
                     engine: darkbot_bsc_trading::strategy::engine::Config {
-                        observation_ms: take("BSC_STRATEGY_C_OBSERVATION_MS", 0, 3_600_000)?,
+                        observation_ms: {
+                            let (lo, hi) = strategy_bounds("BSC_STRATEGY_C_OBSERVATION_MS")?;
+                            take("BSC_STRATEGY_C_OBSERVATION_MS", lo, hi)?
+                        },
                         ratio_places: places,
-                        first_buyer_window: take("BSC_STRATEGY_C_FIRST_BUYER_WINDOW", 1, 100)?
-                            as usize,
+                        first_buyer_window: {
+                            let (lo, hi) = strategy_bounds("BSC_STRATEGY_C_FIRST_BUYER_WINDOW")?;
+                            take("BSC_STRATEGY_C_FIRST_BUYER_WINDOW", lo, hi)?
+                        } as usize,
                         rules: parse_rules(&strategy_filters, places)?,
                         target_net_multiple: multiple(
                             "BSC_STRATEGY_C_TARGET_NET_MULTIPLE",
@@ -1156,13 +1182,18 @@ impl RuntimeConfig {
                             "BSC_STRATEGY_C_STOP_NET_MULTIPLE",
                             &strategy_stop,
                         )?,
-                        hold_ms: take("BSC_STRATEGY_C_HOLD_MS", 1, 86_400_000)?,
-                        max_open: take("BSC_STRATEGY_C_MAX_OPEN", 1, 1_000)? as usize,
-                        input_wei: alloy_primitives::U256::from(take(
-                            "BSC_STRATEGY_C_INPUT_WEI",
-                            1,
-                            u64::MAX,
-                        )?),
+                        hold_ms: {
+                            let (lo, hi) = strategy_bounds("BSC_STRATEGY_C_HOLD_MS")?;
+                            take("BSC_STRATEGY_C_HOLD_MS", lo, hi)?
+                        },
+                        max_open: {
+                            let (lo, hi) = strategy_bounds("BSC_STRATEGY_C_MAX_OPEN")?;
+                            take("BSC_STRATEGY_C_MAX_OPEN", lo, hi)?
+                        } as usize,
+                        input_wei: alloy_primitives::U256::from({
+                            let (lo, hi) = strategy_bounds("BSC_STRATEGY_C_INPUT_WEI")?;
+                            take("BSC_STRATEGY_C_INPUT_WEI", lo, hi)?
+                        }),
                         fill_delay_blocks: take("BSC_STRATEGY_C_FILL_DELAY_BLOCKS", 1, 100)?,
                         creator_sold_before_fill: crate::runtime_strategy::creator_sold_policy(
                             &strategy_creator,

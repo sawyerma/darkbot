@@ -58,3 +58,8 @@ required-features = ["status-reporter"]
 [[test]]
 name = "readiness_job"
 required-features = ["status-reporter"]
+
+# BSC-V8: the reporter's read-only `--query` arm, end to end.
+[[test]]
+name = "bsc_query"
+required-features = ["status-reporter"]

@@ -121,6 +121,16 @@ fn readiness(
                 .write_all(&readiness_job::status(run, label, available).encode_to_vec())?;
             Ok(Some(0))
         }
+        // BSC-V8: one bounded read-only query (`POST /api/v1/bsc/query`): the
+        // request on stdin, the answer on stdout; never a write.
+        ["--query"] => {
+            use std::io::{Read, Write};
+            let mut request = Vec::new();
+            std::io::stdin().lock().read_to_end(&mut request)?;
+            let answer = darkbot_bsc_qualification::status::query::answer(&request, root, run);
+            std::io::stdout().lock().write_all(&answer)?;
+            Ok(Some(0))
+        }
         // A malformed readiness command fails; it never starts the socket server.
         [first, ..] if first.starts_with("--readiness-") => {
             Err(format!("usage: {first}: see bsc-control.sh").into())

@@ -1423,6 +1423,10 @@ pub struct Control {
     launchd_query: Duration,
     /// `Limits::controller_timeout_ms`: one `darkbotctl` dispatch.
     controller: Duration,
+    /// `Limits::bsc_query_timeout_ms`: one `bsc-status-reporter --query` answer (BSC-V8).
+    bsc_query: Duration,
+    /// `Limits::bsc_query_max_answer_bytes`: the largest answer taken (BSC-V8).
+    bsc_query_answer: usize,
 }
 #[derive(Clone, Serialize)]
 pub struct ProcessSnapshot {
@@ -1582,6 +1586,8 @@ impl Control {
             retention: Duration::from_millis(limits.command_retention_ms),
             launchd_query: Duration::from_millis(limits.launchd_query_timeout_ms),
             controller: Duration::from_millis(limits.controller_timeout_ms),
+            bsc_query: Duration::from_millis(limits.bsc_query_timeout_ms),
+            bsc_query_answer: limits.bsc_query_max_answer_bytes,
         }
     }
     pub async fn observe(&self) -> ProcessSnapshot {
@@ -1651,6 +1657,50 @@ impl Control {
         snapshot.reason = format!("launchd: {}", p.label);
         observed_now(snapshot)
     }
+    /// BSC-V8: one read-only query to the deployed reporter (`bsc-status-reporter --query`, the
+    /// request on stdin), bounded by `Limits::bsc_query_timeout_ms` and
+    /// `Limits::bsc_query_max_answer_bytes`; its answer only if it decodes as a `BscQueryResponse`
+    /// (none: unavailable).
+    pub async fn bsc_query(&self, request: &[u8]) -> Option<Vec<u8>> {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let p = self.paths.as_ref()?;
+        let current = p.ctl.parent()?;
+        let mut child = Command::new(current.join("bsc-status-reporter"))
+            .env_clear()
+            .env("PATH", "/usr/bin:/bin")
+            .env("DARKBOT_BSC_ROOT", current.join("bsc-root"))
+            .env("DARKBOT_RUNDIR", &p.rundir)
+            .arg("--query")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .kill_on_drop(true)
+            .spawn()
+            .ok()?;
+        let mut stdin = child.stdin.take()?;
+        let stdout = child.stdout.take()?;
+        let cap = self.bsc_query_answer;
+        let answered = tokio::time::timeout(self.bsc_query, async move {
+            stdin.write_all(request).await.ok()?;
+            drop(stdin);
+            // One byte past the bound tells a larger answer (refused; the reporter is killed).
+            let mut out = Vec::new();
+            stdout
+                .take(cap as u64 + 1)
+                .read_to_end(&mut out)
+                .await
+                .ok()?;
+            if out.len() > cap {
+                return None;
+            }
+            child.wait().await.ok()?.success().then_some(out)
+        })
+        .await
+        .ok()??;
+        crate::proto::bsc::v1::BscQueryResponse::decode(answered.as_slice()).ok()?;
+        Some(answered)
+    }
+
     pub async fn observe_project(&self, project: i32) -> ProcessSnapshot {
         if project != ProjectId::Bsc as i32 {
             return self.observe().await;
@@ -2709,6 +2759,32 @@ pub async fn process(State(app): State<Arc<AppState>>, h: HeaderMap) -> Response
     )
         .into_response()
 }
+/// BSC-V8: `POST /api/v1/bsc/query`: one bounded read-only query (a `BscQueryRequest`, protobuf),
+/// answered by the deployed reporter from the native owners' files; no polling, never a write.
+/// A POST like a command: the session, the allowed origin and its CSRF token (review M4).
+pub async fn bsc_query(State(app): State<Arc<AppState>>, h: HeaderMap, body: Bytes) -> Response {
+    if let Err(s) = authorized(&app, &h, true) {
+        return s.into_response();
+    }
+    if h.get(CONTENT_TYPE).and_then(|v| v.to_str().ok()) != Some("application/x-protobuf") {
+        return StatusCode::UNSUPPORTED_MEDIA_TYPE.into_response();
+    }
+    if crate::proto::bsc::v1::BscQueryRequest::decode(body.clone()).is_err() {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
+    match app.control.bsc_query(&body).await {
+        Some(answer) => (
+            [
+                (CONTENT_TYPE, "application/x-protobuf"),
+                (axum::http::header::CACHE_CONTROL, "no-store"),
+            ],
+            answer,
+        )
+            .into_response(),
+        None => StatusCode::SERVICE_UNAVAILABLE.into_response(),
+    }
+}
+
 pub async fn bsc_process(State(app): State<Arc<AppState>>, h: HeaderMap) -> Response {
     if let Err(s) = authorized(&app, &h, false) {
         return s.into_response();
@@ -6530,6 +6606,89 @@ mod tests {
             "{}",
             closed.detail
         );
+    }
+    /// BSC-V8: a BSC query is the deployed reporter's `--query` answer to the request on its stdin,
+    /// within `Limits::bsc_query_timeout_ms`; output that is no `BscQueryResponse`, a reporter
+    /// slower than the bound or none at all is unavailable.
+    #[tokio::test]
+    async fn a_bsc_query_is_the_reporters_answer_within_its_bound() {
+        use crate::proto::bsc::v1::{
+            bsc_query_request::Query, Availability, BscQueryRequest, BscQueryResponse,
+            StrategyCSettingsQuery,
+        };
+        let dir = std::env::temp_dir().join(format!("gw-query-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("run")).unwrap();
+        let control = Control::new(
+            Some(Paths {
+                ctl: dir.join("darkbotctl"),
+                rundir: dir.join("run"),
+                logdir: dir.clone(),
+                label: "test.capture".into(),
+                launchctl: dir.join("launchctl"),
+            }),
+            &Limits {
+                bsc_query_timeout_ms: 300,
+                bsc_query_max_answer_bytes: 64,
+                ..limits()
+            },
+        );
+        let request = BscQueryRequest {
+            request_id: "q1".into(),
+            query: Some(Query::StrategySettings(StrategyCSettingsQuery {
+                include_features: true,
+            })),
+        }
+        .encode_to_vec();
+        let answer = BscQueryResponse {
+            request_id: "q1".into(),
+            availability: Availability::Available as i32,
+            ..Default::default()
+        }
+        .encode_to_vec();
+        fs::write(dir.join("answer.bin"), &answer).unwrap();
+        let reporter = dir.join("bsc-status-reporter");
+        assert_eq!(control.bsc_query(&request).await, None, "no reporter");
+        executable(
+            &reporter,
+            &format!(
+                "#!/bin/sh\n[ \"$*\" = --query ] || exit 9\n[ \"$DARKBOT_RUNDIR\" = '{}' ] || exit 8\n[ \"$DARKBOT_BSC_ROOT\" = '{}' ] || exit 7\n[ -z \"$HOME\" ] || exit 6\ncat > '{}'\ncat '{}'\n",
+                dir.join("run").display(),
+                dir.join("bsc-root").display(),
+                dir.join("asked.bin").display(),
+                dir.join("answer.bin").display()
+            ),
+        );
+        assert_eq!(control.bsc_query(&request).await, Some(answer));
+        assert_eq!(fs::read(dir.join("asked.bin")).unwrap(), request);
+        executable(
+            &reporter,
+            "#!/bin/sh\ncat > /dev/null\nprintf '\\377\\377'\n",
+        );
+        assert_eq!(
+            control.bsc_query(&request).await,
+            None,
+            "no BscQueryResponse"
+        );
+        // Past the answer bound: refused, never truncated.
+        executable(
+            &reporter,
+            "#!/bin/sh\ncat > /dev/null\nhead -c 65 /dev/zero\n",
+        );
+        assert_eq!(
+            control.bsc_query(&request).await,
+            None,
+            "larger than its bound"
+        );
+        executable(&reporter, "#!/bin/sh\ncat > /dev/null\nsleep 2\n");
+        let started = std::time::Instant::now();
+        assert_eq!(
+            control.bsc_query(&request).await,
+            None,
+            "slower than its bound"
+        );
+        assert!(started.elapsed() < Duration::from_millis(1_500));
+        fs::remove_dir_all(dir).unwrap();
     }
     /// Audit E 3.7: the launchd query and the controller dispatch wait exactly the configured
     /// `Limits`, no literal: a launchd stand-in slower than its bound reads UNKNOWN (never its

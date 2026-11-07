@@ -281,6 +281,21 @@ pub fn effective_values(text: &str, settings: &Settings) -> Vec<(&'static str, S
         .collect()
 }
 
+/// BSC-V8 (settings query, training): the canonical text of a settings
+/// basis, `KEY=value\n` for every key of `values` in [`KEYS`] order (the
+/// values the native parser takes, as their text: "2" and "2.0" are two
+/// bases), and its SHA-256: what "the same configuration" means across
+/// settings, profiles and runs.
+pub fn canonical_text(values: &[(&'static str, String)]) -> String {
+    let mut sorted: Vec<&(&'static str, String)> = values.iter().collect();
+    sorted.sort_by_key(|(k, _)| order(k));
+    sorted.iter().map(|(k, v)| format!("{k}={v}\n")).collect()
+}
+
+pub fn config_sha256(values: &[(&'static str, String)]) -> [u8; 32] {
+    darkbot_bsc_record::sha256(canonical_text(values).as_bytes())
+}
+
 /// The outcome of one setting request.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Receipt {

@@ -135,10 +135,10 @@ Status je Punkt: IMPLEMENTED (nativer Code) · TESTED (Unit/Integration) · INTE
 | V8-01 Profile | OFFEN | nativer Profil-Katalog fehlt |
 | V8-02 Training ausführen | OFFEN | Run-Owner fehlt |
 | V8-03 Trainingsergebnisse | OFFEN | Ergebnisprojektion fehlt |
-| V8-04 „Save all“ | IMPLEMENTED, TESTED | `Owner::set_all` (eine Generation, ein Receipt v2, CAS, Gesamtvalidierung, Recovery), `bsc_runtime strategy set-all`, `darkbotctl bsc strategy set-all`, Gateway `bsc.strategy.set_all`; INTEGRATED offen: Settings-Zustand über `/api/v1/bsc/query` (nächstes Paket) · Commit mit dieser Zeile |
+| V8-04 „Save all“ | IMPLEMENTED, TESTED | `Owner::set_all` (eine Generation, ein Receipt v2, CAS, Gesamtvalidierung, Recovery), `bsc_runtime strategy set-all`, `darkbotctl bsc strategy set-all`, Gateway `bsc.strategy.set_all` (`102e2444`); Settings-Zustand (gespeichert/effektiv/laufend mit Hash, Parser-Grenzen, Features) über `POST /api/v1/bsc/query` (Commit mit dieser Zeile); INTEGRATED offen: Frontend liest ihn |
 | V8-05 First-Buyer-Window | IMPLEMENTED, TESTED | 10. Schlüssel `BSC_STRATEGY_C_FIRST_BUYER_WINDOW` (Parser-Grenzen 1–100), Status-Zeile, `bsc.strategy.set`/`set_all` · Commit mit dieser Zeile |
 | V8-06 Team-Sell | NOT_IMPLEMENTED | kein natives Verkaufssignal/Wallet-Identität (Plan: sonst NOT_IMPLEMENTED) |
-| V8-07…10 Historie/Query | OFFEN | Trade-Projektor, Query-Route fehlen |
+| V8-07…10 Historie/Query | OFFEN | Query-Route steht (Sitzung+CSRF, Protobuf, Zeit-/Antwortgrenze aus Gateway-Limits; Reporter `--query` read-only); Trade-Projektor fehlt, Historien-Abfragen NOT_IMPLEMENTED mit Owner |
 | V8-11 Health-Kennzahlen | OFFEN | |
 | V8-12 LIVE-Status-Projektion | OFFEN | |
 | V8-13…17 Wallets/Treasury | OFFEN | Main-Wallet, vier Geldwege, zwei Policies (PHASENPLAN C.1); echte Transfers EXTERNAL_BLOCKED ohne Freigabe |

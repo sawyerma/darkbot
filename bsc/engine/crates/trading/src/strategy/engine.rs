@@ -113,6 +113,14 @@ pub struct ExitTerms {
 }
 
 impl ExitTerms {
+    /// BSC-V8 (settings query): the extreme multiples [`ExitTerms::validate`]
+    /// accepts at `ratio_places`: the smallest target (1x plus one unit) and
+    /// the largest stop (1x minus one unit).
+    pub fn accepted_extremes(ratio_places: u32) -> Option<(i128, i128)> {
+        let one = super::fixed::scale(ratio_places)?;
+        Some((one + 1, one - 1))
+    }
+
     /// The rule of [`Config::validate`]: `0 <= stop < 1x < target`.
     pub fn validate(&self) -> Result<(), ConfigError> {
         let one = super::fixed::scale(self.ratio_places).ok_or(ConfigError::Places)?;

@@ -5,11 +5,14 @@ pub mod gui_readiness;
 pub mod live;
 pub mod projection;
 pub mod publisher;
+pub mod query;
 pub mod readiness_job;
 pub mod wire {
     pub mod control {
         include!(concat!(env!("OUT_DIR"), "/darkbot.control.v1.rs"));
     }
+    // Generated: the V8 query response's oneof holds whole pages (BSC-V8).
+    #[allow(clippy::large_enum_variant)]
     pub mod bsc {
         include!(concat!(env!("OUT_DIR"), "/darkbot.bsc.v1.rs"));
     }

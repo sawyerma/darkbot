@@ -17,7 +17,7 @@ use axum::{
     },
     middleware::{self, Next},
     response::{IntoResponse, Response},
-    routing::get,
+    routing::{get, post},
     Router,
 };
 use std::{
@@ -60,6 +60,7 @@ pub fn router(state: Arc<AppState>) -> Router {
     Router::new().route("/ws/v1/gateway",get(ws::upgrade)).route("/api/v1/session",get(session_bootstrap)).route("/api/v1/command",get(crate::control::lookup).post(crate::control::command).layer(DefaultBodyLimit::max(4096)))
  .route("/api/v1/project0/process",get(crate::control::process))
  .route("/api/v1/bsc/process",get(crate::control::bsc_process))
+ .route("/api/v1/bsc/query",post(crate::control::bsc_query).layer(DefaultBodyLimit::max(state.cfg.limits.max_client_frame_bytes)))
  .route("/api/v1/logs",get(crate::control::logs))
  .route("/healthz",get(healthz)).fallback(spa)
  .layer(middleware::from_fn_with_state(state.clone(),enforce_host))

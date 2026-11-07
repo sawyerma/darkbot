@@ -325,3 +325,17 @@ fn a_v1_receipt_still_reads() {
         "outcome=APPLIED id=BSC_STRATEGY_C_MAX_OPEN value=3 generation=1 request_id=r1"
     );
 }
+
+/// BSC-V8: the canonical text of a settings basis is `KEY=value\n` in the
+/// keys' order, whatever order the values come in; its SHA-256 follows it.
+#[test]
+fn the_canonical_text_is_in_key_order() {
+    let a = [(WINDOW, "7".to_string()), (MAX_OPEN, "3".to_string())];
+    let b = [(MAX_OPEN, "3".to_string()), (WINDOW, "7".to_string())];
+    assert_eq!(
+        canonical_text(&a),
+        "BSC_STRATEGY_C_MAX_OPEN=3\nBSC_STRATEGY_C_FIRST_BUYER_WINDOW=7\n"
+    );
+    assert_eq!(config_sha256(&a), config_sha256(&b));
+    assert_ne!(config_sha256(&a), config_sha256(&a[..1]));
+}

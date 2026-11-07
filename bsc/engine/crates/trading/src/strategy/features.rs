@@ -44,6 +44,26 @@ pub const GAP_FLAG: usize = 15;
 /// Native amounts are exact wei: 18 places.
 pub const BNB_PLACES: u32 = 18;
 
+/// BSC-V8 (settings query): the unit of feature `i` in the query's words:
+/// `bnb` (18 places), `ratio` and `percent` (the ratio places), `count`,
+/// `milliseconds`, and `flag` for the gap flag (never a filter).
+pub fn unit(i: usize) -> &'static str {
+    match NAMES[i] {
+        "buy_count" | "sell_count" | "unique_buyers" => "count",
+        "buy_volume_bnb" | "sell_volume_bnb" | "net_buy_flow_bnb" | "largest_buy_bnb" => "bnb",
+        "first_sell_latency_ms" => "milliseconds",
+        "curve_progress_pct" => "percent",
+        "provider_gap_flag" => "flag",
+        _ => "ratio",
+    }
+}
+
+/// Whether feature `i` can be negative (buys minus sells, the price change
+/// q - 1): a filter bound of it may be.
+pub fn signed(i: usize) -> bool {
+    matches!(NAMES[i], "net_buy_flow_bnb" | "price_change")
+}
+
 /// The places of feature `i` under `ratio_places`.
 pub fn places(i: usize, ratio_places: u32) -> u32 {
     match NAMES[i] {
