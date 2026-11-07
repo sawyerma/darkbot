@@ -3,19 +3,19 @@ import { useMemo, useState } from "react";
 import * as AlertDialog from "@radix-ui/react-alert-dialog";
 import { TopicId } from "@/core/realtime";
 import { useTopic } from "@/core/realtime/hooks";
-import { strategySettingCommand, useSourceControl } from "@/core/realtime/bscControl";
+import { strategySetAllCommand, strategySettingCommand, useSourceControl } from "@/core/realtime/bscControl";
 import { selectLive, selectStatus, useBscStore } from "../store/bscStore";
 import { tradingState } from "../model/overview";
 import { sourceControlView } from "../model/sources";
 import { strategySettingsView } from "../model/strategySettings";
-import { changes, formOf, runningNotes, type StrategyForm } from "../model/strategyForm";
+import { formOf, runningNotes, saveRequest, type SaveRequest, type StrategyForm } from "../model/strategyForm";
 import { LABEL_TONE, RIGHT_ALIGNED, TRADE_COLUMNS, TRADE_COL_DEFAULT, blockClock, counts, filterTrades, nsToMs, safeColumns, tradeViews, tradesCsv, type TradeColumn, type TradeFilter, type TradeView } from "../model/trades";
 import { detection, nsMs3, share, sourceLines, usToMs, type Market } from "../model/monitor";
 import { SOURCE_STATUS, age, sourceName, venueName } from "../model/health";
 import { LiveLotActions, Receipt, LIVE_LOT } from "../LiveActions";
 import { operatorDecisions } from "../model/live";
 import { SourceActions } from "../SourceActions";
-import { TradeSort } from "../api/bscV8Adapter";
+import { CreatorSellExit, CreatorSoldBeforeFill, TradeSort, v8Params } from "../api/bscV8Adapter";
 import { LiveSections } from "./LiveSections";
 import { StrategyEditor } from "./StrategyEditor";
 import { useNativeRecords } from "./useNativeRecords";
@@ -27,7 +27,6 @@ const STRATEGY = "bsc-live-strategy";
 const COLUMNS_KEY = "bsc_trade_columns_v8";
 const PAGE = 6;
 const NO_PROFILES = "Training modules need their native profile owner (BSC-V8-01); Live uses the native Strategy C configuration.";
-const ONE_AT_A_TIME = "Saving several settings at once needs the atomic set of the native owner (BSC-V8-04): save one change at a time.";
 
 // The column choice is a display preference of this browser: a comma-separated id list (no JSON).
 function loadColumns(): TradeColumn[] {
@@ -60,8 +59,9 @@ function cell(t: TradeView, id: TradeColumn) {
 }
 
 /** V8 Live (FE-V8-09…12): the LIVE strip with its controls and limits, the strategy (the native
- *  Strategy C configuration, one change per request), the one trade list and the monitoring.
- *  Every control is the native owner's request (bsc.live.*, bsc.strategy.set, bsc.source.mode.set). */
+ *  Strategy C configuration: one change, or several as one generation), the one trade list and the
+ *  monitoring. Every control is the native owner's request (bsc.live.*, bsc.strategy.set[_all],
+ *  bsc.source.mode.set). */
 export function LivePanel() {
   useTopic(TopicId.BSC_LIVE_STATE);
   useTopic(TopicId.BSC_MONITORING_STATE);
@@ -79,10 +79,23 @@ export function LivePanel() {
   const [draft, setDraft] = useState<StrategyForm | null>(null);
   const form = draft ?? native.form;
   const edited = draft !== null;
-  const diff = changes(settings, form);
-  const filterError = "changed" in diff ? diff.filterError : undefined;
-  const one = "changed" in diff && !filterError && diff.changed.length === 1 ? diff.changed[0] : undefined;
-  const [confirm, setConfirm] = useState<{ key: string; value: string; generation: bigint } | null>(null);
+  const save = saveRequest(settings, form);
+  const [confirm, setConfirm] = useState<{ request: Exclude<SaveRequest, { kind: "none" | "refused" }>; generation: bigint } | null>(null);
+  const lines = !confirm ? [] : confirm.request.kind === "one" ? [`${confirm.request.key}=${confirm.request.value}`]
+    : [...confirm.request.changed.filter(c => c.key !== "BSC_STRATEGY_C_FILTERS").map(c => `${c.key}=${c.value}`), `BSC_STRATEGY_C_FILTERS=${confirm.request.filters}`];
+  const request = () => {
+    if (!confirm) return;
+    const r = confirm.request;
+    if (r.kind === "one") void strategySettingCommand(STRATEGY, r.key, r.value, confirm.generation);
+    else {
+      const { creatorSoldBeforeFill: sold, creatorSellExit: exit, ...rest } = r.values;
+      const params = v8Params("strategy_set_all_command", { values: { ...rest,
+        creatorSoldBeforeFill: sold ? CreatorSoldBeforeFill[sold] : CreatorSoldBeforeFill.UNSPECIFIED,
+        creatorSellExit: exit ? CreatorSellExit[exit] : CreatorSellExit.UNSPECIFIED } });
+      void strategySetAllCommand(STRATEGY, params, confirm.generation, `set_all keys=${r.changed.length}`);
+    }
+    setDraft(null);
+  };
   const control = sourceControlView(records, nowMs);
   const venues = control.venues.filter(v => v.effective !== "OFF").map(v => venueName(v.id)).join(", ") || "No venue";
 
@@ -126,15 +139,16 @@ export function LivePanel() {
         <button type="button" className={`btn ${mode === "module" ? "primary" : "quiet"}`} disabled title={NO_PROFILES}>Use training module</button>
         <button type="button" className={`btn ${mode === "manual" ? "primary" : "quiet"}`} onClick={() => setMode("manual")}>Custom settings</button>
       </div>
-      <StrategyEditor form={form} onChange={setDraft} disabled={!settings.available || busy} venues={venues} firstBuyerWindow="—" idPrefix={STRATEGY} notes={runningNotes(settings)} />
+      <StrategyEditor form={form} onChange={setDraft} disabled={!settings.available || busy} venues={venues} idPrefix={STRATEGY} notes={runningNotes(settings)} />
       {native.filterError ? <p className="tiny v8-unavailable">Stored filters unreadable here: {native.filterError}</p> : null}
       <div className="editor-footer">
         <span className="small" data-testid={`${STRATEGY}-generation`}>{!settings.available ? `Native owner ${settings.reason}` : `Saved generation ${settings.generation.toString()}${settings.running ? ` · ${settings.startedGeneration?.toString() ?? "?"} in effect` : " · applies at the next start"}`}
-          {"error" in diff ? ` · ${diff.error}` : filterError ? ` · ${filterError}` : "changed" in diff && diff.changed.length > 1 ? ` · ${ONE_AT_A_TIME}` : ""}</span>
+          {save.kind === "refused" ? ` · ${save.reason}` : save.kind === "all" ? ` · ${save.changed.length} changes, saved together` : ""}</span>
         <div className="editor-actions">
           <button type="button" className="btn quiet" disabled={!edited} onClick={() => setDraft(null)}>Reset</button>
-          <button type="button" className="btn primary" disabled={!settings.available || busy || !one} title={one ? `${one.key} at generation ${settings.generation.toString()}` : "changed" in diff && diff.changed.length > 1 ? ONE_AT_A_TIME : "No change"}
-            data-testid={`${STRATEGY}-save`} onClick={() => { if (one) setConfirm({ ...one, generation: settings.generation }); }}>Save custom settings</button>
+          <button type="button" className="btn primary" disabled={!settings.available || busy || save.kind === "none" || save.kind === "refused"}
+            title={save.kind === "one" ? `${save.key} at generation ${settings.generation.toString()}` : save.kind === "all" ? `${save.changed.length} settings as one generation after ${settings.generation.toString()}` : save.kind === "refused" ? save.reason : "No change"}
+            data-testid={`${STRATEGY}-save`} onClick={() => { if (save.kind === "one" || save.kind === "all") setConfirm({ request: save, generation: settings.generation }); }}>Save custom settings</button>
         </div>
       </div>
       <Receipt testId={STRATEGY} />
@@ -248,11 +262,13 @@ export function LivePanel() {
 
     <AlertDialog.Root open={!!confirm} onOpenChange={o => { if (!o) setConfirm(null); }}>
       <AlertDialog.Portal><AlertDialog.Overlay className="ov-log-overlay" /><AlertDialog.Content className="ov-confirm-view" data-testid={`${STRATEGY}-dialog`}>
-        <AlertDialog.Title>{confirm?.key} auf „{confirm?.value}“ setzen?</AlertDialog.Title>
-        <AlertDialog.Description asChild><div><p>Die native Verwaltung prüft den Wert mit der Runtime-Konfiguration und speichert ihn sofort; wirksam wird er beim nächsten Start von Strategy C (Einschalten oder Neustart der Runtime). Echte Positionen behalten die Exit-Werte ihres Einstiegs. Generation {confirm?.generation.toString()}.</p>
-          <p><code data-testid={`${STRATEGY}-request`}>{confirm ? `${confirm.key}=${confirm.value}` : ""}</code></p></div></AlertDialog.Description>
-        <div className="ov-confirm-actions"><AlertDialog.Cancel asChild><button className="ov-btn">Abbrechen</button></AlertDialog.Cancel>
-          <AlertDialog.Action asChild><button className="ov-btn" data-testid={`${STRATEGY}-confirm`} onClick={() => { if (confirm) { void strategySettingCommand(STRATEGY, confirm.key, confirm.value, confirm.generation); setDraft(null); } setConfirm(null); }}>Anfordern</button></AlertDialog.Action></div>
+        <AlertDialog.Title>{confirm?.request.kind === "all" ? `Save ${confirm.request.changed.length} Strategy C settings?` : confirm?.request.kind === "one" ? `Set ${confirm.request.key}?` : ""}</AlertDialog.Title>
+        <AlertDialog.Description asChild><div><p>{confirm?.request.kind === "all"
+          ? "The native owner checks every value with the runtime configuration's own parser and stores them as one generation, all or none. The filters are sent complete: every feature with its enabled flag."
+          : "The native owner checks the value with the runtime configuration's own parser and stores it at once."} They take effect at the next start of Strategy C (its switch on or a runtime restart); open positions keep the exit values of their entry. After generation {confirm?.generation.toString()}.</p>
+          <pre className="mono" data-testid={`${STRATEGY}-request`}>{lines.join("\n")}</pre></div></AlertDialog.Description>
+        <div className="ov-confirm-actions"><AlertDialog.Cancel asChild><button className="ov-btn">Cancel</button></AlertDialog.Cancel>
+          <AlertDialog.Action asChild><button className="ov-btn" data-testid={`${STRATEGY}-confirm`} onClick={() => { request(); setConfirm(null); }}>Request</button></AlertDialog.Action></div>
       </AlertDialog.Content></AlertDialog.Portal>
     </AlertDialog.Root>
   </>;

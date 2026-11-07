@@ -255,6 +255,13 @@ export async function liveDecisionCommand(origin: string, d: LiveDecision): Prom
 export async function strategySettingCommand(origin: string, id: string, value: string, generation: bigint): Promise<void> {
   await ownerSend(origin, "bsc.strategy.set", `${id}:${value}`, new Uint8Array(), { case: "profileVersion" as const, value: generation }, `${id} ${value}`);
 }
+/** BSC-V8-04: several settings as ONE validated generation at the shown one (`profileVersion`),
+ *  all or none; resource_id empty, params a StrategyCSettingsSetAllCommand (the BSC adapter's
+ *  encoding, so no page but BSC loads the training contracts). The receipt line names the keys,
+ *  the generation and the request. */
+export async function strategySetAllCommand(origin: string, params: Uint8Array, generation: bigint, detail: string): Promise<void> {
+  await ownerSend(origin, "bsc.strategy.set_all", "", params, { case: "profileVersion" as const, value: generation }, detail);
+}
 // V8 Wallets (BSC-V8-15/16, FE-V8-15/16): the four money paths and the two policies at the native
 // treasury owner. Prepared: the gateway registers none of these actions yet, and the Wallets tab
 // offers them only while that owner answers the treasury query. A manual transfer is a prepare
@@ -280,7 +287,7 @@ export function releaseWalletRequest(requestId: string): void {
   const { busy, receipt } = useWalletControl.getState();
   if (busy && receipt?.id === requestId && receipt.phase === "UNKNOWN") useWalletControl.setState({ busy: false });
 }
-async function ownerSend(origin: string, action: OwnerAction | "bsc.live.grant" | "bsc.strategy.set" | LiveDecision["action"], resourceId: string, params: Uint8Array,
+async function ownerSend(origin: string, action: OwnerAction | "bsc.live.grant" | "bsc.strategy.set" | "bsc.strategy.set_all" | LiveDecision["action"], resourceId: string, params: Uint8Array,
   version: { case: "walletPolicyVersion" | "configVersion" | "profileVersion"; value: bigint }, detail: string): Promise<void> {
   if (useSourceControl.getState().busy) return;
   const requestId = crypto.randomUUID();

@@ -22,6 +22,7 @@ export const STRATEGY_SETTINGS: readonly StrategySettingInput[] = [
   { id: "BSC_STRATEGY_C_MAX_OPEN", label: "Max open positions" },
   { id: "BSC_STRATEGY_C_CREATOR_SOLD_BEFORE_FILL", label: "Creator sold before the fill", choices: ["FREE_CANCEL", "TX_LANDS"] },
   { id: "BSC_STRATEGY_C_CREATOR_SELL_EXIT", label: "Creator-sell exit", choices: ["ENABLED", "DISABLED"] },
+  { id: "BSC_STRATEGY_C_FIRST_BUYER_WINDOW", label: "Early buyers in window" },
 ];
 
 export interface StrategySettingRow extends StrategySettingInput {

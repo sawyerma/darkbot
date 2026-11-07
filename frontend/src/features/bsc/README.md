@@ -28,7 +28,8 @@ under the owner's LIVE gate for the operator's granted scope, and the browser si
   Monitoring, Analytics) render in the Settings drawer, the LIVE groups in the Live drawers.
 - **Controls:** one command client (`core/realtime/bscControl.ts`): readiness, candidate, source/venue/
   component modes, wallet and economic switches, limits, the LIVE grant/revoke/lot/nonce decisions and
-  Strategy C settings (one `bsc.strategy.set` per change). A lost acknowledgement gets one lookup.
+  Strategy C settings (one change: `bsc.strategy.set`; several: one `bsc.strategy.set_all` generation
+  with the complete filter list, `model/strategyForm.ts` `saveRequest`). A lost acknowledgement gets one lookup.
 - **Never shown:** salts, raw transaction bytes, the private B economics record and absolute local paths.
   Wei amounts are exact (`pages/V8.tsx` `bnb()`, `model/strategyForm.ts`), never floating point.
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bnbToWei, changes, formOf, msToSeconds, parseFilters, secondsToMs, serializeFilters, weiToBnb, FILTER_KEYS } from "./strategyForm";
+import { bnbToWei, changes, filterOrder, formOf, msToSeconds, parseFilters, saveRequest, secondsToMs, serializeFilters, weiToBnb, FILTER_KEYS } from "./strategyForm";
 import { blockClock, counts, filterTrades, nsToMs, safeColumns, tradeLabel, tradeViews } from "./trades";
 import { share, usToMs, detection, CENSUS_SCHEMA } from "./monitor";
 import { capital, pendingTransactions, tradingState } from "./overview";
@@ -66,6 +66,60 @@ describe("V8 Strategy C form: exact conversions, the native filter string", () =
     const odd = strategySettingsView([rec(SOURCE_SCHEMA, { generation: "1", "sources[0].source_id": "BSC_INGRESS_GETH" }),
       rec(SETTINGS_SCHEMA, { generation: "1", "settings[0].id": "BSC_STRATEGY_C_FILTERS", "settings[0].value": "not:a:filter:rule" })], [], 0);
     expect(changes(odd, { ...formOf(odd).form, maxOpen: "2" })).toEqual({ changed: [{ key: "BSC_STRATEGY_C_MAX_OPEN", value: "2" }] });
+  });
+  // TEST_ONLY records: the owner and its stored generation 6 (input, early-buyer window, two rules in the owner's order).
+  const stored6 = (filters?: string) => strategySettingsView([rec(SOURCE_SCHEMA, { generation: "6", "sources[0].source_id": "BSC_INGRESS_GETH" }),
+    rec(SETTINGS_SCHEMA, { generation: "6", "settings[0].id": "BSC_STRATEGY_C_INPUT_WEI", "settings[0].value": "100000000000000000",
+      "settings[1].id": "BSC_STRATEGY_C_FIRST_BUYER_WINDOW", "settings[1].value": "5",
+      ...(filters === undefined ? {} : { "settings[2].id": "BSC_STRATEGY_C_FILTERS", "settings[2].value": filters }) })], [], 0);
+  it("takes the early-buyer window as the tenth key and never offers emptying as a return to the file's value", () => {
+    const v = stored6("unique_buyers:2:,buy_count:3:");
+    const { form } = formOf(v);
+    expect(form.firstBuyerWindow).toBe("5");
+    expect(changes(v, { ...form, firstBuyerWindow: " 8 " })).toEqual({ changed: [{ key: "BSC_STRATEGY_C_FIRST_BUYER_WINDOW", value: "8" }] });
+    // No native unset: an emptied scalar is refused, an untouched empty one is no change.
+    expect(changes(v, { ...form, stake: "" })).toEqual({ error: expect.stringContaining("BSC_STRATEGY_C_INPUT_WEI cannot be empty") });
+    expect(changes(v, { ...form, firstBuyerWindow: "", maxOpen: "2" })).toHaveProperty("error");
+    expect(changes(v, { ...form, hold: "" })).toEqual({ changed: [] });
+    // Every rule off is the empty filter string: no rules (valid); a rule edit keeps the owner's order.
+    const off = Object.fromEntries(FILTER_KEYS.map(k => [k, { on: false, min: "", max: "" }]));
+    expect(changes(v, { ...form, filters: off })).toEqual({ changed: [{ key: "BSC_STRATEGY_C_FILTERS", value: "" }] });
+    expect(changes(v, { ...form, filters: { ...form.filters, sell_count: { on: true, min: "", max: "2" } } })).toEqual({ changed: [{ key: "BSC_STRATEGY_C_FILTERS", value: "unique_buyers:2:,buy_count:3:,sell_count::2" }] });
+    expect(filterOrder(" buy_count:3: ,x:1:,unique_buyers::").slice(0, 3)).toEqual(["buy_count", "unique_buyers", "sell_count"]);
+    expect(filterOrder("")).toEqual(FILTER_KEYS);
+  });
+  it("saves one change as bsc.strategy.set and several as one set_all with the complete filter list", () => {
+    const v = stored6("unique_buyers:2:,buy_count:3:");
+    const { form } = formOf(v);
+    expect(saveRequest(v, form)).toEqual({ kind: "none" });
+    expect(saveRequest(v, { ...form, maxOpen: "2" })).toEqual({ kind: "one", key: "BSC_STRATEGY_C_MAX_OPEN", value: "2" });
+    const r = saveRequest(v, { ...form, maxOpen: "2", firstBuyerWindow: "8", hold: "1.5", creatorSellExit: "DISABLED",
+      filters: { ...form.filters, unique_buyers: { on: false, min: "2", max: "" }, sell_count: { on: true, min: "", max: "0,5" } } });
+    if (r.kind !== "all") throw new Error(r.kind);
+    expect(r.changed.map(c => c.key)).toEqual(["BSC_STRATEGY_C_HOLD_MS", "BSC_STRATEGY_C_MAX_OPEN", "BSC_STRATEGY_C_FIRST_BUYER_WINDOW", "BSC_STRATEGY_C_CREATOR_SELL_EXIT", "BSC_STRATEGY_C_FILTERS"]);
+    expect(r.filters).toBe("buy_count:3:,sell_count::0.5");
+    // Absent keys stay as stored; typed values; every feature sent, the owner's order first, disabled ones without bounds.
+    expect({ ...r.values, filters: undefined }).toEqual({ holdMs: 1500n, maxOpen: 2, firstBuyerWindow: 8, creatorSellExit: "DISABLED", filters: undefined });
+    expect(r.values.filters).toHaveLength(15);
+    expect(r.values.filters.slice(0, 3)).toEqual([{ feature: "unique_buyers", enabled: false }, { feature: "buy_count", enabled: true, min: "3" }, { feature: "sell_count", enabled: true, max: "0.5" }]);
+    // A count the request cannot carry is refused here; any other bound is the native parser's.
+    expect(saveRequest(v, { ...form, maxOpen: "2.5", firstBuyerWindow: "8" })).toEqual({ kind: "refused", reason: expect.stringContaining("no whole number") });
+    expect(saveRequest(v, { ...form, maxOpen: "4294967296", firstBuyerWindow: "8" })).toHaveProperty("kind", "refused");
+    expect(saveRequest(v, { ...form, maxOpen: "2.5" })).toEqual({ kind: "one", key: "BSC_STRATEGY_C_MAX_OPEN", value: "2.5" });
+  });
+  it("refuses a combined save while the filters in effect are unknown or unshowable", () => {
+    const none = stored6();
+    const f = formOf(none).form;
+    expect(saveRequest(none, { ...f, maxOpen: "2", firstBuyerWindow: "8" })).toEqual({ kind: "refused", reason: expect.stringContaining("filters in effect are not reported") });
+    expect(saveRequest(none, { ...f, firstBuyerWindow: "8" })).toEqual({ kind: "one", key: "BSC_STRATEGY_C_FIRST_BUYER_WINDOW", value: "8" });
+    // Running without a stored rule set: the running strategy's filters are the basis.
+    const running = strategySettingsView([rec(SOURCE_SCHEMA, { generation: "6", "sources[0].source_id": "BSC_INGRESS_GETH" }), rec(SETTINGS_SCHEMA, { generation: "6" }),
+      rec(RUNTIME_SCHEMA, { "_provenance.observed_unix_ms": "1800000000000", status_interval_ms: "1000", status_stale_intervals: "3", "strategy[0].state": "SHADOW", "strategy[0].settings_generation": "6",
+        "strategy[0].settings[0].id": "BSC_STRATEGY_C_FILTERS", "strategy[0].settings[0].value": "buy_count:3:" })], [], 1_800_000_000_000);
+    const rf = formOf(running).form;
+    expect(saveRequest(running, { ...rf, maxOpen: "2", firstBuyerWindow: "8" })).toMatchObject({ kind: "all", filters: "buy_count:3:" });
+    const odd = stored6("not:a:filter:rule");
+    expect(saveRequest(odd, { ...formOf(odd).form, maxOpen: "2", firstBuyerWindow: "8" })).toEqual({ kind: "refused", reason: expect.stringContaining("stored filters cannot be shown") });
   });
 });
 

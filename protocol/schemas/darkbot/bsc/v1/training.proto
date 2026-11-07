@@ -6,24 +6,28 @@ import "darkbot/bsc/v1/common.proto";
 // V8 Training and Strategy C settings (BSC-V8-01…06, FE-V8-04…09, Bindings §14.1/§14.2/§14.4
 // M1–M3). Prepared contracts: no producer yet. Strategy C stays the one BSC strategy; a profile is
 // a named, versioned Strategy C configuration, a training run executes it PAPER/SHADOW/REPLAY on
-// the one existing core, never with real funds. The nine settable keys exist natively today
-// (execution/src/strategy_settings.rs, gateway `bsc.strategy.set`, one key per request) and the
-// first-buyer window joins them (BSC_STRATEGY_C_FIRST_BUYER_WINDOW); the 15 filters are
-// trading/src/strategy/features.rs NAMES[0..15] with the parser filters.rs. A command carries only
-// these settable values (StrategyCSettableValues); the configuration-owned values (ratio places,
-// fill delay, gas price) are read-only and appear in the state only.
+// the one existing core, never with real funds. The ten settable keys exist natively
+// (execution/src/strategy_settings.rs KEYS, the first-buyer window BSC_STRATEGY_C_FIRST_BUYER_WINDOW
+// included): gateway `bsc.strategy.set` sets one key per request, `bsc.strategy.set_all` several as
+// one generation; the 15 filters are trading/src/strategy/features.rs NAMES[0..15] with the parser
+// filters.rs. A command carries only these settable values (StrategyCSettableValues); the
+// configuration-owned values (ratio places, fill delay, gas price) are read-only and appear in the
+// state only. No key has a native "unset": the owner stores the value it gets, an empty value is
+// refused for every key but the filters (empty = no rules), and nothing returns a key to the
+// configuration file's value but sending that value.
 //
 // The configuration hash (every *config_sha256 here) is SHA-256, lowercase hex, of the text
 // `KEY=value\n` for each settable key in the native KEYS order of strategy_settings.rs
 // (OBSERVATION_MS, FILTERS, INPUT_WEI, TARGET_NET_MULTIPLE, STOP_NET_MULTIPLE, HOLD_MS, MAX_OPEN,
-// CREATOR_SOLD_BEFORE_FILL, CREATOR_SELL_EXIT, then FIRST_BUYER_WINDOW once it is a key; each with
-// its BSC_STRATEGY_C_ prefix), value = the effective value (a stored key over the configuration
+// CREATOR_SOLD_BEFORE_FILL, CREATOR_SELL_EXIT, FIRST_BUYER_WINDOW; each with its BSC_STRATEGY_C_
+// prefix), value = the effective value (a stored key over the configuration
 // file's) as the native canonical string `bsc.strategy.set` takes (the filters as their native
 // string). The read-only configuration values are not hashed; the same values give the same hash
 // in every owner.
 //
-// Prepared actions (POST /api/v1/command, CommandRequest.action; NOT registered in the gateway
-// until the native owner implements them, the frontend keeps them disabled):
+// Actions (POST /api/v1/command, CommandRequest.action). Registered: bsc.strategy.set_all, resource_id
+// empty. Prepared (NOT registered in the gateway until the native owner implements them, the
+// frontend keeps them disabled): every other one.
 //   bsc.strategy.set_all          StrategyCSettingsSetAllCommand  expected profile_version = stored revision
 //   bsc.training.profile.create   TrainingProfileCreateCommand    expected config_version = catalog_version
 //   bsc.training.profile.update   TrainingProfileUpdateCommand    expected profile_version = profile revision, resource_id = profile_id
@@ -40,7 +44,7 @@ import "darkbot/bsc/v1/common.proto";
 
 // The creator selling before the BUY fills (BSC_STRATEGY_C_CREATOR_SOLD_BEFORE_FILL).
 enum CreatorSoldBeforeFill {
-  // Not set: the configuration file's value.
+  // Not set: in a state the configuration file's value; in a set_all the stored value stays.
   CREATOR_SOLD_BEFORE_FILL_UNSPECIFIED = 0;
   // FREE_CANCEL: the entry is cancelled before execution.
   CREATOR_SOLD_BEFORE_FILL_FREE_CANCEL = 1;
@@ -51,7 +55,7 @@ enum CreatorSoldBeforeFill {
 // The creator-sell exit (BSC_STRATEGY_C_CREATOR_SELL_EXIT). A team-sell exit is NOT_IMPLEMENTED
 // (BSC-V8-06) and has no field until a native wallet attribution and sell signal exist.
 enum CreatorSellExit {
-  // Not set: the configuration file's value.
+  // Not set: in a state the configuration file's value; in a set_all the stored value stays.
   CREATOR_SELL_EXIT_UNSPECIFIED = 0;
   // ENABLED: a sale by the token's creator ends the position.
   CREATOR_SELL_EXIT_ENABLED = 1;
@@ -122,11 +126,13 @@ message StrategyCSettings {
   optional string gas_price_wei = 13;
 }
 
-// The settable Strategy C values of a command (set_all, profile create/update): the nine owner keys
-// and the first-buyer window. A profile and a set_all carry every one of them (an enum not
-// UNSPECIFIED); the owner refuses a set that leaves one out or a value outside its
-// StrategySettingSpec, and stores nothing half. The filters are the complete rule list: an empty
-// list is no filter.
+// The settable Strategy C values of a command (set_all, profile create/update): the ten native keys.
+// A set_all carries the values it changes: an absent value (an enum UNSPECIFIED) stays as stored,
+// an empty scalar is refused. Its filters are always the complete form: every shown feature with
+// its enabled flag (the disabled rules are dropped natively, the enabled ones stored in the order
+// sent); an empty list is refused (InvalidParams), so no rules = every feature with enabled false.
+// A profile carries every value (an enum not UNSPECIFIED). The owner refuses a value outside its
+// StrategySettingSpec and stores nothing half.
 message StrategyCSettableValues {
   // BSC_STRATEGY_C_INPUT_WEI: the BUY input per entry, decimal wei.
   optional string input_wei = 1;
@@ -213,8 +219,9 @@ message StrategyCSettingsState {
   repeated StrategySettingSpec setting_specs = 15;
 }
 
-// Params of `bsc.strategy.set_all` (BSC-V8-04, prepared): the complete form as ONE validated
-// revision; a refused field refuses the whole set, nothing is stored half.
+// Params of `bsc.strategy.set_all` (BSC-V8-04): the form's changes as ONE validated revision; a
+// refused field refuses the whole set, nothing is stored half. Its receipt detail line is
+// `outcome=<…> keys=<n> generation=<g> request_id=<…>[ reason=<…>]`.
 message StrategyCSettingsSetAllCommand {
   // 1 was settings (StrategyCSettings, read-only values included); a command carries settable ones only.
   reserved 1;

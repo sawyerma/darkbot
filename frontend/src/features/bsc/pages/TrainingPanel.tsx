@@ -59,7 +59,7 @@ export function TrainingPanel({ goto }: { goto: (v: BscView) => void }) {
       <p className="tiny mt">{fresh ? `Passed ${y("passed") ?? "?"} · entered ${y("entered") ?? "?"} · exits target ${y("exits_target") ?? "?"}, stop ${y("exits_stop") ?? "?"}, creator sell ${y("exits_creator_sell") ?? "?"}, timeout ${y("exits_timeout") ?? "?"} · open ${y("open") ?? "?"} (not valued) · unresolved ${y("unresolved") ?? "?"}` : "No current runtime status: no result is shown."} The PAPER ledger of the running strategy; not a proven outcome.</p>
     </div>
     <section className="card editor-card mtl"><div className="editor-heading"><div><h2>Module settings</h2><p className="small">The one native Strategy C configuration; edit it in Live → Custom settings.</p></div><Badge label="15 filters available" /></div>
-      <StrategyEditor form={form} onChange={() => undefined} disabled venues={venues} firstBuyerWindow="—" idPrefix="bsc-training" />
+      <StrategyEditor form={form} onChange={() => undefined} disabled venues={venues} idPrefix="bsc-training" />
       <h3 style={{ fontSize: 14, margin: "22px 0 12px" }}>Test run</h3>
       <div className="test-plan"><div className="test-plan-row">
         <div className="field"><label htmlFor="bsc-run-mode">Stop test by</label><select id="bsc-run-mode" className="select" value={runMode} onChange={e => setRunMode(e.target.value as typeof runMode)}>

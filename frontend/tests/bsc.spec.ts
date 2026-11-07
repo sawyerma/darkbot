@@ -5,6 +5,7 @@ import { BscLiveStateSchema, BscMonitoringStateSchema } from "../src/core/genera
 import { BscQueryResponseSchema } from "../src/core/generated/darkbot/bsc/v1/query_pb";
 import { Availability } from "../src/core/generated/darkbot/bsc/v1/common_pb";
 import { BscQueryRequestSchema } from "../src/core/generated/darkbot/bsc/v1/query_pb";
+import { CreatorSellExit, CreatorSoldBeforeFill, StrategyCSettingsSetAllCommandSchema } from "../src/core/generated/darkbot/bsc/v1/training_pb";
 import { createHash } from "node:crypto";
 import {
   MainPayoutPolicySetCommandSchema, ProfitTransferPolicySetCommandSchema, TransferStatus, WalletDestinationConfirmCommandSchema, WalletDestinationSetCommandSchema, WalletMovementKind,
@@ -495,10 +496,11 @@ test("an unreadable campaign verdict is INVALID, an exact T0 leaves only the loc
 // TEST_ONLY records: the owner, its stored settings (generation 5) and a running strategy that started with generation 4.
 const leaf = (name: string, value: string) => ({ name, value, kind: 7, unit: "" });
 const record = (schema: string, fields: [string, string][]) => ({ schema, provenance: "NATIVE_CREATED", fields: fields.map(([n, v]) => leaf(n, v)) });
-const strategyMonitoring = (extra: [string, string][] = []) => toBinary(BscMonitoringStateSchema, create(BscMonitoringStateSchema, { state: "NOT_EXECUTED", records: [
+const STORED_5: [string, string][] = [["generation", "5"], ["request_id", "r-5"], ["settings[0].id", "BSC_STRATEGY_C_MAX_OPEN"], ["settings[0].value", "4"]];
+const strategyMonitoring = (extra: [string, string][] = [], stored = STORED_5) => toBinary(BscMonitoringStateSchema, create(BscMonitoringStateSchema, { state: "NOT_EXECUTED", records: [
   record("darkbot.bsc.source-modes.v1", [["generation", "9"], ["sources[0].source_id", "BSC_INGRESS_GETH"], ["sources[0].requested", "SHADOW"], ["sources[0].effective", "SHADOW"],
     ["sources[1].source_id", "BSC_INGRESS_DRPC"], ["sources[1].requested", "OFF"], ["sources[1].effective", "OFF"]]),
-  record("darkbot.bsc.strategy-settings.v1", [["generation", "5"], ["request_id", "r-5"], ["settings[0].id", "BSC_STRATEGY_C_MAX_OPEN"], ["settings[0].value", "4"]]),
+  record("darkbot.bsc.strategy-settings.v1", stored),
   record("darkbot.bsc.runtime-status.v1", [["_provenance.observed_unix_ms", String(Date.now())], ["status_interval_ms", "60000"], ["status_stale_intervals", "3"], ["mode", "SHADOW"],
     ["strategy[0].state", "SHADOW"], ["strategy[0].settings_generation", "4"], ["strategy[0].settings[0].id", "BSC_STRATEGY_C_MAX_OPEN"], ["strategy[0].settings[0].value", "3"],
     ["strategy[0].settings[1].id", "BSC_STRATEGY_C_CREATOR_SELL_EXIT"], ["strategy[0].settings[1].value", "ENABLED"],
@@ -517,16 +519,22 @@ test("Live sets one Strategy C setting at the stored generation; saved vs runnin
   await expect(page.getByTestId("bsc-live-strategy-maxOpen")).toHaveValue("4");
   await expect(page.getByTestId("bsc-live-strategy-maxOpen-running")).toHaveText("Saved · running 3 until the next start");
   await expect(page.getByLabel("Exit when the creator’s team sells")).toHaveValue("Not implemented");
-  // Nothing changed: nothing to save; two changes: one at a time (no half set, BSC-V8-04).
+  // Nothing changed: nothing to save; two changes without a known filter basis (none stored, the
+  // running strategy names none): one at a time, never a set_all over the file's unreported filters.
   const save = page.getByTestId("bsc-live-strategy-save");
   await expect(save).toBeDisabled();
   await page.getByTestId("bsc-live-strategy-creatorSellExit").selectOption("DISABLED");
   await page.getByTestId("bsc-live-strategy-maxOpen").fill("5");
   await expect(save).toBeDisabled();
   await expect(page.getByTestId("bsc-live-strategy-generation")).toContainText("save one change at a time");
+  // No native unset: emptying a stored value is refused, the file's value is never a choice.
+  await page.getByTestId("bsc-live-strategy-maxOpen").fill("");
+  await expect(save).toBeDisabled();
+  await expect(page.getByTestId("bsc-live-strategy-generation")).toContainText("BSC_STRATEGY_C_MAX_OPEN cannot be empty");
+  await expect(page.getByTestId("bsc-live-strategy-creatorSoldBeforeFill").locator('option[value=""]')).toBeDisabled();
   await page.getByTestId("bsc-live-strategy-maxOpen").fill("4");
   await save.click();
-  await expect(page.getByTestId("bsc-live-strategy-dialog")).toContainText("nächsten Start von Strategy C");
+  await expect(page.getByTestId("bsc-live-strategy-dialog")).toContainText("next start of Strategy C");
   await expect(page.getByTestId("bsc-live-strategy-request")).toHaveText("BSC_STRATEGY_C_CREATOR_SELL_EXIT=DISABLED");
   await page.getByTestId("bsc-live-strategy-confirm").click();
   await expect(page.getByTestId("bsc-live-strategy-receipt")).toContainText("outcome=APPLIED bsc.strategy.set");
@@ -550,6 +558,39 @@ test("Live sets one Strategy C setting at the stored generation; saved vs runnin
   await page.setViewportSize({ width: 390, height: 844 });
   const [scroll, width] = await page.evaluate(() => [document.documentElement.scrollWidth, window.innerWidth]);
   expect(scroll).toBeLessThanOrEqual(width + 1);
+  expect(errors).toEqual([]);
+});
+
+test("Live saves several Strategy C settings as ONE set_all generation with the complete filter list (BSC-V8-04)", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  const sent = await commands(page);
+  // TEST_ONLY: stored generation 6 with the early-buyer window and two rules in the owner's order.
+  await feed(page, liveOf({}), strategyMonitoring([], [["generation", "6"], ["request_id", "r-6"], ["settings[0].id", "BSC_STRATEGY_C_MAX_OPEN"], ["settings[0].value", "4"],
+    ["settings[1].id", "BSC_STRATEGY_C_FIRST_BUYER_WINDOW"], ["settings[1].value", "5"], ["settings[2].id", "BSC_STRATEGY_C_FILTERS"], ["settings[2].value", "unique_buyers:2:,buy_count:3:"]]));
+  await page.goto("/bsc");
+  await area(page, "Live");
+  await expect(page.getByTestId("bsc-live-strategy-firstBuyerWindow")).toHaveValue("5");
+  await page.getByTestId("bsc-live-strategy-maxOpen").fill("5");
+  await page.getByTestId("bsc-live-strategy-firstBuyerWindow").fill("8");
+  await page.getByTestId("bsc-live-strategy-creatorSellExit").selectOption("DISABLED");
+  await page.getByTestId("bsc-live-strategy-filter-unique_buyers").getByLabel("Unique buyers filter").uncheck();
+  await page.getByTestId("bsc-live-strategy-filter-sell_count").getByLabel("Sell count filter").check();
+  await page.getByTestId("bsc-live-strategy-filter-sell_count").getByLabel("Sell count maximum").fill("2");
+  await expect(page.getByTestId("bsc-live-strategy-generation")).toContainText("4 changes, saved together");
+  await page.getByTestId("bsc-live-strategy-save").click();
+  await expect(page.getByTestId("bsc-live-strategy-dialog")).toContainText("Save 4 Strategy C settings?");
+  await expect(page.getByTestId("bsc-live-strategy-dialog")).toContainText("one generation, all or none");
+  await expect(page.getByTestId("bsc-live-strategy-request")).toHaveText(["BSC_STRATEGY_C_MAX_OPEN=5", "BSC_STRATEGY_C_FIRST_BUYER_WINDOW=8",
+    "BSC_STRATEGY_C_CREATOR_SELL_EXIT=DISABLED", "BSC_STRATEGY_C_FILTERS=buy_count:3:,sell_count::2"].join("\n"));
+  await page.getByTestId("bsc-live-strategy-confirm").click();
+  await expect(page.getByTestId("bsc-live-strategy-receipt")).toContainText("outcome=APPLIED bsc.strategy.set_all");
+  expect(sent.map(r => [r.action, r.resourceId, r.expected?.version])).toEqual([["bsc.strategy.set_all", "", { case: "profileVersion", value: 6n }]]);
+  const v = fromBinary(StrategyCSettingsSetAllCommandSchema, sent[0]!.params).values!;
+  // Changed keys only (absent = as stored), enums UNSPECIFIED = as stored; every feature, the owner's order first.
+  expect([v.inputWei, v.holdMs, v.maxOpen, v.firstBuyerWindow, v.creatorSellExit, v.creatorSoldBeforeFill]).toEqual([undefined, undefined, 5, 8, CreatorSellExit.DISABLED, CreatorSoldBeforeFill.UNSPECIFIED]);
+  expect(v.filters).toHaveLength(15);
+  expect(v.filters.slice(0, 3).map(f => [f.feature, f.enabled, f.min, f.max])).toEqual([["unique_buyers", false, undefined, undefined], ["buy_count", true, "3", undefined], ["sell_count", true, undefined, "2"]]);
   expect(errors).toEqual([]);
 });
 

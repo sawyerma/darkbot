@@ -223,11 +223,13 @@ export const StrategyCSettingsSchema: GenMessage<StrategyCSettings> = /*@__PURE_
   messageDesc(file_darkbot_bsc_v1_training, 2);
 
 /**
- * The settable Strategy C values of a command (set_all, profile create/update): the nine owner keys
- * and the first-buyer window. A profile and a set_all carry every one of them (an enum not
- * UNSPECIFIED); the owner refuses a set that leaves one out or a value outside its
- * StrategySettingSpec, and stores nothing half. The filters are the complete rule list: an empty
- * list is no filter.
+ * The settable Strategy C values of a command (set_all, profile create/update): the ten native keys.
+ * A set_all carries the values it changes: an absent value (an enum UNSPECIFIED) stays as stored,
+ * an empty scalar is refused. Its filters are always the complete form: every shown feature with
+ * its enabled flag (the disabled rules are dropped natively, the enabled ones stored in the order
+ * sent); an empty list is refused (InvalidParams), so no rules = every feature with enabled false.
+ * A profile carries every value (an enum not UNSPECIFIED). The owner refuses a value outside its
+ * StrategySettingSpec and stores nothing half.
  *
  * @generated from message darkbot.bsc.v1.StrategyCSettableValues
  */
@@ -480,8 +482,9 @@ export const StrategyCSettingsStateSchema: GenMessage<StrategyCSettingsState> = 
   messageDesc(file_darkbot_bsc_v1_training, 5);
 
 /**
- * Params of `bsc.strategy.set_all` (BSC-V8-04, prepared): the complete form as ONE validated
- * revision; a refused field refuses the whole set, nothing is stored half.
+ * Params of `bsc.strategy.set_all` (BSC-V8-04): the form's changes as ONE validated revision; a
+ * refused field refuses the whole set, nothing is stored half. Its receipt detail line is
+ * `outcome=<…> keys=<n> generation=<g> request_id=<…>[ reason=<…>]`.
  *
  * @generated from message darkbot.bsc.v1.StrategyCSettingsSetAllCommand
  */
@@ -1670,7 +1673,7 @@ export const ReplaySourcePageSchema: GenMessage<ReplaySourcePage> = /*@__PURE__*
  */
 export enum CreatorSoldBeforeFill {
   /**
-   * Not set: the configuration file's value.
+   * Not set: in a state the configuration file's value; in a set_all the stored value stays.
    *
    * @generated from enum value: CREATOR_SOLD_BEFORE_FILL_UNSPECIFIED = 0;
    */
@@ -1705,7 +1708,7 @@ export const CreatorSoldBeforeFillSchema: GenEnum<CreatorSoldBeforeFill> = /*@__
  */
 export enum CreatorSellExit {
   /**
-   * Not set: the configuration file's value.
+   * Not set: in a state the configuration file's value; in a set_all the stored value stays.
    *
    * @generated from enum value: CREATOR_SELL_EXIT_UNSPECIFIED = 0;
    */

@@ -1436,11 +1436,13 @@ A bounded read of the owner&#39;s replay catalogue.
 <a name="darkbot-bsc-v1-StrategyCSettableValues"></a>
 
 ### StrategyCSettableValues
-The settable Strategy C values of a command (set_all, profile create/update): the nine owner keys
-and the first-buyer window. A profile and a set_all carry every one of them (an enum not
-UNSPECIFIED); the owner refuses a set that leaves one out or a value outside its
-StrategySettingSpec, and stores nothing half. The filters are the complete rule list: an empty
-list is no filter.
+The settable Strategy C values of a command (set_all, profile create/update): the ten native keys.
+A set_all carries the values it changes: an absent value (an enum UNSPECIFIED) stays as stored,
+an empty scalar is refused. Its filters are always the complete form: every shown feature with
+its enabled flag (the disabled rules are dropped natively, the enabled ones stored in the order
+sent); an empty list is refused (InvalidParams), so no rules = every feature with enabled false.
+A profile carries every value (an enum not UNSPECIFIED). The owner refuses a value outside its
+StrategySettingSpec and stores nothing half.
 
 
 | Field | Type | Label | Description |
@@ -1508,8 +1510,9 @@ A read of the stored and running Strategy C configuration.
 <a name="darkbot-bsc-v1-StrategyCSettingsSetAllCommand"></a>
 
 ### StrategyCSettingsSetAllCommand
-Params of `bsc.strategy.set_all` (BSC-V8-04, prepared): the complete form as ONE validated
-revision; a refused field refuses the whole set, nothing is stored half.
+Params of `bsc.strategy.set_all` (BSC-V8-04): the form&#39;s changes as ONE validated revision; a
+refused field refuses the whole set, nothing is stored half. Its receipt detail line is
+`outcome=&lt;…&gt; keys=&lt;n&gt; generation=&lt;g&gt; request_id=&lt;…&gt;[ reason=&lt;…&gt;]`.
 
 
 | Field | Type | Label | Description |
@@ -1920,7 +1923,7 @@ The creator-sell exit (BSC_STRATEGY_C_CREATOR_SELL_EXIT). A team-sell exit is NO
 
 | Name | Number | Description |
 | ---- | ------ | ----------- |
-| CREATOR_SELL_EXIT_UNSPECIFIED | 0 | Not set: the configuration file&#39;s value. |
+| CREATOR_SELL_EXIT_UNSPECIFIED | 0 | Not set: in a state the configuration file&#39;s value; in a set_all the stored value stays. |
 | CREATOR_SELL_EXIT_ENABLED | 1 | ENABLED: a sale by the token&#39;s creator ends the position. |
 | CREATOR_SELL_EXIT_DISABLED | 2 | DISABLED: a creator sale does not end the position. |
 
@@ -1933,7 +1936,7 @@ The creator selling before the BUY fills (BSC_STRATEGY_C_CREATOR_SOLD_BEFORE_FIL
 
 | Name | Number | Description |
 | ---- | ------ | ----------- |
-| CREATOR_SOLD_BEFORE_FILL_UNSPECIFIED | 0 | Not set: the configuration file&#39;s value. |
+| CREATOR_SOLD_BEFORE_FILL_UNSPECIFIED | 0 | Not set: in a state the configuration file&#39;s value; in a set_all the stored value stays. |
 | CREATOR_SOLD_BEFORE_FILL_FREE_CANCEL | 1 | FREE_CANCEL: the entry is cancelled before execution. |
 | CREATOR_SOLD_BEFORE_FILL_TX_LANDS | 2 | TX_LANDS: the BUY transaction may still land; never a guaranteed fill. |
 
