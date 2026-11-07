@@ -8618,7 +8618,7 @@
       "sensitivity": "public",
       "provenance": "operator request with the confirmed scope SHA-256; plan 28.10.",
       "quality": "OPERATOR_COMMAND",
-      "source_sha": "9d9fdea287eabb46f6975985e4ed47f8de9530236d7f18a7e396bcffc1f02330",
+      "source_sha": "c0c29acbe5f0ebb8a5efb37bb8fec15711a968b934b617a2c4d0a782d3795e3d",
       "required_gate": "NATIVE_LIVE_GRANT_CONFIRMED_SCOPE",
       "topic_or_command": "bsc.live.grant",
       "test": "control::tests the_live_grant_revoke_and_total_limit_reach_the_native_owner + live.test.ts",
@@ -8642,7 +8642,7 @@
       "sensitivity": "public",
       "provenance": "operator request with the confirmed scope SHA-256; plan 28.10.",
       "quality": "OPERATOR_COMMAND",
-      "source_sha": "9d9fdea287eabb46f6975985e4ed47f8de9530236d7f18a7e396bcffc1f02330",
+      "source_sha": "c0c29acbe5f0ebb8a5efb37bb8fec15711a968b934b617a2c4d0a782d3795e3d",
       "required_gate": "NATIVE_LIVE_GRANT_CONFIRMED_SCOPE",
       "topic_or_command": "bsc.live.grant",
       "test": "control::tests the_live_grant_revoke_and_total_limit_reach_the_native_owner + live.test.ts",
@@ -8666,7 +8666,7 @@
       "sensitivity": "public",
       "provenance": "operator request with the confirmed scope SHA-256; plan 28.10.",
       "quality": "OPERATOR_COMMAND",
-      "source_sha": "9d9fdea287eabb46f6975985e4ed47f8de9530236d7f18a7e396bcffc1f02330",
+      "source_sha": "c0c29acbe5f0ebb8a5efb37bb8fec15711a968b934b617a2c4d0a782d3795e3d",
       "required_gate": "NATIVE_LIVE_GRANT_CONFIRMED_SCOPE",
       "topic_or_command": "bsc.live.grant",
       "test": "control::tests the_live_grant_revoke_and_total_limit_reach_the_native_owner + live.test.ts",
@@ -8690,7 +8690,7 @@
       "sensitivity": "public",
       "provenance": "operator request with the confirmed scope SHA-256; plan 28.10.",
       "quality": "OPERATOR_COMMAND",
-      "source_sha": "9d9fdea287eabb46f6975985e4ed47f8de9530236d7f18a7e396bcffc1f02330",
+      "source_sha": "c0c29acbe5f0ebb8a5efb37bb8fec15711a968b934b617a2c4d0a782d3795e3d",
       "required_gate": "NATIVE_LIVE_GRANT_CONFIRMED_SCOPE",
       "topic_or_command": "bsc.live.grant",
       "test": "control::tests the_live_grant_revoke_and_total_limit_reach_the_native_owner + live.test.ts",
@@ -8714,7 +8714,7 @@
       "sensitivity": "public",
       "provenance": "operator request with the confirmed scope SHA-256; plan 28.10.",
       "quality": "OPERATOR_COMMAND",
-      "source_sha": "9d9fdea287eabb46f6975985e4ed47f8de9530236d7f18a7e396bcffc1f02330",
+      "source_sha": "c0c29acbe5f0ebb8a5efb37bb8fec15711a968b934b617a2c4d0a782d3795e3d",
       "required_gate": "NATIVE_LIVE_GRANT_CONFIRMED_SCOPE",
       "topic_or_command": "bsc.live.grant",
       "test": "control::tests the_live_grant_revoke_and_total_limit_reach_the_native_owner + live.test.ts",
@@ -8738,7 +8738,7 @@
       "sensitivity": "public",
       "provenance": "operator request with the confirmed scope SHA-256; plan 28.10.",
       "quality": "OPERATOR_COMMAND",
-      "source_sha": "9d9fdea287eabb46f6975985e4ed47f8de9530236d7f18a7e396bcffc1f02330",
+      "source_sha": "c0c29acbe5f0ebb8a5efb37bb8fec15711a968b934b617a2c4d0a782d3795e3d",
       "required_gate": "NATIVE_LIVE_GRANT_CONFIRMED_SCOPE",
       "topic_or_command": "bsc.live.grant",
       "test": "control::tests the_live_grant_revoke_and_total_limit_reach_the_native_owner + live.test.ts",
@@ -8762,7 +8762,7 @@
       "sensitivity": "public",
       "provenance": "operator request with the confirmed scope SHA-256; plan 28.10.",
       "quality": "OPERATOR_COMMAND",
-      "source_sha": "9d9fdea287eabb46f6975985e4ed47f8de9530236d7f18a7e396bcffc1f02330",
+      "source_sha": "c0c29acbe5f0ebb8a5efb37bb8fec15711a968b934b617a2c4d0a782d3795e3d",
       "required_gate": "NATIVE_LIVE_GRANT_CONFIRMED_SCOPE",
       "topic_or_command": "bsc.live.grant",
       "test": "control::tests the_live_grant_revoke_and_total_limit_reach_the_native_owner + live.test.ts",
@@ -8786,7 +8786,7 @@
       "sensitivity": "public",
       "provenance": "operator request with the confirmed scope SHA-256; plan 28.10.",
       "quality": "OPERATOR_COMMAND",
-      "source_sha": "9d9fdea287eabb46f6975985e4ed47f8de9530236d7f18a7e396bcffc1f02330",
+      "source_sha": "c0c29acbe5f0ebb8a5efb37bb8fec15711a968b934b617a2c4d0a782d3795e3d",
       "required_gate": "NATIVE_LIVE_GRANT_CONFIRMED_SCOPE",
       "topic_or_command": "bsc.live.grant",
       "test": "control::tests the_live_grant_revoke_and_total_limit_reach_the_native_owner + live.test.ts",
@@ -8810,7 +8810,7 @@
       "sensitivity": "public",
       "provenance": "operator request with the confirmed scope SHA-256; plan 28.10.",
       "quality": "OPERATOR_COMMAND",
-      "source_sha": "9d9fdea287eabb46f6975985e4ed47f8de9530236d7f18a7e396bcffc1f02330",
+      "source_sha": "c0c29acbe5f0ebb8a5efb37bb8fec15711a968b934b617a2c4d0a782d3795e3d",
       "required_gate": "NATIVE_LIVE_GRANT_CONFIRMED_SCOPE",
       "topic_or_command": "bsc.live.grant",
       "test": "control::tests the_live_grant_revoke_and_total_limit_reach_the_native_owner + live.test.ts",
@@ -8834,7 +8834,7 @@
       "sensitivity": "public",
       "provenance": "operator request with the confirmed scope SHA-256; plan 28.10.",
       "quality": "OPERATOR_COMMAND",
-      "source_sha": "9d9fdea287eabb46f6975985e4ed47f8de9530236d7f18a7e396bcffc1f02330",
+      "source_sha": "c0c29acbe5f0ebb8a5efb37bb8fec15711a968b934b617a2c4d0a782d3795e3d",
       "required_gate": "NATIVE_LIVE_GRANT_CONFIRMED_SCOPE",
       "topic_or_command": "bsc.live.grant",
       "test": "control::tests the_live_grant_revoke_and_total_limit_reach_the_native_owner + live.test.ts",
@@ -8858,7 +8858,7 @@
       "sensitivity": "public",
       "provenance": "operator request with the confirmed scope SHA-256; plan 28.10.",
       "quality": "OPERATOR_COMMAND",
-      "source_sha": "9d9fdea287eabb46f6975985e4ed47f8de9530236d7f18a7e396bcffc1f02330",
+      "source_sha": "c0c29acbe5f0ebb8a5efb37bb8fec15711a968b934b617a2c4d0a782d3795e3d",
       "required_gate": "NATIVE_LIVE_GRANT_CONFIRMED_SCOPE",
       "topic_or_command": "bsc.live.grant",
       "test": "control::tests the_live_grant_revoke_and_total_limit_reach_the_native_owner + live.test.ts",
@@ -9026,7 +9026,7 @@
       "sensitivity": "public",
       "provenance": "operator request with the confirmed scope SHA-256; plan 28.10.",
       "quality": "OPERATOR_COMMAND",
-      "source_sha": "9d9fdea287eabb46f6975985e4ed47f8de9530236d7f18a7e396bcffc1f02330",
+      "source_sha": "c0c29acbe5f0ebb8a5efb37bb8fec15711a968b934b617a2c4d0a782d3795e3d",
       "required_gate": "NATIVE_LIVE_GRANT_CONFIRMED_SCOPE",
       "topic_or_command": "bsc.live.grant",
       "test": "control::tests the_live_grant_revoke_and_total_limit_reach_the_native_owner + live.test.ts",
@@ -9059,7 +9059,8 @@
     "bsc.live.nonce_burn": "REV.1.0 R3b (Audit A) LIVE nonce burn request only: 0x<unresolved transaction> resource, config_version = the ledger's version, darkbotctl -> bsc_runtime live nonce-burn, once per request; locked while BSC_EXEC_LIVE_NONCE_BURN is OFF (repository); the armed runtime burns the nonce as an exit step goes",
     "bsc.live.ledger.quarantine": "REV.1.0 R3b (Audit A) LIVE ledger quarantine request only: <sequence number of an entry that does not decode> resource, config_version = the owner generation (read and recorded under the ledger's operator lock), darkbotctl -> bsc_runtime live ledger quarantine, its record first; BUYs of the grants up to it stay refused",
     "bsc.attempt.total.set": "campaign total BUY attempt limit request only (plan 28.10.): BSC_BUY_ATTEMPTS_TOTAL and 0..=10, config_version CAS, the same native owner and receipt; every real BUY attempt counts over every day and restart, UNKNOWN ones too",
-    "bsc.strategy.set": "frontend package 06.11. Strategy C setting request only: <BSC_STRATEGY_C_OBSERVATION_MS|FILTERS|INPUT_WEI|TARGET_NET_MULTIPLE|STOP_NET_MULTIPLE|HOLD_MS|MAX_OPEN|CREATOR_SOLD_BEFORE_FILL|CREATOR_SELL_EXIT>:<value, printable ASCII without spaces, or none> resource, profile_version = the stored settings generation, darkbotctl -> bsc_runtime strategy set, once per request; the runtime configuration's own parser decides the value (REJECTED_INVALID with its reason); stored at once, effective at the next start of Strategy C; never a signature or send"
+    "bsc.strategy.set": "frontend package 06.11. Strategy C setting request only: <BSC_STRATEGY_C_OBSERVATION_MS|FILTERS|INPUT_WEI|TARGET_NET_MULTIPLE|STOP_NET_MULTIPLE|HOLD_MS|MAX_OPEN|CREATOR_SOLD_BEFORE_FILL|CREATOR_SELL_EXIT|FIRST_BUYER_WINDOW>:<value, printable ASCII without spaces, or none> resource, profile_version = the stored settings generation, darkbotctl -> bsc_runtime strategy set, once per request; the runtime configuration's own parser decides the value (REJECTED_INVALID with its reason); stored at once, effective at the next start of Strategy C; never a signature or send",
+    "bsc.strategy.set_all": "BSC-V8-04 Strategy C save-all request only: no resource, params = StrategyCSettingsSetAllCommand (absent values unchanged; the filter list always, every feature enabled or not, empty refused), profile_version = the stored settings generation, darkbotctl -> bsc_runtime strategy set-all: one generation with one receipt, all or none; the runtime configuration's own parser decides every value; effective at the next start of Strategy C; never a signature or send"
   },
   "missing": [
     "Readiness head block not provided by native record",
@@ -9072,7 +9073,7 @@
   "command_bindings": [
     {
       "source_path": "ops/bsc-control.sh",
-      "source_sha": "3d842cc97d6f831a3dbc186a5837d7dc46f9bd789bc484bcad96c6332b203f93",
+      "source_sha": "b7e0cbbbbfb7e4e3800c5f47ce319a2042cfa362ec76facc5221208e4e831da0",
       "owner": "Gateway / ops",
       "gate": "READ_ONLY; no signing; launch UUID CAS; durable receipt; session/CSRF"
     },
@@ -9090,7 +9091,7 @@
     },
     {
       "source_path": "gateway/src/control.rs",
-      "source_sha": "9d9fdea287eabb46f6975985e4ed47f8de9530236d7f18a7e396bcffc1f02330",
+      "source_sha": "c0c29acbe5f0ebb8a5efb37bb8fec15711a968b934b617a2c4d0a782d3795e3d",
       "owner": "Gateway / ops",
       "gate": "READ_ONLY; no signing; launch UUID CAS; durable receipt; session/CSRF"
     }
@@ -10389,6 +10390,7 @@
     },
     {
       "schemas": [
+        "darkbot.bsc.strategy-setting-receipt.v2",
         "darkbot.bsc.strategy-setting-receipt.v1"
       ],
       "match": "*",

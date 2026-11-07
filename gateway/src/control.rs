@@ -119,7 +119,13 @@ const BSC_LIVE_DECISIONS: [&str; 3] = [BSC_LIVE_LOT, BSC_LIVE_NONCE_BURN, BSC_LI
 /// nothing); the runtime configuration's own parser decides the value, its refusal is the
 /// receipt. Effective at the strategy's next start; never a signature or send.
 const BSC_STRATEGY_SET: &str = "bsc.strategy.set";
-const BSC_STRATEGY_KEYS: [&str; 9] = [
+/// BSC-V8-04: the whole Strategy C form at once (`darkbotctl bsc strategy set-all`): one
+/// generation with one receipt at the native owner, all or none. Its params are a
+/// `StrategyCSettingsSetAllCommand`; an absent value stays as it is. The filter list is always
+/// part of the form, every feature enabled or not (an empty list is refused: "no rules" is every
+/// feature disabled). The runtime configuration's parser decides every value.
+const BSC_STRATEGY_SET_ALL: &str = "bsc.strategy.set_all";
+const BSC_STRATEGY_KEYS: [&str; 10] = [
     "BSC_STRATEGY_C_OBSERVATION_MS",
     "BSC_STRATEGY_C_FILTERS",
     "BSC_STRATEGY_C_INPUT_WEI",
@@ -129,6 +135,7 @@ const BSC_STRATEGY_KEYS: [&str; 9] = [
     "BSC_STRATEGY_C_MAX_OPEN",
     "BSC_STRATEGY_C_CREATOR_SOLD_BEFORE_FILL",
     "BSC_STRATEGY_C_CREATOR_SELL_EXIT",
+    "BSC_STRATEGY_C_FIRST_BUYER_WINDOW",
 ];
 
 const BSC_OWNER_ACTIONS: [&str; 8] = [
@@ -440,6 +447,7 @@ fn allowed(project: i32, action: &str) -> bool {
         || (project == ProjectId::Bsc as i32
             && ([BSC_START, BSC_STOP, BSC_CANDIDATE, BSC_LIVE_GRANT].contains(&action)
                 || action == BSC_STRATEGY_SET
+                || action == BSC_STRATEGY_SET_ALL
                 || BSC_OWNER_ACTIONS.contains(&action)
                 || BSC_LIVE_DECISIONS.contains(&action)))
 }
@@ -519,6 +527,112 @@ fn strategy_request(req: &CommandRequest) -> Option<Vec<String>> {
         ),
         _ => None,
     }
+}
+
+/// BSC-V8-04: the arguments of `darkbotctl bsc strategy set-all <generation> KEY=VALUE...`
+/// (without the request id) of a `bsc.strategy.set_all`: no resource, the settings generation as
+/// `profile_version`, its params a `StrategyCSettingsSetAllCommand`. Only shapes are checked
+/// here (decimal amounts and bounds, a feature name); the native parser decides the values.
+fn strategy_set_all_request(req: &CommandRequest) -> Option<Vec<String>> {
+    use crate::proto::bsc::v1::{
+        CreatorSellExit, CreatorSoldBeforeFill, StrategyCSettingsSetAllCommand,
+    };
+    if req.action != BSC_STRATEGY_SET_ALL || !req.resource_id.is_empty() {
+        return None;
+    }
+    let generation = match req.expected.as_ref()?.version? {
+        expected_version::Version::ProfileVersion(g) => g,
+        _ => return None,
+    };
+    let v = StrategyCSettingsSetAllCommand::decode(req.params.as_ref())
+        .ok()?
+        .values?;
+    let decimal = |s: &str| {
+        !s.is_empty()
+            && s.bytes().all(|b| b.is_ascii_digit() || b == b'.')
+            && s.bytes().filter(|b| *b == b'.').count() <= 1
+    };
+    let mut set: Vec<(&str, String)> = Vec::new();
+    if let Some(x) = v.observation_ms {
+        set.push(("BSC_STRATEGY_C_OBSERVATION_MS", x.to_string()));
+    }
+    if v.filters.is_empty() {
+        return None;
+    }
+    let rules = v
+        .filters
+        .iter()
+        .filter(|r| r.enabled)
+        .map(|r| {
+            let name_ok = !r.feature.is_empty()
+                && r.feature
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_');
+            // A signed feature's bound may be negative (net flow, price change).
+            let bound_ok = |b: &Option<String>| {
+                b.as_deref()
+                    .map_or(true, |x| decimal(x.strip_prefix('-').unwrap_or(x)))
+            };
+            (name_ok && bound_ok(&r.min) && bound_ok(&r.max)).then(|| {
+                format!(
+                    "{}:{}:{}",
+                    r.feature,
+                    r.min.as_deref().unwrap_or_default(),
+                    r.max.as_deref().unwrap_or_default()
+                )
+            })
+        })
+        .collect::<Option<Vec<_>>>()?;
+    set.push(("BSC_STRATEGY_C_FILTERS", rules.join(",")));
+    if let Some(x) = v.input_wei {
+        wei_ok(&x).then_some(())?;
+        set.push(("BSC_STRATEGY_C_INPUT_WEI", x));
+    }
+    for (key, x) in [
+        ("BSC_STRATEGY_C_TARGET_NET_MULTIPLE", v.target_net_multiple),
+        ("BSC_STRATEGY_C_STOP_NET_MULTIPLE", v.stop_net_multiple),
+    ] {
+        if let Some(x) = x {
+            decimal(&x).then_some(())?;
+            set.push((key, x));
+        }
+    }
+    if let Some(x) = v.hold_ms {
+        set.push(("BSC_STRATEGY_C_HOLD_MS", x.to_string()));
+    }
+    if let Some(x) = v.max_open {
+        set.push(("BSC_STRATEGY_C_MAX_OPEN", x.to_string()));
+    }
+    match CreatorSoldBeforeFill::try_from(v.creator_sold_before_fill).ok()? {
+        CreatorSoldBeforeFill::Unspecified => {}
+        CreatorSoldBeforeFill::FreeCancel => set.push((
+            "BSC_STRATEGY_C_CREATOR_SOLD_BEFORE_FILL",
+            "FREE_CANCEL".into(),
+        )),
+        CreatorSoldBeforeFill::TxLands => {
+            set.push(("BSC_STRATEGY_C_CREATOR_SOLD_BEFORE_FILL", "TX_LANDS".into()))
+        }
+    }
+    match CreatorSellExit::try_from(v.creator_sell_exit).ok()? {
+        CreatorSellExit::Unspecified => {}
+        CreatorSellExit::Enabled => {
+            set.push(("BSC_STRATEGY_C_CREATOR_SELL_EXIT", "ENABLED".into()))
+        }
+        CreatorSellExit::Disabled => {
+            set.push(("BSC_STRATEGY_C_CREATOR_SELL_EXIT", "DISABLED".into()))
+        }
+    }
+    if let Some(x) = v.first_buyer_window {
+        set.push(("BSC_STRATEGY_C_FIRST_BUYER_WINDOW", x.to_string()));
+    }
+    Some(
+        ["bsc", "strategy", "set-all"]
+            .into_iter()
+            .map(String::from)
+            .chain([generation.to_string()])
+            .chain(set.into_iter().map(|(k, x)| format!("{k}={x}")))
+            .collect(),
+    )
 }
 
 /// A plain decimal wei amount (no sign, no leading zero), within 128 bits.
@@ -1695,7 +1809,19 @@ impl Control {
                         id,
                         CommandStatus::Rejected,
                         CommandRejectReason::InvalidParams,
-                        "Strategy C setting takes exactly <BSC_STRATEGY_C_OBSERVATION_MS|FILTERS|INPUT_WEI|TARGET_NET_MULTIPLE|STOP_NET_MULTIPLE|HOLD_MS|MAX_OPEN|CREATOR_SOLD_BEFORE_FILL|CREATOR_SELL_EXIT>:<value, printable ASCII without spaces> and the profile_version generation; the runtime configuration decides the value",
+                        "Strategy C setting takes exactly <BSC_STRATEGY_C_OBSERVATION_MS|FILTERS|INPUT_WEI|TARGET_NET_MULTIPLE|STOP_NET_MULTIPLE|HOLD_MS|MAX_OPEN|CREATOR_SOLD_BEFORE_FILL|CREATOR_SELL_EXIT|FIRST_BUYER_WINDOW>:<value, printable ASCII without spaces> and the profile_version generation; the runtime configuration decides the value",
+                    );
+                }
+            }
+        } else if req.action == BSC_STRATEGY_SET_ALL {
+            match strategy_set_all_request(req) {
+                Some(args) => Some(args),
+                None => {
+                    return reply(
+                        id,
+                        CommandStatus::Rejected,
+                        CommandRejectReason::InvalidParams,
+                        "Strategy C save-all takes no resource, the profile_version generation and a StrategyCSettingsSetAllCommand (decimal wei, exact decimal multiples and filter bounds, native feature names); the runtime configuration decides every value",
                     );
                 }
             }
@@ -4963,6 +5089,152 @@ mod tests {
             CommandPhase::Failed as i32
         );
         fs::remove_dir_all(dir).unwrap();
+    }
+    /// BSC-V8-04: "save all" reaches `darkbotctl bsc strategy set-all` with every given value as
+    /// one `KEY=VALUE` argument (absent ones left out, the filter list always, disabled rules not
+    /// part of the configuration), the settings generation as `profile_version` and no resource;
+    /// a malformed shape is refused before any process runs.
+    #[test]
+    fn a_strategy_save_all_maps_to_one_owner_call() {
+        use crate::proto::bsc::v1::{
+            CreatorSellExit, CreatorSoldBeforeFill, StrategyCSettableValues,
+            StrategyCSettingsSetAllCommand, StrategyFilterRule,
+        };
+        let rule =
+            |feature: &str, enabled, min: Option<&str>, max: Option<&str>| StrategyFilterRule {
+                feature: feature.into(),
+                enabled,
+                min: min.map(String::from),
+                max: max.map(String::from),
+            };
+        let values = StrategyCSettableValues {
+            input_wei: Some("10000000000000000".into()),
+            target_net_multiple: Some("1.50".into()),
+            observation_ms: Some(3000),
+            max_open: Some(2),
+            creator_sold_before_fill: CreatorSoldBeforeFill::TxLands as i32,
+            creator_sell_exit: CreatorSellExit::Disabled as i32,
+            filters: vec![
+                rule("buy_count", true, Some("2"), None),
+                rule("top_buyer_share", false, None, Some("0.5")),
+                rule("unique_buyers", true, Some("2"), Some("40")),
+                rule("price_change", true, Some("-0.2"), None),
+            ],
+            first_buyer_window: Some(7),
+            ..Default::default()
+        };
+        let request = |resource: &str,
+                       expected: Option<expected_version::Version>,
+                       v: &StrategyCSettableValues| {
+            CommandRequest {
+                project: ProjectId::Bsc as i32,
+                request_id: "x".into(),
+                action: BSC_STRATEGY_SET_ALL.into(),
+                resource_id: resource.into(),
+                expected: expected.map(|v| crate::proto::ExpectedVersion { version: Some(v) }),
+                params: StrategyCSettingsSetAllCommand {
+                    values: Some(v.clone()),
+                }
+                .encode_to_vec()
+                .into(),
+                issued_at_unix_ns: crate::overview::unix_ns_now(),
+            }
+        };
+        let profile = |g| Some(expected_version::Version::ProfileVersion(g));
+        assert_eq!(
+            strategy_set_all_request(&request("", profile(5), &values)),
+            Some(
+                [
+                    "bsc",
+                    "strategy",
+                    "set-all",
+                    "5",
+                    "BSC_STRATEGY_C_OBSERVATION_MS=3000",
+                    "BSC_STRATEGY_C_FILTERS=buy_count:2:,unique_buyers:2:40,price_change:-0.2:",
+                    "BSC_STRATEGY_C_INPUT_WEI=10000000000000000",
+                    "BSC_STRATEGY_C_TARGET_NET_MULTIPLE=1.50",
+                    "BSC_STRATEGY_C_MAX_OPEN=2",
+                    "BSC_STRATEGY_C_CREATOR_SOLD_BEFORE_FILL=TX_LANDS",
+                    "BSC_STRATEGY_C_CREATOR_SELL_EXIT=DISABLED",
+                    "BSC_STRATEGY_C_FIRST_BUYER_WINDOW=7",
+                ]
+                .map(String::from)
+                .to_vec()
+            )
+        );
+        // Every feature disabled: no rules, nothing else; an empty list is refused.
+        let off = StrategyCSettableValues {
+            filters: vec![rule("buy_count", false, Some("2"), None)],
+            ..Default::default()
+        };
+        assert_eq!(
+            strategy_set_all_request(&request("", profile(0), &off)),
+            Some(
+                ["bsc", "strategy", "set-all", "0", "BSC_STRATEGY_C_FILTERS="]
+                    .map(String::from)
+                    .to_vec()
+            )
+        );
+        assert_eq!(
+            strategy_set_all_request(&request(
+                "",
+                profile(0),
+                &StrategyCSettableValues::default()
+            )),
+            None
+        );
+        let with = |f: &dyn Fn(&mut StrategyCSettableValues)| {
+            let mut v = values.clone();
+            f(&mut v);
+            v
+        };
+        for (resource, expected, v) in [
+            ("x", profile(5), values.clone()),
+            ("", None, values.clone()),
+            (
+                "",
+                Some(expected_version::Version::ConfigVersion(5)),
+                values.clone(),
+            ),
+            ("", profile(5), with(&|v| v.input_wei = Some("010".into()))),
+            (
+                "",
+                profile(5),
+                with(&|v| v.target_net_multiple = Some("1,5".into())),
+            ),
+            (
+                "",
+                profile(5),
+                with(&|v| v.filters = vec![rule("buy_count:9", true, None, None)]),
+            ),
+            (
+                "",
+                profile(5),
+                with(&|v| v.filters = vec![rule("buy_count", true, Some("1:2"), None)]),
+            ),
+            ("", profile(5), with(&|v| v.creator_sell_exit = 9)),
+            (
+                "",
+                profile(5),
+                with(&|v| v.target_net_multiple = Some("-1.5".into())),
+            ),
+            (
+                "",
+                profile(5),
+                with(&|v| v.filters = vec![rule("price_change", true, Some("--1"), None)]),
+            ),
+        ] {
+            assert_eq!(
+                strategy_set_all_request(&request(resource, expected, &v)),
+                None,
+                "{resource} {v:?}"
+            );
+        }
+        let mut junk = request("", profile(5), &values);
+        junk.params = vec![0xff, 0xff].into();
+        assert_eq!(strategy_set_all_request(&junk), None);
+        assert!(allowed(ProjectId::Bsc as i32, BSC_STRATEGY_SET_ALL));
+        assert!(!allowed(ProjectId::Project0 as i32, BSC_STRATEGY_SET_ALL));
     }
     /// Frontend package (06.11.): a Strategy C setting is exactly `<KEY>:<VALUE>` with a key from
     /// the fixed set, a value of printable ASCII without spaces (or none) and the displayed

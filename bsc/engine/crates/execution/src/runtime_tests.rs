@@ -3189,7 +3189,7 @@ fn a_strategy_start_journals_its_settings_before_its_switch() {
         c.strategy_settings
             .as_ref()
             .map(|s| (s.generation, s.values.len())),
-        Some((0, 9))
+        Some((0, crate::strategy_settings::KEYS.len()))
     );
     Owner::open(&sources)
         .unwrap()

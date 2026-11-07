@@ -205,3 +205,123 @@ fn an_exposed_store_is_refused() {
     std::fs::set_permissions(&store, std::fs::Permissions::from_mode(0o700)).unwrap();
     assert_eq!(current(&dir).unwrap().value(MAX_OPEN), Some("3"));
 }
+
+const TARGET: &str = "BSC_STRATEGY_C_TARGET_NET_MULTIPLE";
+const STOP: &str = "BSC_STRATEGY_C_STOP_NET_MULTIPLE";
+const WINDOW: &str = "BSC_STRATEGY_C_FIRST_BUYER_WINDOW";
+
+/// BSC-V8-04/05: "save all" is one generation with one receipt for every
+/// key it sets, the same CAS and request rules as a single setting; the
+/// whole set is validated together (all or none); the first-buyer window
+/// is a settable key within the parser's bounds.
+#[test]
+fn save_all_is_one_validated_generation_with_one_receipt() {
+    let dir = sources("set-all");
+    let o = Owner::open(&dir).unwrap();
+    let all = [(MAX_OPEN, "3"), (EXIT, "DISABLED"), (WINDOW, "7")];
+    let r = o.set_all("a1", &all, 0, CONFIG, 1).unwrap();
+    assert_eq!((r.outcome, r.generation), ("APPLIED", 1));
+    assert_eq!(
+        r.line(),
+        "outcome=APPLIED keys=3 generation=1 request_id=a1"
+    );
+    let now = current(&dir).unwrap();
+    assert_eq!((now.generation, now.values.len()), (1, 3));
+    assert_eq!(now.value(WINDOW), Some("7"));
+    // The same request again: its receipt (any order of the pairs); other
+    // values under its ID: refused.
+    let reordered = [(WINDOW, "7"), (MAX_OPEN, "3"), (EXIT, "DISABLED")];
+    assert_eq!(o.set_all("a1", &reordered, 0, CONFIG, 2).unwrap(), r);
+    assert!(o.set_all("a1", &[(MAX_OPEN, "4")], 0, CONFIG, 2).is_err());
+    // Validated together: one value against another refuses all of them.
+    let crossed = [(TARGET, "1.5"), (STOP, "2")];
+    let bad = o.set_all("a2", &crossed, 1, CONFIG, 3).unwrap();
+    assert_eq!((bad.outcome, bad.generation), ("REJECTED_INVALID", 1));
+    assert!(bad.reason.is_some());
+    assert_eq!(current(&dir).unwrap().generation, 1);
+    // The window within the parser's bounds only.
+    let out = o.set_all("a3", &[(WINDOW, "0")], 1, CONFIG, 4).unwrap();
+    assert_eq!(out.outcome, "REJECTED_INVALID");
+    // Stale, a key twice, no key, a key outside the scope.
+    let stale = o.set_all("a4", &[(MAX_OPEN, "5")], 0, CONFIG, 5).unwrap();
+    assert_eq!(stale.outcome, "REJECTED_STALE");
+    assert!(
+        o.set_all("a5", &[(MAX_OPEN, "4"), (MAX_OPEN, "5")], 1, CONFIG, 6)
+            .is_err()
+    );
+    assert!(o.set_all("a6", &[], 1, CONFIG, 6).is_err());
+    assert!(
+        o.set_all("a7", &[("BSC_STRATEGY_C_GAS_PRICE_WEI", "1")], 1, CONFIG, 6)
+            .is_err()
+    );
+    // A lost receipt of "save all" is recovered from its generation, also
+    // after later ones; a subset or another expected generation under its
+    // ID is another request (review).
+    let receipt = dir.join(DIR).join("receipts/a1.dbrec");
+    std::fs::remove_file(&receipt).unwrap();
+    let again = o.set_all("a1", &all, 0, CONFIG, 7).unwrap();
+    assert_eq!((again.outcome, again.generation), ("APPLIED", 1));
+    let later = o.set_all("a8", &[(MAX_OPEN, "4")], 1, CONFIG, 8).unwrap();
+    assert_eq!((later.outcome, later.generation), ("APPLIED", 2));
+    std::fs::remove_file(&receipt).unwrap();
+    let again = o.set_all("a1", &all, 0, CONFIG, 9).unwrap();
+    assert_eq!((again.outcome, again.generation), ("APPLIED", 1));
+    std::fs::remove_file(&receipt).unwrap();
+    assert!(o.set_all("a1", &all[..2], 0, CONFIG, 10).is_err());
+    let other = o.set_all("a1", &all, 1, CONFIG, 10).unwrap();
+    assert_eq!(
+        other.outcome, "REJECTED_STALE",
+        "never APPLIED from generation 1"
+    );
+}
+
+/// BSC-V8-04: the strings the gateway's "save all" maps a form to are
+/// what the owner and the runtime parser take: filter rules with signed
+/// and open bounds, no rules at all, the enum tokens, a multiple.
+#[test]
+fn the_gateways_save_all_strings_are_the_natives() {
+    let dir = sources("set-all-strings");
+    let o = Owner::open(&dir).unwrap();
+    let form = [
+        ("BSC_STRATEGY_C_OBSERVATION_MS", "3000"),
+        (
+            "BSC_STRATEGY_C_FILTERS",
+            "buy_count:2:,unique_buyers:2:40,price_change:-0.2:",
+        ),
+        ("BSC_STRATEGY_C_INPUT_WEI", "10000000000000000"),
+        (TARGET, "1.50"),
+        ("BSC_STRATEGY_C_MAX_OPEN", "2"),
+        ("BSC_STRATEGY_C_CREATOR_SOLD_BEFORE_FILL", "TX_LANDS"),
+        (EXIT, "DISABLED"),
+        (WINDOW, "7"),
+    ];
+    let r = o.set_all("g1", &form, 0, CONFIG, 1).unwrap();
+    assert_eq!(r.outcome, "APPLIED", "{:?}", r.reason);
+    let none = o
+        .set_all("g2", &[("BSC_STRATEGY_C_FILTERS", "")], 1, CONFIG, 2)
+        .unwrap();
+    assert_eq!(none.outcome, "APPLIED", "{:?}", none.reason);
+    let c = effective(CONFIG, &current(&dir).unwrap()).unwrap();
+    assert!(c.strategy.engine.rules.is_empty());
+}
+
+/// A single setting's v1 receipt of the frontend package (06.11.) still
+/// reads, as the same receipt.
+#[test]
+fn a_v1_receipt_still_reads() {
+    use darkbot_bsc_record::schema::bsc_runtime::strategy_setting_receipt as sr;
+    let mut d = darkbot_bsc_record::Draft::new(&sr::V1);
+    d.set(sr::REQUEST_ID, "r1")
+        .set(sr::ID, MAX_OPEN)
+        .set(sr::VALUE, "3")
+        .set(sr::EXPECTED_GENERATION, 0u64)
+        .set(sr::OUTCOME, "APPLIED")
+        .set(sr::GENERATION, 1u64)
+        .set(sr::OBSERVED_UNIX_MS, 1u64);
+    let r = Receipt::decode(&d.encode().unwrap()).unwrap();
+    assert_eq!(r.values, vec![(MAX_OPEN, "3".to_string())]);
+    assert_eq!(
+        r.line(),
+        "outcome=APPLIED id=BSC_STRATEGY_C_MAX_OPEN value=3 generation=1 request_id=r1"
+    );
+}

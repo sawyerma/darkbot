@@ -1218,7 +1218,7 @@ pub mod strategy_setting_receipt {
     use super::*;
 
     pub const REQUEST_ID: u16 = 1;
-    /// The key the request was for and the value it asked.
+    /// v1: the key the request was for and the value it asked.
     pub const ID: u16 = 2;
     pub const VALUE: u16 = 3;
     pub const EXPECTED_GENERATION: u16 = 4;
@@ -1229,8 +1229,33 @@ pub mod strategy_setting_receipt {
     pub const GENERATION: u16 = 6;
     pub const REASON: u16 = 7;
     pub const OBSERVED_UNIX_MS: u16 = 8;
+    /// BSC-V8-04 (v2): every key the request set and its value, in the
+    /// keys' order (one for a single setting, several for "save all").
+    pub const VALUES: u16 = 9;
 
     pub const SCHEMA: Schema = Schema {
+        name: "darkbot.bsc.strategy-setting-receipt.v2",
+        record_type: 78,
+        schema_version: 2,
+        fields: &[
+            Field::req(REQUEST_ID, "request_id", Text),
+            Field::req(EXPECTED_GENERATION, "expected_generation", U64),
+            Field::req(OUTCOME, "outcome", Text),
+            Field::req(GENERATION, "generation", U64),
+            Field::opt(REASON, "reason", Text),
+            Field::req(OBSERVED_UNIX_MS, "observed_unix_ms", U64),
+            Field::nested(
+                VALUES,
+                "values",
+                Presence::Repeated,
+                &strategy_settings::setting::SCHEMA,
+            ),
+        ],
+    };
+
+    /// The single-setting receipt of the frontend package (06.11.), still
+    /// read.
+    pub const V1: Schema = Schema {
         name: "darkbot.bsc.strategy-setting-receipt.v1",
         record_type: 78,
         schema_version: 1,
@@ -2828,6 +2853,7 @@ pub const ALL: &[&Schema] = &[
     &source_mode_receipt::SCHEMA,
     &strategy_settings::SCHEMA,
     &strategy_setting_receipt::SCHEMA,
+    &strategy_setting_receipt::V1,
     &buy_attempt_slot::SCHEMA,
     &buy_attempt_total_slot::SCHEMA,
     &live_spend::SCHEMA,

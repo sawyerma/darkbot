@@ -325,7 +325,7 @@ bsc_source_request() {
 # configuration's own parser on the snapshot's configuration, applies or
 # refuses it with its generation as the CAS and prints the receipt. Effective
 # at the strategy's next start (its switch on, a runtime restart).
-BSC_STRATEGY_USAGE="bsc strategy set <BSC_STRATEGY_C_KEY> <value> <generation> <request_id>; bsc strategy show"
+BSC_STRATEGY_USAGE="bsc strategy set <BSC_STRATEGY_C_KEY> <value> <generation> <request_id>; bsc strategy set-all <generation> <BSC_STRATEGY_C_KEY>=<value>... <request_id>; bsc strategy show"
 bsc_strategy_set() {
   [ "$#" -eq 4 ] || die "$BSC_STRATEGY_USAGE"
   case "$1" in BSC_STRATEGY_C_*) ;; *) die "unknown Strategy C setting" ;; esac
@@ -336,10 +336,24 @@ bsc_strategy_set() {
   /usr/bin/env -i PATH=/usr/bin:/bin "$APP_HOME/current/bsc_runtime" strategy set "$1" "$2" \
     --expect-generation "$3" --request-id "$4" --state "$RUNDIR/bsc-sources" --config "$BSC_CONFIG"
 }
+# BSC-V8-04: every given Strategy C setting in one generation with one receipt (all or none).
+bsc_strategy_set_all() {
+  [ "$#" -ge 3 ] || die "$BSC_STRATEGY_USAGE"
+  local gen="$1" req="${@: -1}" kv
+  case "$gen" in ''|*[!0-9]*) die "generation must be an unsigned integer" ;; esac
+  case "$req" in ''|-*|*[!$BSC_ID_CHARS]*) die "the request id is letters, digits and hyphens" ;; esac
+  [ "${#req}" -le 64 ] || die "the request id is letters, digits and hyphens"
+  set -- "${@:2:$#-2}"
+  for kv in "$@"; do case "$kv" in BSC_STRATEGY_C_*=*) ;; *) die "unknown Strategy C setting" ;; esac; done
+  [ -x "$APP_HOME/current/bsc_runtime" ] || die "BSC runtime nicht deployed"
+  /usr/bin/env -i PATH=/usr/bin:/bin "$APP_HOME/current/bsc_runtime" strategy set-all "$@" \
+    --expect-generation "$gen" --request-id "$req" --state "$RUNDIR/bsc-sources" --config "$BSC_CONFIG"
+}
 cmd_bsc() {
   case "${1:-}" in
     strategy) case "${2:-}" in
       set) locked bsc_strategy_set "${@:3}" ;;
+      set-all) locked bsc_strategy_set_all "${@:3}" ;;
       show) [ -x "$APP_HOME/current/bsc_runtime" ] || die "BSC runtime nicht deployed"
         /usr/bin/env -i PATH=/usr/bin:/bin "$APP_HOME/current/bsc_runtime" strategy show --state "$RUNDIR/bsc-sources" --config "$BSC_CONFIG" ;;
       *) die "$BSC_STRATEGY_USAGE" ;;

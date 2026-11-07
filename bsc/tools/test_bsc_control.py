@@ -125,6 +125,20 @@ class ControlTests(unittest.TestCase):
         code, out = self.sh('cmd_bsc', 'strategy', 'show')
         self.assertEqual(code, 0, out)
         self.assertEqual(self.calls()[-1], ['strategy', 'show', '--state', f'{self.w}/run/bsc-sources', '--config', config])
+        # BSC-V8-04: "save all", every pair one argument, one call.
+        before = len(self.calls())
+        for args, why in [(['x', 'BSC_STRATEGY_C_MAX_OPEN=3', 'r1'], 'unsigned integer'),
+                          (['1', 'BSC_STRATEGY_C_MAX_OPEN=3', '-r1'], 'letters, digits and hyphens'),
+                          (['1', 'BSC_EXEC_INPUT_WEI=1', 'r1'], 'unknown Strategy C setting'),
+                          (['1', 'r1'], 'bsc strategy set-all')]:
+            code, out = self.sh('cmd_bsc', 'strategy', 'set-all', *args)
+            self.assertEqual(code, 1, out); self.assertIn(why, out)
+        self.assertEqual(len(self.calls()), before)
+        code, out = self.sh('cmd_bsc', 'strategy', 'set-all', '3', 'BSC_STRATEGY_C_MAX_OPEN=3', 'BSC_STRATEGY_C_FILTERS=a b=c', 'r-2')
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.calls()[-1], ['strategy', 'set-all', 'BSC_STRATEGY_C_MAX_OPEN=3', 'BSC_STRATEGY_C_FILTERS=a b=c',
+                                            '--expect-generation', '3', '--request-id', 'r-2', '--state',
+                                            f'{self.w}/run/bsc-sources', '--config', config])
 
 if __name__ == '__main__':
     unittest.main()

@@ -30,9 +30,10 @@ use darkbot_bsc_record::{Draft, decode};
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
-/// The settable keys (the user's scope of 06.11.), in their order; every
-/// other key stays the configuration file's.
-pub const KEYS: [&str; 9] = [
+/// The settable keys (the user's scope of 06.11.; BSC-V8-05 the first-buyer
+/// window), in their order; every other key stays the configuration file's.
+/// New keys go last: a journal `p` record names a key by its index here.
+pub const KEYS: [&str; 10] = [
     "BSC_STRATEGY_C_OBSERVATION_MS",
     "BSC_STRATEGY_C_FILTERS",
     "BSC_STRATEGY_C_INPUT_WEI",
@@ -42,6 +43,7 @@ pub const KEYS: [&str; 9] = [
     "BSC_STRATEGY_C_MAX_OPEN",
     "BSC_STRATEGY_C_CREATOR_SOLD_BEFORE_FILL",
     "BSC_STRATEGY_C_CREATOR_SELL_EXIT",
+    "BSC_STRATEGY_C_FIRST_BUYER_WINDOW",
 ];
 
 /// The owner's directory under the source-mode owner's.
@@ -116,20 +118,24 @@ impl Settings {
             .map(|(_, v)| v.as_str())
     }
 
-    /// Whether this generation sets `key` to `value` for `request_id`.
-    fn applied(&self, request_id: &str, key: &str, value: &str) -> bool {
-        self.request_id.as_deref() == Some(request_id) && self.value(key) == Some(value)
+    /// Whether this generation sets every key of `values` to its value
+    /// for `request_id`.
+    fn applied(&self, request_id: &str, values: &[(&'static str, String)]) -> bool {
+        self.request_id.as_deref() == Some(request_id)
+            && values
+                .iter()
+                .all(|(k, v)| self.value(k) == Some(v.as_str()))
     }
 
-    /// The values with `key` set to `value`.
-    fn with(&self, key: &'static str, value: &str) -> Vec<(&'static str, String)> {
+    /// The values with every key of `set` set to its value.
+    fn with(&self, set: &[(&'static str, String)]) -> Vec<(&'static str, String)> {
         let mut values: Vec<_> = self
             .values
             .iter()
-            .filter(|(k, _)| *k != key)
+            .filter(|(k, _)| !set.iter().any(|(s, _)| s == k))
             .cloned()
             .collect();
-        values.push((key, value.to_string()));
+        values.extend(set.iter().cloned());
         values.sort_by_key(|(k, _)| order(k));
         values
     }
@@ -279,8 +285,9 @@ pub fn effective_values(text: &str, settings: &Settings) -> Vec<(&'static str, S
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Receipt {
     pub request_id: String,
-    pub id: &'static str,
-    pub value: String,
+    /// Every key the request set with its value, in [`KEYS`] order (one for
+    /// a single setting; BSC-V8-04: several for "save all").
+    pub values: Vec<(&'static str, String)>,
     pub expected_generation: u64,
     /// `APPLIED`, `REJECTED_STALE` or `REJECTED_INVALID`.
     pub outcome: &'static str,
@@ -295,13 +302,18 @@ impl Receipt {
         self.outcome == "APPLIED"
     }
 
-    /// One line for the controller and the gateway's receipt detail.
+    /// One line for the controller and the gateway's receipt detail (a
+    /// single setting's as before; "save all" names its keys).
     pub fn line(&self) -> String {
+        // Several keys: their count (the gateway keeps the first 300
+        // characters of the line; review: the reason must fit).
+        let set = match self.values.as_slice() {
+            [(id, value)] => format!("id={id} value={value}"),
+            values => format!("keys={}", values.len()),
+        };
         format!(
-            "outcome={} id={} value={} generation={} request_id={}{}",
+            "outcome={} {set} generation={} request_id={}{}",
             self.outcome,
-            self.id,
-            self.value,
             self.generation,
             self.request_id,
             self.reason
@@ -311,31 +323,57 @@ impl Receipt {
         )
     }
 
-    fn same(&self, id: &str, value: &str, expected_generation: u64) -> bool {
-        self.id == id && self.value == value && self.expected_generation == expected_generation
+    fn same(&self, values: &[(&'static str, String)], expected_generation: u64) -> bool {
+        self.values == values && self.expected_generation == expected_generation
     }
 
     fn encode(&self, observed_unix_ms: u64) -> Result<Vec<u8>, String> {
         let mut d = Draft::new(&sr::SCHEMA);
         d.set(sr::REQUEST_ID, self.request_id.as_str())
-            .set(sr::ID, self.id)
-            .set(sr::VALUE, self.value.as_str())
             .set(sr::EXPECTED_GENERATION, self.expected_generation)
             .set(sr::OUTCOME, self.outcome)
             .set(sr::GENERATION, self.generation)
             .set_opt(sr::REASON, self.reason.as_deref())
             .set(sr::OBSERVED_UNIX_MS, observed_unix_ms);
+        for (k, v) in &self.values {
+            let mut e = Draft::new(&ss::setting::SCHEMA);
+            e.set(ss::setting::ID, *k)
+                .set(ss::setting::VALUE, v.as_str());
+            d.push(sr::VALUES, e.into_nested());
+        }
         d.encode().map_err(|e| e.to_string())
     }
 
+    /// v2, or a single setting's v1 receipt (06.11.).
     fn decode(bytes: &[u8]) -> Result<Self, String> {
-        let r = decode(&sr::SCHEMA, bytes).map_err(|e| e.to_string())?;
         let e = |x: darkbot_bsc_record::RecordError| x.0;
-        let id = r.text(sr::ID).map_err(e)?;
+        let settable = |id: &str| key(id).ok_or_else(|| format!("{id} is no Strategy C setting"));
+        let (r, values) = match decode(&sr::SCHEMA, bytes) {
+            Ok(r) => {
+                let mut values = Vec::new();
+                for row in r.nested_all(sr::VALUES).map_err(e)? {
+                    let k = settable(row.text(ss::setting::ID).map_err(e)?)?;
+                    let v = row.text(ss::setting::VALUE).map_err(e)?;
+                    if let Some(why) = value_refused(v) {
+                        return Err(format!("{k}: {why}"));
+                    }
+                    values.push((k, v.to_string()));
+                }
+                (r, values)
+            }
+            Err(v2) => {
+                let r = decode(&sr::V1, bytes).map_err(|v1| format!("{v2}; {v1}"))?;
+                let k = settable(r.text(sr::ID).map_err(e)?)?;
+                let v = r.text(sr::VALUE).map_err(e)?.to_string();
+                (r, vec![(k, v)])
+            }
+        };
+        if values.is_empty() || !values.windows(2).all(|w| order(w[0].0) < order(w[1].0)) {
+            return Err("the receipt's settings are not one per key in order".into());
+        }
         Ok(Receipt {
             request_id: r.text(sr::REQUEST_ID).map_err(e)?.to_string(),
-            id: key(id).ok_or_else(|| format!("{id} is no Strategy C setting"))?,
-            value: r.text(sr::VALUE).map_err(e)?.to_string(),
+            values,
             expected_generation: r.u64(sr::EXPECTED_GENERATION).map_err(e)?,
             outcome: match r.text(sr::OUTCOME).map_err(e)? {
                 "APPLIED" => "APPLIED",
@@ -460,13 +498,44 @@ impl Owner {
         config_text: &str,
         now_ms: u64,
     ) -> Result<Receipt, String> {
+        self.set_all(
+            request_id,
+            &[(id, value)],
+            expected_generation,
+            config_text,
+            now_ms,
+        )
+    }
+
+    /// BSC-V8-04: sets every `(id, value)` of `pairs` (each a settable key,
+    /// once) as one generation with one receipt, the same CAS, validation and
+    /// recovery as [`Owner::set`]: all of them or none.
+    pub fn set_all(
+        &self,
+        request_id: &str,
+        pairs: &[(&str, &str)],
+        expected_generation: u64,
+        config_text: &str,
+        now_ms: u64,
+    ) -> Result<Receipt, String> {
         if !safe_id(request_id) {
             return Err("the request ID is not a safe identifier".into());
         }
-        let k = key(id).ok_or_else(|| format!("{id} is no Strategy C setting"))?;
-        if let Some(why) = value_refused(value) {
-            return Err(format!("{k}: {why}"));
+        if pairs.is_empty() {
+            return Err("no Strategy C setting given".into());
         }
+        let mut values: Vec<(&'static str, String)> = Vec::with_capacity(pairs.len());
+        for (id, value) in pairs {
+            let k = key(id).ok_or_else(|| format!("{id} is no Strategy C setting"))?;
+            if values.iter().any(|(s, _)| *s == k) {
+                return Err(format!("{k} is given twice"));
+            }
+            if let Some(why) = value_refused(value) {
+                return Err(format!("{k}: {why}"));
+            }
+            values.push((k, value.to_string()));
+        }
+        values.sort_by_key(|(k, _)| order(k));
         // The file alone must stand: a refusal names a setting, never the
         // file's other lines (`bsc_runtime config-check` names why).
         RuntimeConfig::parse(config_text)
@@ -479,7 +548,7 @@ impl Owner {
             let r = Receipt::decode(
                 &read_private(&receipt_path, self.owner).map_err(|e| e.to_string())?,
             )?;
-            match r.same(k, value, expected_generation) {
+            match r.same(&values, expected_generation) {
                 true => Ok(r),
                 false => Err("the request ID already belongs to another request".into()),
             }
@@ -492,18 +561,31 @@ impl Owner {
         let current = self.current()?;
         let mut receipt = Receipt {
             request_id: request_id.into(),
-            id: k,
-            value: value.into(),
+            values: values.clone(),
             expected_generation,
             outcome: "REJECTED_STALE",
             generation: current.generation,
             reason: None,
         };
+        // A generation is this request's only if it is the one the request
+        // would have written: at its expected generation + 1, exactly its
+        // values over the generation before (review: never a subset).
         let mine = |s: &Settings| -> Result<bool, String> {
-            match s.request_id.as_deref() == Some(request_id) {
-                true if s.applied(request_id, k, value) => Ok(true),
-                true => Err("the request ID already belongs to another request".into()),
-                false => Ok(false),
+            if s.request_id.as_deref() != Some(request_id) {
+                return Ok(false);
+            }
+            let before = match s.generation {
+                0 | 1 => Settings::default(),
+                n => read_generation(&self.dir, self.owner, n - 1).map_err(|e| {
+                    format!("{}: {e}", generation_path(&self.dir, n - 1).display())
+                })??,
+            };
+            match s.generation == expected_generation + 1
+                && s.applied(request_id, &values)
+                && s.values == before.with(&values)
+            {
+                true => Ok(true),
+                false => Err("the request ID already belongs to another request".into()),
             }
         };
         if mine(&current)? {
@@ -527,7 +609,7 @@ impl Owner {
                     .checked_add(1)
                     .ok_or("generation exhausted")?,
                 request_id: Some(request_id.into()),
-                values: current.with(k, value),
+                values: current.with(&values),
             };
             match effective(config_text, &next) {
                 Err(why) => {
@@ -545,11 +627,15 @@ impl Owner {
                     // Another writer took this generation first: stale,
                     // unless it was this very request (an identical twin).
                     Err(e) if e.kind() == ErrorKind::AlreadyExists => {
-                        let now = self.current()?;
-                        if mine(&now)? {
+                        // Review: the generation it would have written decides.
+                        let taken = read_generation(&self.dir, self.owner, next.generation)
+                            .map_err(|e| format!("generation {}: {e}", next.generation))??;
+                        if mine(&taken)? {
                             receipt.outcome = "APPLIED";
+                            receipt.generation = next.generation;
+                        } else {
+                            receipt.generation = self.current()?.generation;
                         }
-                        receipt.generation = now.generation;
                     }
                     Err(e) => return Err(format!("generation not written: {e}")),
                 },

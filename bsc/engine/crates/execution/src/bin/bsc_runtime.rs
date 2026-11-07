@@ -10,6 +10,7 @@
 //! bsc_runtime source request <WALLET_OR_ECONOMIC_SWITCH_ID> <DISABLED|ENABLED> --expect-generation <n> --request-id <id> --state <dir> --config <ingress.public.env>
 //! bsc_runtime strategy show --state <dir> --config <ingress.public.env>
 //! bsc_runtime strategy set <BSC_STRATEGY_C_KEY> <VALUE> --expect-generation <n> --request-id <id> --state <dir> --config <ingress.public.env>
+//! bsc_runtime strategy set-all <BSC_STRATEGY_C_KEY>=<VALUE>... --expect-generation <n> --request-id <id> --state <dir> --config <ingress.public.env>
 //! bsc_runtime control require [--state <dir>] <SWITCH_ID>...
 //! bsc_runtime live scope|grant|revoke|qualify|status|positions|idle|bound-inputs|loopback-identity ...
 //! bsc_runtime live key init --key <file> --root <repo>
@@ -1300,6 +1301,39 @@ fn run(args: &[String]) -> Result<bool, String> {
             println!("{}", receipt.line());
             Ok(receipt.applied())
         }
+        [area, cmd, rest @ ..] if area == "strategy" && cmd == "set-all" => {
+            // BSC-V8-04: every given key in one generation with one receipt.
+            use darkbot_bsc_execution::strategy_settings as settings;
+            let given: Vec<&String> = rest.iter().take_while(|a| !a.starts_with("--")).collect();
+            // Review: after the pairs only the four flags, each with its value.
+            let flags = &rest[given.len()..];
+            if flags.len() % 2 != 0
+                || flags.chunks(2).any(|f| {
+                    !["--expect-generation", "--request-id", "--state", "--config"].contains(&f[0].as_str())
+                })
+            {
+                return Err("strategy set-all: KEY=VALUE... then only --expect-generation, --request-id, --state, --config".into());
+            }
+            let pairs = given
+                .iter()
+                .map(|a| a.split_once('=').ok_or(format!("{a}: KEY=VALUE expected")))
+                .collect::<Result<Vec<_>, _>>()?;
+            let expected = flag(rest, "--expect-generation")?
+                .parse::<u64>()
+                .map_err(|_| "--expect-generation is an unsigned integer")?;
+            let config_path = flag(rest, "--config")?;
+            let text = std::fs::read_to_string(config_path).map_err(|e| format!("{config_path}: {e}"))?;
+            let owner = settings::Owner::open(std::path::Path::new(flag(rest, "--state")?))?;
+            let receipt = owner.set_all(
+                flag(rest, "--request-id")?,
+                &pairs,
+                expected,
+                &text,
+                darkbot_bsc_record::observed_now()?,
+            )?;
+            println!("{}", receipt.line());
+            Ok(receipt.applied())
+        }
         [area, cmd, source, mode, rest @ ..] if area == "source" && cmd == "request" => {
             let source =
                 Entity::parse(source).ok_or("unknown source, component, venue or switch ID")?;
@@ -1348,7 +1382,7 @@ fn run(args: &[String]) -> Result<bool, String> {
             println!("{}", receipt.line());
             Ok(receipt.applied())
         }
-        _ => Err("usage: bsc_runtime run --sources DIR --rundir DIR --config FILE | source init|reset --state DIR | source show --state DIR --config FILE | source request ID MODE --expect-generation N --request-id ID --state DIR --config FILE [--root DIR] [--rundir DIR] | strategy show --state DIR --config FILE | strategy set BSC_STRATEGY_C_KEY VALUE --expect-generation N --request-id ID --state DIR --config FILE | live scope|grant --config FILE --venue V --strategies S --sources A,B --adapters X --max-input-wei N --max-spend-wei N --max-attempts N --expires-unix-ms N --max-buy-slippage-bps N --max-exit-slippage-bps N --max-gas-price-wei N --max-buy-gas-limit N --max-approve-gas-limit N --max-sell-gas-limit N --max-open-positions N --max-realized-loss-wei N --max-daily-realized-loss-wei N --min-buy-interval-ms N [--exit-only] [--risk-outlier-ack] [--scope-sha256 H --expect-generation N --request-id ID --state DIR [--presence-signature S]] | live revoke --expect-generation N --request-id ID --state DIR | live qualify --root DIR --runtime-binary FILE [--venue V@EV,..] [--source S@EV,..] [--adapter A@FINDING,..@EV,..] [--acquisition G08@G07] [--risk-by WHO --risk-statement TEXT --risk-scope-sha256 H --risk-evidence EV,..] [--out FILE] [--replace] | live key init --key FILE --root DIR | config-check --config FILE | live bound-inputs --root DIR | live idle --state DIR | live status --state DIR --config FILE [--root DIR] [--rundir DIR] | live loopback-identity init|show --state DIR --root DIR | live positions --state DIR | live lot resume|write-off|exit-now --lot H --expect-version N --state DIR --config FILE --request-id ID --decided-by WHO | live nonce-burn --tx H --expect-version N --state DIR --config FILE --request-id ID --decided-by WHO | live adopt-g07 --g08 FILE --capture FILE --state DIR --config FILE --request-id ID --decided-by WHO | live ledger check --state DIR | live ledger quarantine --seq N --expect-generation N --state DIR --request-id ID --decided-by WHO | control require [--state DIR] SWITCH_ID... | census --rundir DIR --config FILE | g04-precommit --rundir DIR --criteria FILE --decided-by WHO | g04-verdict --rundir DIR --config FILE --criteria FILE | replay-proof|capture-quality|strategy-replay --rundir DIR --config FILE [--run ID] | capture-preflight --rundir DIR --config FILE | paper-identity init|show --config FILE".into()),
+        _ => Err("usage: bsc_runtime run --sources DIR --rundir DIR --config FILE | source init|reset --state DIR | source show --state DIR --config FILE | source request ID MODE --expect-generation N --request-id ID --state DIR --config FILE [--root DIR] [--rundir DIR] | strategy show --state DIR --config FILE | strategy set BSC_STRATEGY_C_KEY VALUE --expect-generation N --request-id ID --state DIR --config FILE | strategy set-all BSC_STRATEGY_C_KEY=VALUE... --expect-generation N --request-id ID --state DIR --config FILE | live scope|grant --config FILE --venue V --strategies S --sources A,B --adapters X --max-input-wei N --max-spend-wei N --max-attempts N --expires-unix-ms N --max-buy-slippage-bps N --max-exit-slippage-bps N --max-gas-price-wei N --max-buy-gas-limit N --max-approve-gas-limit N --max-sell-gas-limit N --max-open-positions N --max-realized-loss-wei N --max-daily-realized-loss-wei N --min-buy-interval-ms N [--exit-only] [--risk-outlier-ack] [--scope-sha256 H --expect-generation N --request-id ID --state DIR [--presence-signature S]] | live revoke --expect-generation N --request-id ID --state DIR | live qualify --root DIR --runtime-binary FILE [--venue V@EV,..] [--source S@EV,..] [--adapter A@FINDING,..@EV,..] [--acquisition G08@G07] [--risk-by WHO --risk-statement TEXT --risk-scope-sha256 H --risk-evidence EV,..] [--out FILE] [--replace] | live key init --key FILE --root DIR | config-check --config FILE | live bound-inputs --root DIR | live idle --state DIR | live status --state DIR --config FILE [--root DIR] [--rundir DIR] | live loopback-identity init|show --state DIR --root DIR | live positions --state DIR | live lot resume|write-off|exit-now --lot H --expect-version N --state DIR --config FILE --request-id ID --decided-by WHO | live nonce-burn --tx H --expect-version N --state DIR --config FILE --request-id ID --decided-by WHO | live adopt-g07 --g08 FILE --capture FILE --state DIR --config FILE --request-id ID --decided-by WHO | live ledger check --state DIR | live ledger quarantine --seq N --expect-generation N --state DIR --request-id ID --decided-by WHO | control require [--state DIR] SWITCH_ID... | census --rundir DIR --config FILE | g04-precommit --rundir DIR --criteria FILE --decided-by WHO | g04-verdict --rundir DIR --config FILE --criteria FILE | replay-proof|capture-quality|strategy-replay --rundir DIR --config FILE [--run ID] | capture-preflight --rundir DIR --config FILE | paper-identity init|show --config FILE".into()),
     }
 }
 
