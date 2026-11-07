@@ -1272,6 +1272,125 @@ pub mod strategy_setting_receipt {
     };
 }
 
+/// BSC-V8-01: the Strategy C profile catalog at one version: every profile
+/// at its revision of that version (a deleted one stays, its values kept).
+pub mod strategy_profiles {
+    use super::*;
+
+    /// One profile at one revision.
+    pub mod profile {
+        use super::*;
+
+        /// The owner's identity, never reused.
+        pub const PROFILE_ID: u16 = 1;
+        pub const NAME: u16 = 2;
+        pub const REVISION: u16 = 3;
+        /// `ACTIVE`, `ARCHIVED` or `DELETED`.
+        pub const STATUS: u16 = 4;
+        /// `BSC_VENUE_*`, each once, in the owner's venue order.
+        pub const VENUES: u16 = 5;
+        pub const CREATED_UNIX_MS: u16 = 6;
+        pub const UPDATED_UNIX_MS: u16 = 7;
+        /// The request that wrote this revision.
+        pub const REQUEST_ID: u16 = 8;
+        /// Every settable key with its value, in the owner's key order.
+        pub const VALUES: u16 = 9;
+
+        pub const SCHEMA: Schema = Schema {
+            name: "darkbot.bsc.strategy-profile",
+            record_type: 0,
+            schema_version: 1,
+            fields: &[
+                Field::req(PROFILE_ID, "profile_id", Text).max(32),
+                Field::req(NAME, "name", Text).max(64),
+                Field::req(REVISION, "revision", U64),
+                Field::req(STATUS, "status", Text).max(16),
+                Field::rep(VENUES, "venues", Text).max(32),
+                Field::req(CREATED_UNIX_MS, "created_unix_ms", U64),
+                Field::req(UPDATED_UNIX_MS, "updated_unix_ms", U64),
+                Field::req(REQUEST_ID, "request_id", Text).max(64),
+                Field::nested(
+                    VALUES,
+                    "values",
+                    Presence::Repeated,
+                    &strategy_settings::setting::SCHEMA,
+                ),
+            ],
+        };
+    }
+
+    /// The catalog version (the CAS of a create or clone).
+    pub const VERSION: u16 = 1;
+    /// The request that wrote this version and its payload's hash.
+    pub const REQUEST_ID: u16 = 2;
+    pub const PROVENANCE_TOOL: u16 = crate::schema::PROVENANCE_TOOL;
+    pub const PROVENANCE_OBSERVED_UNIX_MS: u16 = crate::schema::PROVENANCE_OBSERVED_UNIX_MS;
+    pub const REQUEST_SHA256: u16 = 5;
+    pub const PROFILES: u16 = 6;
+
+    pub const SCHEMA: Schema = Schema {
+        name: "darkbot.bsc.strategy-profiles.v1",
+        record_type: 79,
+        schema_version: 1,
+        fields: &[
+            Field::req(VERSION, "version", U64),
+            Field::req(REQUEST_ID, "request_id", Text).max(64),
+            Field::req(PROVENANCE_TOOL, "_provenance.tool", Text),
+            Field::req(
+                PROVENANCE_OBSERVED_UNIX_MS,
+                "_provenance.observed_unix_ms",
+                U64,
+            ),
+            Field::req(REQUEST_SHA256, "request_sha256", B256),
+            Field::nested(PROFILES, "profiles", Presence::Repeated, &profile::SCHEMA),
+        ],
+    };
+}
+
+/// BSC-V8-01: the outcome of one Strategy C profile request.
+pub mod strategy_profile_receipt {
+    use super::*;
+
+    pub const REQUEST_ID: u16 = 1;
+    /// `CREATE`, `UPDATE`, `CLONE`, `ARCHIVE` or `DELETE`.
+    pub const ACTION: u16 = 2;
+    /// The hash of the request's canonical payload (the same ID with
+    /// another payload is refused).
+    pub const REQUEST_SHA256: u16 = 3;
+    /// The catalog version (create, clone) or the profile revision (update,
+    /// archive, delete) the request expected.
+    pub const EXPECTED: u16 = 4;
+    /// `APPLIED`, `REJECTED_STALE`, `REJECTED_INVALID`, `REJECTED_NOT_FOUND`
+    /// or `REJECTED_IN_USE` (`REASON` says why); `PENDING` for the request's
+    /// intent, kept under `intents/` before any catalog version.
+    pub const OUTCOME: u16 = 5;
+    /// The catalog version now current (the new one when applied).
+    pub const CATALOG_VERSION: u16 = 6;
+    /// The profile it created or changed and its revision now.
+    pub const PROFILE_ID: u16 = 7;
+    pub const PROFILE_REVISION: u16 = 8;
+    pub const REASON: u16 = 9;
+    pub const OBSERVED_UNIX_MS: u16 = 10;
+
+    pub const SCHEMA: Schema = Schema {
+        name: "darkbot.bsc.strategy-profile-receipt.v1",
+        record_type: 80,
+        schema_version: 1,
+        fields: &[
+            Field::req(REQUEST_ID, "request_id", Text),
+            Field::req(ACTION, "action", Text),
+            Field::req(REQUEST_SHA256, "request_sha256", B256),
+            Field::req(EXPECTED, "expected", U64),
+            Field::req(OUTCOME, "outcome", Text),
+            Field::req(CATALOG_VERSION, "catalog_version", U64),
+            Field::opt(PROFILE_ID, "profile_id", Text),
+            Field::opt(PROFILE_REVISION, "profile_revision", U64),
+            Field::opt(REASON, "reason", Text),
+            Field::req(OBSERVED_UNIX_MS, "observed_unix_ms", U64),
+        ],
+    };
+}
+
 /// The running runtime's state, rewritten while it runs: per source its
 /// effective mode, derived health and counters (plan §5a.2/§5a.3).
 pub mod runtime_status {
@@ -2854,6 +2973,8 @@ pub const ALL: &[&Schema] = &[
     &strategy_settings::SCHEMA,
     &strategy_setting_receipt::SCHEMA,
     &strategy_setting_receipt::V1,
+    &strategy_profiles::SCHEMA,
+    &strategy_profile_receipt::SCHEMA,
     &buy_attempt_slot::SCHEMA,
     &buy_attempt_total_slot::SCHEMA,
     &live_spend::SCHEMA,

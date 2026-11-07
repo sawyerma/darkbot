@@ -11,6 +11,10 @@
 //! bsc_runtime strategy show --state <dir> --config <ingress.public.env>
 //! bsc_runtime strategy set <BSC_STRATEGY_C_KEY> <VALUE> --expect-generation <n> --request-id <id> --state <dir> --config <ingress.public.env>
 //! bsc_runtime strategy set-all <BSC_STRATEGY_C_KEY>=<VALUE>... --expect-generation <n> --request-id <id> --state <dir> --config <ingress.public.env>
+//! bsc_runtime profile show --state <dir>
+//! bsc_runtime profile create|update <BSC_STRATEGY_C_KEY>=<VALUE>... [--profile <id>] --name <name> --venues <BSC_VENUE_*,...> --expect <n> --request-id <id> --state <dir> --config <ingress.public.env>
+//! bsc_runtime profile clone --source <id> --source-revision <n> --name <name> --expect <n> --request-id <id> --state <dir> --config <ingress.public.env>
+//! bsc_runtime profile archive|delete --profile <id> --expect <n> --request-id <id> --state <dir> --config <ingress.public.env>
 //! bsc_runtime control require [--state <dir>] <SWITCH_ID>...
 //! bsc_runtime live scope|grant|revoke|qualify|status|positions|idle|bound-inputs|loopback-identity ...
 //! bsc_runtime live key init --key <file> --root <repo>
@@ -1329,6 +1333,46 @@ fn run(args: &[String]) -> Result<bool, String> {
                 &pairs,
                 expected,
                 &text,
+                darkbot_bsc_record::observed_now()?,
+            )?;
+            println!("{}", receipt.line());
+            Ok(receipt.applied())
+        }
+        // BSC-V8-01: the Strategy C profiles (training, the LIVE selection).
+        [area, cmd, rest @ ..] if area == "profile" && cmd == "show" => {
+            use darkbot_bsc_execution::strategy_profiles as profiles;
+            let (c, _) = profiles::current_file(std::path::Path::new(flag(rest, "--state")?))?;
+            println!("catalog={}", c.version);
+            for p in &c.profiles {
+                let venues: Vec<&str> = p.venues.iter().map(|v| v.name()).collect();
+                println!(
+                    "profile={} revision={} status={} venues={} config_sha256={} name={}",
+                    p.profile_id,
+                    p.revision,
+                    p.status.name(),
+                    venues.join(","),
+                    darkbot_bsc_record::hex(&p.config_sha256()),
+                    p.name
+                );
+            }
+            Ok(true)
+        }
+        [area, cmd, rest @ ..]
+            if area == "profile"
+                && ["create", "update", "clone", "archive", "delete"].contains(&cmd.as_str()) =>
+        {
+            use darkbot_bsc_execution::strategy_profiles as profiles;
+            // Review M2: each flag's value from its own pair.
+            let c = profiles::command(cmd, rest)?;
+            let text = std::fs::read_to_string(&c.config).map_err(|e| format!("{}: {e}", c.config))?;
+            let owner = profiles::Owner::open(std::path::Path::new(&c.state))?;
+            // No training run or LIVE selection uses a profile yet (BSC-V8-02, -09).
+            let receipt = owner.apply(
+                &c.request_id,
+                &c.request,
+                c.expected,
+                &text,
+                &|_| None,
                 darkbot_bsc_record::observed_now()?,
             )?;
             println!("{}", receipt.line());

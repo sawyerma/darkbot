@@ -132,10 +132,10 @@ Status je Punkt: IMPLEMENTED (nativer Code) · TESTED (Unit/Integration) · INTE
 
 | Punkt | Status | Nachweis / Grenze |
 |---|---|---|
-| V8-01 Profile | OFFEN | nativer Profil-Katalog fehlt |
+| V8-01 Profile | IMPLEMENTED, TESTED | nativer Profil-Owner `strategy_profiles` (Katalog-Versionen + Intent/Receipt je Request-ID, CAS Katalog/Revision, alle 10 Werte parservalidiert, Crash-Recovery, In-Use-Sperre, `BSC_STRATEGY_PROFILES_MAX` ≤ Record-Grenze), `bsc_runtime profile`, `darkbotctl bsc profile`, Gateway `bsc.training.profile.*`, Query `TrainingProfiles` (Commit mit dieser Zeile); INTEGRATED offen: Frontend-CRUD |
 | V8-02 Training ausführen | OFFEN | Run-Owner fehlt |
 | V8-03 Trainingsergebnisse | OFFEN | Ergebnisprojektion fehlt |
-| V8-04 „Save all“ | IMPLEMENTED, TESTED | `Owner::set_all` (eine Generation, ein Receipt v2, CAS, Gesamtvalidierung, Recovery), `bsc_runtime strategy set-all`, `darkbotctl bsc strategy set-all`, Gateway `bsc.strategy.set_all` (`102e2444`); Settings-Zustand (gespeichert/effektiv/laufend mit Hash, Parser-Grenzen, Features) über `POST /api/v1/bsc/query` (Commit mit dieser Zeile); INTEGRATED offen: Frontend liest ihn |
+| V8-04 „Save all“ | IMPLEMENTED, TESTED, INTEGRATED | `Owner::set_all` (eine Generation, ein Receipt v2, CAS, Gesamtvalidierung, Recovery), `bsc_runtime strategy set-all`, `darkbotctl bsc strategy set-all`, Gateway `bsc.strategy.set_all` (`102e2444`); Settings-Zustand (gespeichert/effektiv/laufend mit Hash, Parser-Grenzen, Features) über `POST /api/v1/bsc/query` (`ca4a5646`); INTEGRATED: Formular auf dem nativen Zustand (`8a02aff3`) |
 | V8-05 First-Buyer-Window | IMPLEMENTED, TESTED | 10. Schlüssel `BSC_STRATEGY_C_FIRST_BUYER_WINDOW` (Parser-Grenzen 1–100), Status-Zeile, `bsc.strategy.set`/`set_all` · Commit mit dieser Zeile |
 | V8-06 Team-Sell | NOT_IMPLEMENTED | kein natives Verkaufssignal/Wallet-Identität (Plan: sonst NOT_IMPLEMENTED) |
 | V8-07…10 Historie/Query | OFFEN | Query-Route steht (Sitzung+CSRF, Protobuf, Zeit-/Antwortgrenze aus Gateway-Limits; Reporter `--query` read-only); Trade-Projektor fehlt, Historien-Abfragen NOT_IMPLEMENTED mit Owner |

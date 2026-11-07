@@ -329,6 +329,110 @@ fn the_bounds_table_is_what_the_parser_takes() {
     }
 }
 
+/// BSC-V8-01: the profiles of the owner's current catalog at their revision
+/// with their hash and every value; archived ones on request, deleted ones
+/// never; the catalog version is the next create's CAS.
+#[test]
+fn the_profiles_are_the_owners_catalog() {
+    use darkbot_bsc_execution::strategy_profiles::{Owner, Request};
+    use w::bsc_query_request::Query;
+    let dir = rundir("profiles");
+    let ask_profiles = |include_archived| {
+        let r = ask(
+            Query::TrainingProfiles(w::TrainingProfilesQuery { include_archived }),
+            &dir,
+        );
+        assert_eq!(r.availability, w::Availability::Available as i32);
+        match r.result {
+            Some(w::bsc_query_response::Result::TrainingProfiles(p)) => p,
+            other => panic!("{other:?}"),
+        }
+    };
+    let none = ask_profiles(false);
+    assert_eq!((none.catalog_version, none.profiles.len()), (0, 0));
+    let owner = Owner::open(&dir.join("bsc-sources")).unwrap();
+    let values: Vec<(String, String)> = settings::effective_values(&config(), &Default::default())
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), v))
+        .collect();
+    for (i, name) in ["a", "b", "c"].into_iter().enumerate() {
+        let create = Request::Create {
+            name: name.into(),
+            venues: vec!["BSC_VENUE_FLAP".into()],
+            values: values.clone(),
+        };
+        let r = owner
+            .apply(name, &create, i as u64, &config(), &|_| None, 1_000)
+            .unwrap();
+        assert!(r.applied(), "{}", r.line());
+    }
+    for (id, archive, req) in [("p000002", true, "x"), ("p000003", false, "y")] {
+        let delete = Request::Delete {
+            profile_id: id.into(),
+            archive,
+        };
+        assert!(
+            owner
+                .apply(req, &delete, 1, &config(), &|_| None, 2_000)
+                .unwrap()
+                .applied()
+        );
+    }
+    let p = ask_profiles(false);
+    assert_eq!(p.catalog_version, 5);
+    let a = &p.profiles[..];
+    assert_eq!(a.len(), 1);
+    assert_eq!(
+        (
+            a[0].profile_id.as_str(),
+            a[0].name.as_str(),
+            a[0].revision,
+            a[0].request_id.as_str()
+        ),
+        ("p000001", "a", 1, "a")
+    );
+    assert_eq!(a[0].status, w::TrainingProfileStatus::Active as i32);
+    assert_eq!(a[0].venues, ["BSC_VENUE_FLAP"]);
+    let pairs: Vec<(&'static str, String)> = values
+        .iter()
+        .map(|(k, v)| (settings::key(k).unwrap(), v.clone()))
+        .collect();
+    assert_eq!(
+        a[0].config_sha256,
+        darkbot_bsc_record::hex(&settings::config_sha256(&pairs))
+    );
+    let v = a[0].values.clone().unwrap();
+    assert_eq!(
+        (v.max_open, v.first_buyer_window, v.creator_sell_exit),
+        (Some(5), Some(5), w::CreatorSellExit::Enabled as i32)
+    );
+    assert_eq!(v.filters.len(), 2);
+    let provenance = p.provenance.unwrap();
+    assert_eq!(
+        (provenance.owner_version, provenance.provenance.as_str()),
+        (5, "NATIVE_CREATED")
+    );
+    assert!(
+        provenance
+            .evidence
+            .unwrap()
+            .path
+            .ends_with("00000000000000000005.dbrec")
+    );
+    let with_archived = ask_profiles(true);
+    let ids: Vec<_> = with_archived
+        .profiles
+        .iter()
+        .map(|p| p.profile_id.as_str())
+        .collect();
+    assert_eq!(ids, ["p000001", "p000002"]);
+    assert_eq!(
+        with_archived.profiles[1].status,
+        w::TrainingProfileStatus::Archived as i32
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 /// Every other query names its missing BSC-V8 owner; garbage is refused.
 #[test]
 fn a_query_without_an_owner_is_not_implemented() {

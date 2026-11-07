@@ -101,6 +101,10 @@ fn a_lost_receipt_is_recovered_from_its_generation() {
     // Another payload under the ID of a kept generation is refused.
     std::fs::remove_file(&receipt).unwrap();
     assert!(o.set("r1", MAX_OPEN, "5", 0, CONFIG, 5).is_err());
+    // V8-01 review M1: under another CAS too (the ID's intent is kept):
+    // never a second generation of one request.
+    assert!(o.set("r1", MAX_OPEN, "3", 2, CONFIG, 6).is_err());
+    assert_eq!(current(&dir).unwrap().generation, 2);
 }
 
 /// The runtime configuration's parser decides: a value out of its bounds
@@ -268,11 +272,9 @@ fn save_all_is_one_validated_generation_with_one_receipt() {
     assert_eq!((again.outcome, again.generation), ("APPLIED", 1));
     std::fs::remove_file(&receipt).unwrap();
     assert!(o.set_all("a1", &all[..2], 0, CONFIG, 10).is_err());
-    let other = o.set_all("a1", &all, 1, CONFIG, 10).unwrap();
-    assert_eq!(
-        other.outcome, "REJECTED_STALE",
-        "never APPLIED from generation 1"
-    );
+    // V8-01 review M1: another CAS under its ID is another request (its
+    // intent is kept): refused, never APPLIED from generation 1.
+    assert!(o.set_all("a1", &all, 1, CONFIG, 10).is_err());
 }
 
 /// BSC-V8-04: the strings the gateway's "save all" maps a form to are

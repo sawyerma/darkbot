@@ -10,6 +10,9 @@ use super::*;
 pub struct StrategyConfig {
     pub engine: darkbot_bsc_trading::strategy::engine::Config,
     pub gas_evidence: Vec<String>,
+    /// BSC-V8-01: the most profiles (not deleted) the profile owner keeps
+    /// (`BSC_STRATEGY_PROFILES_MAX`).
+    pub profiles_max: usize,
 }
 
 impl StrategyConfig {
@@ -1218,6 +1221,12 @@ impl RuntimeConfig {
                         .map(|p| p.trim().to_string())
                         .filter(|p| !p.is_empty())
                         .collect(),
+                    // Review L4: at most what one catalog version holds.
+                    profiles_max: take(
+                        "BSC_STRATEGY_PROFILES_MAX",
+                        1,
+                        crate::strategy_profiles::max_profiles_bound(),
+                    )? as usize,
                 }
             },
             source_sha256: darkbot_bsc_record::sha256(text.as_bytes()),

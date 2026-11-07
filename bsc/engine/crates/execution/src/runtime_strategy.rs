@@ -3079,6 +3079,7 @@ mod tests {
         let with = |files: &[&str]| crate::runtime::StrategyConfig {
             engine: config(),
             gas_evidence: files.iter().map(|f| f.to_string()).collect(),
+            profiles_max: 1,
         };
         let text = std::fs::read_to_string(root.join("bsc/config/ingress.public.env")).unwrap();
         let configured = crate::runtime::RuntimeConfig::parse(&text)

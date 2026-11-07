@@ -349,8 +349,59 @@ bsc_strategy_set_all() {
   /usr/bin/env -i PATH=/usr/bin:/bin "$APP_HOME/current/bsc_runtime" strategy set-all "$@" \
     --expect-generation "$gen" --request-id "$req" --state "$RUNDIR/bsc-sources" --config "$BSC_CONFIG"
 }
+# BSC-V8-01: the Strategy C profiles at their native owner (training runs, the LIVE
+# selection): a profile carries every Strategy C value, checked by the runtime
+# configuration's own parser; create and clone take the catalog version as CAS,
+# update, archive and delete the profile's revision. The receipt is printed.
+BSC_PROFILE_USAGE="bsc profile create <catalog_version> <name> <BSC_VENUE_*,...> <BSC_STRATEGY_C_KEY>=<value>... <request_id>; bsc profile update <profile_id> <revision> <name> <BSC_VENUE_*,...> <BSC_STRATEGY_C_KEY>=<value>... <request_id>; bsc profile clone <source_profile_id> <source_revision> <catalog_version> <name> <request_id>; bsc profile archive|delete <profile_id> <revision> <request_id>; bsc profile show"
+bsc_profile() {
+  local what="${1:-}" kv
+  [ "$#" -ge 1 ] && shift
+  local req="${@: -1}"
+  [ "$#" -ge 3 ] || die "$BSC_PROFILE_USAGE"
+  case "$req" in ''|-*|*[!$BSC_ID_CHARS]*) die "the request id is letters, digits and hyphens" ;; esac
+  [ "${#req}" -le 64 ] || die "the request id is letters, digits and hyphens"
+  [ -x "$APP_HOME/current/bsc_runtime" ] || die "BSC runtime nicht deployed"
+  local owner=(--request-id "$req" --state "$RUNDIR/bsc-sources" --config "$BSC_CONFIG")
+  local number id
+  case "$what" in
+    create)
+      [ "$#" -ge 5 ] || die "$BSC_PROFILE_USAGE"
+      number="$1"; local name="$2" venues="$3"; set -- "${@:4:$#-4}" ;;
+    update)
+      [ "$#" -ge 6 ] || die "$BSC_PROFILE_USAGE"
+      id="$1"; number="$2"; local name="$3" venues="$4"; set -- "${@:5:$#-5}" ;;
+    clone)
+      [ "$#" -eq 5 ] || die "$BSC_PROFILE_USAGE"
+      id="$1"; number="$3"
+      case "$2" in ''|*[!0-9]*) die "the source revision must be an unsigned integer" ;; esac ;;
+    archive|delete)
+      [ "$#" -eq 3 ] || die "$BSC_PROFILE_USAGE"
+      id="$1"; number="$2" ;;
+    *) die "$BSC_PROFILE_USAGE" ;;
+  esac
+  case "$number" in ''|*[!0-9]*) die "the version must be an unsigned integer" ;; esac
+  if [ -n "${id:-}" ]; then
+    case "$id" in ''|-*|*[!$BSC_ID_CHARS]*) die "the profile id is letters, digits and hyphens" ;; esac
+  fi
+  local rt=(/usr/bin/env -i PATH=/usr/bin:/bin "$APP_HOME/current/bsc_runtime" profile "$what")
+  case "$what" in
+    create|update)
+      for kv in "$@"; do case "$kv" in BSC_STRATEGY_C_*=*) ;; *) die "unknown Strategy C setting" ;; esac; done
+      [ "$what" = create ] || set -- "$@" --profile "$id"
+      "${rt[@]}" "$@" --name "$name" --venues "$venues" --expect "$number" "${owner[@]}" ;;
+    clone) "${rt[@]}" --source "$id" --source-revision "$2" --name "$4" --expect "$number" "${owner[@]}" ;;
+    *) "${rt[@]}" --profile "$id" --expect "$number" "${owner[@]}" ;;
+  esac
+}
 cmd_bsc() {
   case "${1:-}" in
+    profile) case "${2:-}" in
+      create|update|clone|archive|delete) locked bsc_profile "${@:2}" ;;
+      show) [ -x "$APP_HOME/current/bsc_runtime" ] || die "BSC runtime nicht deployed"
+        /usr/bin/env -i PATH=/usr/bin:/bin "$APP_HOME/current/bsc_runtime" profile show --state "$RUNDIR/bsc-sources" ;;
+      *) die "$BSC_PROFILE_USAGE" ;;
+    esac ;;
     strategy) case "${2:-}" in
       set) locked bsc_strategy_set "${@:3}" ;;
       set-all) locked bsc_strategy_set_all "${@:3}" ;;

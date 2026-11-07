@@ -125,6 +125,23 @@ const BSC_STRATEGY_SET: &str = "bsc.strategy.set";
 /// part of the form, every feature enabled or not (an empty list is refused: "no rules" is every
 /// feature disabled). The runtime configuration's parser decides every value.
 const BSC_STRATEGY_SET_ALL: &str = "bsc.strategy.set_all";
+/// BSC-V8-01: the Strategy C profiles at their native owner (`darkbotctl bsc profile`,
+/// `bsc_runtime profile`): named, versioned Strategy C configurations for training runs and the
+/// LIVE selection. Create and clone take the catalog version as `config_version`, update and
+/// archive/delete the profile's revision as `profile_version` with the profile as resource. A
+/// profile carries every value (`StrategyCSettableValues`, no enum UNSPECIFIED); only the shape
+/// is checked here, the runtime configuration's parser decides the values, the owner the name,
+/// the venues and whether a profile in use may go. Never a signature or send.
+const BSC_PROFILE_CREATE: &str = "bsc.training.profile.create";
+const BSC_PROFILE_UPDATE: &str = "bsc.training.profile.update";
+const BSC_PROFILE_CLONE: &str = "bsc.training.profile.clone";
+const BSC_PROFILE_DELETE: &str = "bsc.training.profile.delete";
+const BSC_PROFILE_ACTIONS: [&str; 4] = [
+    BSC_PROFILE_CREATE,
+    BSC_PROFILE_UPDATE,
+    BSC_PROFILE_CLONE,
+    BSC_PROFILE_DELETE,
+];
 const BSC_STRATEGY_KEYS: [&str; 10] = [
     "BSC_STRATEGY_C_OBSERVATION_MS",
     "BSC_STRATEGY_C_FILTERS",
@@ -448,6 +465,7 @@ fn allowed(project: i32, action: &str) -> bool {
             && ([BSC_START, BSC_STOP, BSC_CANDIDATE, BSC_LIVE_GRANT].contains(&action)
                 || action == BSC_STRATEGY_SET
                 || action == BSC_STRATEGY_SET_ALL
+                || BSC_PROFILE_ACTIONS.contains(&action)
                 || BSC_OWNER_ACTIONS.contains(&action)
                 || BSC_LIVE_DECISIONS.contains(&action)))
 }
@@ -534,9 +552,7 @@ fn strategy_request(req: &CommandRequest) -> Option<Vec<String>> {
 /// `profile_version`, its params a `StrategyCSettingsSetAllCommand`. Only shapes are checked
 /// here (decimal amounts and bounds, a feature name); the native parser decides the values.
 fn strategy_set_all_request(req: &CommandRequest) -> Option<Vec<String>> {
-    use crate::proto::bsc::v1::{
-        CreatorSellExit, CreatorSoldBeforeFill, StrategyCSettingsSetAllCommand,
-    };
+    use crate::proto::bsc::v1::StrategyCSettingsSetAllCommand;
     if req.action != BSC_STRATEGY_SET_ALL || !req.resource_id.is_empty() {
         return None;
     }
@@ -547,12 +563,33 @@ fn strategy_set_all_request(req: &CommandRequest) -> Option<Vec<String>> {
     let v = StrategyCSettingsSetAllCommand::decode(req.params.as_ref())
         .ok()?
         .values?;
+    Some(
+        ["bsc", "strategy", "set-all"]
+            .into_iter()
+            .map(String::from)
+            .chain([generation.to_string()])
+            .chain(
+                settable_pairs(&v, false)?
+                    .into_iter()
+                    .map(|(k, x)| format!("{k}={x}")),
+            )
+            .collect(),
+    )
+}
+
+/// The Strategy C values of a command as the native owner's `KEY=value` pairs in its key order
+/// (only their shape checked); `complete` (a profile): every value given, no enum UNSPECIFIED.
+fn settable_pairs(
+    v: &crate::proto::bsc::v1::StrategyCSettableValues,
+    complete: bool,
+) -> Option<Vec<(&'static str, String)>> {
+    use crate::proto::bsc::v1::{CreatorSellExit, CreatorSoldBeforeFill};
     let decimal = |s: &str| {
         !s.is_empty()
             && s.bytes().all(|b| b.is_ascii_digit() || b == b'.')
             && s.bytes().filter(|b| *b == b'.').count() <= 1
     };
-    let mut set: Vec<(&str, String)> = Vec::new();
+    let mut set: Vec<(&'static str, String)> = Vec::new();
     if let Some(x) = v.observation_ms {
         set.push(("BSC_STRATEGY_C_OBSERVATION_MS", x.to_string()));
     }
@@ -584,13 +621,19 @@ fn strategy_set_all_request(req: &CommandRequest) -> Option<Vec<String>> {
         })
         .collect::<Option<Vec<_>>>()?;
     set.push(("BSC_STRATEGY_C_FILTERS", rules.join(",")));
-    if let Some(x) = v.input_wei {
+    if let Some(x) = v.input_wei.clone() {
         wei_ok(&x).then_some(())?;
         set.push(("BSC_STRATEGY_C_INPUT_WEI", x));
     }
     for (key, x) in [
-        ("BSC_STRATEGY_C_TARGET_NET_MULTIPLE", v.target_net_multiple),
-        ("BSC_STRATEGY_C_STOP_NET_MULTIPLE", v.stop_net_multiple),
+        (
+            "BSC_STRATEGY_C_TARGET_NET_MULTIPLE",
+            v.target_net_multiple.clone(),
+        ),
+        (
+            "BSC_STRATEGY_C_STOP_NET_MULTIPLE",
+            v.stop_net_multiple.clone(),
+        ),
     ] {
         if let Some(x) = x {
             decimal(&x).then_some(())?;
@@ -625,14 +668,86 @@ fn strategy_set_all_request(req: &CommandRequest) -> Option<Vec<String>> {
     if let Some(x) = v.first_buyer_window {
         set.push(("BSC_STRATEGY_C_FIRST_BUYER_WINDOW", x.to_string()));
     }
-    Some(
-        ["bsc", "strategy", "set-all"]
-            .into_iter()
-            .map(String::from)
-            .chain([generation.to_string()])
-            .chain(set.into_iter().map(|(k, x)| format!("{k}={x}")))
-            .collect(),
-    )
+    (!complete || set.len() == BSC_STRATEGY_KEYS.len()).then_some(set)
+}
+
+/// BSC-V8-01: a profile request as the arguments of `darkbotctl bsc profile` without the request
+/// id: the action's resource and CAS kind, its typed params (the profile named twice must agree).
+fn profile_request(req: &CommandRequest) -> Option<Vec<String>> {
+    use crate::proto::bsc::v1::{
+        TrainingProfileCloneCommand, TrainingProfileCreateCommand, TrainingProfileDeleteCommand,
+        TrainingProfileUpdateCommand,
+    };
+    use expected_version::Version;
+    let version = req.expected.as_ref()?.version?;
+    let id_ok = |s: &str| {
+        !s.is_empty()
+            && !s.starts_with('-')
+            && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+    };
+    let name_ok = |s: &str| !s.trim().is_empty() && !s.chars().any(char::is_control);
+    let venues = |v: &[String]| {
+        (!v.is_empty() && v.iter().all(|x| BSC_VENUE_IDS.contains(&x.as_str())))
+            .then(|| v.join(","))
+    };
+    let pairs = |v: Option<&crate::proto::bsc::v1::StrategyCSettableValues>| {
+        settable_pairs(v?, true).map(|s| {
+            s.into_iter()
+                .map(|(k, x)| format!("{k}={x}"))
+                .collect::<Vec<_>>()
+        })
+    };
+    let words = |w: &[&str]| w.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+    let mut args = words(&["bsc", "profile"]);
+    match (req.action.as_str(), version) {
+        (BSC_PROFILE_CREATE, Version::ConfigVersion(n)) if req.resource_id.is_empty() => {
+            let c = TrainingProfileCreateCommand::decode(req.params.as_ref()).ok()?;
+            name_ok(&c.name).then_some(())?;
+            args.extend([
+                "create".into(),
+                n.to_string(),
+                c.name.clone(),
+                venues(&c.venues)?,
+            ]);
+            args.extend(pairs(c.values.as_ref())?);
+        }
+        (BSC_PROFILE_UPDATE, Version::ProfileVersion(n)) => {
+            let c = TrainingProfileUpdateCommand::decode(req.params.as_ref()).ok()?;
+            (id_ok(&c.profile_id) && c.profile_id == req.resource_id && name_ok(&c.name))
+                .then_some(())?;
+            args.extend([
+                "update".into(),
+                c.profile_id.clone(),
+                n.to_string(),
+                c.name.clone(),
+                venues(&c.venues)?,
+            ]);
+            args.extend(pairs(c.values.as_ref())?);
+        }
+        (BSC_PROFILE_CLONE, Version::ConfigVersion(n)) => {
+            let c = TrainingProfileCloneCommand::decode(req.params.as_ref()).ok()?;
+            (id_ok(&c.source_profile_id)
+                && c.source_profile_id == req.resource_id
+                && c.source_revision > 0
+                && name_ok(&c.name))
+            .then_some(())?;
+            args.extend([
+                "clone".into(),
+                c.source_profile_id.clone(),
+                c.source_revision.to_string(),
+                n.to_string(),
+                c.name.clone(),
+            ]);
+        }
+        (BSC_PROFILE_DELETE, Version::ProfileVersion(n)) => {
+            let c = TrainingProfileDeleteCommand::decode(req.params.as_ref()).ok()?;
+            (id_ok(&c.profile_id) && c.profile_id == req.resource_id).then_some(())?;
+            let what = if c.archive { "archive" } else { "delete" };
+            args.extend([what.into(), c.profile_id.clone(), n.to_string()]);
+        }
+        _ => return None,
+    }
+    Some(args)
 }
 
 /// A plain decimal wei amount (no sign, no leading zero), within 128 bits.
@@ -1860,6 +1975,18 @@ impl Control {
                         CommandStatus::Rejected,
                         CommandRejectReason::InvalidParams,
                         "Strategy C setting takes exactly <BSC_STRATEGY_C_OBSERVATION_MS|FILTERS|INPUT_WEI|TARGET_NET_MULTIPLE|STOP_NET_MULTIPLE|HOLD_MS|MAX_OPEN|CREATOR_SOLD_BEFORE_FILL|CREATOR_SELL_EXIT|FIRST_BUYER_WINDOW>:<value, printable ASCII without spaces> and the profile_version generation; the runtime configuration decides the value",
+                    );
+                }
+            }
+        } else if BSC_PROFILE_ACTIONS.contains(&req.action.as_str()) {
+            match profile_request(req) {
+                Some(args) => Some(args),
+                None => {
+                    return reply(
+                        id,
+                        CommandStatus::Rejected,
+                        CommandRejectReason::InvalidParams,
+                        "Strategy C profile: create and clone take the catalog version as config_version, update and delete the profile as resource and its revision as profile_version; the typed params name the same profile, a name, venues from BSC_VENUE_FLAP|FOUR_CLASSIC|OPENFOUR and every Strategy C value; the native owner decides",
                     );
                 }
             }
@@ -5311,6 +5438,225 @@ mod tests {
         assert_eq!(strategy_set_all_request(&junk), None);
         assert!(allowed(ProjectId::Bsc as i32, BSC_STRATEGY_SET_ALL));
         assert!(!allowed(ProjectId::Project0 as i32, BSC_STRATEGY_SET_ALL));
+    }
+    /// BSC-V8-01: a profile request reaches `darkbotctl bsc profile` with its resource, its CAS
+    /// kind (catalog version: create, clone; revision: update, delete) and its typed params; a
+    /// profile carries every value; a profile named twice must agree; nothing else passes.
+    #[test]
+    fn a_profile_request_maps_to_one_owner_call() {
+        use crate::proto::bsc::v1::{
+            CreatorSellExit, CreatorSoldBeforeFill, StrategyCSettableValues, StrategyFilterRule,
+            TrainingProfileCloneCommand, TrainingProfileCreateCommand,
+            TrainingProfileDeleteCommand, TrainingProfileUpdateCommand,
+        };
+        let values = StrategyCSettableValues {
+            input_wei: Some("10000000000000000".into()),
+            target_net_multiple: Some("2".into()),
+            stop_net_multiple: Some("0.5".into()),
+            observation_ms: Some(3000),
+            hold_ms: Some(600000),
+            max_open: Some(5),
+            creator_sold_before_fill: CreatorSoldBeforeFill::FreeCancel as i32,
+            creator_sell_exit: CreatorSellExit::Enabled as i32,
+            filters: vec![StrategyFilterRule {
+                feature: "buy_count".into(),
+                enabled: true,
+                min: Some("2".into()),
+                max: None,
+            }],
+            first_buyer_window: Some(5),
+        };
+        let pairs = [
+            "BSC_STRATEGY_C_OBSERVATION_MS=3000",
+            "BSC_STRATEGY_C_FILTERS=buy_count:2:",
+            "BSC_STRATEGY_C_INPUT_WEI=10000000000000000",
+            "BSC_STRATEGY_C_TARGET_NET_MULTIPLE=2",
+            "BSC_STRATEGY_C_STOP_NET_MULTIPLE=0.5",
+            "BSC_STRATEGY_C_HOLD_MS=600000",
+            "BSC_STRATEGY_C_MAX_OPEN=5",
+            "BSC_STRATEGY_C_CREATOR_SOLD_BEFORE_FILL=FREE_CANCEL",
+            "BSC_STRATEGY_C_CREATOR_SELL_EXIT=ENABLED",
+            "BSC_STRATEGY_C_FIRST_BUYER_WINDOW=5",
+        ];
+        let request =
+            |action: &str, resource: &str, v: expected_version::Version, params: Vec<u8>| {
+                CommandRequest {
+                    project: ProjectId::Bsc as i32,
+                    request_id: "x".into(),
+                    action: action.into(),
+                    resource_id: resource.into(),
+                    expected: Some(crate::proto::ExpectedVersion { version: Some(v) }),
+                    params: params.into(),
+                    issued_at_unix_ns: crate::overview::unix_ns_now(),
+                }
+            };
+        let catalog = expected_version::Version::ConfigVersion;
+        let revision = expected_version::Version::ProfileVersion;
+        let strings = |w: &[&str]| w.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        let create = |v: &StrategyCSettableValues, name: &str| {
+            TrainingProfileCreateCommand {
+                name: name.into(),
+                venues: vec!["BSC_VENUE_FLAP".into(), "BSC_VENUE_OPENFOUR".into()],
+                values: Some(v.clone()),
+            }
+            .encode_to_vec()
+        };
+        let mut want = strings(&[
+            "bsc",
+            "profile",
+            "create",
+            "3",
+            "fast one",
+            "BSC_VENUE_FLAP,BSC_VENUE_OPENFOUR",
+        ]);
+        want.extend(strings(&pairs));
+        assert_eq!(
+            profile_request(&request(
+                BSC_PROFILE_CREATE,
+                "",
+                catalog(3),
+                create(&values, "fast one")
+            )),
+            Some(want)
+        );
+        let update = TrainingProfileUpdateCommand {
+            profile_id: "p000001".into(),
+            name: "fast".into(),
+            venues: vec!["BSC_VENUE_FOUR_CLASSIC".into()],
+            values: Some(values.clone()),
+        }
+        .encode_to_vec();
+        let mut want = strings(&[
+            "bsc",
+            "profile",
+            "update",
+            "p000001",
+            "4",
+            "fast",
+            "BSC_VENUE_FOUR_CLASSIC",
+        ]);
+        want.extend(strings(&pairs));
+        assert_eq!(
+            profile_request(&request(
+                BSC_PROFILE_UPDATE,
+                "p000001",
+                revision(4),
+                update.clone()
+            )),
+            Some(want)
+        );
+        let clone = TrainingProfileCloneCommand {
+            source_profile_id: "p000001".into(),
+            source_revision: 2,
+            name: "copy".into(),
+        }
+        .encode_to_vec();
+        assert_eq!(
+            profile_request(&request(
+                BSC_PROFILE_CLONE,
+                "p000001",
+                catalog(7),
+                clone.clone()
+            )),
+            Some(strings(&[
+                "bsc", "profile", "clone", "p000001", "2", "7", "copy"
+            ]))
+        );
+        let delete = |archive| {
+            TrainingProfileDeleteCommand {
+                profile_id: "p000001".into(),
+                archive,
+            }
+            .encode_to_vec()
+        };
+        assert_eq!(
+            profile_request(&request(
+                BSC_PROFILE_DELETE,
+                "p000001",
+                revision(5),
+                delete(true)
+            )),
+            Some(strings(&["bsc", "profile", "archive", "p000001", "5"]))
+        );
+        assert_eq!(
+            profile_request(&request(
+                BSC_PROFILE_DELETE,
+                "p000001",
+                revision(5),
+                delete(false)
+            )),
+            Some(strings(&["bsc", "profile", "delete", "p000001", "5"]))
+        );
+        let partial = StrategyCSettableValues {
+            hold_ms: None,
+            ..values.clone()
+        };
+        let unset = StrategyCSettableValues {
+            creator_sell_exit: CreatorSellExit::Unspecified as i32,
+            ..values.clone()
+        };
+        let other_venue = TrainingProfileCreateCommand {
+            name: "x".into(),
+            venues: vec!["BSC_VENUE_NONE".into()],
+            values: Some(values.clone()),
+        }
+        .encode_to_vec();
+        for (r, why) in [
+            (
+                request(BSC_PROFILE_CREATE, "", catalog(3), create(&partial, "x")),
+                "a value missing",
+            ),
+            (
+                request(BSC_PROFILE_CREATE, "", catalog(3), create(&unset, "x")),
+                "an enum unset",
+            ),
+            (
+                request(BSC_PROFILE_CREATE, "", catalog(3), create(&values, " ")),
+                "a blank name",
+            ),
+            (
+                request(BSC_PROFILE_CREATE, "", catalog(3), create(&values, "a\nb")),
+                "a control character",
+            ),
+            (
+                request(BSC_PROFILE_CREATE, "", catalog(3), other_venue),
+                "an unknown venue",
+            ),
+            (
+                request(BSC_PROFILE_CREATE, "p1", catalog(3), create(&values, "x")),
+                "a resource",
+            ),
+            (
+                request(BSC_PROFILE_CREATE, "", revision(3), create(&values, "x")),
+                "the wrong CAS",
+            ),
+            (
+                request(BSC_PROFILE_UPDATE, "p000002", revision(4), update.clone()),
+                "two profiles",
+            ),
+            (
+                request(BSC_PROFILE_UPDATE, "p000001", catalog(4), update),
+                "the wrong CAS",
+            ),
+            (
+                request(BSC_PROFILE_CLONE, "p000002", catalog(7), clone),
+                "two profiles",
+            ),
+            (
+                request(BSC_PROFILE_DELETE, "-p", revision(5), delete(false)),
+                "a flag as id",
+            ),
+            (
+                request(BSC_PROFILE_DELETE, "p000001", revision(5), vec![0xff, 0xff]),
+                "garbage",
+            ),
+        ] {
+            assert_eq!(profile_request(&r), None, "{why}");
+        }
+        for action in BSC_PROFILE_ACTIONS {
+            assert!(allowed(ProjectId::Bsc as i32, action));
+            assert!(!allowed(ProjectId::Project0 as i32, action));
+        }
     }
     /// Frontend package (06.11.): a Strategy C setting is exactly `<KEY>:<VALUE>` with a key from
     /// the fixed set, a value of printable ASCII without spaces (or none) and the displayed

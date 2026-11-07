@@ -46,7 +46,16 @@ fn respond(req: w::BscQueryRequest, root: &Path, rundir: &Path) -> w::BscQueryRe
         Some(Query::TrainingRuns(_)) | Some(Query::ReplaySources(_)) => {
             missing("BSC-V8-02/03 training runs")
         }
-        Some(Query::TrainingProfiles(_)) => missing("BSC-V8-01 Strategy C profiles"),
+        Some(Query::TrainingProfiles(q)) => {
+            let profiles = training_profiles(q.include_archived, rundir);
+            w::BscQueryResponse {
+                request_id: req.request_id.clone(),
+                availability: profiles.availability,
+                unavailable_reason: profiles.unavailable_reason.clone(),
+                result: Some(w::bsc_query_response::Result::TrainingProfiles(profiles)),
+                ..Default::default()
+            }
+        }
         Some(Query::WalletMovements(_)) | Some(Query::Treasury(_)) => {
             missing("BSC-V8-13..17 wallets and treasury")
         }
@@ -232,6 +241,95 @@ fn strategy_settings_state_at(
         provenance: "NATIVE_CREATED".into(),
     });
     state
+}
+
+/// BSC-V8-01: the Strategy C profiles of the native owner's current
+/// catalog (the deleted ones never, the archived ones on request), each at
+/// its revision with its configuration hash. No run or LIVE selection uses
+/// one yet (BSC-V8-02, -09): `in_use` false, no runs.
+fn training_profiles(include_archived: bool, rundir: &Path) -> w::TrainingProfiles {
+    use darkbot_bsc_execution::strategy_profiles::{self as profiles, Status};
+    use darkbot_bsc_record::schema::bsc_runtime::strategy_profiles as sp;
+    let observed = darkbot_bsc_record::observed_now().unwrap_or(0);
+    let (catalog, file) = match profiles::current_file(&rundir.join("bsc-sources")) {
+        Ok(c) => c,
+        Err(e) => {
+            return w::TrainingProfiles {
+                availability: w::Availability::Unavailable as i32,
+                unavailable_reason: format!("the Strategy C profile owner: {e}"),
+                ..Default::default()
+            };
+        }
+    };
+    let list = catalog
+        .profiles
+        .iter()
+        .filter(|p| match p.status {
+            Status::Active => true,
+            Status::Archived => include_archived,
+            Status::Deleted => false,
+        })
+        .map(|p| w::TrainingProfile {
+            profile_id: p.profile_id.clone(),
+            name: p.name.clone(),
+            revision: p.revision,
+            config_sha256: darkbot_bsc_record::hex(&p.config_sha256()),
+            venues: p.venues.iter().map(|v| v.name().to_string()).collect(),
+            created_unix_ms: p.created_unix_ms,
+            updated_unix_ms: p.updated_unix_ms,
+            status: match p.status {
+                Status::Active => w::TrainingProfileStatus::Active,
+                Status::Archived => w::TrainingProfileStatus::Archived,
+                Status::Deleted => w::TrainingProfileStatus::Deleted,
+            } as i32,
+            values: Some(settable_proto(&p.values)),
+            request_id: p.request_id.clone(),
+            ..Default::default()
+        })
+        .collect();
+    w::TrainingProfiles {
+        availability: w::Availability::Available as i32,
+        provenance: Some(w::OwnerProvenance {
+            owner: "bsc_runtime strategy profiles".into(),
+            owner_version: catalog.version,
+            observed_unix_ms: observed,
+            evidence: file.as_ref().and_then(|f| {
+                let bytes = std::fs::read(f).ok()?;
+                let written = darkbot_bsc_record::decode(&sp::SCHEMA, &bytes)
+                    .ok()?
+                    .u64(sp::PROVENANCE_OBSERVED_UNIX_MS)
+                    .ok()?;
+                Some(w::Evidence {
+                    path: f.strip_prefix(rundir).unwrap_or(f).display().to_string(),
+                    sha256: darkbot_bsc_record::hex(&darkbot_bsc_record::sha256(&bytes)),
+                    observed_unix_s: written / 1_000,
+                })
+            }),
+            quality: w::DataQuality::Verified as i32,
+            provenance: "NATIVE_CREATED".into(),
+            ..Default::default()
+        }),
+        profiles: list,
+        catalog_version: catalog.version,
+        ..Default::default()
+    }
+}
+
+/// A profile's values (every settable key) as a command's typed values.
+fn settable_proto(values: &[(&'static str, String)]) -> w::StrategyCSettableValues {
+    let s = values_proto(values, None);
+    w::StrategyCSettableValues {
+        input_wei: s.input_wei,
+        target_net_multiple: s.target_net_multiple,
+        stop_net_multiple: s.stop_net_multiple,
+        observation_ms: s.observation_ms,
+        hold_ms: s.hold_ms,
+        max_open: s.max_open,
+        creator_sold_before_fill: s.creator_sold_before_fill,
+        creator_sell_exit: s.creator_sell_exit,
+        filters: s.filters,
+        first_buyer_window: s.first_buyer_window,
+    }
 }
 
 /// A settings basis as its typed values (`config`: the effective one, with

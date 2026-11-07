@@ -391,6 +391,7 @@ impl Receipt {
             values,
             expected_generation: r.u64(sr::EXPECTED_GENERATION).map_err(e)?,
             outcome: match r.text(sr::OUTCOME).map_err(e)? {
+                "PENDING" => "PENDING",
                 "APPLIED" => "APPLIED",
                 "REJECTED_STALE" => "REJECTED_STALE",
                 "REJECTED_INVALID" => "REJECTED_INVALID",
@@ -479,7 +480,12 @@ impl Owner {
     pub fn open(sources: &Path) -> Result<Self, String> {
         let dir = sources.join(DIR);
         let mut owner = None;
-        for d in [dir.clone(), dir.join("generations"), dir.join("receipts")] {
+        for d in [
+            dir.clone(),
+            dir.join("generations"),
+            dir.join("intents"),
+            dir.join("receipts"),
+        ] {
             create_durable_dir(&d)?;
             if !std::fs::symlink_metadata(&d).is_ok_and(|m| m.is_dir()) {
                 return Err(format!("{} is not a real directory", d.display()));
@@ -578,10 +584,27 @@ impl Owner {
             request_id: request_id.into(),
             values: values.clone(),
             expected_generation,
-            outcome: "REJECTED_STALE",
+            outcome: "PENDING",
             generation: current.generation,
             reason: None,
         };
+        // V8-01 review M1: before any generation the request's intent (its
+        // values and CAS) is kept under its ID, so a lost receipt never lets
+        // the ID write again under another CAS or payload.
+        let intent_path = self.dir.join("intents").join(format!("{request_id}.dbrec"));
+        match write_new(&intent_path, &receipt.encode(now_ms)?) {
+            Ok(()) => {}
+            Err(e) if e.kind() == ErrorKind::AlreadyExists => {
+                let i = Receipt::decode(
+                    &read_private(&intent_path, self.owner).map_err(|e| e.to_string())?,
+                )?;
+                if !i.same(&values, expected_generation) {
+                    return Err("the request ID already belongs to another request".into());
+                }
+            }
+            Err(e) => return Err(format!("intent not written: {e}")),
+        }
+        receipt.outcome = "REJECTED_STALE";
         // A generation is this request's only if it is the one the request
         // would have written: at its expected generation + 1, exactly its
         // values over the generation before (review: never a subset).

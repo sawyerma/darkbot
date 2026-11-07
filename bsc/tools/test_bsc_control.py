@@ -140,5 +140,42 @@ class ControlTests(unittest.TestCase):
                                             '--expect-generation', '3', '--request-id', 'r-2', '--state',
                                             f'{self.w}/run/bsc-sources', '--config', config])
 
+    def test_a_profile_request_reaches_the_owner_with_each_value_as_one_argument(self):
+        # BSC-V8-01: create/update with every value, clone, archive/delete; the name one argument.
+        config = f'{self.snapshot}/bsc/config/ingress.public.env'
+        owner = ['--request-id', 'r-1', '--state', f'{self.w}/run/bsc-sources', '--config', config]
+        for args, why in [(['create', 'x', 'n', 'BSC_VENUE_FLAP', 'BSC_STRATEGY_C_MAX_OPEN=3', 'r-1'], 'unsigned integer'),
+                          (['create', '0', 'n', 'BSC_VENUE_FLAP', 'BSC_EXEC_INPUT_WEI=1', 'r-1'], 'unknown Strategy C setting'),
+                          (['create', '0', 'n', 'BSC_VENUE_FLAP', 'BSC_STRATEGY_C_MAX_OPEN=3', '-r'], 'letters, digits and hyphens'),
+                          (['update', '-p', '1', 'n', 'BSC_VENUE_FLAP', 'BSC_STRATEGY_C_MAX_OPEN=3', 'r-1'], 'profile id'),
+                          (['clone', 'p1', 'x', '0', 'n', 'r-1'], 'source revision'),
+                          (['delete', 'p1', '1'], 'bsc profile create'),
+                          (['rename', 'p1', '1', 'r-1'], 'bsc profile create')]:
+            code, out = self.sh('cmd_bsc', 'profile', *args)
+            self.assertEqual(code, 1, out); self.assertIn(why, out)
+        self.assertEqual(self.calls(), [])
+        code, out = self.sh('cmd_bsc', 'profile', 'create', '0', 'fast one', 'BSC_VENUE_FLAP,BSC_VENUE_OPENFOUR',
+                            'BSC_STRATEGY_C_MAX_OPEN=3', 'BSC_STRATEGY_C_FILTERS=a b=c', 'r-1')
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.calls()[-1], ['profile', 'create', 'BSC_STRATEGY_C_MAX_OPEN=3', 'BSC_STRATEGY_C_FILTERS=a b=c',
+                                            '--name', 'fast one', '--venues', 'BSC_VENUE_FLAP,BSC_VENUE_OPENFOUR',
+                                            '--expect', '0', *owner])
+        code, out = self.sh('cmd_bsc', 'profile', 'update', 'p000001', '2', 'slow', 'BSC_VENUE_FLAP',
+                            'BSC_STRATEGY_C_MAX_OPEN=1', 'r-1')
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.calls()[-1], ['profile', 'update', 'BSC_STRATEGY_C_MAX_OPEN=1', '--profile', 'p000001',
+                                            '--name', 'slow', '--venues', 'BSC_VENUE_FLAP', '--expect', '2', *owner])
+        code, out = self.sh('cmd_bsc', 'profile', 'clone', 'p000001', '1', '4', '-copy', 'r-1')
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.calls()[-1], ['profile', 'clone', '--source', 'p000001', '--source-revision', '1',
+                                            '--name', '-copy', '--expect', '4', *owner])
+        for what in ['archive', 'delete']:
+            code, out = self.sh('cmd_bsc', 'profile', what, 'p000001', '3', 'r-1')
+            self.assertEqual(code, 0, out)
+            self.assertEqual(self.calls()[-1], ['profile', what, '--profile', 'p000001', '--expect', '3', *owner])
+        code, out = self.sh('cmd_bsc', 'profile', 'show')
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.calls()[-1], ['profile', 'show', '--state', f'{self.w}/run/bsc-sources'])
+
 if __name__ == '__main__':
     unittest.main()

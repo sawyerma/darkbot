@@ -125,6 +125,10 @@ pub mod runtime_strategy;
 /// settings, effective at the strategy's next start.
 #[cfg(feature = "runtime")]
 pub mod strategy_settings;
+/// BSC-V8-01: the native owner of the Strategy C profiles (named, versioned
+/// configurations for training runs and the LIVE selection).
+#[cfg(feature = "runtime")]
+pub mod strategy_profiles;
 /// The native canonical chain follower: G0.4 launches from canonical receipts.
 #[cfg(feature = "runtime")]
 pub mod chain_follower;
