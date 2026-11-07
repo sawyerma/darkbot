@@ -53,8 +53,8 @@ export function WalletsPanel() {
   const t = treasuryOf(q);
   // A request whose handoff was UNKNOWN unlocks once the owner's treasury shows it.
   const unknown = receipt?.phase === "UNKNOWN" ? receipt.id : null;
-  const shown = !!unknown && t.ok && ([...t.state.transfers, t.state.profitPolicy?.lastTransfer, t.state.payoutPolicy?.lastPayout].some(x => x?.requestId === unknown)
-    || t.state.profitPolicy?.requestId === unknown || t.state.payoutPolicy?.requestId === unknown);
+  const shown = !!unknown && t.ok && ([...t.state.transfers, t.state.profitPolicy?.lastTransfer, t.state.payoutPolicy?.lastPayout].some(x => x?.requestId === unknown || x?.authorizeRequestId === unknown)
+    || t.state.profitPolicy?.requestId === unknown || t.state.payoutPolicy?.requestId === unknown || t.state.decidedRequestIds.includes(unknown));
   useEffect(() => { if (shown && receipt) releaseWalletRequest(receipt.id); }, [shown, receipt]);
   const accounts = accountViews(w, t, live);
   const eco = economics(t, live);

@@ -17,9 +17,12 @@ under the owner's LIVE gate for the operator's granted scope, and the browser si
 - **Wallets** (`pages/Wallet*.tsx`, `model/wallets.ts`): Accounts → Balances → Manual transfers → Automatic
   profit transfer (policy A) → Automatic payout (policy B) → Transaction history → Balance & profit. Main,
   Trading (Buyer), External (receive-only, no MetaMask connection) and the separate G0.7 launcher are never
-  summed. Funding, payout, destinations and both policies go to the native treasury owner as typed commands
-  at its version (`walletCommand`), offered only while it answers the treasury query; an open (PENDING/SENT/
-  UNKNOWN) transfer locks its path. Drafts live in the view only.
+  summed. A manual transfer is a prepare (the owner's DRAFT with its scope text, its SHA-256 checked here)
+  and an authorization of that digest; a destination is saved, then confirmed on its own; an enabled policy
+  carries an authorization (expiry, per-transfer and total maximum within the owner's bounds) with its
+  canonical scope text's SHA-256. All go to the native treasury owner as typed commands at its version
+  (`walletCommand`), offered only while it answers the treasury query; an open (DRAFT/PENDING/SENT/UNKNOWN)
+  transfer locks its path. Drafts live in the view only.
 - **Placement:** every native field keeps its section from `frontend/contracts/bsc-fields.json`
   (`model/placement.generated.ts`, `check:bsc-fields`); the pre-V8 groups (Overview, Launch / BUY,
   Monitoring, Analytics) render in the Settings drawer, the LIVE groups in the Live drawers.

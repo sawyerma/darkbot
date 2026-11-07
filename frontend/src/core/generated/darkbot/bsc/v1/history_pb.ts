@@ -6,13 +6,17 @@ import type { GenEnum, GenFile, GenMessage } from "@bufbuild/protobuf/codegenv1"
 import { enumDesc, fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv1";
 import type { Availability, DataQuality, OwnerProvenance, SourcedTime } from "./common_pb";
 import { file_darkbot_bsc_v1_common } from "./common_pb";
+import type { LiveAttempt, LiveTransaction } from "./status_pb";
+import { file_darkbot_bsc_v1_status } from "./status_pb";
+import type { CreatorSellExit } from "./training_pb";
+import { file_darkbot_bsc_v1_training } from "./training_pb";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file darkbot/bsc/v1/history.proto.
  */
 export const file_darkbot_bsc_v1_history: GenFile = /*@__PURE__*/
-  fileDesc("ChxkYXJrYm90L2JzYy92MS9oaXN0b3J5LnByb3RvEg5kYXJrYm90LmJzYy52MSLiBwoIVHJhZGVSb3cSCwoDbG90GAEgASgJEg0KBXRva2VuGAIgASgJEisKBnN0YXR1cxgDIAEoDjIbLmRhcmtib3QuYnNjLnYxLlRyYWRlU3RhdHVzEg0KBXZlbnVlGAQgASgJEhEKCWNvbXBvbmVudBgFIAEoCRIRCglpbnB1dF93ZWkYBiABKAkSGQoMcHJvY2VlZHNfd2VpGAcgASgJSACIAQESGAoQcHJvY2VlZHNfdW5rbm93bhgIIAEoCBIUCgdwbmxfd2VpGAkgASgJSAGIAQESFAoHcm9pX3BwbRgKIAEoEkgCiAEBEi0KCGJ1eV90aW1lGAsgASgLMhsuZGFya2JvdC5ic2MudjEuU291cmNlZFRpbWUSLgoJc2VsbF90aW1lGAwgASgLMhsuZGFya2JvdC5ic2MudjEuU291cmNlZFRpbWUSFAoHaG9sZF9tcxgNIAEoBEgDiAEBEhQKDGZpcnN0X3NvdXJjZRgOIAEoCRIhChRsZWFkX2JlZm9yZV9ibG9ja191cxgPIAEoEkgEiAEBEh4KEWRldGVjdF90b19zZW5kX25zGBAgASgESAWIAQESGwoOc2VuZF90b19hY2tfbnMYESABKARIBogBARIPCgdnYXNfd2VpGBIgASgJEhUKCGZlZXNfd2VpGBMgASgJSAeIAQESMQoJcGxhY2VtZW50GBQgASgOMh4uZGFya2JvdC5ic2MudjEuVHJhZGVQbGFjZW1lbnQSLwoLZXhpdF9yZWFzb24YFSABKA4yGi5kYXJrYm90LmJzYy52MS5FeGl0UmVhc29uEjwKEmV4aXRfcmVhc29uX3NvdXJjZRgWIAEoDjIgLmRhcmtib3QuYnNjLnYxLkV4aXRSZWFzb25Tb3VyY2USGgoSZXhpdF9yZWFzb25fZGV0YWlsGBcgASgJEhMKC2J1eV90eF9oYXNoGBggASgJEhQKDHNlbGxfdHhfaGFzaBgZIAEoCRIQCgNydW4YGiABKARICIgBARIWCg5sZWRnZXJfdmVyc2lvbhgbIAEoBBIsCgdxdWFsaXR5GBwgASgOMhsuZGFya2JvdC5ic2MudjEuRGF0YVF1YWxpdHkSFwoPcXVhbGl0eV9yZWFzb25zGB0gAygJQg8KDV9wcm9jZWVkc193ZWlCCgoIX3BubF93ZWlCCgoIX3JvaV9wcG1CCgoIX2hvbGRfbXNCFwoVX2xlYWRfYmVmb3JlX2Jsb2NrX3VzQhQKEl9kZXRlY3RfdG9fc2VuZF9uc0IRCg9fc2VuZF90b19hY2tfbnNCCwoJX2ZlZXNfd2VpQgYKBF9ydW4ijwIKEFRyYWRlVHJhbnNhY3Rpb24SDwoHdHhfaGFzaBgBIAEoCRIOCgZpbnRlbnQYAiABKAkSDQoFbm9uY2UYAyABKAQSDQoFc3RhdGUYBCABKAkSGQoMYmxvY2tfbnVtYmVyGAUgASgESACIAQESLwoKYmxvY2tfdGltZRgGIAEoCzIbLmRhcmtib3QuYnNjLnYxLlNvdXJjZWRUaW1lEhQKB2dhc193ZWkYByABKAlIAYgBARIOCgZzb3VyY2UYCCABKAkSLQoIcmVsZWFzZWQYCSABKAsyGy5kYXJrYm90LmJzYy52MS5Tb3VyY2VkVGltZUIPCg1fYmxvY2tfbnVtYmVyQgoKCF9nYXNfd2VpIrIBCg1UcmFkZVNpZ2h0aW5nEg4KBnNvdXJjZRgBIAEoCRISCgpjYXBhYmlsaXR5GAIgASgJEikKBHNlZW4YAyABKAsyGy5kYXJrYm90LmJzYy52MS5Tb3VyY2VkVGltZRIhChRsZWFkX2JlZm9yZV9ibG9ja191cxgEIAEoEkgAiAEBEhYKDmZpcnN0X3ZlcmlmaWVkGAUgASgIQhcKFV9sZWFkX2JlZm9yZV9ibG9ja191cyLkBgoLVHJhZGVEZXRhaWwSMgoMYXZhaWxhYmlsaXR5GAEgASgOMhwuZGFya2JvdC5ic2MudjEuQXZhaWxhYmlsaXR5EhoKEnVuYXZhaWxhYmxlX3JlYXNvbhgCIAEoCRIzCgpwcm92ZW5hbmNlGAMgASgLMh8uZGFya2JvdC5ic2MudjEuT3duZXJQcm92ZW5hbmNlEiUKA3JvdxgEIAEoCzIYLmRhcmtib3QuYnNjLnYxLlRyYWRlUm93EjYKDHRyYW5zYWN0aW9ucxgFIAMoCzIgLmRhcmtib3QuYnNjLnYxLlRyYWRlVHJhbnNhY3Rpb24SMAoJc2lnaHRpbmdzGAYgAygLMh0uZGFya2JvdC5ic2MudjEuVHJhZGVTaWdodGluZxITCgtsYXVuY2hfaGFzaBgHIAEoCRIZCgxsYXVuY2hfYmxvY2sYCCABKARIAIgBARIwCgtsYXVuY2hfdGltZRgJIAEoCzIbLmRhcmtib3QuYnNjLnYxLlNvdXJjZWRUaW1lEhUKCGNsb2NrX2lkGAogASgESAGIAQESEAoIdDBfZXhhY3QYCyABKAgSGAoLdF9kZXRlY3RfbnMYDCABKARIAogBARIYCgt0X3NlbGVjdF9ucxgNIAEoBEgDiAEBEhYKCXRfc2VuZF9ucxgOIAEoBEgEiAEBEhUKCHRfYWNrX25zGA8gASgESAWIAQESGQoMbGF1bmNoX2luZGV4GBAgASgESAaIAQESFgoJb3duX2luZGV4GBEgASgESAeIAQESGAoLYnV5c19iZWZvcmUYEiABKARICIgBARITCgZ0b2tlbnMYEyABKAlICYgBARIdChBncmFudF9nZW5lcmF0aW9uGBQgASgESAqIAQESFQoNY29uZmlnX3NoYTI1NhgVIAEoCRIRCglkZWNpc2lvbnMYFiADKAlCDwoNX2xhdW5jaF9ibG9ja0ILCglfY2xvY2tfaWRCDgoMX3RfZGV0ZWN0X25zQg4KDF90X3NlbGVjdF9uc0IMCgpfdF9zZW5kX25zQgsKCV90X2Fja19uc0IPCg1fbGF1bmNoX2luZGV4QgwKCl9vd25faW5kZXhCDgoMX2J1eXNfYmVmb3JlQgkKB190b2tlbnNCEwoRX2dyYW50X2dlbmVyYXRpb24inAIKEVRyYWRlSGlzdG9yeVF1ZXJ5Ei0KCHN0YXR1c2VzGAEgAygOMhsuZGFya2JvdC5ic2MudjEuVHJhZGVTdGF0dXMSEgoFZ2FpbnMYAiABKAhIAIgBARIOCgZ2ZW51ZXMYAyADKAkSGQoMZnJvbV91bml4X21zGAQgASgESAGIAQESFwoKdG9fdW5peF9tcxgFIAEoBEgCiAEBEg4KBnNlYXJjaBgGIAEoCRInCgRzb3J0GAcgASgOMhkuZGFya2JvdC5ic2MudjEuVHJhZGVTb3J0Eg4KBmN1cnNvchgIIAEoCRINCgVsaW1pdBgJIAEoDUIICgZfZ2FpbnNCDwoNX2Zyb21fdW5peF9tc0INCgtfdG9fdW5peF9tcyKAAQoLVHJhZGVDb3VudHMSDwoHcGVuZGluZxgBIAEoBBIPCgdydW5uaW5nGAIgASgEEgwKBHdpbnMYAyABKAQSDgoGbG9zc2VzGAQgASgEEgwKBGZsYXQYBSABKAQSDgoGZmFpbGVkGAYgASgEEhMKC3dyaXR0ZW5fb2ZmGAcgASgEIqICChBUcmFkZUhpc3RvcnlQYWdlEjIKDGF2YWlsYWJpbGl0eRgBIAEoDjIcLmRhcmtib3QuYnNjLnYxLkF2YWlsYWJpbGl0eRIaChJ1bmF2YWlsYWJsZV9yZWFzb24YAiABKAkSMwoKcHJvdmVuYW5jZRgDIAEoCzIfLmRhcmtib3QuYnNjLnYxLk93bmVyUHJvdmVuYW5jZRImCgRyb3dzGAQgAygLMhguZGFya2JvdC5ic2MudjEuVHJhZGVSb3cSEwoLbmV4dF9jdXJzb3IYBSABKAkSEAoIaGFzX21vcmUYBiABKAgSDQoFdG90YWwYByABKAQSKwoGY291bnRzGAggASgLMhsuZGFya2JvdC5ic2MudjEuVHJhZGVDb3VudHMiHwoQVHJhZGVEZXRhaWxRdWVyeRILCgNsb3QYASABKAkq4AEKC1RyYWRlU3RhdHVzEhwKGFRSQURFX1NUQVRVU19VTlNQRUNJRklFRBAAEhgKFFRSQURFX1NUQVRVU19QRU5ESU5HEAESFQoRVFJBREVfU1RBVFVTX09QRU4QAhIYChRUUkFERV9TVEFUVVNfRVhJVElORxADEhcKE1RSQURFX1NUQVRVU19DTE9TRUQQBBIXChNUUkFERV9TVEFUVVNfRkFJTEVEEAUSHAoYVFJBREVfU1RBVFVTX1dSSVRURU5fT0ZGEAYSGAoUVFJBREVfU1RBVFVTX1VOS05PV04QByqvAgoKRXhpdFJlYXNvbhIbChdFWElUX1JFQVNPTl9VTlNQRUNJRklFRBAAEhQKEEVYSVRfUkVBU09OX05PTkUQARIWChJFWElUX1JFQVNPTl9UQVJHRVQQAhIUChBFWElUX1JFQVNPTl9TVE9QEAMSFwoTRVhJVF9SRUFTT05fVElNRU9VVBAEEhwKGEVYSVRfUkVBU09OX0NSRUFUT1JfU0VMTBAFEh0KGUVYSVRfUkVBU09OX09QRVJBVE9SX0VYSVQQBhIZChVFWElUX1JFQVNPTl9XUklURV9PRkYQBxIaChZFWElUX1JFQVNPTl9CVVlfRkFJTEVEEAgSHAoYRVhJVF9SRUFTT05fREVYX01JR1JBVEVEEAkSFQoRRVhJVF9SRUFTT05fT1RIRVIQCirMAQoQRXhpdFJlYXNvblNvdXJjZRIiCh5FWElUX1JFQVNPTl9TT1VSQ0VfVU5TUEVDSUZJRUQQABInCiNFWElUX1JFQVNPTl9TT1VSQ0VfU1RSQVRFR1lfSk9VUk5BTBABEiYKIkVYSVRfUkVBU09OX1NPVVJDRV9MRURHRVJfT1BFUkFUT1IQAhIjCh9FWElUX1JFQVNPTl9TT1VSQ0VfTEVER0VSX0NIQUlOEAMSHgoaRVhJVF9SRUFTT05fU09VUkNFX1VOS05PV04QBCrDAQoOVHJhZGVQbGFjZW1lbnQSHwobVFJBREVfUExBQ0VNRU5UX1VOU1BFQ0lGSUVEEAASGwoXVFJBREVfUExBQ0VNRU5UX1VOS05PV04QARIZChVUUkFERV9QTEFDRU1FTlRfRklSU1QQAhIYChRUUkFERV9QTEFDRU1FTlRfTEFURRADEh8KG1RSQURFX1BMQUNFTUVOVF9PVEhFUl9CTE9DSxAEEh0KGVRSQURFX1BMQUNFTUVOVF9OT19UT0tFTlMQBSpyCglUcmFkZVNvcnQSGgoWVFJBREVfU09SVF9VTlNQRUNJRklFRBAAEhsKF1RSQURFX1NPUlRfQUNUSVZFX0ZJUlNUEAESFQoRVFJBREVfU09SVF9ORVdFU1QQAhIVChFUUkFERV9TT1JUX09MREVTVBADQnwKEmNvbS5kYXJrYm90LmJzYy52MUIMSGlzdG9yeVByb3RvUAGiAgNEQliqAg5EYXJrYm90LkJzYy5WMcoCDkRhcmtib3RcQnNjXFYx4gIaRGFya2JvdFxCc2NcVjFcR1BCTWV0YWRhdGHqAhBEYXJrYm90OjpCc2M6OlYxYgZwcm90bzM", [file_darkbot_bsc_v1_common]);
+  fileDesc("ChxkYXJrYm90L2JzYy92MS9oaXN0b3J5LnByb3RvEg5kYXJrYm90LmJzYy52MSK3CAoIVHJhZGVSb3cSCwoDbG90GAEgASgJEg0KBXRva2VuGAIgASgJEisKBnN0YXR1cxgDIAEoDjIbLmRhcmtib3QuYnNjLnYxLlRyYWRlU3RhdHVzEg0KBXZlbnVlGAQgASgJEhEKCWNvbXBvbmVudBgFIAEoCRIRCglpbnB1dF93ZWkYBiABKAkSGQoMcHJvY2VlZHNfd2VpGAcgASgJSACIAQESGAoQcHJvY2VlZHNfdW5rbm93bhgIIAEoCBIUCgdwbmxfd2VpGAkgASgJSAGIAQESFAoHcm9pX3BwbRgKIAEoEkgCiAEBEi0KCGJ1eV90aW1lGAsgASgLMhsuZGFya2JvdC5ic2MudjEuU291cmNlZFRpbWUSLgoJc2VsbF90aW1lGAwgASgLMhsuZGFya2JvdC5ic2MudjEuU291cmNlZFRpbWUSFAoHaG9sZF9tcxgNIAEoBEgDiAEBEiEKFGxlYWRfYmVmb3JlX2Jsb2NrX3VzGA8gASgSSASIAQESHgoRZGV0ZWN0X3RvX3NlbmRfbnMYECABKARIBYgBARIbCg5zZW5kX3RvX2Fja19ucxgRIAEoBEgGiAEBEg8KB2dhc193ZWkYEiABKAkSFQoIZmVlc193ZWkYEyABKAlIB4gBARIxCglwbGFjZW1lbnQYFCABKA4yHi5kYXJrYm90LmJzYy52MS5UcmFkZVBsYWNlbWVudBIvCgtleGl0X3JlYXNvbhgVIAEoDjIaLmRhcmtib3QuYnNjLnYxLkV4aXRSZWFzb24SPAoSZXhpdF9yZWFzb25fc291cmNlGBYgASgOMiAuZGFya2JvdC5ic2MudjEuRXhpdFJlYXNvblNvdXJjZRIaChJleGl0X3JlYXNvbl9kZXRhaWwYFyABKAkSEwoLYnV5X3R4X2hhc2gYGCABKAkSFAoMc2VsbF90eF9oYXNoGBkgASgJEhAKA3J1bhgaIAEoBEgIiAEBEhYKDmxlZGdlcl92ZXJzaW9uGBsgASgEEiwKB3F1YWxpdHkYHCABKA4yGy5kYXJrYm90LmJzYy52MS5EYXRhUXVhbGl0eRIXCg9xdWFsaXR5X3JlYXNvbnMYHSADKAkSFgoOdHJpZ2dlcl9zb3VyY2UYHiABKAkSEwoLZmVlc19yZWFzb24YHyABKAkSDwoHYWRvcHRlZBggIAEoCBIXCg9ldmlkZW5jZV9zaGEyNTYYISABKAlCDwoNX3Byb2NlZWRzX3dlaUIKCghfcG5sX3dlaUIKCghfcm9pX3BwbUIKCghfaG9sZF9tc0IXChVfbGVhZF9iZWZvcmVfYmxvY2tfdXNCFAoSX2RldGVjdF90b19zZW5kX25zQhEKD19zZW5kX3RvX2Fja19uc0ILCglfZmVlc193ZWlCBgoEX3J1bkoECA4QD1IMZmlyc3Rfc291cmNlIqwCChBUcmFkZVRyYW5zYWN0aW9uEi8KCmJsb2NrX3RpbWUYBiABKAsyGy5kYXJrYm90LmJzYy52MS5Tb3VyY2VkVGltZRIUCgdnYXNfd2VpGAcgASgJSACIAQESLQoIcmVsZWFzZWQYCSABKAsyGy5kYXJrYm90LmJzYy52MS5Tb3VyY2VkVGltZRIrCgJ0eBgKIAEoCzIfLmRhcmtib3QuYnNjLnYxLkxpdmVUcmFuc2FjdGlvbhIQCghvcnBoYW5lZBgLIAEoCEIKCghfZ2FzX3dlaUoECAEQAkoECAIQA0oECAMQBEoECAQQBUoECAUQBkoECAgQCVIHdHhfaGFzaFIGaW50ZW50UgVub25jZVIFc3RhdGVSDGJsb2NrX251bWJlclIGc291cmNlIrIBCg1UcmFkZVNpZ2h0aW5nEg4KBnNvdXJjZRgBIAEoCRISCgpjYXBhYmlsaXR5GAIgASgJEikKBHNlZW4YAyABKAsyGy5kYXJrYm90LmJzYy52MS5Tb3VyY2VkVGltZRIhChRsZWFkX2JlZm9yZV9ibG9ja191cxgEIAEoEkgAiAEBEhYKDmZpcnN0X3ZlcmlmaWVkGAUgASgIQhcKFV9sZWFkX2JlZm9yZV9ibG9ja191cyKrAQoOVHJhZGVFeGl0VGVybXMSFAoMcmF0aW9fcGxhY2VzGAEgASgNEhsKE3RhcmdldF9uZXRfbXVsdGlwbGUYAiABKAkSGQoRc3RvcF9uZXRfbXVsdGlwbGUYAyABKAkSDwoHaG9sZF9tcxgEIAEoBBI6ChFjcmVhdG9yX3NlbGxfZXhpdBgFIAEoDjIfLmRhcmtib3QuYnNjLnYxLkNyZWF0b3JTZWxsRXhpdCKCBgoLVHJhZGVEZXRhaWwSMgoMYXZhaWxhYmlsaXR5GAEgASgOMhwuZGFya2JvdC5ic2MudjEuQXZhaWxhYmlsaXR5EhoKEnVuYXZhaWxhYmxlX3JlYXNvbhgCIAEoCRIzCgpwcm92ZW5hbmNlGAMgASgLMh8uZGFya2JvdC5ic2MudjEuT3duZXJQcm92ZW5hbmNlEiUKA3JvdxgEIAEoCzIYLmRhcmtib3QuYnNjLnYxLlRyYWRlUm93EjYKDHRyYW5zYWN0aW9ucxgFIAMoCzIgLmRhcmtib3QuYnNjLnYxLlRyYWRlVHJhbnNhY3Rpb24SMAoJc2lnaHRpbmdzGAYgAygLMh0uZGFya2JvdC5ic2MudjEuVHJhZGVTaWdodGluZxIdChBncmFudF9nZW5lcmF0aW9uGBQgASgESACIAQESEQoJZGVjaXNpb25zGBYgAygJEiwKB2F0dGVtcHQYFyABKAsyGy5kYXJrYm90LmJzYy52MS5MaXZlQXR0ZW1wdBIyCgpleGl0X3Rlcm1zGBggASgLMh4uZGFya2JvdC5ic2MudjEuVHJhZGVFeGl0VGVybXMSIAoTc2V0dGluZ3NfZ2VuZXJhdGlvbhgZIAEoBEgBiAEBQhMKEV9ncmFudF9nZW5lcmF0aW9uQhYKFF9zZXR0aW5nc19nZW5lcmF0aW9uSgQIBxAISgQICBAJSgQICRAKSgQIChALSgQICxAMSgQIDBANSgQIDRAOSgQIDhAPSgQIDxAQSgQIEBARSgQIERASSgQIEhATSgQIExAUSgQIFRAWUgtsYXVuY2hfaGFzaFIMbGF1bmNoX2Jsb2NrUgtsYXVuY2hfdGltZVIIY2xvY2tfaWRSCHQwX2V4YWN0Ugt0X2RldGVjdF9uc1ILdF9zZWxlY3RfbnNSCXRfc2VuZF9uc1IIdF9hY2tfbnNSDGxhdW5jaF9pbmRleFIJb3duX2luZGV4UgtidXlzX2JlZm9yZVIGdG9rZW5zUg1jb25maWdfc2hhMjU2IpwCChFUcmFkZUhpc3RvcnlRdWVyeRItCghzdGF0dXNlcxgBIAMoDjIbLmRhcmtib3QuYnNjLnYxLlRyYWRlU3RhdHVzEhIKBWdhaW5zGAIgASgISACIAQESDgoGdmVudWVzGAMgAygJEhkKDGZyb21fdW5peF9tcxgEIAEoBEgBiAEBEhcKCnRvX3VuaXhfbXMYBSABKARIAogBARIOCgZzZWFyY2gYBiABKAkSJwoEc29ydBgHIAEoDjIZLmRhcmtib3QuYnNjLnYxLlRyYWRlU29ydBIOCgZjdXJzb3IYCCABKAkSDQoFbGltaXQYCSABKA1CCAoGX2dhaW5zQg8KDV9mcm9tX3VuaXhfbXNCDQoLX3RvX3VuaXhfbXMigAEKC1RyYWRlQ291bnRzEg8KB3BlbmRpbmcYASABKAQSDwoHcnVubmluZxgCIAEoBBIMCgR3aW5zGAMgASgEEg4KBmxvc3NlcxgEIAEoBBIMCgRmbGF0GAUgASgEEg4KBmZhaWxlZBgGIAEoBBITCgt3cml0dGVuX29mZhgHIAEoBCKKAwoQVHJhZGVIaXN0b3J5UGFnZRIyCgxhdmFpbGFiaWxpdHkYASABKA4yHC5kYXJrYm90LmJzYy52MS5BdmFpbGFiaWxpdHkSGgoSdW5hdmFpbGFibGVfcmVhc29uGAIgASgJEjMKCnByb3ZlbmFuY2UYAyABKAsyHy5kYXJrYm90LmJzYy52MS5Pd25lclByb3ZlbmFuY2USJgoEcm93cxgEIAMoCzIYLmRhcmtib3QuYnNjLnYxLlRyYWRlUm93EhMKC25leHRfY3Vyc29yGAUgASgJEhAKCGhhc19tb3JlGAYgASgIEg0KBXRvdGFsGAcgASgEEisKBmNvdW50cxgIIAEoCzIbLmRhcmtib3QuYnNjLnYxLlRyYWRlQ291bnRzEiEKFHJlYWxpemVkX25ldF9wbmxfd2VpGAkgASgJSACIAQESGQoMYnVybl9nYXNfd2VpGAogASgJSAGIAQFCFwoVX3JlYWxpemVkX25ldF9wbmxfd2VpQg8KDV9idXJuX2dhc193ZWkiHwoQVHJhZGVEZXRhaWxRdWVyeRILCgNsb3QYASABKAkq4AEKC1RyYWRlU3RhdHVzEhwKGFRSQURFX1NUQVRVU19VTlNQRUNJRklFRBAAEhgKFFRSQURFX1NUQVRVU19QRU5ESU5HEAESFQoRVFJBREVfU1RBVFVTX09QRU4QAhIYChRUUkFERV9TVEFUVVNfRVhJVElORxADEhcKE1RSQURFX1NUQVRVU19DTE9TRUQQBBIXChNUUkFERV9TVEFUVVNfRkFJTEVEEAUSHAoYVFJBREVfU1RBVFVTX1dSSVRURU5fT0ZGEAYSGAoUVFJBREVfU1RBVFVTX1VOS05PV04QByqxAgoKRXhpdFJlYXNvbhIbChdFWElUX1JFQVNPTl9VTlNQRUNJRklFRBAAEhQKEEVYSVRfUkVBU09OX05PTkUQARIWChJFWElUX1JFQVNPTl9UQVJHRVQQAhIUChBFWElUX1JFQVNPTl9TVE9QEAMSFwoTRVhJVF9SRUFTT05fVElNRU9VVBAEEhwKGEVYSVRfUkVBU09OX0NSRUFUT1JfU0VMTBAFEh0KGUVYSVRfUkVBU09OX09QRVJBVE9SX0VYSVQQBhIZChVFWElUX1JFQVNPTl9XUklURV9PRkYQBxIaChZFWElUX1JFQVNPTl9CVVlfRkFJTEVEEAgSFQoRRVhJVF9SRUFTT05fT1RIRVIQCiIECAkQCSoYRVhJVF9SRUFTT05fREVYX01JR1JBVEVEKswBChBFeGl0UmVhc29uU291cmNlEiIKHkVYSVRfUkVBU09OX1NPVVJDRV9VTlNQRUNJRklFRBAAEicKI0VYSVRfUkVBU09OX1NPVVJDRV9TVFJBVEVHWV9KT1VSTkFMEAESJgoiRVhJVF9SRUFTT05fU09VUkNFX0xFREdFUl9PUEVSQVRPUhACEiMKH0VYSVRfUkVBU09OX1NPVVJDRV9MRURHRVJfQ0hBSU4QAxIeChpFWElUX1JFQVNPTl9TT1VSQ0VfVU5LTk9XThAEKsMBCg5UcmFkZVBsYWNlbWVudBIfChtUUkFERV9QTEFDRU1FTlRfVU5TUEVDSUZJRUQQABIbChdUUkFERV9QTEFDRU1FTlRfVU5LTk9XThABEhkKFVRSQURFX1BMQUNFTUVOVF9GSVJTVBACEhgKFFRSQURFX1BMQUNFTUVOVF9MQVRFEAMSHwobVFJBREVfUExBQ0VNRU5UX09USEVSX0JMT0NLEAQSHQoZVFJBREVfUExBQ0VNRU5UX05PX1RPS0VOUxAFKnIKCVRyYWRlU29ydBIaChZUUkFERV9TT1JUX1VOU1BFQ0lGSUVEEAASGwoXVFJBREVfU09SVF9BQ1RJVkVfRklSU1QQARIVChFUUkFERV9TT1JUX05FV0VTVBACEhUKEVRSQURFX1NPUlRfT0xERVNUEANCfAoSY29tLmRhcmtib3QuYnNjLnYxQgxIaXN0b3J5UHJvdG9QAaICA0RCWKoCDkRhcmtib3QuQnNjLlYxygIORGFya2JvdFxCc2NcVjHiAhpEYXJrYm90XEJzY1xWMVxHUEJNZXRhZGF0YeoCEERhcmtib3Q6OkJzYzo6VjFiBnByb3RvMw", [file_darkbot_bsc_v1_common, file_darkbot_bsc_v1_status, file_darkbot_bsc_v1_training]);
 
 /**
  * One lot's row of the trade table (the 17 V8 columns and their identity).
@@ -79,7 +83,8 @@ export type TradeRow = Message<"darkbot.bsc.v1.TradeRow"> & {
   proceedsUnknown: boolean;
 
   /**
-   * Column pnl: proceeds − input − every gas and proven fee, signed decimal wei; absent while open.
+   * Column pnl: the ledger's Position.pnl_wei exactly (proceeds − input − gas; FAILED: − gas),
+   * signed decimal wei; absent while open. No fee beyond gas is in it (fees_wei).
    *
    * @generated from field: optional string pnl_wei = 9;
    */
@@ -100,30 +105,23 @@ export type TradeRow = Message<"darkbot.bsc.v1.TradeRow"> & {
   buyTime?: SourcedTime;
 
   /**
-   * Column sell: the SELL's time (its block header); absent unix_ms while not closed.
+   * Column sell: CLOSED only, the SELL's block header time; WRITTEN_OFF: the write-off's local wall
+   * time (source TIME_SOURCE_LOCAL_WALL, never a block time); absent otherwise (FAILED has none).
    *
    * @generated from field: darkbot.bsc.v1.SourcedTime sell_time = 12;
    */
   sellTime?: SourcedTime;
 
   /**
-   * Column hold: SELL block time − BUY block time, ms, natively; absent while open.
+   * Column hold: CLOSED only, SELL block time − BUY block time, ms, natively; absent otherwise.
    *
    * @generated from field: optional uint64 hold_ms = 13;
    */
   holdMs?: bigint;
 
   /**
-   * Column source: the ingress source of the first verified full sighting attributed to this lot;
-   * empty without an attributed sighting (a Strategy C BUY has a decision, not a trigger).
-   *
-   * @generated from field: string first_source = 14;
-   */
-  firstSource: string;
-
-  /**
-   * Column lead: that sighting's lead before the launch block's header time, microseconds
-   * (negative: after it); absent without an attributed sighting. Never the producer's T0.
+   * Column lead: the trigger source's sighting lead before the launch block's header time,
+   * microseconds (negative: after it); absent without a trigger. Never the producer's T0.
    *
    * @generated from field: optional sint64 lead_before_block_us = 15;
    */
@@ -152,7 +150,8 @@ export type TradeRow = Message<"darkbot.bsc.v1.TradeRow"> & {
   gasWei: string;
 
   /**
-   * Other proven fees (taxes, builder tips), decimal wei; absent when none is proven.
+   * Other proven fees (taxes, builder tips), decimal wei; absent while no native owner attributes
+   * them (fees_reason).
    *
    * @generated from field: optional string fees_wei = 19;
    */
@@ -222,11 +221,41 @@ export type TradeRow = Message<"darkbot.bsc.v1.TradeRow"> & {
   quality: DataQuality;
 
   /**
-   * Why the quality is not VERIFIED.
+   * Why the quality is not VERIFIED, e.g. GAS_UPPER_BOUND (the gas is a bound, not the receipt's)
+   * or CLOCK_SUSPECT (the local timings' clock is not trusted).
    *
    * @generated from field: repeated string quality_reasons = 29;
    */
   qualityReasons: string[];
+
+  /**
+   * Column source: LiveAttempt.trigger, the source whose sighting triggered the BUY (C3); empty for
+   * a Strategy C BUY (a decision, no trigger).
+   *
+   * @generated from field: string trigger_source = 30;
+   */
+  triggerSource: string;
+
+  /**
+   * Why fees_wei is absent (FEES_NOT_ATTRIBUTED); empty when present.
+   *
+   * @generated from field: string fees_reason = 31;
+   */
+  feesReason: string;
+
+  /**
+   * The lot is an adopted G0.7 BUY (the ledger's ADOPTED fact).
+   *
+   * @generated from field: bool adopted = 32;
+   */
+  adopted: boolean;
+
+  /**
+   * An adopted lot's G0.7 evidence, SHA-256 lowercase hex; empty otherwise.
+   *
+   * @generated from field: string evidence_sha256 = 33;
+   */
+  evidenceSha256: string;
 };
 
 /**
@@ -237,46 +266,12 @@ export const TradeRowSchema: GenMessage<TradeRow> = /*@__PURE__*/
   messageDesc(file_darkbot_bsc_v1_history, 0);
 
 /**
- * One transaction of a lot and what the chain made of it.
+ * One transaction of a lot (BUY, APPROVE, SELL; a nonce burn is no lot's, its gas is in
+ * TradeHistoryPage.burn_gas_wei): the ledger's LiveTransaction unchanged, plus what the row needs.
  *
  * @generated from message darkbot.bsc.v1.TradeTransaction
  */
 export type TradeTransaction = Message<"darkbot.bsc.v1.TradeTransaction"> & {
-  /**
-   * Transaction hash, 0x hex.
-   *
-   * @generated from field: string tx_hash = 1;
-   */
-  txHash: string;
-
-  /**
-   * BUY, APPROVE, SELL or BURN.
-   *
-   * @generated from field: string intent = 2;
-   */
-  intent: string;
-
-  /**
-   * The buyer's nonce it used.
-   *
-   * @generated from field: uint64 nonce = 3;
-   */
-  nonce: bigint;
-
-  /**
-   * RELEASED, UNKNOWN, INCLUDED, REVERTED, REPLACED or ORPHANED.
-   *
-   * @generated from field: string state = 4;
-   */
-  state: string;
-
-  /**
-   * The block that included it; absent while not included.
-   *
-   * @generated from field: optional uint64 block_number = 5;
-   */
-  blockNumber?: bigint;
-
   /**
    * That block's header time.
    *
@@ -292,18 +287,25 @@ export type TradeTransaction = Message<"darkbot.bsc.v1.TradeTransaction"> & {
   gasWei?: string;
 
   /**
-   * RECEIPT when the receipt recovery decided it; empty otherwise.
-   *
-   * @generated from field: string source = 8;
-   */
-  source: string;
-
-  /**
    * The local time its bytes were handed to the first adapter.
    *
    * @generated from field: darkbot.bsc.v1.SourcedTime released = 9;
    */
   released?: SourcedTime;
+
+  /**
+   * The ledger's transaction (state RELEASED, UNKNOWN, WITHDRAWN, INCLUDED, REVERTED or REPLACED).
+   *
+   * @generated from field: darkbot.bsc.v1.LiveTransaction tx = 10;
+   */
+  tx?: LiveTransaction;
+
+  /**
+   * Its including block left the canonical chain (the ledger's ORPHANED fact).
+   *
+   * @generated from field: bool orphaned = 11;
+   */
+  orphaned: boolean;
 };
 
 /**
@@ -363,6 +365,55 @@ export const TradeSightingSchema: GenMessage<TradeSighting> = /*@__PURE__*/
   messageDesc(file_darkbot_bsc_v1_history, 2);
 
 /**
+ * What a Strategy C entry took for its exit (from its settings generation).
+ *
+ * @generated from message darkbot.bsc.v1.TradeExitTerms
+ */
+export type TradeExitTerms = Message<"darkbot.bsc.v1.TradeExitTerms"> & {
+  /**
+   * BSC_STRATEGY_C_RATIO_PLACES of the multiples.
+   *
+   * @generated from field: uint32 ratio_places = 1;
+   */
+  ratioPlaces: number;
+
+  /**
+   * The net target multiple, exact decimal at ratio_places.
+   *
+   * @generated from field: string target_net_multiple = 2;
+   */
+  targetNetMultiple: string;
+
+  /**
+   * The net stop multiple, exact decimal at ratio_places.
+   *
+   * @generated from field: string stop_net_multiple = 3;
+   */
+  stopNetMultiple: string;
+
+  /**
+   * The hold timeout, milliseconds.
+   *
+   * @generated from field: uint64 hold_ms = 4;
+   */
+  holdMs: bigint;
+
+  /**
+   * The creator-sell exit.
+   *
+   * @generated from field: darkbot.bsc.v1.CreatorSellExit creator_sell_exit = 5;
+   */
+  creatorSellExit: CreatorSellExit;
+};
+
+/**
+ * Describes the message darkbot.bsc.v1.TradeExitTerms.
+ * Use `create(TradeExitTermsSchema)` to create a new message.
+ */
+export const TradeExitTermsSchema: GenMessage<TradeExitTerms> = /*@__PURE__*/
+  messageDesc(file_darkbot_bsc_v1_history, 3);
+
+/**
  * The full detail of one lot.
  *
  * @generated from message darkbot.bsc.v1.TradeDetail
@@ -404,102 +455,12 @@ export type TradeDetail = Message<"darkbot.bsc.v1.TradeDetail"> & {
   transactions: TradeTransaction[];
 
   /**
-   * The launch's sightings per source; empty for a lot without an attributed launch.
+   * The launch's sightings per source (the first verified full one flagged); empty for a lot
+   * without an attributed launch.
    *
    * @generated from field: repeated darkbot.bsc.v1.TradeSighting sightings = 6;
    */
   sightings: TradeSighting[];
-
-  /**
-   * The launch transaction hash, 0x hex; empty without a launch (Strategy C).
-   *
-   * @generated from field: string launch_hash = 7;
-   */
-  launchHash: string;
-
-  /**
-   * The launch's block; absent without one.
-   *
-   * @generated from field: optional uint64 launch_block = 8;
-   */
-  launchBlock?: bigint;
-
-  /**
-   * The launch block's header time.
-   *
-   * @generated from field: darkbot.bsc.v1.SourcedTime launch_time = 9;
-   */
-  launchTime?: SourcedTime;
-
-  /**
-   * The runtime clock of the local timings; absent without a release record.
-   *
-   * @generated from field: optional uint64 clock_id = 10;
-   */
-  clockId?: bigint;
-
-  /**
-   * Whether T0 is the producer's exact time (never without its witness).
-   *
-   * @generated from field: bool t0_exact = 11;
-   */
-  t0Exact: boolean;
-
-  /**
-   * Detection on that clock, ns.
-   *
-   * @generated from field: optional uint64 t_detect_ns = 12;
-   */
-  tDetectNs?: bigint;
-
-  /**
-   * Selection on that clock, ns.
-   *
-   * @generated from field: optional uint64 t_select_ns = 13;
-   */
-  tSelectNs?: bigint;
-
-  /**
-   * The first qualified send on that clock, ns.
-   *
-   * @generated from field: optional uint64 t_send_ns = 14;
-   */
-  tSendNs?: bigint;
-
-  /**
-   * The first acknowledgement on that clock, ns.
-   *
-   * @generated from field: optional uint64 t_ack_ns = 15;
-   */
-  tAckNs?: bigint;
-
-  /**
-   * The launch's transaction index in its block.
-   *
-   * @generated from field: optional uint64 launch_index = 16;
-   */
-  launchIndex?: bigint;
-
-  /**
-   * The BUY's transaction index in its block.
-   *
-   * @generated from field: optional uint64 own_index = 17;
-   */
-  ownIndex?: bigint;
-
-  /**
-   * Other traders' BUYs between the launch and the own BUY.
-   *
-   * @generated from field: optional uint64 buys_before = 18;
-   */
-  buysBefore?: bigint;
-
-  /**
-   * Tokens the BUY received, decimal token units.
-   *
-   * @generated from field: optional string tokens = 19;
-   */
-  tokens?: string;
 
   /**
    * The grant generation its BUY was admitted under.
@@ -509,18 +470,33 @@ export type TradeDetail = Message<"darkbot.bsc.v1.TradeDetail"> & {
   grantGeneration?: bigint;
 
   /**
-   * The settings or profile revision its entry took (Strategy C); empty for C3.
-   *
-   * @generated from field: string config_sha256 = 21;
-   */
-  configSha256: string;
-
-  /**
    * The operator decisions the ledger takes of this lot now (RESUME, WRITE_OFF, EXIT_NOW).
    *
    * @generated from field: repeated string decisions = 22;
    */
   decisions: string[];
+
+  /**
+   * The BUY's evaluated attempt record unchanged (launch, clock, T0, timings, placement, tokens);
+   * absent without one.
+   *
+   * @generated from field: darkbot.bsc.v1.LiveAttempt attempt = 23;
+   */
+  attempt?: LiveAttempt;
+
+  /**
+   * Strategy C: the exit terms its entry took; absent for C3.
+   *
+   * @generated from field: darkbot.bsc.v1.TradeExitTerms exit_terms = 24;
+   */
+  exitTerms?: TradeExitTerms;
+
+  /**
+   * Strategy C: the settings generation its entry took; absent for C3.
+   *
+   * @generated from field: optional uint64 settings_generation = 25;
+   */
+  settingsGeneration?: bigint;
 };
 
 /**
@@ -528,7 +504,7 @@ export type TradeDetail = Message<"darkbot.bsc.v1.TradeDetail"> & {
  * Use `create(TradeDetailSchema)` to create a new message.
  */
 export const TradeDetailSchema: GenMessage<TradeDetail> = /*@__PURE__*/
-  messageDesc(file_darkbot_bsc_v1_history, 3);
+  messageDesc(file_darkbot_bsc_v1_history, 4);
 
 /**
  * A bounded, cursor-paged, read-only query of the LIVE trades.
@@ -593,7 +569,7 @@ export type TradeHistoryQuery = Message<"darkbot.bsc.v1.TradeHistoryQuery"> & {
   cursor: string;
 
   /**
-   * At most this many rows; the owner caps it.
+   * At most this many rows; 0: the owner's default; above its cap: refused (LIMIT_EXCEEDED).
    *
    * @generated from field: uint32 limit = 9;
    */
@@ -605,7 +581,7 @@ export type TradeHistoryQuery = Message<"darkbot.bsc.v1.TradeHistoryQuery"> & {
  * Use `create(TradeHistoryQuerySchema)` to create a new message.
  */
 export const TradeHistoryQuerySchema: GenMessage<TradeHistoryQuery> = /*@__PURE__*/
-  messageDesc(file_darkbot_bsc_v1_history, 4);
+  messageDesc(file_darkbot_bsc_v1_history, 5);
 
 /**
  * The counts of the whole filtered result (V8 trade summary).
@@ -668,10 +644,12 @@ export type TradeCounts = Message<"darkbot.bsc.v1.TradeCounts"> & {
  * Use `create(TradeCountsSchema)` to create a new message.
  */
 export const TradeCountsSchema: GenMessage<TradeCounts> = /*@__PURE__*/
-  messageDesc(file_darkbot_bsc_v1_history, 5);
+  messageDesc(file_darkbot_bsc_v1_history, 6);
 
 /**
- * One page of trades, bound to one ledger snapshot (no gap, no duplicate across pages).
+ * One page of trades, bound to one composite snapshot (ledger version, Strategy C journal and attempt
+ * record positions), the filter digest and the sort: no gap, no duplicate across pages; a cursor
+ * of another snapshot, filter or sort is refused (QueryRefusal).
  *
  * @generated from message darkbot.bsc.v1.TradeHistoryPage
  */
@@ -731,6 +709,21 @@ export type TradeHistoryPage = Message<"darkbot.bsc.v1.TradeHistoryPage"> & {
    * @generated from field: darkbot.bsc.v1.TradeCounts counts = 8;
    */
   counts?: TradeCounts;
+
+  /**
+   * The ledger pnl_wei of every decided lot of the whole filtered result (CLOSED, FAILED,
+   * WRITTEN_OFF), signed decimal wei; absent while one is unresolved.
+   *
+   * @generated from field: optional string realized_net_pnl_wei = 9;
+   */
+  realizedNetPnlWei?: string;
+
+  /**
+   * Gas of the nonce burns in the snapshot (no lot's), decimal wei; absent when unknown.
+   *
+   * @generated from field: optional string burn_gas_wei = 10;
+   */
+  burnGasWei?: string;
 };
 
 /**
@@ -738,7 +731,7 @@ export type TradeHistoryPage = Message<"darkbot.bsc.v1.TradeHistoryPage"> & {
  * Use `create(TradeHistoryPageSchema)` to create a new message.
  */
 export const TradeHistoryPageSchema: GenMessage<TradeHistoryPage> = /*@__PURE__*/
-  messageDesc(file_darkbot_bsc_v1_history, 6);
+  messageDesc(file_darkbot_bsc_v1_history, 7);
 
 /**
  * A read of one lot.
@@ -759,7 +752,7 @@ export type TradeDetailQuery = Message<"darkbot.bsc.v1.TradeDetailQuery"> & {
  * Use `create(TradeDetailQuerySchema)` to create a new message.
  */
 export const TradeDetailQuerySchema: GenMessage<TradeDetailQuery> = /*@__PURE__*/
-  messageDesc(file_darkbot_bsc_v1_history, 7);
+  messageDesc(file_darkbot_bsc_v1_history, 8);
 
 /**
  * The ledger state of a lot (LivePosition.state plus the owner's write-off and unknown).
@@ -803,7 +796,7 @@ export enum TradeStatus {
   CLOSED = 4,
 
   /**
-   * The BUY failed (reverted, dropped, replaced); its gas is the loss.
+   * The BUY reverted (only a revert); its gas is the loss.
    *
    * @generated from enum value: TRADE_STATUS_FAILED = 5;
    */
@@ -831,7 +824,8 @@ export const TradeStatusSchema: GenEnum<TradeStatus> = /*@__PURE__*/
   enumDesc(file_darkbot_bsc_v1_history, 0);
 
 /**
- * Why a position ended.
+ * Why a position ended. The Strategy C journal's Y exit codes map one to one: 1 CREATOR_SELL,
+ * 2 TARGET, 3 STOP, 4 TIMEOUT (runtime_strategy.rs); any other code is OTHER with its detail.
  *
  * @generated from enum darkbot.bsc.v1.ExitReason
  */
@@ -851,28 +845,28 @@ export enum ExitReason {
   NONE = 1,
 
   /**
-   * The net target multiple was reached.
+   * Y code 2: the net target multiple was reached.
    *
    * @generated from enum value: EXIT_REASON_TARGET = 2;
    */
   TARGET = 2,
 
   /**
-   * The net stop multiple was reached.
+   * Y code 3: the net stop multiple was reached.
    *
    * @generated from enum value: EXIT_REASON_STOP = 3;
    */
   STOP = 3,
 
   /**
-   * The hold timeout ran out.
+   * Y code 4: the hold timeout ran out.
    *
    * @generated from enum value: EXIT_REASON_TIMEOUT = 4;
    */
   TIMEOUT = 4,
 
   /**
-   * The token's creator sold (creator-sell exit).
+   * Y code 1: the token's creator sold (creator-sell exit).
    *
    * @generated from enum value: EXIT_REASON_CREATOR_SELL = 5;
    */
@@ -898,13 +892,6 @@ export enum ExitReason {
    * @generated from enum value: EXIT_REASON_BUY_FAILED = 8;
    */
   BUY_FAILED = 8,
-
-  /**
-   * The token migrated to its DEX and was exited there (DEX exit).
-   *
-   * @generated from enum value: EXIT_REASON_DEX_MIGRATED = 9;
-   */
-  DEX_MIGRATED = 9,
 
   /**
    * An exit whose reason the owner holds in exit_reason_detail only.

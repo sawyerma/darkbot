@@ -257,12 +257,15 @@ export async function strategySettingCommand(origin: string, id: string, value: 
 }
 // V8 Wallets (BSC-V8-15/16, FE-V8-15/16): the four money paths and the two policies at the native
 // treasury owner. Prepared: the gateway registers none of these actions yet, and the Wallets tab
-// offers them only while that owner answers the treasury query. The CAS is the shown
-// treasury_version (destination, funding, payout) or the policy's own version (A, B). Its own state,
+// offers them only while that owner answers the treasury query. A manual transfer is a prepare
+// (the owner's DRAFT) and its authorization with the DRAFT's scope digest, two requests; a
+// destination is saved, then confirmed on its own. The CAS is the shown treasury_version
+// (destination, prepare, authorize) or the policy's own version (A, B). Its own state,
 // apart from the owner controls: a decided request (any phase) releases it, since the re-read
 // treasury then shows the transfer and its open state locks that path; only a lost handoff
 // (UNKNOWN) stays locked until the treasury shows the request (`releaseWalletRequest`).
-export type WalletAction = "bsc.wallet.destination.set" | "bsc.wallet.fund_trading" | "bsc.wallet.payout" | "bsc.wallet.profit_policy.set" | "bsc.wallet.payout_policy.set";
+export type WalletAction = "bsc.wallet.destination.set" | "bsc.wallet.destination.confirm" | "bsc.wallet.transfer.prepare" | "bsc.wallet.transfer.authorize"
+  | "bsc.wallet.profit_policy.set" | "bsc.wallet.payout_policy.set";
 export const useWalletControl = create<SourceControlState>(() => ({ busy: false, receipt: null }));
 export async function walletCommand(origin: string, action: WalletAction, resourceId: string, params: Uint8Array, version: bigint, detail: string): Promise<void> {
   if (useWalletControl.getState().busy) return;

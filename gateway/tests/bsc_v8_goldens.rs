@@ -5,21 +5,25 @@
 //! frontend/src/features/bsc/api/bsc-v8-golden.test.ts decodes the same bytes and re-encodes
 //! them byte for byte.
 use darkbot_gateway::proto::bsc::v1::{
-    bsc_query_request, bsc_query_response, policy_amount, Availability, BscQueryRequest,
-    BscQueryResponse, BscWatchState, ChainTxStatus, CreatorSellExit, CreatorSoldBeforeFill,
-    DataQuality, Evidence, ExitReason, ExitReasonSource, FiatQuote, LiveStrategySelectCommand,
-    MainPayoutPolicy, MainPayoutPolicySetCommand, OwnerProvenance, PerformanceMetric,
-    PerformancePoint, PerformanceScope, PerformanceSeries, PolicyAmount, PolicyUnit,
-    ProfitTransferPolicy, ProfitTransferPolicySetCommand, RequalificationState,
-    SettingsApplyStatus, SourcedTime, StrategyCSettings, StrategyCSettingsSetAllCommand,
-    StrategyCSettingsState, StrategyFeatureSpec, StrategyFilterRule, TimeSource, TradeCounts,
-    TradeDetail, TradeHistoryPage, TradeHistoryQuery, TradePlacement, TradeRow, TradeSighting,
-    TradeSort, TradeStatus, TradeTransaction, TrainingProfile, TrainingProfileStatus,
-    TrainingProfiles, TrainingResult, TrainingRun, TrainingRunMode, TrainingRunPage,
-    TrainingRunPlan, TrainingRunStartCommand, TrainingRunStatus, TrainingRunStopKind,
-    TransferStatus, WalletAccount, WalletBalanceSnapshot, WalletDestination,
+    bsc_query_request, bsc_query_response, policy_amount, wallet_transfer_prepare_command,
+    Availability, BscQueryRequest, BscQueryResponse, BscWatchState, ChainTxStatus, ControlSwitch,
+    CreatorSellExit, CreatorSoldBeforeFill, DataQuality, Evidence, ExitReason, ExitReasonSource,
+    FiatQuote, LiveAttempt, LiveStrategySelectCommand, LiveTransaction, MainPayoutPolicy,
+    MainPayoutPolicySetCommand, OwnerProvenance, PerformanceMetric, PerformancePoint,
+    PerformanceScope, PerformanceSeries, PolicyAmount, PolicyUnit, ProfitTransferPolicy,
+    ProfitTransferPolicySetCommand, QueryRefusal, ReplaySource, ReplaySourcePage, ReplayVerdict,
+    RequalificationState, SettingsApplyStatus, SourcedTime, StrategyCSettableValues,
+    StrategyCSettings, StrategyCSettingsSetAllCommand, StrategyCSettingsState, StrategyFeatureSpec,
+    StrategyFilterRule, StrategySettingSpec, TimeSource, TradeCounts, TradeDetail, TradeExitTerms,
+    TradeHistoryPage, TradeHistoryQuery, TradePlacement, TradeRow, TradeSighting, TradeSort,
+    TradeStatus, TradeTransaction, TrainingProfile, TrainingProfileStatus, TrainingProfiles,
+    TrainingResult, TrainingRun, TrainingRunMode, TrainingRunPage, TrainingRunPlan,
+    TrainingRunStartCommand, TrainingRunStatus, TrainingRunStopKind, TransferStatus, WalletAccount,
+    WalletAuthorization, WalletAuthorizationBounds, WalletAuthorizationScope,
+    WalletBalanceSnapshot, WalletDestination, WalletDestinationConfirmCommand,
     WalletDestinationSetCommand, WalletFundTradingCommand, WalletHistoryPage, WalletMovement,
-    WalletMovementKind, WalletPayoutCommand, WalletRole, WalletTransferState, WalletTreasuryState,
+    WalletMovementKind, WalletPayoutCommand, WalletRole, WalletTransferAuthorizeCommand,
+    WalletTransferPrepareCommand, WalletTransferReceipt, WalletTransferState, WalletTreasuryState,
     WatchSubjectKind, WatchSubjectState, WatchVerdict,
 };
 use prost::Message;
@@ -28,6 +32,12 @@ use std::{fs, path::PathBuf};
 /// 2^256 − 1: the largest wei amount, beyond every native integer type of the browser.
 const U256_MAX: &str =
     "115792089237316195423570985008687907853269984665640564039457584007913129639935";
+/// The canonical scope texts (wallet.proto) and their SHA-256: the vectors both the native owner
+/// and the browser reproduce byte for byte (frontend model/wallets.test.ts builds the same texts).
+const SCOPE_TRANSFER: &str = include_str!("../../protocol/golden/bsc/v8/scope_wallet_transfer.txt");
+const SCOPE_TRANSFER_SHA: &str = "9bbf9226da8df80e8999ce018d4ca5fff4c2447acb19e4057e210729b8ef0a4d";
+const SCOPE_PROFIT_SHA: &str = "36f5e77e4de86b52131b9c194a595406170022e29a948aeb0b687c95c644b40d";
+const SCOPE_PAYOUT_SHA: &str = "d4eceffb071ad47b72ef74a47915456026c14d2d3180e26455ecda0e5b25eb16";
 const LOT: &str = "0x3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a";
 const TOKEN: &str = "0x6161616161616161616161616161616161616161";
 const FEATURES: [&str; 15] = [
@@ -126,6 +136,36 @@ fn settings() -> StrategyCSettings {
     }
 }
 
+/// The settable values of a command: settings() without the configuration-owned ones.
+fn values() -> StrategyCSettableValues {
+    let s = settings();
+    StrategyCSettableValues {
+        input_wei: s.input_wei,
+        target_net_multiple: s.target_net_multiple,
+        stop_net_multiple: s.stop_net_multiple,
+        observation_ms: s.observation_ms,
+        hold_ms: s.hold_ms,
+        max_open: s.max_open,
+        creator_sold_before_fill: s.creator_sold_before_fill,
+        creator_sell_exit: s.creator_sell_exit,
+        filters: s.filters,
+        first_buyer_window: s.first_buyer_window,
+    }
+}
+
+/// A native switch as the owner holds it.
+fn switch(id: &str, effective: &str, block_reason: &str) -> Option<ControlSwitch> {
+    Some(ControlSwitch {
+        id: id.into(),
+        requested: "ENABLED".into(),
+        effective: effective.into(),
+        block_reason: block_reason.into(),
+        generation: u64::MAX,
+        request_id: "sw-1".into(),
+        set_generation: Some(0),
+    })
+}
+
 fn trade_row(closed: bool) -> TradeRow {
     TradeRow {
         lot: LOT.into(),
@@ -145,11 +185,6 @@ fn trade_row(closed: bool) -> TradeRow {
         buy_time: block_time(Some(1_793_000_000_000), Some(u64::MAX)),
         sell_time: block_time(closed.then_some(1_793_000_028_000), None),
         hold_ms: closed.then_some(0),
-        first_source: if closed {
-            "BSC_INGRESS_GETH".into()
-        } else {
-            String::new()
-        },
         lead_before_block_us: closed.then_some(i64::MIN),
         detect_to_send_ns: closed.then_some(u64::MAX),
         send_to_ack_ns: None,
@@ -184,7 +219,23 @@ fn trade_row(closed: bool) -> TradeRow {
         } else {
             DataQuality::Unresolved
         } as i32,
-        quality_reasons: vec![],
+        quality_reasons: if closed {
+            vec![]
+        } else {
+            vec!["GAS_UPPER_BOUND".into(), "CLOCK_SUSPECT".into()]
+        },
+        trigger_source: if closed {
+            "BSC_INGRESS_GETH".into()
+        } else {
+            String::new()
+        },
+        fees_reason: "FEES_NOT_ATTRIBUTED".into(),
+        adopted: !closed,
+        evidence_sha256: if closed {
+            String::new()
+        } else {
+            "ee".repeat(32)
+        },
     }
 }
 
@@ -215,6 +266,20 @@ fn bsc_v8_contract_golden_bytes() {
             availability: Availability::NotImplemented as i32,
             unavailable_reason: "BSC-V8-10".into(),
             result: None,
+            refusal: QueryRefusal::Unspecified as i32,
+            refusal_detail: String::new(),
+        }
+        .encode_to_vec(),
+    );
+    check(
+        "query_refused",
+        BscQueryResponse {
+            request_id: "123e4567-e89b-12d3-a456-426614174000".into(),
+            availability: Availability::Available as i32,
+            unavailable_reason: String::new(),
+            result: None,
+            refusal: QueryRefusal::CursorStale as i32,
+            refusal_detail: "SNAPSHOT_COMPACTED".into(),
         }
         .encode_to_vec(),
     );
@@ -241,7 +306,11 @@ fn bsc_v8_contract_golden_bytes() {
                     failed: 0,
                     written_off: u64::MAX,
                 }),
+                realized_net_pnl_wei: Some(format!("-{U256_MAX}")),
+                burn_gas_wei: None,
             })),
+            refusal: QueryRefusal::Unspecified as i32,
+            refusal_detail: String::new(),
         }
         .encode_to_vec(),
     );
@@ -253,19 +322,25 @@ fn bsc_v8_contract_golden_bytes() {
             provenance: provenance("bsc_runtime live ledger", DataQuality::Verified),
             row: Some(trade_row(true)),
             transactions: vec![TradeTransaction {
-                tx_hash: LOT.into(),
-                intent: "BUY".into(),
-                nonce: u64::MAX,
-                state: "INCLUDED".into(),
-                block_number: Some(0),
                 block_time: block_time(Some(1_793_000_000_000), Some(0)),
                 gas_wei: Some("0".into()),
-                source: "RECEIPT".into(),
                 released: Some(SourcedTime {
                     unix_ms: Some(1_792_999_999_900),
                     source: TimeSource::LocalWall as i32,
                     block_number: None,
                 }),
+                tx: Some(LiveTransaction {
+                    tx_hash: LOT.into(),
+                    intent: "BUY".into(),
+                    token: TOKEN.into(),
+                    nonce: u64::MAX,
+                    state: "INCLUDED".into(),
+                    block_number: Some(0),
+                    source: "RECEIPT".into(),
+                    burn_requested: false,
+                    burnable: false,
+                }),
+                orphaned: true,
             }],
             sightings: vec![TradeSighting {
                 source: "BSC_INGRESS_PUBLICNODE".into(),
@@ -278,22 +353,36 @@ fn bsc_v8_contract_golden_bytes() {
                 lead_before_block_us: Some(-100_000),
                 first_verified: false,
             }],
-            launch_hash: "0x".to_owned() + &"c1".repeat(32),
-            launch_block: Some(u64::MAX),
-            launch_time: block_time(Some(1_793_000_000_000), Some(u64::MAX)),
-            clock_id: Some(u64::MAX),
-            t0_exact: false,
-            t_detect_ns: Some(0),
-            t_select_ns: None,
-            t_send_ns: Some(u64::MAX),
-            t_ack_ns: None,
-            launch_index: Some(0),
-            own_index: Some(1),
-            buys_before: Some(0),
-            tokens: Some(U256_MAX.into()),
             grant_generation: Some(u64::MAX),
-            config_sha256: "cd".repeat(32),
             decisions: vec!["RESUME".into(), "WRITE_OFF".into()],
+            attempt: Some(LiveAttempt {
+                ordinal: 1,
+                tx: LOT.into(),
+                kind: "STRATEGY_BUY".into(),
+                cell: "STRATEGY_ENTRY".into(),
+                state: "INCLUDED".into(),
+                verdict: "NOT_APPLICABLE".into(),
+                token: TOKEN.into(),
+                launch_hash: String::new(),
+                clock_id: Some(u64::MAX),
+                t_ingress_ns: Some(0),
+                t_send_ns: Some(u64::MAX),
+                launch_index: Some(0),
+                own_index: Some(1),
+                buys_before: Some(0),
+                tokens: Some(U256_MAX.into()),
+                t0_exact: false,
+                window_ms: 15_000,
+                ..LiveAttempt::default()
+            }),
+            exit_terms: Some(TradeExitTerms {
+                ratio_places: 18,
+                target_net_multiple: "1.50".into(),
+                stop_net_multiple: "0.80".into(),
+                hold_ms: u64::MAX,
+                creator_sell_exit: CreatorSellExit::Disabled as i32,
+            }),
+            settings_generation: Some(u64::MAX),
         }
         .encode_to_vec(),
     );
@@ -324,13 +413,33 @@ fn bsc_v8_contract_golden_bytes() {
                     filterable: true,
                 })
                 .collect(),
+            effective: Some(StrategyCSettings {
+                fill_delay_blocks: Some(0),
+                ..settings()
+            }),
+            setting_specs: vec![
+                StrategySettingSpec {
+                    key: "BSC_STRATEGY_C_INPUT_WEI".into(),
+                    unit: "wei".into(),
+                    min: Some("1".into()),
+                    max: Some(U256_MAX.into()),
+                    places: 0,
+                },
+                StrategySettingSpec {
+                    key: "BSC_STRATEGY_C_FIRST_BUYER_WINDOW".into(),
+                    unit: "count".into(),
+                    min: Some("1".into()),
+                    max: None,
+                    places: 0,
+                },
+            ],
         }
         .encode_to_vec(),
     );
     check(
         "strategy_set_all_command",
         StrategyCSettingsSetAllCommand {
-            settings: Some(settings()),
+            values: Some(values()),
         }
         .encode_to_vec(),
     );
@@ -345,7 +454,6 @@ fn bsc_v8_contract_golden_bytes() {
                     profile_id: "p1".into(),
                     name: "Fast Entry".into(),
                     revision: u64::MAX,
-                    settings: Some(settings()),
                     config_sha256: "01".repeat(32),
                     venues: vec!["BSC_VENUE_FLAP".into(), "BSC_VENUE_OPENFOUR".into()],
                     created_unix_ms: 1,
@@ -354,12 +462,13 @@ fn bsc_v8_contract_golden_bytes() {
                     run_ids: vec!["run-2".into(), "run-1".into()],
                     in_use: true,
                     in_use_reason: "TRAINING_RUN_RUNNING".into(),
+                    values: Some(values()),
+                    request_id: "prof-1".into(),
                 },
                 TrainingProfile {
                     profile_id: "p2".into(),
                     name: "Archived".into(),
                     revision: 0,
-                    settings: Some(StrategyCSettings::default()),
                     config_sha256: String::new(),
                     venues: vec![],
                     created_unix_ms: 0,
@@ -368,6 +477,8 @@ fn bsc_v8_contract_golden_bytes() {
                     run_ids: vec![],
                     in_use: false,
                     in_use_reason: String::new(),
+                    values: Some(StrategyCSettableValues::default()),
+                    request_id: String::new(),
                 },
             ],
             catalog_version: 7,
@@ -424,9 +535,22 @@ fn bsc_v8_contract_golden_bytes() {
                         ingress_dropped: u64::MAX,
                         quality: DataQuality::Incomplete as i32,
                         quality_reasons: vec!["JOURNAL_NOT_SEALED".into()],
+                        slot_limit: 2,
+                        creator_sold: 1,
+                        cancelled: u64::MAX,
+                        cancelled_creator_sold: 1,
+                        cancelled_not_tracked: 0,
+                        cancelled_quote: 1,
+                        cancelled_cost: 0,
+                        superseded: 0,
+                        paper_unpriced: 1,
+                        open_at_end: 0,
+                        replay_verdict: ReplayVerdict::NotRun as i32,
+                        config_match: None,
                     }),
                     provenance: provenance("bsc_runtime training runs", DataQuality::Unresolved),
                     request_id: "req-2".into(),
+                    replay_source: String::new(),
                 },
                 TrainingRun {
                     run_id: "run-1".into(),
@@ -442,15 +566,18 @@ fn bsc_v8_contract_golden_bytes() {
                     }),
                     started_unix_ms: Some(0),
                     ended_unix_ms: Some(0),
-                    status: TrainingRunStatus::Completed as i32,
-                    stop_reason: "PLAN_DURATION".into(),
+                    status: TrainingRunStatus::Interrupted as i32,
+                    stop_reason: "RUNTIME_RESTART".into(),
                     launches_processed: 0,
                     result: Some(TrainingResult {
                         net_wei: Some("-1".into()),
+                        replay_verdict: ReplayVerdict::Differs as i32,
+                        config_match: Some(false),
                         ..TrainingResult::default()
                     }),
                     provenance: None,
                     request_id: String::new(),
+                    replay_source: "rec-run-1".into(),
                 },
             ],
             next_cursor: String::new(),
@@ -479,11 +606,47 @@ fn bsc_v8_contract_golden_bytes() {
             profile_id: "p1".into(),
             profile_revision: u64::MAX,
             config_sha256: "01".repeat(32),
+            expected_settings_generation: u64::MAX,
+        }
+        .encode_to_vec(),
+    );
+    check(
+        "replay_source_page",
+        ReplaySourcePage {
+            availability: Availability::Available as i32,
+            unavailable_reason: String::new(),
+            provenance: provenance("bsc_runtime training runs", DataQuality::Verified),
+            sources: vec![ReplaySource {
+                source_id: "rec-run-1".into(),
+                kind: "RECORDED_RUN".into(),
+                run_id: "run-1".into(),
+                from_block: Some(0),
+                to_block: Some(u64::MAX),
+                from: block_time(Some(0), Some(0)),
+                to: block_time(None, Some(u64::MAX)),
+                records: u64::MAX,
+                config_sha256: "01".repeat(32),
+                quality: DataQuality::Incomplete as i32,
+                quality_reasons: vec!["JOURNAL_GAP".into()],
+            }],
+            next_cursor: String::new(),
+            has_more: false,
         }
         .encode_to_vec(),
     );
     const MAIN: &str = "0x4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d";
     const EXTERNAL: &str = "0x8282828282828282828282828282828282828282";
+    const SECOND: &str = "0x9393939393939393939393939393939393939393";
+    let authorization = |sha: &str, reason: &str| WalletAuthorization {
+        scope_text: "darkbot.bsc.wallet-profit-policy.v1\n".into(),
+        scope_sha256: sha.repeat(32),
+        expires_unix_ms: u64::MAX,
+        max_per_transfer_wei: U256_MAX.into(),
+        max_total_wei: U256_MAX.into(),
+        used_total_wei: "0".into(),
+        request_id: "auth-1".into(),
+        block_reason: reason.into(),
+    };
     let profit_transfer = WalletTransferState {
         request_id: "auto-a-1".into(),
         command_id: "intent-a-1".into(),
@@ -494,7 +657,6 @@ fn bsc_v8_contract_golden_bytes() {
         destination_address: MAIN.into(),
         chain_id: 56,
         amount_wei: U256_MAX.into(),
-        fee_wei: None,
         nonce: Some(0),
         tx_hash: LOT.into(),
         status: TransferStatus::Unknown as i32,
@@ -502,8 +664,15 @@ fn bsc_v8_contract_golden_bytes() {
         created_unix_ms: 1,
         updated_unix_ms: u64::MAX,
         policy_version: Some(u64::MAX),
-        block_number: None,
         trigger_id: "settle-7".into(),
+        receipt: None,
+        fee_estimate_wei: Some("21000000000000".into()),
+        reserve_after_wei: None,
+        scope_text: "darkbot.bsc.wallet-profit-policy.v1\n".into(),
+        scope_sha256: "a1".repeat(32),
+        expires_unix_ms: None,
+        max_block: None,
+        authorize_request_id: String::new(),
     };
     let payout = WalletTransferState {
         request_id: "auto-b-1".into(),
@@ -515,7 +684,6 @@ fn bsc_v8_contract_golden_bytes() {
         destination_address: EXTERNAL.into(),
         chain_id: 56,
         amount_wei: "1".into(),
-        fee_wei: Some("0".into()),
         nonce: Some(u64::MAX),
         tx_hash: LOT.into(),
         status: TransferStatus::Confirmed as i32,
@@ -523,8 +691,24 @@ fn bsc_v8_contract_golden_bytes() {
         created_unix_ms: 1,
         updated_unix_ms: 2,
         policy_version: Some(1),
-        block_number: Some(u64::MAX),
         trigger_id: "balance-9".into(),
+        receipt: Some(WalletTransferReceipt {
+            request_id: "auto-b-1".into(),
+            status: TransferStatus::Confirmed as i32,
+            tx_hash: LOT.into(),
+            block_number: Some(u64::MAX),
+            block_time: block_time(Some(1_793_000_000_000), Some(u64::MAX)),
+            gas_used: Some(21_000),
+            fee_wei: Some("0".into()),
+            reason: String::new(),
+        }),
+        fee_estimate_wei: None,
+        reserve_after_wei: Some(U256_MAX.into()),
+        scope_text: "darkbot.bsc.wallet-payout-policy.v1\n".into(),
+        scope_sha256: "b2".repeat(32),
+        expires_unix_ms: None,
+        max_block: Some(u64::MAX),
+        authorize_request_id: String::new(),
     };
     check(
         "wallet_history_page",
@@ -571,8 +755,8 @@ fn bsc_v8_contract_golden_bytes() {
             ],
             next_cursor: "w2".into(),
             has_more: true,
-            deposited_wei: U256_MAX.into(),
-            paid_out_wei: "0".into(),
+            deposited_total_wei: Some(U256_MAX.into()),
+            paid_out_total_wei: None,
         }
         .encode_to_vec(),
     );
@@ -608,7 +792,7 @@ fn bsc_v8_contract_golden_bytes() {
                     other_capital_wei: Some("0".into()),
                     next_nonce: Some(u64::MAX),
                     owner_key: true,
-                    state: "READY".into(),
+                    control: switch("BSC_WALLET_MAIN", "ENABLED", ""),
                     ..WalletAccount::default()
                 },
                 WalletAccount {
@@ -622,24 +806,35 @@ fn bsc_v8_contract_golden_bytes() {
                     untransferred_profit_wei: Some("0".into()),
                     next_nonce: None,
                     owner_key: true,
-                    state: "LOCKED".into(),
-                    reason: "ECONOMIC_LIVE_DISABLED".into(),
+                    control: switch("BSC_WALLET_BUYER", "BLOCKED", "RESET_BY_RESTART"),
                     ..WalletAccount::default()
                 },
                 WalletAccount {
                     role: WalletRole::Launcher as i32,
-                    state: "NOT_CONFIGURED".into(),
+                    reason: "NOT_CONFIGURED".into(),
                     ..WalletAccount::default()
                 },
             ],
-            destinations: vec![WalletDestination {
-                destination_id: "d1".into(),
-                label: "MetaMask".into(),
-                address: EXTERNAL.into(),
-                chain_id: 56,
-                confirmed: true,
-                created_unix_ms: 1,
-            }],
+            destinations: vec![
+                WalletDestination {
+                    destination_id: "d1".into(),
+                    label: "MetaMask".into(),
+                    address: EXTERNAL.into(),
+                    chain_id: 56,
+                    confirmed: true,
+                    created_unix_ms: 1,
+                    in_use: false,
+                },
+                WalletDestination {
+                    destination_id: "d2".into(),
+                    label: "Ledger".into(),
+                    address: SECOND.into(),
+                    chain_id: 56,
+                    confirmed: false,
+                    created_unix_ms: u64::MAX,
+                    in_use: false,
+                },
+            ],
             profit_policy: Some(ProfitTransferPolicy {
                 enabled: true,
                 threshold_realized_net_profit_wei: "100000000000000000".into(),
@@ -656,6 +851,10 @@ fn bsc_v8_contract_golden_bytes() {
                 to_threshold_wei: None,
                 effective_version: Some(u64::MAX),
                 block_reason: String::new(),
+                authorization: Some(authorization("a1", "")),
+                net_since_last_settlement_wei: Some(format!("-{U256_MAX}")),
+                settled_ledger_version: Some(u64::MAX),
+                finality_depth: Some(15),
             }),
             payout_policy: Some(MainPayoutPolicy {
                 enabled: false,
@@ -675,6 +874,7 @@ fn bsc_v8_contract_golden_bytes() {
                 available_main_wei: None,
                 effective_version: Some(0),
                 block_reason: "DISABLED".into(),
+                authorization: Some(authorization("b2", "RESET_BY_RESTART")),
             }),
             transfers: vec![profit_transfer, payout],
             treasury_version: u64::MAX,
@@ -691,6 +891,38 @@ fn bsc_v8_contract_golden_bytes() {
                 max_age_ms: 60_000,
             }),
             transfer_fee_estimate_wei: Some("21000000000000".into()),
+            decided_request_ids: vec!["pol-b-1".into(), "auth-1".into()],
+            authorization_bounds: Some(WalletAuthorizationBounds {
+                max_per_transfer_wei: "1000000000000000000".into(),
+                max_total_wei: "5000000000000000000".into(),
+                max_validity_ms: 604_800_000,
+                draft_validity_ms: 600_000,
+            }),
+        }
+        .encode_to_vec(),
+    );
+    check(
+        "transfer_draft",
+        WalletTransferState {
+            request_id: "fund-1".into(),
+            command_id: "draft-f-1".into(),
+            kind: WalletMovementKind::CapitalFunding as i32,
+            source_role: WalletRole::Main as i32,
+            source_address: MAIN.into(),
+            destination_role: WalletRole::Buyer as i32,
+            destination_address: TOKEN.into(),
+            chain_id: 56,
+            amount_wei: "500000000000000000".into(),
+            nonce: Some(7),
+            status: TransferStatus::Draft as i32,
+            created_unix_ms: 1_793_000_000_000,
+            updated_unix_ms: 1_793_000_000_000,
+            fee_estimate_wei: Some("21000000000000".into()),
+            reserve_after_wei: Some("479000000000000000".into()),
+            scope_text: SCOPE_TRANSFER.into(),
+            scope_sha256: SCOPE_TRANSFER_SHA.into(),
+            expires_unix_ms: Some(1_793_000_600_000),
+            ..WalletTransferState::default()
         }
         .encode_to_vec(),
     );
@@ -701,27 +933,50 @@ fn bsc_v8_contract_golden_bytes() {
             address: EXTERNAL.into(),
             chain_id: 56,
             remove: false,
-            confirmed: true,
         }
         .encode_to_vec(),
     );
     check(
-        "fund_trading_command",
-        WalletFundTradingCommand {
-            amount_wei: U256_MAX.into(),
-            max_fee_wei: "0".into(),
-            chain_id: 56,
+        "destination_confirm_command",
+        WalletDestinationConfirmCommand {
+            destination_id: "d2".into(),
+            address: SECOND.into(),
         }
         .encode_to_vec(),
     );
     check(
-        "payout_command",
-        WalletPayoutCommand {
-            destination_id: "d1".into(),
-            destination_address: EXTERNAL.into(),
-            chain_id: 56,
-            amount_wei: "1".into(),
-            max_fee_wei: U256_MAX.into(),
+        "transfer_prepare_fund_command",
+        WalletTransferPrepareCommand {
+            transfer: Some(wallet_transfer_prepare_command::Transfer::FundTrading(
+                WalletFundTradingCommand {
+                    amount_wei: U256_MAX.into(),
+                    max_fee_wei: "0".into(),
+                    chain_id: 56,
+                    buyer_address: TOKEN.into(),
+                },
+            )),
+        }
+        .encode_to_vec(),
+    );
+    check(
+        "transfer_prepare_payout_command",
+        WalletTransferPrepareCommand {
+            transfer: Some(wallet_transfer_prepare_command::Transfer::Payout(
+                WalletPayoutCommand {
+                    destination_id: "d1".into(),
+                    destination_address: EXTERNAL.into(),
+                    chain_id: 56,
+                    amount_wei: "1".into(),
+                    max_fee_wei: U256_MAX.into(),
+                },
+            )),
+        }
+        .encode_to_vec(),
+    );
+    check(
+        "transfer_authorize_command",
+        WalletTransferAuthorizeCommand {
+            scope_sha256: SCOPE_TRANSFER_SHA.into(),
         }
         .encode_to_vec(),
     );
@@ -735,22 +990,34 @@ fn bsc_v8_contract_golden_bytes() {
             }),
             buyer_min_capital_wei: U256_MAX.into(),
             buyer_reserve_wei: "1".into(),
+            authorization: Some(WalletAuthorizationScope {
+                expires_unix_ms: u64::MAX,
+                max_per_transfer_wei: "1".into(),
+                max_total_wei: U256_MAX.into(),
+                scope_sha256: SCOPE_PROFIT_SHA.into(),
+            }),
         }
         .encode_to_vec(),
     );
     check(
         "payout_policy_set_command",
         MainPayoutPolicySetCommand {
-            enabled: false,
+            enabled: true,
             destination_id: "d1".into(),
             unit: PolicyUnit::Eur as i32,
             threshold_available_main_wei: String::new(),
-            threshold_eur: Some("1000.00".into()),
+            threshold_eur: Some("1000.5".into()),
             amount: Some(PolicyAmount {
                 amount: Some(policy_amount::Amount::FixedEur("0.01".into())),
             }),
             retain_wei: U256_MAX.into(),
             destination_address: EXTERNAL.into(),
+            authorization: Some(WalletAuthorizationScope {
+                expires_unix_ms: 1_793_000_000_000,
+                max_per_transfer_wei: "1000000000000000000".into(),
+                max_total_wei: "5000000000000000000".into(),
+                scope_sha256: SCOPE_PAYOUT_SHA.into(),
+            }),
         }
         .encode_to_vec(),
     );
@@ -778,6 +1045,7 @@ fn bsc_v8_contract_golden_bytes() {
                 },
             ],
             opening_wei: None,
+            truncated: true,
         }
         .encode_to_vec(),
     );

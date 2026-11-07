@@ -1,0 +1,9 @@
+darkbot.bsc.wallet-transfer.v1
+kind=CAPITAL_FUNDING
+chain_id=56
+from=0x4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d
+to=0x6161616161616161616161616161616161616161
+amount_wei=500000000000000000
+max_fee_wei=21000000000000
+nonce=7
+expires_unix_ms=1793000600000

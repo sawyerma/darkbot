@@ -4,7 +4,7 @@
 
 import type { GenEnum, GenFile, GenMessage } from "@bufbuild/protobuf/codegenv1";
 import { enumDesc, fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv1";
-import type { Availability, DataQuality, OwnerProvenance } from "./common_pb";
+import type { Availability, DataQuality, OwnerProvenance, SourcedTime } from "./common_pb";
 import { file_darkbot_bsc_v1_common } from "./common_pb";
 import type { Message } from "@bufbuild/protobuf";
 
@@ -12,11 +12,12 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file darkbot/bsc/v1/training.proto.
  */
 export const file_darkbot_bsc_v1_training: GenFile = /*@__PURE__*/
-  fileDesc("Ch1kYXJrYm90L2JzYy92MS90cmFpbmluZy5wcm90bxIOZGFya2JvdC5ic2MudjEiagoSU3RyYXRlZ3lGaWx0ZXJSdWxlEg8KB2ZlYXR1cmUYASABKAkSDwoHZW5hYmxlZBgCIAEoCBIQCgNtaW4YAyABKAlIAIgBARIQCgNtYXgYBCABKAlIAYgBAUIGCgRfbWluQgYKBF9tYXgidAoTU3RyYXRlZ3lGZWF0dXJlU3BlYxIMCgRuYW1lGAEgASgJEg0KBWluZGV4GAIgASgNEgwKBHVuaXQYAyABKAkSDgoGcGxhY2VzGAQgASgNEg4KBnNpZ25lZBgFIAEoCBISCgpmaWx0ZXJhYmxlGAYgASgIIqEFChFTdHJhdGVneUNTZXR0aW5ncxIWCglpbnB1dF93ZWkYASABKAlIAIgBARIgChN0YXJnZXRfbmV0X211bHRpcGxlGAIgASgJSAGIAQESHgoRc3RvcF9uZXRfbXVsdGlwbGUYAyABKAlIAogBARIbCg5vYnNlcnZhdGlvbl9tcxgEIAEoBEgDiAEBEhQKB2hvbGRfbXMYBSABKARIBIgBARIVCghtYXhfb3BlbhgGIAEoDUgFiAEBEkcKGGNyZWF0b3Jfc29sZF9iZWZvcmVfZmlsbBgHIAEoDjIlLmRhcmtib3QuYnNjLnYxLkNyZWF0b3JTb2xkQmVmb3JlRmlsbBI6ChFjcmVhdG9yX3NlbGxfZXhpdBgIIAEoDjIfLmRhcmtib3QuYnNjLnYxLkNyZWF0b3JTZWxsRXhpdBIzCgdmaWx0ZXJzGAkgAygLMiIuZGFya2JvdC5ic2MudjEuU3RyYXRlZ3lGaWx0ZXJSdWxlEh8KEmZpcnN0X2J1eWVyX3dpbmRvdxgKIAEoDUgGiAEBEhkKDHJhdGlvX3BsYWNlcxgLIAEoDUgHiAEBEh4KEWZpbGxfZGVsYXlfYmxvY2tzGAwgASgNSAiIAQESGgoNZ2FzX3ByaWNlX3dlaRgNIAEoCUgJiAEBQgwKCl9pbnB1dF93ZWlCFgoUX3RhcmdldF9uZXRfbXVsdGlwbGVCFAoSX3N0b3BfbmV0X211bHRpcGxlQhEKD19vYnNlcnZhdGlvbl9tc0IKCghfaG9sZF9tc0ILCglfbWF4X29wZW5CFQoTX2ZpcnN0X2J1eWVyX3dpbmRvd0IPCg1fcmF0aW9fcGxhY2VzQhQKEl9maWxsX2RlbGF5X2Jsb2Nrc0IQCg5fZ2FzX3ByaWNlX3dlaSKsBAoWU3RyYXRlZ3lDU2V0dGluZ3NTdGF0ZRIyCgxhdmFpbGFiaWxpdHkYASABKA4yHC5kYXJrYm90LmJzYy52MS5BdmFpbGFiaWxpdHkSGgoSdW5hdmFpbGFibGVfcmVhc29uGAIgASgJEjMKCnByb3ZlbmFuY2UYAyABKAsyHy5kYXJrYm90LmJzYy52MS5Pd25lclByb3ZlbmFuY2USMQoGc3RvcmVkGAQgASgLMiEuZGFya2JvdC5ic2MudjEuU3RyYXRlZ3lDU2V0dGluZ3MSFwoPc3RvcmVkX3JldmlzaW9uGAUgASgEEhwKFHN0b3JlZF9jb25maWdfc2hhMjU2GAYgASgJEjIKB3J1bm5pbmcYByABKAsyIS5kYXJrYm90LmJzYy52MS5TdHJhdGVneUNTZXR0aW5ncxIdChBydW5uaW5nX3JldmlzaW9uGAggASgESACIAQESHQoVcnVubmluZ19jb25maWdfc2hhMjU2GAkgASgJEjkKDGFwcGx5X3N0YXR1cxgKIAEoDjIjLmRhcmtib3QuYnNjLnYxLlNldHRpbmdzQXBwbHlTdGF0dXMSFgoOcmVmdXNhbF9yZWFzb24YCyABKAkSEgoKcmVxdWVzdF9pZBgMIAEoCRI1CghmZWF0dXJlcxgNIAMoCzIjLmRhcmtib3QuYnNjLnYxLlN0cmF0ZWd5RmVhdHVyZVNwZWNCEwoRX3J1bm5pbmdfcmV2aXNpb24iVQoeU3RyYXRlZ3lDU2V0dGluZ3NTZXRBbGxDb21tYW5kEjMKCHNldHRpbmdzGAEgASgLMiEuZGFya2JvdC5ic2MudjEuU3RyYXRlZ3lDU2V0dGluZ3MiwgIKD1RyYWluaW5nUHJvZmlsZRISCgpwcm9maWxlX2lkGAEgASgJEgwKBG5hbWUYAiABKAkSEAoIcmV2aXNpb24YAyABKAQSMwoIc2V0dGluZ3MYBCABKAsyIS5kYXJrYm90LmJzYy52MS5TdHJhdGVneUNTZXR0aW5ncxIVCg1jb25maWdfc2hhMjU2GAUgASgJEg4KBnZlbnVlcxgGIAMoCRIXCg9jcmVhdGVkX3VuaXhfbXMYByABKAQSFwoPdXBkYXRlZF91bml4X21zGAggASgEEjUKBnN0YXR1cxgJIAEoDjIlLmRhcmtib3QuYnNjLnYxLlRyYWluaW5nUHJvZmlsZVN0YXR1cxIPCgdydW5faWRzGAogAygJEg4KBmluX3VzZRgLIAEoCBIVCg1pbl91c2VfcmVhc29uGAwgASgJIroCChBUcmFpbmluZ1Byb2ZpbGVzEjIKDGF2YWlsYWJpbGl0eRgBIAEoDjIcLmRhcmtib3QuYnNjLnYxLkF2YWlsYWJpbGl0eRIaChJ1bmF2YWlsYWJsZV9yZWFzb24YAiABKAkSMwoKcHJvdmVuYW5jZRgDIAEoCzIfLmRhcmtib3QuYnNjLnYxLk93bmVyUHJvdmVuYW5jZRIxCghwcm9maWxlcxgEIAMoCzIfLmRhcmtib3QuYnNjLnYxLlRyYWluaW5nUHJvZmlsZRIXCg9jYXRhbG9nX3ZlcnNpb24YBSABKAQSFwoPbGl2ZV9wcm9maWxlX2lkGAYgASgJEiIKFWxpdmVfcHJvZmlsZV9yZXZpc2lvbhgHIAEoBEgAiAEBQhgKFl9saXZlX3Byb2ZpbGVfcmV2aXNpb24iMQoVVHJhaW5pbmdQcm9maWxlc1F1ZXJ5EhgKEGluY2x1ZGVfYXJjaGl2ZWQYASABKAgicQocVHJhaW5pbmdQcm9maWxlQ3JlYXRlQ29tbWFuZBIMCgRuYW1lGAEgASgJEjMKCHNldHRpbmdzGAIgASgLMiEuZGFya2JvdC5ic2MudjEuU3RyYXRlZ3lDU2V0dGluZ3MSDgoGdmVudWVzGAMgAygJIoUBChxUcmFpbmluZ1Byb2ZpbGVVcGRhdGVDb21tYW5kEhIKCnByb2ZpbGVfaWQYASABKAkSDAoEbmFtZRgCIAEoCRIzCghzZXR0aW5ncxgDIAEoCzIhLmRhcmtib3QuYnNjLnYxLlN0cmF0ZWd5Q1NldHRpbmdzEg4KBnZlbnVlcxgEIAMoCSJfChtUcmFpbmluZ1Byb2ZpbGVDbG9uZUNvbW1hbmQSGQoRc291cmNlX3Byb2ZpbGVfaWQYASABKAkSFwoPc291cmNlX3JldmlzaW9uGAIgASgEEgwKBG5hbWUYAyABKAkiQwocVHJhaW5pbmdQcm9maWxlRGVsZXRlQ29tbWFuZBISCgpwcm9maWxlX2lkGAEgASgJEg8KB2FyY2hpdmUYAiABKAginwEKD1RyYWluaW5nUnVuUGxhbhI2CglzdG9wX2tpbmQYASABKA4yIy5kYXJrYm90LmJzYy52MS5UcmFpbmluZ1J1blN0b3BLaW5kEhgKC2R1cmF0aW9uX21zGAIgASgESACIAQESGQoMbWF4X2xhdW5jaGVzGAMgASgESAGIAQFCDgoMX2R1cmF0aW9uX21zQg8KDV9tYXhfbGF1bmNoZXMipgQKDlRyYWluaW5nUmVzdWx0EhEKCWV2YWx1YXRlZBgBIAEoBBIOCgZwYXNzZWQYAiABKAQSEAoIcmVqZWN0ZWQYAyABKAQSFwoPZGF0YV9pbmNvbXBsZXRlGAQgASgEEhMKC25vdF90cmFja2VkGAUgASgEEhIKCnVucmVzb2x2ZWQYBiABKAQSDwoHZW50ZXJlZBgHIAEoBBIUCgxleGl0c190YXJnZXQYCCABKAQSEgoKZXhpdHNfc3RvcBgJIAEoBBIaChJleGl0c19jcmVhdG9yX3NlbGwYCiABKAQSFQoNZXhpdHNfdGltZW91dBgLIAEoBBIMCgR3aW5zGAwgASgEEg4KBmxvc3NlcxgNIAEoBBIQCghnYWluX3dlaRgOIAEoCRIQCghsb3NzX3dlaRgPIAEoCRIUCgduZXRfd2VpGBAgASgJSACIAQESFgoOb3Blbl9wb3NpdGlvbnMYESABKAQSDwoHc291cmNlcxgSIAMoCRIaCg1vYnNlcnZhYmxlX21zGBMgASgESAGIAQESFAoMbG9zdF9yZWNvcmRzGBQgASgEEhcKD2luZ3Jlc3NfZHJvcHBlZBgVIAEoBBIsCgdxdWFsaXR5GBYgASgOMhsuZGFya2JvdC5ic2MudjEuRGF0YVF1YWxpdHkSFwoPcXVhbGl0eV9yZWFzb25zGBcgAygJQgoKCF9uZXRfd2VpQhAKDl9vYnNlcnZhYmxlX21zIo0ECgtUcmFpbmluZ1J1bhIOCgZydW5faWQYASABKAkSEgoKcHJvZmlsZV9pZBgCIAEoCRIYChBwcm9maWxlX3JldmlzaW9uGAMgASgEEhUKDWNvbmZpZ19zaGEyNTYYBCABKAkSLQoEbW9kZRgFIAEoDjIfLmRhcmtib3QuYnNjLnYxLlRyYWluaW5nUnVuTW9kZRIOCgZ2ZW51ZXMYBiADKAkSLQoEcGxhbhgHIAEoCzIfLmRhcmtib3QuYnNjLnYxLlRyYWluaW5nUnVuUGxhbhIcCg9zdGFydGVkX3VuaXhfbXMYCCABKARIAIgBARIaCg1lbmRlZF91bml4X21zGAkgASgESAGIAQESMQoGc3RhdHVzGAogASgOMiEuZGFya2JvdC5ic2MudjEuVHJhaW5pbmdSdW5TdGF0dXMSEwoLc3RvcF9yZWFzb24YCyABKAkSGgoSbGF1bmNoZXNfcHJvY2Vzc2VkGAwgASgEEi4KBnJlc3VsdBgNIAEoCzIeLmRhcmtib3QuYnNjLnYxLlRyYWluaW5nUmVzdWx0EjMKCnByb3ZlbmFuY2UYDiABKAsyHy5kYXJrYm90LmJzYy52MS5Pd25lclByb3ZlbmFuY2USEgoKcmVxdWVzdF9pZBgPIAEoCUISChBfc3RhcnRlZF91bml4X21zQhAKDl9lbmRlZF91bml4X21zIrIBChdUcmFpbmluZ1J1blN0YXJ0Q29tbWFuZBISCgpwcm9maWxlX2lkGAEgASgJEi0KBG1vZGUYAiABKA4yHy5kYXJrYm90LmJzYy52MS5UcmFpbmluZ1J1bk1vZGUSDgoGdmVudWVzGAMgAygJEi0KBHBsYW4YBCABKAsyHy5kYXJrYm90LmJzYy52MS5UcmFpbmluZ1J1blBsYW4SFQoNcmVwbGF5X3NvdXJjZRgFIAEoCSIoChZUcmFpbmluZ1J1blN0b3BDb21tYW5kEg4KBnJlYXNvbhgBIAEoCSJgChlMaXZlU3RyYXRlZ3lTZWxlY3RDb21tYW5kEhIKCnByb2ZpbGVfaWQYASABKAkSGAoQcHJvZmlsZV9yZXZpc2lvbhgCIAEoBBIVCg1jb25maWdfc2hhMjU2GAMgASgJIjIKFlN0cmF0ZWd5Q1NldHRpbmdzUXVlcnkSGAoQaW5jbHVkZV9mZWF0dXJlcxgBIAEoCCJ6ChBUcmFpbmluZ1J1blF1ZXJ5EhIKCnByb2ZpbGVfaWQYASABKAkSMwoIc3RhdHVzZXMYAiADKA4yIS5kYXJrYm90LmJzYy52MS5UcmFpbmluZ1J1blN0YXR1cxIOCgZjdXJzb3IYAyABKAkSDQoFbGltaXQYBCABKA0i6AEKD1RyYWluaW5nUnVuUGFnZRIyCgxhdmFpbGFiaWxpdHkYASABKA4yHC5kYXJrYm90LmJzYy52MS5BdmFpbGFiaWxpdHkSGgoSdW5hdmFpbGFibGVfcmVhc29uGAIgASgJEjMKCnByb3ZlbmFuY2UYAyABKAsyHy5kYXJrYm90LmJzYy52MS5Pd25lclByb3ZlbmFuY2USKQoEcnVucxgEIAMoCzIbLmRhcmtib3QuYnNjLnYxLlRyYWluaW5nUnVuEhMKC25leHRfY3Vyc29yGAUgASgJEhAKCGhhc19tb3JlGAYgASgIKpIBChVDcmVhdG9yU29sZEJlZm9yZUZpbGwSKAokQ1JFQVRPUl9TT0xEX0JFRk9SRV9GSUxMX1VOU1BFQ0lGSUVEEAASKAokQ1JFQVRPUl9TT0xEX0JFRk9SRV9GSUxMX0ZSRUVfQ0FOQ0VMEAESJQohQ1JFQVRPUl9TT0xEX0JFRk9SRV9GSUxMX1RYX0xBTkRTEAIqcwoPQ3JlYXRvclNlbGxFeGl0EiEKHUNSRUFUT1JfU0VMTF9FWElUX1VOU1BFQ0lGSUVEEAASHQoZQ1JFQVRPUl9TRUxMX0VYSVRfRU5BQkxFRBABEh4KGkNSRUFUT1JfU0VMTF9FWElUX0RJU0FCTEVEEAIq3wEKE1NldHRpbmdzQXBwbHlTdGF0dXMSJQohU0VUVElOR1NfQVBQTFlfU1RBVFVTX1VOU1BFQ0lGSUVEEAASIwofU0VUVElOR1NfQVBQTFlfU1RBVFVTX0lOX0VGRkVDVBABEjIKLlNFVFRJTkdTX0FQUExZX1NUQVRVU19TQVZFRF9BUFBMSUVTX05FWFRfU1RBUlQQAhIlCiFTRVRUSU5HU19BUFBMWV9TVEFUVVNfTk9UX1JVTk5JTkcQAxIhCh1TRVRUSU5HU19BUFBMWV9TVEFUVVNfUkVGVVNFRBAEKq8BChVUcmFpbmluZ1Byb2ZpbGVTdGF0dXMSJwojVFJBSU5JTkdfUFJPRklMRV9TVEFUVVNfVU5TUEVDSUZJRUQQABIiCh5UUkFJTklOR19QUk9GSUxFX1NUQVRVU19BQ1RJVkUQARIkCiBUUkFJTklOR19QUk9GSUxFX1NUQVRVU19BUkNISVZFRBACEiMKH1RSQUlOSU5HX1BST0ZJTEVfU1RBVFVTX0RFTEVURUQQAyqNAQoPVHJhaW5pbmdSdW5Nb2RlEiEKHVRSQUlOSU5HX1JVTl9NT0RFX1VOU1BFQ0lGSUVEEAASGwoXVFJBSU5JTkdfUlVOX01PREVfUEFQRVIQARIcChhUUkFJTklOR19SVU5fTU9ERV9TSEFET1cQAhIcChhUUkFJTklOR19SVU5fTU9ERV9SRVBMQVkQAyq1AQoTVHJhaW5pbmdSdW5TdG9wS2luZBImCiJUUkFJTklOR19SVU5fU1RPUF9LSU5EX1VOU1BFQ0lGSUVEEAASIwofVFJBSU5JTkdfUlVOX1NUT1BfS0lORF9EVVJBVElPThABEicKI1RSQUlOSU5HX1JVTl9TVE9QX0tJTkRfTEFVTkNIX0NPVU5UEAISKAokVFJBSU5JTkdfUlVOX1NUT1BfS0lORF9VTlRJTF9TVE9QUEVEEAMqoQIKEVRyYWluaW5nUnVuU3RhdHVzEiMKH1RSQUlOSU5HX1JVTl9TVEFUVVNfVU5TUEVDSUZJRUQQABIfChtUUkFJTklOR19SVU5fU1RBVFVTX1BFTkRJTkcQARIfChtUUkFJTklOR19SVU5fU1RBVFVTX1JVTk5JTkcQAhIgChxUUkFJTklOR19SVU5fU1RBVFVTX1NUT1BQSU5HEAMSIQodVFJBSU5JTkdfUlVOX1NUQVRVU19DT01QTEVURUQQBBIfChtUUkFJTklOR19SVU5fU1RBVFVTX1NUT1BQRUQQBRIeChpUUkFJTklOR19SVU5fU1RBVFVTX0ZBSUxFRBAGEh8KG1RSQUlOSU5HX1JVTl9TVEFUVVNfVU5LTk9XThAHQn0KEmNvbS5kYXJrYm90LmJzYy52MUINVHJhaW5pbmdQcm90b1ABogIDREJYqgIORGFya2JvdC5Cc2MuVjHKAg5EYXJrYm90XEJzY1xWMeICGkRhcmtib3RcQnNjXFYxXEdQQk1ldGFkYXRh6gIQRGFya2JvdDo6QnNjOjpWMWIGcHJvdG8z", [file_darkbot_bsc_v1_common]);
+  fileDesc("Ch1kYXJrYm90L2JzYy92MS90cmFpbmluZy5wcm90bxIOZGFya2JvdC5ic2MudjEiagoSU3RyYXRlZ3lGaWx0ZXJSdWxlEg8KB2ZlYXR1cmUYASABKAkSDwoHZW5hYmxlZBgCIAEoCBIQCgNtaW4YAyABKAlIAIgBARIQCgNtYXgYBCABKAlIAYgBAUIGCgRfbWluQgYKBF9tYXgidAoTU3RyYXRlZ3lGZWF0dXJlU3BlYxIMCgRuYW1lGAEgASgJEg0KBWluZGV4GAIgASgNEgwKBHVuaXQYAyABKAkSDgoGcGxhY2VzGAQgASgNEg4KBnNpZ25lZBgFIAEoCBISCgpmaWx0ZXJhYmxlGAYgASgIIqEFChFTdHJhdGVneUNTZXR0aW5ncxIWCglpbnB1dF93ZWkYASABKAlIAIgBARIgChN0YXJnZXRfbmV0X211bHRpcGxlGAIgASgJSAGIAQESHgoRc3RvcF9uZXRfbXVsdGlwbGUYAyABKAlIAogBARIbCg5vYnNlcnZhdGlvbl9tcxgEIAEoBEgDiAEBEhQKB2hvbGRfbXMYBSABKARIBIgBARIVCghtYXhfb3BlbhgGIAEoDUgFiAEBEkcKGGNyZWF0b3Jfc29sZF9iZWZvcmVfZmlsbBgHIAEoDjIlLmRhcmtib3QuYnNjLnYxLkNyZWF0b3JTb2xkQmVmb3JlRmlsbBI6ChFjcmVhdG9yX3NlbGxfZXhpdBgIIAEoDjIfLmRhcmtib3QuYnNjLnYxLkNyZWF0b3JTZWxsRXhpdBIzCgdmaWx0ZXJzGAkgAygLMiIuZGFya2JvdC5ic2MudjEuU3RyYXRlZ3lGaWx0ZXJSdWxlEh8KEmZpcnN0X2J1eWVyX3dpbmRvdxgKIAEoDUgGiAEBEhkKDHJhdGlvX3BsYWNlcxgLIAEoDUgHiAEBEh4KEWZpbGxfZGVsYXlfYmxvY2tzGAwgASgNSAiIAQESGgoNZ2FzX3ByaWNlX3dlaRgNIAEoCUgJiAEBQgwKCl9pbnB1dF93ZWlCFgoUX3RhcmdldF9uZXRfbXVsdGlwbGVCFAoSX3N0b3BfbmV0X211bHRpcGxlQhEKD19vYnNlcnZhdGlvbl9tc0IKCghfaG9sZF9tc0ILCglfbWF4X29wZW5CFQoTX2ZpcnN0X2J1eWVyX3dpbmRvd0IPCg1fcmF0aW9fcGxhY2VzQhQKEl9maWxsX2RlbGF5X2Jsb2Nrc0IQCg5fZ2FzX3ByaWNlX3dlaSKXBAoXU3RyYXRlZ3lDU2V0dGFibGVWYWx1ZXMSFgoJaW5wdXRfd2VpGAEgASgJSACIAQESIAoTdGFyZ2V0X25ldF9tdWx0aXBsZRgCIAEoCUgBiAEBEh4KEXN0b3BfbmV0X211bHRpcGxlGAMgASgJSAKIAQESGwoOb2JzZXJ2YXRpb25fbXMYBCABKARIA4gBARIUCgdob2xkX21zGAUgASgESASIAQESFQoIbWF4X29wZW4YBiABKA1IBYgBARJHChhjcmVhdG9yX3NvbGRfYmVmb3JlX2ZpbGwYByABKA4yJS5kYXJrYm90LmJzYy52MS5DcmVhdG9yU29sZEJlZm9yZUZpbGwSOgoRY3JlYXRvcl9zZWxsX2V4aXQYCCABKA4yHy5kYXJrYm90LmJzYy52MS5DcmVhdG9yU2VsbEV4aXQSMwoHZmlsdGVycxgJIAMoCzIiLmRhcmtib3QuYnNjLnYxLlN0cmF0ZWd5RmlsdGVyUnVsZRIfChJmaXJzdF9idXllcl93aW5kb3cYCiABKA1IBogBAUIMCgpfaW5wdXRfd2VpQhYKFF90YXJnZXRfbmV0X211bHRpcGxlQhQKEl9zdG9wX25ldF9tdWx0aXBsZUIRCg9fb2JzZXJ2YXRpb25fbXNCCgoIX2hvbGRfbXNCCwoJX21heF9vcGVuQhUKE19maXJzdF9idXllcl93aW5kb3cidAoTU3RyYXRlZ3lTZXR0aW5nU3BlYxILCgNrZXkYASABKAkSDAoEdW5pdBgCIAEoCRIQCgNtaW4YAyABKAlIAIgBARIQCgNtYXgYBCABKAlIAYgBARIOCgZwbGFjZXMYBSABKA1CBgoEX21pbkIGCgRfbWF4Ip4FChZTdHJhdGVneUNTZXR0aW5nc1N0YXRlEjIKDGF2YWlsYWJpbGl0eRgBIAEoDjIcLmRhcmtib3QuYnNjLnYxLkF2YWlsYWJpbGl0eRIaChJ1bmF2YWlsYWJsZV9yZWFzb24YAiABKAkSMwoKcHJvdmVuYW5jZRgDIAEoCzIfLmRhcmtib3QuYnNjLnYxLk93bmVyUHJvdmVuYW5jZRIxCgZzdG9yZWQYBCABKAsyIS5kYXJrYm90LmJzYy52MS5TdHJhdGVneUNTZXR0aW5ncxIXCg9zdG9yZWRfcmV2aXNpb24YBSABKAQSHAoUc3RvcmVkX2NvbmZpZ19zaGEyNTYYBiABKAkSMgoHcnVubmluZxgHIAEoCzIhLmRhcmtib3QuYnNjLnYxLlN0cmF0ZWd5Q1NldHRpbmdzEh0KEHJ1bm5pbmdfcmV2aXNpb24YCCABKARIAIgBARIdChVydW5uaW5nX2NvbmZpZ19zaGEyNTYYCSABKAkSOQoMYXBwbHlfc3RhdHVzGAogASgOMiMuZGFya2JvdC5ic2MudjEuU2V0dGluZ3NBcHBseVN0YXR1cxIWCg5yZWZ1c2FsX3JlYXNvbhgLIAEoCRISCgpyZXF1ZXN0X2lkGAwgASgJEjUKCGZlYXR1cmVzGA0gAygLMiMuZGFya2JvdC5ic2MudjEuU3RyYXRlZ3lGZWF0dXJlU3BlYxI0CgllZmZlY3RpdmUYDiABKAsyIS5kYXJrYm90LmJzYy52MS5TdHJhdGVneUNTZXR0aW5ncxI6Cg1zZXR0aW5nX3NwZWNzGA8gAygLMiMuZGFya2JvdC5ic2MudjEuU3RyYXRlZ3lTZXR0aW5nU3BlY0ITChFfcnVubmluZ19yZXZpc2lvbiJpCh5TdHJhdGVneUNTZXR0aW5nc1NldEFsbENvbW1hbmQSNwoGdmFsdWVzGAIgASgLMicuZGFya2JvdC5ic2MudjEuU3RyYXRlZ3lDU2V0dGFibGVWYWx1ZXNKBAgBEAJSCHNldHRpbmdzIuoCCg9UcmFpbmluZ1Byb2ZpbGUSEgoKcHJvZmlsZV9pZBgBIAEoCRIMCgRuYW1lGAIgASgJEhAKCHJldmlzaW9uGAMgASgEEhUKDWNvbmZpZ19zaGEyNTYYBSABKAkSDgoGdmVudWVzGAYgAygJEhcKD2NyZWF0ZWRfdW5peF9tcxgHIAEoBBIXCg91cGRhdGVkX3VuaXhfbXMYCCABKAQSNQoGc3RhdHVzGAkgASgOMiUuZGFya2JvdC5ic2MudjEuVHJhaW5pbmdQcm9maWxlU3RhdHVzEg8KB3J1bl9pZHMYCiADKAkSDgoGaW5fdXNlGAsgASgIEhUKDWluX3VzZV9yZWFzb24YDCABKAkSNwoGdmFsdWVzGA0gASgLMicuZGFya2JvdC5ic2MudjEuU3RyYXRlZ3lDU2V0dGFibGVWYWx1ZXMSEgoKcmVxdWVzdF9pZBgOIAEoCUoECAQQBVIIc2V0dGluZ3MiugIKEFRyYWluaW5nUHJvZmlsZXMSMgoMYXZhaWxhYmlsaXR5GAEgASgOMhwuZGFya2JvdC5ic2MudjEuQXZhaWxhYmlsaXR5EhoKEnVuYXZhaWxhYmxlX3JlYXNvbhgCIAEoCRIzCgpwcm92ZW5hbmNlGAMgASgLMh8uZGFya2JvdC5ic2MudjEuT3duZXJQcm92ZW5hbmNlEjEKCHByb2ZpbGVzGAQgAygLMh8uZGFya2JvdC5ic2MudjEuVHJhaW5pbmdQcm9maWxlEhcKD2NhdGFsb2dfdmVyc2lvbhgFIAEoBBIXCg9saXZlX3Byb2ZpbGVfaWQYBiABKAkSIgoVbGl2ZV9wcm9maWxlX3JldmlzaW9uGAcgASgESACIAQFCGAoWX2xpdmVfcHJvZmlsZV9yZXZpc2lvbiIxChVUcmFpbmluZ1Byb2ZpbGVzUXVlcnkSGAoQaW5jbHVkZV9hcmNoaXZlZBgBIAEoCCKFAQocVHJhaW5pbmdQcm9maWxlQ3JlYXRlQ29tbWFuZBIMCgRuYW1lGAEgASgJEg4KBnZlbnVlcxgDIAMoCRI3CgZ2YWx1ZXMYBCABKAsyJy5kYXJrYm90LmJzYy52MS5TdHJhdGVneUNTZXR0YWJsZVZhbHVlc0oECAIQA1IIc2V0dGluZ3MimQEKHFRyYWluaW5nUHJvZmlsZVVwZGF0ZUNvbW1hbmQSEgoKcHJvZmlsZV9pZBgBIAEoCRIMCgRuYW1lGAIgASgJEg4KBnZlbnVlcxgEIAMoCRI3CgZ2YWx1ZXMYBSABKAsyJy5kYXJrYm90LmJzYy52MS5TdHJhdGVneUNTZXR0YWJsZVZhbHVlc0oECAMQBFIIc2V0dGluZ3MiXwobVHJhaW5pbmdQcm9maWxlQ2xvbmVDb21tYW5kEhkKEXNvdXJjZV9wcm9maWxlX2lkGAEgASgJEhcKD3NvdXJjZV9yZXZpc2lvbhgCIAEoBBIMCgRuYW1lGAMgASgJIkMKHFRyYWluaW5nUHJvZmlsZURlbGV0ZUNvbW1hbmQSEgoKcHJvZmlsZV9pZBgBIAEoCRIPCgdhcmNoaXZlGAIgASgIIp8BCg9UcmFpbmluZ1J1blBsYW4SNgoJc3RvcF9raW5kGAEgASgOMiMuZGFya2JvdC5ic2MudjEuVHJhaW5pbmdSdW5TdG9wS2luZBIYCgtkdXJhdGlvbl9tcxgCIAEoBEgAiAEBEhkKDG1heF9sYXVuY2hlcxgDIAEoBEgBiAEBQg4KDF9kdXJhdGlvbl9tc0IPCg1fbWF4X2xhdW5jaGVzIvcGCg5UcmFpbmluZ1Jlc3VsdBIRCglldmFsdWF0ZWQYASABKAQSDgoGcGFzc2VkGAIgASgEEhAKCHJlamVjdGVkGAMgASgEEhcKD2RhdGFfaW5jb21wbGV0ZRgEIAEoBBITCgtub3RfdHJhY2tlZBgFIAEoBBISCgp1bnJlc29sdmVkGAYgASgEEg8KB2VudGVyZWQYByABKAQSFAoMZXhpdHNfdGFyZ2V0GAggASgEEhIKCmV4aXRzX3N0b3AYCSABKAQSGgoSZXhpdHNfY3JlYXRvcl9zZWxsGAogASgEEhUKDWV4aXRzX3RpbWVvdXQYCyABKAQSDAoEd2lucxgMIAEoBBIOCgZsb3NzZXMYDSABKAQSEAoIZ2Fpbl93ZWkYDiABKAkSEAoIbG9zc193ZWkYDyABKAkSFAoHbmV0X3dlaRgQIAEoCUgAiAEBEhYKDm9wZW5fcG9zaXRpb25zGBEgASgEEg8KB3NvdXJjZXMYEiADKAkSGgoNb2JzZXJ2YWJsZV9tcxgTIAEoBEgBiAEBEhQKDGxvc3RfcmVjb3JkcxgUIAEoBBIXCg9pbmdyZXNzX2Ryb3BwZWQYFSABKAQSLAoHcXVhbGl0eRgWIAEoDjIbLmRhcmtib3QuYnNjLnYxLkRhdGFRdWFsaXR5EhcKD3F1YWxpdHlfcmVhc29ucxgXIAMoCRISCgpzbG90X2xpbWl0GBggASgEEhQKDGNyZWF0b3Jfc29sZBgZIAEoBBIRCgljYW5jZWxsZWQYGiABKAQSHgoWY2FuY2VsbGVkX2NyZWF0b3Jfc29sZBgbIAEoBBIdChVjYW5jZWxsZWRfbm90X3RyYWNrZWQYHCABKAQSFwoPY2FuY2VsbGVkX3F1b3RlGB0gASgEEhYKDmNhbmNlbGxlZF9jb3N0GB4gASgEEhIKCnN1cGVyc2VkZWQYHyABKAQSFgoOcGFwZXJfdW5wcmljZWQYICABKAQSEwoLb3Blbl9hdF9lbmQYISABKAQSNQoOcmVwbGF5X3ZlcmRpY3QYIiABKA4yHS5kYXJrYm90LmJzYy52MS5SZXBsYXlWZXJkaWN0EhkKDGNvbmZpZ19tYXRjaBgjIAEoCEgCiAEBQgoKCF9uZXRfd2VpQhAKDl9vYnNlcnZhYmxlX21zQg8KDV9jb25maWdfbWF0Y2gipAQKC1RyYWluaW5nUnVuEg4KBnJ1bl9pZBgBIAEoCRISCgpwcm9maWxlX2lkGAIgASgJEhgKEHByb2ZpbGVfcmV2aXNpb24YAyABKAQSFQoNY29uZmlnX3NoYTI1NhgEIAEoCRItCgRtb2RlGAUgASgOMh8uZGFya2JvdC5ic2MudjEuVHJhaW5pbmdSdW5Nb2RlEg4KBnZlbnVlcxgGIAMoCRItCgRwbGFuGAcgASgLMh8uZGFya2JvdC5ic2MudjEuVHJhaW5pbmdSdW5QbGFuEhwKD3N0YXJ0ZWRfdW5peF9tcxgIIAEoBEgAiAEBEhoKDWVuZGVkX3VuaXhfbXMYCSABKARIAYgBARIxCgZzdGF0dXMYCiABKA4yIS5kYXJrYm90LmJzYy52MS5UcmFpbmluZ1J1blN0YXR1cxITCgtzdG9wX3JlYXNvbhgLIAEoCRIaChJsYXVuY2hlc19wcm9jZXNzZWQYDCABKAQSLgoGcmVzdWx0GA0gASgLMh4uZGFya2JvdC5ic2MudjEuVHJhaW5pbmdSZXN1bHQSMwoKcHJvdmVuYW5jZRgOIAEoCzIfLmRhcmtib3QuYnNjLnYxLk93bmVyUHJvdmVuYW5jZRISCgpyZXF1ZXN0X2lkGA8gASgJEhUKDXJlcGxheV9zb3VyY2UYECABKAlCEgoQX3N0YXJ0ZWRfdW5peF9tc0IQCg5fZW5kZWRfdW5peF9tcyKyAQoXVHJhaW5pbmdSdW5TdGFydENvbW1hbmQSEgoKcHJvZmlsZV9pZBgBIAEoCRItCgRtb2RlGAIgASgOMh8uZGFya2JvdC5ic2MudjEuVHJhaW5pbmdSdW5Nb2RlEg4KBnZlbnVlcxgDIAMoCRItCgRwbGFuGAQgASgLMh8uZGFya2JvdC5ic2MudjEuVHJhaW5pbmdSdW5QbGFuEhUKDXJlcGxheV9zb3VyY2UYBSABKAkiKAoWVHJhaW5pbmdSdW5TdG9wQ29tbWFuZBIOCgZyZWFzb24YASABKAkihgEKGUxpdmVTdHJhdGVneVNlbGVjdENvbW1hbmQSEgoKcHJvZmlsZV9pZBgBIAEoCRIYChBwcm9maWxlX3JldmlzaW9uGAIgASgEEhUKDWNvbmZpZ19zaGEyNTYYAyABKAkSJAocZXhwZWN0ZWRfc2V0dGluZ3NfZ2VuZXJhdGlvbhgEIAEoBCIyChZTdHJhdGVneUNTZXR0aW5nc1F1ZXJ5EhgKEGluY2x1ZGVfZmVhdHVyZXMYASABKAgiegoQVHJhaW5pbmdSdW5RdWVyeRISCgpwcm9maWxlX2lkGAEgASgJEjMKCHN0YXR1c2VzGAIgAygOMiEuZGFya2JvdC5ic2MudjEuVHJhaW5pbmdSdW5TdGF0dXMSDgoGY3Vyc29yGAMgASgJEg0KBWxpbWl0GAQgASgNIugBCg9UcmFpbmluZ1J1blBhZ2USMgoMYXZhaWxhYmlsaXR5GAEgASgOMhwuZGFya2JvdC5ic2MudjEuQXZhaWxhYmlsaXR5EhoKEnVuYXZhaWxhYmxlX3JlYXNvbhgCIAEoCRIzCgpwcm92ZW5hbmNlGAMgASgLMh8uZGFya2JvdC5ic2MudjEuT3duZXJQcm92ZW5hbmNlEikKBHJ1bnMYBCADKAsyGy5kYXJrYm90LmJzYy52MS5UcmFpbmluZ1J1bhITCgtuZXh0X2N1cnNvchgFIAEoCRIQCghoYXNfbW9yZRgGIAEoCCIyChFSZXBsYXlTb3VyY2VRdWVyeRIOCgZjdXJzb3IYASABKAkSDQoFbGltaXQYAiABKA0izgIKDFJlcGxheVNvdXJjZRIRCglzb3VyY2VfaWQYASABKAkSDAoEa2luZBgCIAEoCRIOCgZydW5faWQYAyABKAkSFwoKZnJvbV9ibG9jaxgEIAEoBEgAiAEBEhUKCHRvX2Jsb2NrGAUgASgESAGIAQESKQoEZnJvbRgGIAEoCzIbLmRhcmtib3QuYnNjLnYxLlNvdXJjZWRUaW1lEicKAnRvGAcgASgLMhsuZGFya2JvdC5ic2MudjEuU291cmNlZFRpbWUSDwoHcmVjb3JkcxgIIAEoBBIVCg1jb25maWdfc2hhMjU2GAkgASgJEiwKB3F1YWxpdHkYCiABKA4yGy5kYXJrYm90LmJzYy52MS5EYXRhUXVhbGl0eRIXCg9xdWFsaXR5X3JlYXNvbnMYCyADKAlCDQoLX2Zyb21fYmxvY2tCCwoJX3RvX2Jsb2NrIu0BChBSZXBsYXlTb3VyY2VQYWdlEjIKDGF2YWlsYWJpbGl0eRgBIAEoDjIcLmRhcmtib3QuYnNjLnYxLkF2YWlsYWJpbGl0eRIaChJ1bmF2YWlsYWJsZV9yZWFzb24YAiABKAkSMwoKcHJvdmVuYW5jZRgDIAEoCzIfLmRhcmtib3QuYnNjLnYxLk93bmVyUHJvdmVuYW5jZRItCgdzb3VyY2VzGAQgAygLMhwuZGFya2JvdC5ic2MudjEuUmVwbGF5U291cmNlEhMKC25leHRfY3Vyc29yGAUgASgJEhAKCGhhc19tb3JlGAYgASgIKpIBChVDcmVhdG9yU29sZEJlZm9yZUZpbGwSKAokQ1JFQVRPUl9TT0xEX0JFRk9SRV9GSUxMX1VOU1BFQ0lGSUVEEAASKAokQ1JFQVRPUl9TT0xEX0JFRk9SRV9GSUxMX0ZSRUVfQ0FOQ0VMEAESJQohQ1JFQVRPUl9TT0xEX0JFRk9SRV9GSUxMX1RYX0xBTkRTEAIqcwoPQ3JlYXRvclNlbGxFeGl0EiEKHUNSRUFUT1JfU0VMTF9FWElUX1VOU1BFQ0lGSUVEEAASHQoZQ1JFQVRPUl9TRUxMX0VYSVRfRU5BQkxFRBABEh4KGkNSRUFUT1JfU0VMTF9FWElUX0RJU0FCTEVEEAIq3wEKE1NldHRpbmdzQXBwbHlTdGF0dXMSJQohU0VUVElOR1NfQVBQTFlfU1RBVFVTX1VOU1BFQ0lGSUVEEAASIwofU0VUVElOR1NfQVBQTFlfU1RBVFVTX0lOX0VGRkVDVBABEjIKLlNFVFRJTkdTX0FQUExZX1NUQVRVU19TQVZFRF9BUFBMSUVTX05FWFRfU1RBUlQQAhIlCiFTRVRUSU5HU19BUFBMWV9TVEFUVVNfTk9UX1JVTk5JTkcQAxIhCh1TRVRUSU5HU19BUFBMWV9TVEFUVVNfUkVGVVNFRBAEKq8BChVUcmFpbmluZ1Byb2ZpbGVTdGF0dXMSJwojVFJBSU5JTkdfUFJPRklMRV9TVEFUVVNfVU5TUEVDSUZJRUQQABIiCh5UUkFJTklOR19QUk9GSUxFX1NUQVRVU19BQ1RJVkUQARIkCiBUUkFJTklOR19QUk9GSUxFX1NUQVRVU19BUkNISVZFRBACEiMKH1RSQUlOSU5HX1BST0ZJTEVfU1RBVFVTX0RFTEVURUQQAyqNAQoPVHJhaW5pbmdSdW5Nb2RlEiEKHVRSQUlOSU5HX1JVTl9NT0RFX1VOU1BFQ0lGSUVEEAASGwoXVFJBSU5JTkdfUlVOX01PREVfUEFQRVIQARIcChhUUkFJTklOR19SVU5fTU9ERV9TSEFET1cQAhIcChhUUkFJTklOR19SVU5fTU9ERV9SRVBMQVkQAyq1AQoTVHJhaW5pbmdSdW5TdG9wS2luZBImCiJUUkFJTklOR19SVU5fU1RPUF9LSU5EX1VOU1BFQ0lGSUVEEAASIwofVFJBSU5JTkdfUlVOX1NUT1BfS0lORF9EVVJBVElPThABEicKI1RSQUlOSU5HX1JVTl9TVE9QX0tJTkRfTEFVTkNIX0NPVU5UEAISKAokVFJBSU5JTkdfUlVOX1NUT1BfS0lORF9VTlRJTF9TVE9QUEVEEAMqxgIKEVRyYWluaW5nUnVuU3RhdHVzEiMKH1RSQUlOSU5HX1JVTl9TVEFUVVNfVU5TUEVDSUZJRUQQABIfChtUUkFJTklOR19SVU5fU1RBVFVTX1BFTkRJTkcQARIfChtUUkFJTklOR19SVU5fU1RBVFVTX1JVTk5JTkcQAhIgChxUUkFJTklOR19SVU5fU1RBVFVTX1NUT1BQSU5HEAMSIQodVFJBSU5JTkdfUlVOX1NUQVRVU19DT01QTEVURUQQBBIfChtUUkFJTklOR19SVU5fU1RBVFVTX1NUT1BQRUQQBRIeChpUUkFJTklOR19SVU5fU1RBVFVTX0ZBSUxFRBAGEh8KG1RSQUlOSU5HX1JVTl9TVEFUVVNfVU5LTk9XThAHEiMKH1RSQUlOSU5HX1JVTl9TVEFUVVNfSU5URVJSVVBURUQQCCqfAQoNUmVwbGF5VmVyZGljdBIeChpSRVBMQVlfVkVSRElDVF9VTlNQRUNJRklFRBAAEhcKE1JFUExBWV9WRVJESUNUX1BBU1MQARIaChZSRVBMQVlfVkVSRElDVF9ESUZGRVJTEAISHQoZUkVQTEFZX1ZFUkRJQ1RfSU5DT01QTEVURRADEhoKFlJFUExBWV9WRVJESUNUX05PVF9SVU4QBEJ9ChJjb20uZGFya2JvdC5ic2MudjFCDVRyYWluaW5nUHJvdG9QAaICA0RCWKoCDkRhcmtib3QuQnNjLlYxygIORGFya2JvdFxCc2NcVjHiAhpEYXJrYm90XEJzY1xWMVxHUEJNZXRhZGF0YeoCEERhcmtib3Q6OkJzYzo6VjFiBnByb3RvMw", [file_darkbot_bsc_v1_common]);
 
 /**
  * One entry filter `feature:min:max` of BSC_STRATEGY_C_FILTERS. A disabled rule is not part of the
- * serialized native string; an enabled rule without bounds still fails on a NULL feature.
+ * serialized native string; an enabled rule without bounds still fails on a NULL feature. Rules keep
+ * the native rule order of the stored string (the owner's, never re-sorted by a client).
  *
  * @generated from message darkbot.bsc.v1.StrategyFilterRule
  */
@@ -114,8 +115,9 @@ export const StrategyFeatureSpecSchema: GenMessage<StrategyFeatureSpec> = /*@__P
   messageDesc(file_darkbot_bsc_v1_training, 1);
 
 /**
- * A complete Strategy C configuration. Each of the nine settable keys is optional: absent means
- * the configuration file's value (the native owner's rule); a profile stores all of them.
+ * A Strategy C configuration as the owner reports it (state only, never a command's params): the
+ * settable values 1–10 and the configuration-owned, read-only values 11–13. Each value is optional:
+ * absent means the configuration file's value (the native owner's rule).
  *
  * @generated from message darkbot.bsc.v1.StrategyCSettings
  */
@@ -157,7 +159,7 @@ export type StrategyCSettings = Message<"darkbot.bsc.v1.StrategyCSettings"> & {
   holdMs?: bigint;
 
   /**
-   * BSC_STRATEGY_C_MAX_OPEN: the most positions open at once.
+   * BSC_STRATEGY_C_MAX_OPEN: the most positions open at once, per venue.
    *
    * @generated from field: optional uint32 max_open = 6;
    */
@@ -178,36 +180,35 @@ export type StrategyCSettings = Message<"darkbot.bsc.v1.StrategyCSettings"> & {
   creatorSellExit: CreatorSellExit;
 
   /**
-   * BSC_STRATEGY_C_FILTERS: every filterable feature in native order, enabled or not.
+   * BSC_STRATEGY_C_FILTERS: the rules in the native rule order.
    *
    * @generated from field: repeated darkbot.bsc.v1.StrategyFilterRule filters = 9;
    */
   filters: StrategyFilterRule[];
 
   /**
-   * BSC_STRATEGY_C_FIRST_BUYER_WINDOW: the buyers counted as early (1..100). In the runtime
-   * configuration today but no settable key yet (BSC-V8-05): read-only until the owner takes it.
+   * BSC_STRATEGY_C_FIRST_BUYER_WINDOW: the buyers counted as early, within its StrategySettingSpec.
    *
    * @generated from field: optional uint32 first_buyer_window = 10;
    */
   firstBuyerWindow?: number;
 
   /**
-   * BSC_STRATEGY_C_RATIO_PLACES: decimal places of ratios and multiples (read-only).
+   * BSC_STRATEGY_C_RATIO_PLACES: decimal places of ratios and multiples (configuration, read-only).
    *
    * @generated from field: optional uint32 ratio_places = 11;
    */
   ratioPlaces?: number;
 
   /**
-   * BSC_STRATEGY_C_FILL_DELAY_BLOCKS (read-only, configuration file).
+   * BSC_STRATEGY_C_FILL_DELAY_BLOCKS (configuration, read-only).
    *
    * @generated from field: optional uint32 fill_delay_blocks = 12;
    */
   fillDelayBlocks?: number;
 
   /**
-   * BSC_STRATEGY_C_GAS_PRICE_WEI (read-only, configuration file), decimal wei.
+   * BSC_STRATEGY_C_GAS_PRICE_WEI (configuration, read-only), decimal wei.
    *
    * @generated from field: optional string gas_price_wei = 13;
    */
@@ -220,6 +221,143 @@ export type StrategyCSettings = Message<"darkbot.bsc.v1.StrategyCSettings"> & {
  */
 export const StrategyCSettingsSchema: GenMessage<StrategyCSettings> = /*@__PURE__*/
   messageDesc(file_darkbot_bsc_v1_training, 2);
+
+/**
+ * The settable Strategy C values of a command (set_all, profile create/update): the nine owner keys
+ * and the first-buyer window. A profile and a set_all carry every one of them (an enum not
+ * UNSPECIFIED); the owner refuses a set that leaves one out or a value outside its
+ * StrategySettingSpec, and stores nothing half. The filters are the complete rule list: an empty
+ * list is no filter.
+ *
+ * @generated from message darkbot.bsc.v1.StrategyCSettableValues
+ */
+export type StrategyCSettableValues = Message<"darkbot.bsc.v1.StrategyCSettableValues"> & {
+  /**
+   * BSC_STRATEGY_C_INPUT_WEI: the BUY input per entry, decimal wei.
+   *
+   * @generated from field: optional string input_wei = 1;
+   */
+  inputWei?: string;
+
+  /**
+   * BSC_STRATEGY_C_TARGET_NET_MULTIPLE: exact decimal at the ratio places, e.g. "1.50".
+   *
+   * @generated from field: optional string target_net_multiple = 2;
+   */
+  targetNetMultiple?: string;
+
+  /**
+   * BSC_STRATEGY_C_STOP_NET_MULTIPLE: exact decimal at the ratio places.
+   *
+   * @generated from field: optional string stop_net_multiple = 3;
+   */
+  stopNetMultiple?: string;
+
+  /**
+   * BSC_STRATEGY_C_OBSERVATION_MS, milliseconds.
+   *
+   * @generated from field: optional uint64 observation_ms = 4;
+   */
+  observationMs?: bigint;
+
+  /**
+   * BSC_STRATEGY_C_HOLD_MS, milliseconds.
+   *
+   * @generated from field: optional uint64 hold_ms = 5;
+   */
+  holdMs?: bigint;
+
+  /**
+   * BSC_STRATEGY_C_MAX_OPEN, per venue.
+   *
+   * @generated from field: optional uint32 max_open = 6;
+   */
+  maxOpen?: number;
+
+  /**
+   * BSC_STRATEGY_C_CREATOR_SOLD_BEFORE_FILL.
+   *
+   * @generated from field: darkbot.bsc.v1.CreatorSoldBeforeFill creator_sold_before_fill = 7;
+   */
+  creatorSoldBeforeFill: CreatorSoldBeforeFill;
+
+  /**
+   * BSC_STRATEGY_C_CREATOR_SELL_EXIT.
+   *
+   * @generated from field: darkbot.bsc.v1.CreatorSellExit creator_sell_exit = 8;
+   */
+  creatorSellExit: CreatorSellExit;
+
+  /**
+   * BSC_STRATEGY_C_FILTERS: the rules in the native rule order.
+   *
+   * @generated from field: repeated darkbot.bsc.v1.StrategyFilterRule filters = 9;
+   */
+  filters: StrategyFilterRule[];
+
+  /**
+   * BSC_STRATEGY_C_FIRST_BUYER_WINDOW: the buyers counted as early.
+   *
+   * @generated from field: optional uint32 first_buyer_window = 10;
+   */
+  firstBuyerWindow?: number;
+};
+
+/**
+ * Describes the message darkbot.bsc.v1.StrategyCSettableValues.
+ * Use `create(StrategyCSettableValuesSchema)` to create a new message.
+ */
+export const StrategyCSettableValuesSchema: GenMessage<StrategyCSettableValues> = /*@__PURE__*/
+  messageDesc(file_darkbot_bsc_v1_training, 3);
+
+/**
+ * One settable key's bounds as the native parser enforces them (no client literal of a bound).
+ *
+ * @generated from message darkbot.bsc.v1.StrategySettingSpec
+ */
+export type StrategySettingSpec = Message<"darkbot.bsc.v1.StrategySettingSpec"> & {
+  /**
+   * The native key, e.g. BSC_STRATEGY_C_HOLD_MS.
+   *
+   * @generated from field: string key = 1;
+   */
+  key: string;
+
+  /**
+   * Its unit: wei, ratio, ms, count or enum.
+   *
+   * @generated from field: string unit = 2;
+   */
+  unit: string;
+
+  /**
+   * The smallest accepted value, exact decimal; absent: unbounded below.
+   *
+   * @generated from field: optional string min = 3;
+   */
+  min?: string;
+
+  /**
+   * The largest accepted value, exact decimal; absent: unbounded above.
+   *
+   * @generated from field: optional string max = 4;
+   */
+  max?: string;
+
+  /**
+   * Decimal places a value may have.
+   *
+   * @generated from field: uint32 places = 5;
+   */
+  places: number;
+};
+
+/**
+ * Describes the message darkbot.bsc.v1.StrategySettingSpec.
+ * Use `create(StrategySettingSpecSchema)` to create a new message.
+ */
+export const StrategySettingSpecSchema: GenMessage<StrategySettingSpec> = /*@__PURE__*/
+  messageDesc(file_darkbot_bsc_v1_training, 4);
 
 /**
  * The stored and the running Strategy C configuration of the native owner.
@@ -249,7 +387,7 @@ export type StrategyCSettingsState = Message<"darkbot.bsc.v1.StrategyCSettingsSt
   provenance?: OwnerProvenance;
 
   /**
-   * The stored configuration (absent keys: the configuration file's).
+   * The stored settable values (absent keys: the configuration file's).
    *
    * @generated from field: darkbot.bsc.v1.StrategyCSettings stored = 4;
    */
@@ -263,7 +401,7 @@ export type StrategyCSettingsState = Message<"darkbot.bsc.v1.StrategyCSettingsSt
   storedRevision: bigint;
 
   /**
-   * SHA-256 of the stored configuration's canonical native text, lowercase hex.
+   * The configuration hash of the stored revision's effective values.
    *
    * @generated from field: string stored_config_sha256 = 6;
    */
@@ -284,7 +422,7 @@ export type StrategyCSettingsState = Message<"darkbot.bsc.v1.StrategyCSettingsSt
   runningRevision?: bigint;
 
   /**
-   * SHA-256 of the running configuration's canonical native text; empty while it does not run.
+   * The configuration hash of what the running strategy took; empty while it does not run.
    *
    * @generated from field: string running_config_sha256 = 9;
    */
@@ -317,6 +455,21 @@ export type StrategyCSettingsState = Message<"darkbot.bsc.v1.StrategyCSettingsSt
    * @generated from field: repeated darkbot.bsc.v1.StrategyFeatureSpec features = 13;
    */
   features: StrategyFeatureSpec[];
+
+  /**
+   * The values in effect for the next start: every stored key over the configuration file's, the
+   * read-only configuration values included.
+   *
+   * @generated from field: darkbot.bsc.v1.StrategyCSettings effective = 14;
+   */
+  effective?: StrategyCSettings;
+
+  /**
+   * The bounds of every settable key, in the native KEYS order.
+   *
+   * @generated from field: repeated darkbot.bsc.v1.StrategySettingSpec setting_specs = 15;
+   */
+  settingSpecs: StrategySettingSpec[];
 };
 
 /**
@@ -324,7 +477,7 @@ export type StrategyCSettingsState = Message<"darkbot.bsc.v1.StrategyCSettingsSt
  * Use `create(StrategyCSettingsStateSchema)` to create a new message.
  */
 export const StrategyCSettingsStateSchema: GenMessage<StrategyCSettingsState> = /*@__PURE__*/
-  messageDesc(file_darkbot_bsc_v1_training, 3);
+  messageDesc(file_darkbot_bsc_v1_training, 5);
 
 /**
  * Params of `bsc.strategy.set_all` (BSC-V8-04, prepared): the complete form as ONE validated
@@ -334,11 +487,11 @@ export const StrategyCSettingsStateSchema: GenMessage<StrategyCSettingsState> = 
  */
 export type StrategyCSettingsSetAllCommand = Message<"darkbot.bsc.v1.StrategyCSettingsSetAllCommand"> & {
   /**
-   * Every settable key; the owner refuses a set that leaves one out.
+   * Every settable value.
    *
-   * @generated from field: darkbot.bsc.v1.StrategyCSettings settings = 1;
+   * @generated from field: darkbot.bsc.v1.StrategyCSettableValues values = 2;
    */
-  settings?: StrategyCSettings;
+  values?: StrategyCSettableValues;
 };
 
 /**
@@ -346,7 +499,7 @@ export type StrategyCSettingsSetAllCommand = Message<"darkbot.bsc.v1.StrategyCSe
  * Use `create(StrategyCSettingsSetAllCommandSchema)` to create a new message.
  */
 export const StrategyCSettingsSetAllCommandSchema: GenMessage<StrategyCSettingsSetAllCommand> = /*@__PURE__*/
-  messageDesc(file_darkbot_bsc_v1_training, 4);
+  messageDesc(file_darkbot_bsc_v1_training, 6);
 
 /**
  * A named, versioned Strategy C configuration of the native owner (one strategy, many profiles).
@@ -376,14 +529,7 @@ export type TrainingProfile = Message<"darkbot.bsc.v1.TrainingProfile"> & {
   revision: bigint;
 
   /**
-   * The complete configuration of this revision.
-   *
-   * @generated from field: darkbot.bsc.v1.StrategyCSettings settings = 4;
-   */
-  settings?: StrategyCSettings;
-
-  /**
-   * SHA-256 of this revision's canonical native configuration text, lowercase hex.
+   * The configuration hash of this revision's effective values.
    *
    * @generated from field: string config_sha256 = 5;
    */
@@ -438,6 +584,20 @@ export type TrainingProfile = Message<"darkbot.bsc.v1.TrainingProfile"> & {
    * @generated from field: string in_use_reason = 12;
    */
   inUseReason: string;
+
+  /**
+   * Every settable value of this revision.
+   *
+   * @generated from field: darkbot.bsc.v1.StrategyCSettableValues values = 13;
+   */
+  values?: StrategyCSettableValues;
+
+  /**
+   * The request that wrote this revision.
+   *
+   * @generated from field: string request_id = 14;
+   */
+  requestId: string;
 };
 
 /**
@@ -445,7 +605,7 @@ export type TrainingProfile = Message<"darkbot.bsc.v1.TrainingProfile"> & {
  * Use `create(TrainingProfileSchema)` to create a new message.
  */
 export const TrainingProfileSchema: GenMessage<TrainingProfile> = /*@__PURE__*/
-  messageDesc(file_darkbot_bsc_v1_training, 5);
+  messageDesc(file_darkbot_bsc_v1_training, 7);
 
 /**
  * The training profiles of the native owner.
@@ -508,7 +668,7 @@ export type TrainingProfiles = Message<"darkbot.bsc.v1.TrainingProfiles"> & {
  * Use `create(TrainingProfilesSchema)` to create a new message.
  */
 export const TrainingProfilesSchema: GenMessage<TrainingProfiles> = /*@__PURE__*/
-  messageDesc(file_darkbot_bsc_v1_training, 6);
+  messageDesc(file_darkbot_bsc_v1_training, 8);
 
 /**
  * A bounded read of the training profiles.
@@ -529,7 +689,7 @@ export type TrainingProfilesQuery = Message<"darkbot.bsc.v1.TrainingProfilesQuer
  * Use `create(TrainingProfilesQuerySchema)` to create a new message.
  */
 export const TrainingProfilesQuerySchema: GenMessage<TrainingProfilesQuery> = /*@__PURE__*/
-  messageDesc(file_darkbot_bsc_v1_training, 7);
+  messageDesc(file_darkbot_bsc_v1_training, 9);
 
 /**
  * Params of `bsc.training.profile.create` (prepared).
@@ -545,18 +705,18 @@ export type TrainingProfileCreateCommand = Message<"darkbot.bsc.v1.TrainingProfi
   name: string;
 
   /**
-   * The complete configuration.
-   *
-   * @generated from field: darkbot.bsc.v1.StrategyCSettings settings = 2;
-   */
-  settings?: StrategyCSettings;
-
-  /**
    * The venues it trains on.
    *
    * @generated from field: repeated string venues = 3;
    */
   venues: string[];
+
+  /**
+   * Every settable value.
+   *
+   * @generated from field: darkbot.bsc.v1.StrategyCSettableValues values = 4;
+   */
+  values?: StrategyCSettableValues;
 };
 
 /**
@@ -564,7 +724,7 @@ export type TrainingProfileCreateCommand = Message<"darkbot.bsc.v1.TrainingProfi
  * Use `create(TrainingProfileCreateCommandSchema)` to create a new message.
  */
 export const TrainingProfileCreateCommandSchema: GenMessage<TrainingProfileCreateCommand> = /*@__PURE__*/
-  messageDesc(file_darkbot_bsc_v1_training, 8);
+  messageDesc(file_darkbot_bsc_v1_training, 10);
 
 /**
  * Params of `bsc.training.profile.update` (prepared): a new revision of one profile.
@@ -573,7 +733,7 @@ export const TrainingProfileCreateCommandSchema: GenMessage<TrainingProfileCreat
  */
 export type TrainingProfileUpdateCommand = Message<"darkbot.bsc.v1.TrainingProfileUpdateCommand"> & {
   /**
-   * The profile.
+   * The profile (equal to CommandRequest.resource_id).
    *
    * @generated from field: string profile_id = 1;
    */
@@ -587,18 +747,18 @@ export type TrainingProfileUpdateCommand = Message<"darkbot.bsc.v1.TrainingProfi
   name: string;
 
   /**
-   * The complete configuration.
-   *
-   * @generated from field: darkbot.bsc.v1.StrategyCSettings settings = 3;
-   */
-  settings?: StrategyCSettings;
-
-  /**
    * The venues it trains on.
    *
    * @generated from field: repeated string venues = 4;
    */
   venues: string[];
+
+  /**
+   * Every settable value.
+   *
+   * @generated from field: darkbot.bsc.v1.StrategyCSettableValues values = 5;
+   */
+  values?: StrategyCSettableValues;
 };
 
 /**
@@ -606,7 +766,7 @@ export type TrainingProfileUpdateCommand = Message<"darkbot.bsc.v1.TrainingProfi
  * Use `create(TrainingProfileUpdateCommandSchema)` to create a new message.
  */
 export const TrainingProfileUpdateCommandSchema: GenMessage<TrainingProfileUpdateCommand> = /*@__PURE__*/
-  messageDesc(file_darkbot_bsc_v1_training, 9);
+  messageDesc(file_darkbot_bsc_v1_training, 11);
 
 /**
  * Params of `bsc.training.profile.clone` (prepared): a new profile from one revision.
@@ -641,7 +801,7 @@ export type TrainingProfileCloneCommand = Message<"darkbot.bsc.v1.TrainingProfil
  * Use `create(TrainingProfileCloneCommandSchema)` to create a new message.
  */
 export const TrainingProfileCloneCommandSchema: GenMessage<TrainingProfileCloneCommand> = /*@__PURE__*/
-  messageDesc(file_darkbot_bsc_v1_training, 10);
+  messageDesc(file_darkbot_bsc_v1_training, 12);
 
 /**
  * Params of `bsc.training.profile.delete` (prepared): refused while a run or LIVE uses it.
@@ -669,10 +829,11 @@ export type TrainingProfileDeleteCommand = Message<"darkbot.bsc.v1.TrainingProfi
  * Use `create(TrainingProfileDeleteCommandSchema)` to create a new message.
  */
 export const TrainingProfileDeleteCommandSchema: GenMessage<TrainingProfileDeleteCommand> = /*@__PURE__*/
-  messageDesc(file_darkbot_bsc_v1_training, 11);
+  messageDesc(file_darkbot_bsc_v1_training, 13);
 
 /**
- * The bound of a training run.
+ * The bound of a training run: exactly the field its stop_kind names is set, the owner refuses any
+ * other combination.
  *
  * @generated from message darkbot.bsc.v1.TrainingRunPlan
  */
@@ -685,14 +846,14 @@ export type TrainingRunPlan = Message<"darkbot.bsc.v1.TrainingRunPlan"> & {
   stopKind: TrainingRunStopKind;
 
   /**
-   * The run's length for DURATION, milliseconds.
+   * DURATION only: the run's length, milliseconds.
    *
    * @generated from field: optional uint64 duration_ms = 2;
    */
   durationMs?: bigint;
 
   /**
-   * The qualified launches for LAUNCH_COUNT.
+   * LAUNCH_COUNT only: the qualified launches (the engine's Decided outputs) it processes.
    *
    * @generated from field: optional uint64 max_launches = 3;
    */
@@ -704,7 +865,7 @@ export type TrainingRunPlan = Message<"darkbot.bsc.v1.TrainingRunPlan"> & {
  * Use `create(TrainingRunPlanSchema)` to create a new message.
  */
 export const TrainingRunPlanSchema: GenMessage<TrainingRunPlan> = /*@__PURE__*/
-  messageDesc(file_darkbot_bsc_v1_training, 12);
+  messageDesc(file_darkbot_bsc_v1_training, 14);
 
 /**
  * The results of one training run, from its native journal; counts are the journal's, its quality says
@@ -874,6 +1035,90 @@ export type TrainingResult = Message<"darkbot.bsc.v1.TrainingResult"> & {
    * @generated from field: repeated string quality_reasons = 23;
    */
   qualityReasons: string[];
+
+  /**
+   * Entries refused because max_open slots were full.
+   *
+   * @generated from field: uint64 slot_limit = 24;
+   */
+  slotLimit: bigint;
+
+  /**
+   * Launches whose creator sold before the BUY filled.
+   *
+   * @generated from field: uint64 creator_sold = 25;
+   */
+  creatorSold: bigint;
+
+  /**
+   * Entries cancelled before execution (the four counts below together).
+   *
+   * @generated from field: uint64 cancelled = 26;
+   */
+  cancelled: bigint;
+
+  /**
+   * Of them by a creator sale (FREE_CANCEL).
+   *
+   * @generated from field: uint64 cancelled_creator_sold = 27;
+   */
+  cancelledCreatorSold: bigint;
+
+  /**
+   * Of them because the launch is not tracked.
+   *
+   * @generated from field: uint64 cancelled_not_tracked = 28;
+   */
+  cancelledNotTracked: bigint;
+
+  /**
+   * Of them by a quote error.
+   *
+   * @generated from field: uint64 cancelled_quote = 29;
+   */
+  cancelledQuote: bigint;
+
+  /**
+   * Of them by a cost error.
+   *
+   * @generated from field: uint64 cancelled_cost = 30;
+   */
+  cancelledCost: bigint;
+
+  /**
+   * Entries superseded by a later decision on the same token.
+   *
+   * @generated from field: uint64 superseded = 31;
+   */
+  superseded: bigint;
+
+  /**
+   * PAPER positions without an exact price (no value, never zero).
+   *
+   * @generated from field: uint64 paper_unpriced = 32;
+   */
+  paperUnpriced: bigint;
+
+  /**
+   * Positions still open when the run ended.
+   *
+   * @generated from field: uint64 open_at_end = 33;
+   */
+  openAtEnd: bigint;
+
+  /**
+   * REPLAY: the comparison with the recorded run; NOT_RUN otherwise.
+   *
+   * @generated from field: darkbot.bsc.v1.ReplayVerdict replay_verdict = 34;
+   */
+  replayVerdict: ReplayVerdict;
+
+  /**
+   * REPLAY: whether the replayed configuration hash equals the recorded run's; absent otherwise.
+   *
+   * @generated from field: optional bool config_match = 35;
+   */
+  configMatch?: boolean;
 };
 
 /**
@@ -881,7 +1126,7 @@ export type TrainingResult = Message<"darkbot.bsc.v1.TrainingResult"> & {
  * Use `create(TrainingResultSchema)` to create a new message.
  */
 export const TrainingResultSchema: GenMessage<TrainingResult> = /*@__PURE__*/
-  messageDesc(file_darkbot_bsc_v1_training, 13);
+  messageDesc(file_darkbot_bsc_v1_training, 15);
 
 /**
  * One training run of a profile revision.
@@ -911,7 +1156,7 @@ export type TrainingRun = Message<"darkbot.bsc.v1.TrainingRun"> & {
   profileRevision: bigint;
 
   /**
-   * SHA-256 of the configuration it runs, lowercase hex.
+   * The configuration hash it runs.
    *
    * @generated from field: string config_sha256 = 4;
    */
@@ -993,6 +1238,13 @@ export type TrainingRun = Message<"darkbot.bsc.v1.TrainingRun"> & {
    * @generated from field: string request_id = 15;
    */
   requestId: string;
+
+  /**
+   * REPLAY: the ReplaySource.source_id it replays (echo of the start); empty otherwise.
+   *
+   * @generated from field: string replay_source = 16;
+   */
+  replaySource: string;
 };
 
 /**
@@ -1000,7 +1252,7 @@ export type TrainingRun = Message<"darkbot.bsc.v1.TrainingRun"> & {
  * Use `create(TrainingRunSchema)` to create a new message.
  */
 export const TrainingRunSchema: GenMessage<TrainingRun> = /*@__PURE__*/
-  messageDesc(file_darkbot_bsc_v1_training, 14);
+  messageDesc(file_darkbot_bsc_v1_training, 16);
 
 /**
  * Params of `bsc.training.run.start` (prepared).
@@ -1037,8 +1289,8 @@ export type TrainingRunStartCommand = Message<"darkbot.bsc.v1.TrainingRunStartCo
   plan?: TrainingRunPlan;
 
   /**
-   * For REPLAY: the recorded run or journal identity the owner replays (its own catalogue);
-   * empty for PAPER and SHADOW.
+   * REPLAY: a ReplaySource.source_id of the owner's catalogue (never a path); empty for PAPER and
+   * SHADOW.
    *
    * @generated from field: string replay_source = 5;
    */
@@ -1050,7 +1302,7 @@ export type TrainingRunStartCommand = Message<"darkbot.bsc.v1.TrainingRunStartCo
  * Use `create(TrainingRunStartCommandSchema)` to create a new message.
  */
 export const TrainingRunStartCommandSchema: GenMessage<TrainingRunStartCommand> = /*@__PURE__*/
-  messageDesc(file_darkbot_bsc_v1_training, 15);
+  messageDesc(file_darkbot_bsc_v1_training, 17);
 
 /**
  * Params of `bsc.training.run.stop` (prepared); CommandRequest.resource_id names the run.
@@ -1071,7 +1323,7 @@ export type TrainingRunStopCommand = Message<"darkbot.bsc.v1.TrainingRunStopComm
  * Use `create(TrainingRunStopCommandSchema)` to create a new message.
  */
 export const TrainingRunStopCommandSchema: GenMessage<TrainingRunStopCommand> = /*@__PURE__*/
-  messageDesc(file_darkbot_bsc_v1_training, 16);
+  messageDesc(file_darkbot_bsc_v1_training, 18);
 
 /**
  * Params of `bsc.live.strategy.select` (prepared, FE-V8-09): LIVE takes one profile revision as ONE
@@ -1095,11 +1347,19 @@ export type LiveStrategySelectCommand = Message<"darkbot.bsc.v1.LiveStrategySele
   profileRevision: bigint;
 
   /**
-   * SHA-256 of that revision's configuration the operator saw, lowercase hex.
+   * The configuration hash of that revision the operator saw.
    *
    * @generated from field: string config_sha256 = 3;
    */
   configSha256: string;
+
+  /**
+   * The stored settings generation the selection replaces (StrategyCSettingsState.stored_revision):
+   * the compare-and-swap of the ONE generation it writes.
+   *
+   * @generated from field: uint64 expected_settings_generation = 4;
+   */
+  expectedSettingsGeneration: bigint;
 };
 
 /**
@@ -1107,7 +1367,7 @@ export type LiveStrategySelectCommand = Message<"darkbot.bsc.v1.LiveStrategySele
  * Use `create(LiveStrategySelectCommandSchema)` to create a new message.
  */
 export const LiveStrategySelectCommandSchema: GenMessage<LiveStrategySelectCommand> = /*@__PURE__*/
-  messageDesc(file_darkbot_bsc_v1_training, 17);
+  messageDesc(file_darkbot_bsc_v1_training, 19);
 
 /**
  * A read of the stored and running Strategy C configuration.
@@ -1128,7 +1388,7 @@ export type StrategyCSettingsQuery = Message<"darkbot.bsc.v1.StrategyCSettingsQu
  * Use `create(StrategyCSettingsQuerySchema)` to create a new message.
  */
 export const StrategyCSettingsQuerySchema: GenMessage<StrategyCSettingsQuery> = /*@__PURE__*/
-  messageDesc(file_darkbot_bsc_v1_training, 18);
+  messageDesc(file_darkbot_bsc_v1_training, 20);
 
 /**
  * A bounded, cursor-paged read of training runs.
@@ -1158,7 +1418,7 @@ export type TrainingRunQuery = Message<"darkbot.bsc.v1.TrainingRunQuery"> & {
   cursor: string;
 
   /**
-   * At most this many runs; the owner caps it.
+   * At most this many runs; 0: the owner's default; above its cap: refused (LIMIT_EXCEEDED).
    *
    * @generated from field: uint32 limit = 4;
    */
@@ -1170,7 +1430,7 @@ export type TrainingRunQuery = Message<"darkbot.bsc.v1.TrainingRunQuery"> & {
  * Use `create(TrainingRunQuerySchema)` to create a new message.
  */
 export const TrainingRunQuerySchema: GenMessage<TrainingRunQuery> = /*@__PURE__*/
-  messageDesc(file_darkbot_bsc_v1_training, 19);
+  messageDesc(file_darkbot_bsc_v1_training, 21);
 
 /**
  * One page of training runs, newest first, bound to one owner snapshot.
@@ -1226,7 +1486,182 @@ export type TrainingRunPage = Message<"darkbot.bsc.v1.TrainingRunPage"> & {
  * Use `create(TrainingRunPageSchema)` to create a new message.
  */
 export const TrainingRunPageSchema: GenMessage<TrainingRunPage> = /*@__PURE__*/
-  messageDesc(file_darkbot_bsc_v1_training, 20);
+  messageDesc(file_darkbot_bsc_v1_training, 22);
+
+/**
+ * A bounded read of the owner's replay catalogue.
+ *
+ * @generated from message darkbot.bsc.v1.ReplaySourceQuery
+ */
+export type ReplaySourceQuery = Message<"darkbot.bsc.v1.ReplaySourceQuery"> & {
+  /**
+   * The previous page's next_cursor; empty: the first page.
+   *
+   * @generated from field: string cursor = 1;
+   */
+  cursor: string;
+
+  /**
+   * At most this many sources; 0: the owner's default; above its cap: refused (LIMIT_EXCEEDED).
+   *
+   * @generated from field: uint32 limit = 2;
+   */
+  limit: number;
+};
+
+/**
+ * Describes the message darkbot.bsc.v1.ReplaySourceQuery.
+ * Use `create(ReplaySourceQuerySchema)` to create a new message.
+ */
+export const ReplaySourceQuerySchema: GenMessage<ReplaySourceQuery> = /*@__PURE__*/
+  messageDesc(file_darkbot_bsc_v1_training, 23);
+
+/**
+ * One recorded run or journal the owner can replay, named by its catalogue id only (never a path).
+ *
+ * @generated from message darkbot.bsc.v1.ReplaySource
+ */
+export type ReplaySource = Message<"darkbot.bsc.v1.ReplaySource"> & {
+  /**
+   * The catalogue id a REPLAY start names.
+   *
+   * @generated from field: string source_id = 1;
+   */
+  sourceId: string;
+
+  /**
+   * RECORDED_RUN or MARKET_JOURNAL.
+   *
+   * @generated from field: string kind = 2;
+   */
+  kind: string;
+
+  /**
+   * The recorded training run, when it is one; empty otherwise.
+   *
+   * @generated from field: string run_id = 3;
+   */
+  runId: string;
+
+  /**
+   * Its first block; absent when unknown.
+   *
+   * @generated from field: optional uint64 from_block = 4;
+   */
+  fromBlock?: bigint;
+
+  /**
+   * Its last block; absent when unknown.
+   *
+   * @generated from field: optional uint64 to_block = 5;
+   */
+  toBlock?: bigint;
+
+  /**
+   * Its first record's time.
+   *
+   * @generated from field: darkbot.bsc.v1.SourcedTime from = 6;
+   */
+  from?: SourcedTime;
+
+  /**
+   * Its last record's time.
+   *
+   * @generated from field: darkbot.bsc.v1.SourcedTime to = 7;
+   */
+  to?: SourcedTime;
+
+  /**
+   * Records in it.
+   *
+   * @generated from field: uint64 records = 8;
+   */
+  records: bigint;
+
+  /**
+   * The configuration hash it was recorded with; empty for a market journal.
+   *
+   * @generated from field: string config_sha256 = 9;
+   */
+  configSha256: string;
+
+  /**
+   * How complete it is (INCOMPLETE with gaps).
+   *
+   * @generated from field: darkbot.bsc.v1.DataQuality quality = 10;
+   */
+  quality: DataQuality;
+
+  /**
+   * Why the quality is not VERIFIED.
+   *
+   * @generated from field: repeated string quality_reasons = 11;
+   */
+  qualityReasons: string[];
+};
+
+/**
+ * Describes the message darkbot.bsc.v1.ReplaySource.
+ * Use `create(ReplaySourceSchema)` to create a new message.
+ */
+export const ReplaySourceSchema: GenMessage<ReplaySource> = /*@__PURE__*/
+  messageDesc(file_darkbot_bsc_v1_training, 24);
+
+/**
+ * One page of the replay catalogue, newest first, bound to one owner snapshot.
+ *
+ * @generated from message darkbot.bsc.v1.ReplaySourcePage
+ */
+export type ReplaySourcePage = Message<"darkbot.bsc.v1.ReplaySourcePage"> & {
+  /**
+   * Whether the native owner answered.
+   *
+   * @generated from field: darkbot.bsc.v1.Availability availability = 1;
+   */
+  availability: Availability;
+
+  /**
+   * Why it is not AVAILABLE.
+   *
+   * @generated from field: string unavailable_reason = 2;
+   */
+  unavailableReason: string;
+
+  /**
+   * The owner and the snapshot the cursor is bound to.
+   *
+   * @generated from field: darkbot.bsc.v1.OwnerProvenance provenance = 3;
+   */
+  provenance?: OwnerProvenance;
+
+  /**
+   * The sources.
+   *
+   * @generated from field: repeated darkbot.bsc.v1.ReplaySource sources = 4;
+   */
+  sources: ReplaySource[];
+
+  /**
+   * The cursor of the next page; empty on the last one.
+   *
+   * @generated from field: string next_cursor = 5;
+   */
+  nextCursor: string;
+
+  /**
+   * Whether another page follows.
+   *
+   * @generated from field: bool has_more = 6;
+   */
+  hasMore: boolean;
+};
+
+/**
+ * Describes the message darkbot.bsc.v1.ReplaySourcePage.
+ * Use `create(ReplaySourcePageSchema)` to create a new message.
+ */
+export const ReplaySourcePageSchema: GenMessage<ReplaySourcePage> = /*@__PURE__*/
+  messageDesc(file_darkbot_bsc_v1_training, 25);
 
 /**
  * The creator selling before the BUY fills (BSC_STRATEGY_C_CREATOR_SOLD_BEFORE_FILL).
@@ -1400,14 +1835,14 @@ export enum TrainingRunMode {
   UNSPECIFIED = 0,
 
   /**
-   * PAPER on live market data: decisions, PAPER BUYs and exits valued by the exact curve.
+   * PAPER: the BSC_RUNTIME_MODE PAPER path on live market data to the PAPER sink, nothing sent.
    *
    * @generated from enum value: TRAINING_RUN_MODE_PAPER = 1;
    */
   PAPER = 1,
 
   /**
-   * SHADOW: the production path to the PAPER sink, nothing sent.
+   * SHADOW: the engine's valuation only (decisions and exits valued by the exact curve), no sink.
    *
    * @generated from enum value: TRAINING_RUN_MODE_SHADOW = 2;
    */
@@ -1529,6 +1964,13 @@ export enum TrainingRunStatus {
    * @generated from enum value: TRAINING_RUN_STATUS_UNKNOWN = 7;
    */
   UNKNOWN = 7,
+
+  /**
+   * The runtime ended or restarted under it: sealed up to its last journal record, never resumed.
+   *
+   * @generated from enum value: TRAINING_RUN_STATUS_INTERRUPTED = 8;
+   */
+  INTERRUPTED = 8,
 }
 
 /**
@@ -1536,3 +1978,51 @@ export enum TrainingRunStatus {
  */
 export const TrainingRunStatusSchema: GenEnum<TrainingRunStatus> = /*@__PURE__*/
   enumDesc(file_darkbot_bsc_v1_training, 6);
+
+/**
+ * A replay's comparison with the run it replays.
+ *
+ * @generated from enum darkbot.bsc.v1.ReplayVerdict
+ */
+export enum ReplayVerdict {
+  /**
+   * Not set by any producer; never displayed as a value.
+   *
+   * @generated from enum value: REPLAY_VERDICT_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * The replay's decisions and results equal the recorded ones.
+   *
+   * @generated from enum value: REPLAY_VERDICT_PASS = 1;
+   */
+  PASS = 1,
+
+  /**
+   * They differ (the first difference in quality_reasons).
+   *
+   * @generated from enum value: REPLAY_VERDICT_DIFFERS = 2;
+   */
+  DIFFERS = 2,
+
+  /**
+   * The recorded journal has gaps; no verdict.
+   *
+   * @generated from enum value: REPLAY_VERDICT_INCOMPLETE = 3;
+   */
+  INCOMPLETE = 3,
+
+  /**
+   * Not a replay, or not compared.
+   *
+   * @generated from enum value: REPLAY_VERDICT_NOT_RUN = 4;
+   */
+  NOT_RUN = 4,
+}
+
+/**
+ * Describes the enum darkbot.bsc.v1.ReplayVerdict.
+ */
+export const ReplayVerdictSchema: GenEnum<ReplayVerdict> = /*@__PURE__*/
+  enumDesc(file_darkbot_bsc_v1_training, 7);

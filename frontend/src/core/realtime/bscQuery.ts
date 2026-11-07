@@ -1,13 +1,15 @@
 import { create as message, fromBinary, toBinary, type MessageInitShape } from "@bufbuild/protobuf";
 import { Availability } from "../generated/darkbot/bsc/v1/common_pb";
-import { BscQueryRequestSchema, BscQueryResponseSchema, type BscQueryResponse } from "../generated/darkbot/bsc/v1/query_pb";
+import { BscQueryRequestSchema, BscQueryResponseSchema, QueryRefusal, type BscQueryResponse } from "../generated/darkbot/bsc/v1/query_pb";
 import { READ_TIMEOUT_MS, session } from "./bscControl";
 
 // V8 (BSC-V8-10, prepared): the one bounded, read-only BSC query (protocol/schemas/darkbot/bsc/v1/
 // query.proto): one POST per operator view or page step, never polling, never a STATE topic. The
 // gateway route is registered once its native owner answers; until then every answer is
 // UNAVAILABLE with its reason (405 from the gateway's static fallback, a non-protobuf answer) or
-// the owner's NOT_IMPLEMENTED. Nothing here substitutes, caches or computes a value.
+// the owner's NOT_IMPLEMENTED. A refused query (a stale or foreign cursor, a limit above the owner's
+// cap, a filter it does not accept) is UNAVAILABLE with the refusal, never another page. Nothing
+// here substitutes, caches or computes a value.
 
 export const BSC_QUERY_PATH = "/api/v1/bsc/query";
 
@@ -29,6 +31,7 @@ export function classify(status: number, contentType: string | null, body: Uint8
   let r: BscQueryResponse;
   try { r = fromBinary(BscQueryResponseSchema, body); } catch { return { kind: "UNAVAILABLE", reason: "QUERY_ANSWER_INVALID" }; }
   if (r.availability === Availability.NOT_IMPLEMENTED) return { kind: "NOT_IMPLEMENTED", reason: r.unavailableReason || "NOT_IMPLEMENTED" };
+  if (r.refusal !== QueryRefusal.UNSPECIFIED) return { kind: "UNAVAILABLE", reason: `QUERY_REFUSED ${QueryRefusal[r.refusal] ?? r.refusal}${r.refusalDetail ? ` (${r.refusalDetail})` : ""}` };
   if (r.availability !== Availability.AVAILABLE || r.result.case === undefined) return { kind: "UNAVAILABLE", reason: r.unavailableReason || "OWNER_UNAVAILABLE" };
   return { kind: "ANSWER", result: r.result, requestId: r.requestId };
 }

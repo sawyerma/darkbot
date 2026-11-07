@@ -223,7 +223,7 @@ message BscStatus {
 // a Mainnet signing or sending path checks besides its own guard, V5, nonce and budget checks,
 // never an action. DISABLED initially, in a missing or unreadable state and after every restart.
 message ControlSwitch {
-  // Native ID: BSC_WALLET_LAUNCHER, BSC_WALLET_BUYER, BSC_ECON_SIGN, BSC_ECON_ARM,
+  // Native ID: BSC_WALLET_LAUNCHER, BSC_WALLET_BUYER, BSC_WALLET_MAIN, BSC_ECON_SIGN, BSC_ECON_ARM,
   // BSC_ECON_SEND, BSC_ECON_ATTEMPT or BSC_ECON_LIVE.
   string id = 1;
   // DISABLED or ENABLED as requested; UNKNOWN when the owner state is unreadable.
@@ -452,7 +452,8 @@ message LiveTransaction {
   string token = 3;
   // The buyer's nonce it used.
   uint64 nonce = 4;
-  // RELEASED, UNKNOWN, INCLUDED, REVERTED or REPLACED.
+  // RELEASED, UNKNOWN, WITHDRAWN (admitted, no byte left: never on chain), INCLUDED, REVERTED or
+  // REPLACED.
   string state = 5;
   // The block that included it.
   optional uint64 block_number = 6;

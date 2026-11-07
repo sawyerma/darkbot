@@ -2,7 +2,7 @@
   "version": 1,
   "source_commit": "84eb791a84edd0a8745dd42853d78612ed7810c2",
   "schema": "protocol/schemas/darkbot/bsc/v1/status.proto",
-  "schema_sha256": "d8060c41fc3b8f3b97b45395c255b98e981a202d69efe3cac7c7344f43b8987e",
+  "schema_sha256": "75b80024d590a184bdf8deec4b9bf67a9f3962671fcd577055fdd42d60f5c976",
   "fields": [
     {
       "project": "bsc",

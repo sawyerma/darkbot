@@ -2,8 +2,11 @@ import { create, fromBinary, toBinary, type DescMessage, type MessageInitShape, 
 import { BscQueryRequestSchema, BscQueryResponseSchema } from "@/core/generated/darkbot/bsc/v1/query_pb";
 import { PerformanceSeriesSchema } from "@/core/generated/darkbot/bsc/v1/common_pb";
 import { TradeDetailSchema } from "@/core/generated/darkbot/bsc/v1/history_pb";
-import { LiveStrategySelectCommandSchema, StrategyCSettingsSetAllCommandSchema, StrategyCSettingsStateSchema, TrainingProfilesSchema, TrainingRunPageSchema, TrainingRunStartCommandSchema } from "@/core/generated/darkbot/bsc/v1/training_pb";
-import { MainPayoutPolicySetCommandSchema, WalletDestinationSetCommandSchema, ProfitTransferPolicySetCommandSchema, WalletFundTradingCommandSchema, WalletHistoryPageSchema, WalletPayoutCommandSchema, WalletTreasuryStateSchema } from "@/core/generated/darkbot/bsc/v1/wallet_pb";
+import { LiveStrategySelectCommandSchema, ReplaySourcePageSchema, StrategyCSettingsSetAllCommandSchema, StrategyCSettingsStateSchema, TrainingProfilesSchema, TrainingRunPageSchema, TrainingRunStartCommandSchema } from "@/core/generated/darkbot/bsc/v1/training_pb";
+import {
+  MainPayoutPolicySetCommandSchema, ProfitTransferPolicySetCommandSchema, WalletDestinationConfirmCommandSchema, WalletDestinationSetCommandSchema, WalletHistoryPageSchema,
+  WalletTransferAuthorizeCommandSchema, WalletTransferPrepareCommandSchema, WalletTransferStateSchema, WalletTreasuryStateSchema,
+} from "@/core/generated/darkbot/bsc/v1/wallet_pb";
 import { BscWatchStateSchema } from "@/core/generated/darkbot/bsc/v1/watch_pb";
 
 // V8 (BSC-V8-09, FE-V8-17): the prepared V8 contracts of protocol/schemas/darkbot/bsc/v1/
@@ -15,15 +18,20 @@ export { Availability, DataQuality, TimeSource, PerformanceMetric, PerformanceSc
 export type { PerformanceSeries } from "@/core/generated/darkbot/bsc/v1/common_pb";
 export { TradeStatus, ExitReason, ExitReasonSource, TradePlacement, TradeSort } from "@/core/generated/darkbot/bsc/v1/history_pb";
 export type { TradeRow, TradeDetail, TradeHistoryPage } from "@/core/generated/darkbot/bsc/v1/history_pb";
-export { CreatorSoldBeforeFill, CreatorSellExit, SettingsApplyStatus, TrainingProfileStatus, TrainingRunMode, TrainingRunStatus, TrainingRunStopKind } from "@/core/generated/darkbot/bsc/v1/training_pb";
+export { QueryRefusal } from "@/core/generated/darkbot/bsc/v1/query_pb";
+export { CreatorSoldBeforeFill, CreatorSellExit, ReplayVerdict, SettingsApplyStatus, TrainingProfileStatus, TrainingRunMode, TrainingRunStatus, TrainingRunStopKind } from "@/core/generated/darkbot/bsc/v1/training_pb";
 export type { TrainingProfile, TrainingProfiles, TrainingRun, TrainingRunPage } from "@/core/generated/darkbot/bsc/v1/training_pb";
 export { ChainTxStatus, PolicyUnit, TransferStatus, WalletMovementKind, WalletRole } from "@/core/generated/darkbot/bsc/v1/wallet_pb";
-export type { FiatQuote, MainPayoutPolicy, PolicyAmount, ProfitTransferPolicy, WalletAccount, WalletDestination, WalletHistoryPage, WalletMovement, WalletTransferState, WalletTreasuryState } from "@/core/generated/darkbot/bsc/v1/wallet_pb";
+export type {
+  FiatQuote, MainPayoutPolicy, PolicyAmount, ProfitTransferPolicy, WalletAccount, WalletAuthorization, WalletAuthorizationBounds, WalletDestination, WalletHistoryPage,
+  WalletMovement, WalletTransferState, WalletTreasuryState,
+} from "@/core/generated/darkbot/bsc/v1/wallet_pb";
 
 /** Every prepared V8 contract with a golden fixture (protocol/golden/bsc/v8/<name>.hex). */
 export const V8_CONTRACTS = {
   query_trades_request: BscQueryRequestSchema,
   query_not_implemented: BscQueryResponseSchema,
+  query_refused: BscQueryResponseSchema,
   trade_page: BscQueryResponseSchema,
   trade_detail: TradeDetailSchema,
   strategy_settings_state: StrategyCSettingsStateSchema,
@@ -32,11 +40,15 @@ export const V8_CONTRACTS = {
   training_run_page: TrainingRunPageSchema,
   training_run_start_command: TrainingRunStartCommandSchema,
   live_strategy_select_command: LiveStrategySelectCommandSchema,
+  replay_source_page: ReplaySourcePageSchema,
   wallet_history_page: WalletHistoryPageSchema,
   treasury_state: WalletTreasuryStateSchema,
   destination_set_command: WalletDestinationSetCommandSchema,
-  fund_trading_command: WalletFundTradingCommandSchema,
-  payout_command: WalletPayoutCommandSchema,
+  destination_confirm_command: WalletDestinationConfirmCommandSchema,
+  transfer_prepare_fund_command: WalletTransferPrepareCommandSchema,
+  transfer_prepare_payout_command: WalletTransferPrepareCommandSchema,
+  transfer_authorize_command: WalletTransferAuthorizeCommandSchema,
+  transfer_draft: WalletTransferStateSchema,
   profit_policy_set_command: ProfitTransferPolicySetCommandSchema,
   payout_policy_set_command: MainPayoutPolicySetCommandSchema,
   performance_series: PerformanceSeriesSchema,

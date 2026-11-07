@@ -15,8 +15,24 @@ import "darkbot/bsc/v1/watch.proto";
 // One request per operator view or page step, never polling; history never on a STATE topic
 // (BscLiveState stays bounded, topic 40 stays reserved). The gateway checks session, origin, host
 // and CSRF and bounds the body; the native owner reads its journals (an index only as a rebuildable
-// cache), binds every cursor to its snapshot and caps every limit. Without the route the frontend
-// shows each answer as UNAVAILABLE; it never substitutes data.
+// cache) and binds every cursor to (its snapshot, the filter digest, the sort). A limit 0 asks for
+// the owner's default. A query the owner cannot answer as asked is refused with a QueryRefusal,
+// never answered with another page. Without the route the frontend shows each answer as
+// UNAVAILABLE; it never substitutes data.
+
+// Why the owner refused a query.
+enum QueryRefusal {
+  // No refusal.
+  QUERY_REFUSAL_UNSPECIFIED = 0;
+  // The cursor's snapshot is gone (compaction, restart): start again from the first page.
+  QUERY_REFUSAL_CURSOR_STALE = 1;
+  // The cursor is not the owner's, or belongs to another filter or sort.
+  QUERY_REFUSAL_CURSOR_INVALID = 2;
+  // The limit is above the owner's cap.
+  QUERY_REFUSAL_LIMIT_EXCEEDED = 3;
+  // A filter value the owner does not accept (unknown state, venue or kind, a reversed period).
+  QUERY_REFUSAL_INVALID_FILTER = 4;
+}
 
 // One bounded query.
 message BscQueryRequest {
@@ -42,6 +58,8 @@ message BscQueryRequest {
     BscWatchQuery watch = 9;
     // The stored and running Strategy C configuration.
     StrategyCSettingsQuery strategy_settings = 10;
+    // A page of the replay catalogue.
+    ReplaySourceQuery replay_sources = 11;
   }
 }
 
@@ -73,5 +91,11 @@ message BscQueryResponse {
     BscWatchState watch = 11;
     // The stored and running Strategy C configuration.
     StrategyCSettingsState strategy_settings = 12;
+    // A page of the replay catalogue.
+    ReplaySourcePage replay_sources = 13;
   }
+  // Why the owner refused the query (no result then); UNSPECIFIED otherwise.
+  QueryRefusal refusal = 14;
+  // The owner's detail of the refusal; empty without one.
+  string refusal_detail = 15;
 }

@@ -26,6 +26,7 @@ function AccountDetail({ a, w, switchRow }: { a: AccountView; w: BscWalletsView 
     <p className="small" style={{ margin: "12px 0 4px" }}>{ROLE_TEXT[a.id]}</p>
     <DetailLine label="Address" value={<span className="wallet-address">{a.address || "—"}</span>} />
     <DetailLine label="State" value={<span>{a.state}{a.reason ? <span className="tiny" style={{ display: "block" }}>{a.reason}</span> : null}</span>} />
+    {a.id === "main" && a.account?.control ? <DetailLine label="Main switch" value={`${a.account.control.id} · requested ${a.account.control.requested || "—"} · generation ${a.account.control.generation.toString()}`} /> : null}
     <DetailLine label="Chain" value={a.chainId?.toString() ?? "—"} />
     <DetailLine label="Balance source" value={`${a.source} · ${a.quality}`} />
     <DetailLine label="Exact balance" value={<Wei wei={a.balanceWei} places={18} />} />

@@ -30,8 +30,8 @@ export function TransferLines({ row, empty, testId }: { row: TransferRow | undef
   return <div data-testid={testId} data-status={row.label}>
     <DetailLine label="Last transfer" value={<span className="start"><Badge label={row.label} tone={row.tone} />{row.duplicateTrigger ? <Badge label="Two requests on one trigger" tone="bad" /> : null}</span>} />
     <DetailLine label="Amount" value={<Wei wei={t.amountWei} places={6} />} />
-    <DetailLine label="Fee" value={t.feeWei === undefined ? "— (not reported)" : `${bnb(t.feeWei, 6)} BNB`} />
-    <DetailLine label="Nonce · block" value={`${t.nonce?.toString() ?? "—"} · ${t.blockNumber?.toString() ?? "not included"}`} />
+    <DetailLine label="Fee" value={t.receipt?.feeWei !== undefined ? `${bnb(t.receipt.feeWei, 6)} BNB` : t.feeEstimateWei !== undefined ? `≤ ${bnb(t.feeEstimateWei, 6)} BNB (estimate)` : "— (not reported)"} />
+    <DetailLine label="Nonce · block" value={`${t.nonce?.toString() ?? "—"} · ${t.receipt?.blockNumber?.toString() ?? "not included"}`} />
     <DetailLine label="Transaction" value={<span className="wallet-address">{t.txHash || "not signed"}</span>} />
     {t.triggerId ? <DetailLine label="Trigger" value={<span className="wallet-address">{t.triggerId}{t.policyVersion !== undefined ? ` · policy v${t.policyVersion}` : ""}</span>} /> : null}
     {t.failureReason ? <DetailLine label="Reason" value={t.failureReason} /> : null}
@@ -42,13 +42,14 @@ export function TransferLines({ row, empty, testId }: { row: TransferRow | undef
 export const chainLabel = (s: ChainTxStatus) => CHAIN_LABEL[s] ?? CHAIN_LABEL[ChainTxStatus.UNSPECIFIED];
 
 /** The confirmation of one money request: everything the owner will be asked, then one request. */
-export function WalletConfirm({ open, title, lines, action, onCancel, onConfirm, testId }: { open: boolean; title: string; lines: ReadonlyArray<[string, ReactNode]>; action: string; onCancel: () => void; onConfirm: () => void; testId: string }) {
+const SEND_NOTE = "One request to the native BSC treasury owner. It checks the version, the balance, the reserve and the fee again, signs and sends on its own, and reports the chain's receipt. An unknown handoff is never sent twice.";
+export function WalletConfirm({ open, title, lines, action, note = SEND_NOTE, onCancel, onConfirm, testId }: { open: boolean; title: string; lines: ReadonlyArray<[string, ReactNode]>; action: string; note?: string; onCancel: () => void; onConfirm: () => void; testId: string }) {
   return <AlertDialog.Root open={open} onOpenChange={o => { if (!o) onCancel(); }}>
     <AlertDialog.Portal><AlertDialog.Overlay className="ov-log-overlay" /><AlertDialog.Content className="ov-confirm-view" data-testid={testId}>
       <AlertDialog.Title>{title}</AlertDialog.Title>
       <AlertDialog.Description asChild><div>
         {lines.map(([k, v]) => <p key={k}><strong>{k}:</strong> {v}</p>)}
-        <p>One request to the native BSC treasury owner. It checks the version, the balance, the reserve and the fee again, signs and sends on its own, and reports the chain's receipt. An unknown handoff is never sent twice.</p>
+        <p>{note}</p>
       </div></AlertDialog.Description>
       <div className="ov-confirm-actions"><AlertDialog.Cancel asChild><button className="ov-btn">Cancel</button></AlertDialog.Cancel>
         <AlertDialog.Action asChild><button className="ov-btn" data-testid={`${testId}-confirm`} onClick={onConfirm}>{action}</button></AlertDialog.Action></div>

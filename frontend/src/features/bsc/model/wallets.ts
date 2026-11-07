@@ -4,9 +4,9 @@
 // would leave; the native treasury owner alone decides, signs, sends and settles.
 import {
   Availability, ChainTxStatus, DataQuality, PolicyUnit, TransferStatus, WalletMovementKind, WalletRole,
-  type MainPayoutPolicy, type ProfitTransferPolicy, type WalletAccount, type WalletDestination, type WalletTransferState, type WalletTreasuryState,
+  type MainPayoutPolicy, type ProfitTransferPolicy, type WalletAccount, type WalletAuthorizationBounds, type WalletDestination, type WalletTransferState, type WalletTreasuryState,
 } from "../api/bscV8Adapter";
-import type { BscLiveView, BscWalletsView } from "./types";
+import type { BscLiveView, BscWalletsView, ControlSwitchView } from "./types";
 import { bnbToWei, weiToBnb } from "./strategyForm";
 import type { BscQueryOutcome } from "@/core/realtime/bscQuery";
 
@@ -38,12 +38,19 @@ export interface AccountView {
   balanceWei?: string; reservedWei?: string; availableWei?: string;
   /** Who reported the balance and how it is proven. */
   source: string; quality: string;
-  /** NOT_CONFIGURED, READY, LOCKED or UNKNOWN, with the owner's reason. */
+  /** The account's wallet switch as the owner holds it (ENABLED, DISABLED, BLOCKED, UNKNOWN), or
+   *  NOT_CONFIGURED; an external wallet CONFIRMED or UNCONFIRMED. With the owner's reason. */
   state: string; reason: string;
   nonce?: string; ownerKey: boolean; account?: WalletAccount;
 }
 const DIGITS = /^[0-9]+$/;
 const digits = (v: string | undefined) => v !== undefined && DIGITS.test(v) ? v : undefined;
+
+/** The account's state: its native switch, else NOT_CONFIGURED without an address, else UNKNOWN. */
+const switchState = (address: string, control: ControlSwitchView | undefined) => control ? control.effective || "UNKNOWN" : address ? "UNKNOWN" : "NOT_CONFIGURED";
+const reasons = (...r: (string | undefined)[]) => r.filter(Boolean).join(" · ");
+/** Whether the owner can send from this account now: its switch ENABLED, no owner reason, its key held. */
+export const usable = (a: AccountView) => a.state === "ENABLED" && !a.reason && a.ownerKey;
 
 function fromTreasury(id: AccountId, a: WalletAccount): AccountView {
   const b = a.balance;
@@ -52,7 +59,7 @@ function fromTreasury(id: AccountId, a: WalletAccount): AccountView {
     balanceWei: digits(b?.balanceWei), reservedWei: digits(b?.reservedWei), availableWei: digits(b?.availableWei),
     source: b ? `${b.source || "TREASURY_OWNER"}${b.blockNumber !== undefined ? ` · block ${b.blockNumber}` : ""}` : "TREASURY_OWNER",
     quality: b ? DataQuality[b.quality] ?? "UNKNOWN" : "UNKNOWN",
-    state: a.state || "UNKNOWN", reason: a.reason, nonce: a.nextNonce?.toString(), ownerKey: a.ownerKey, account: a,
+    state: switchState(a.address, a.control), reason: reasons(a.reason, a.control?.blockReason), nonce: a.nextNonce?.toString(), ownerKey: a.ownerKey, account: a,
   };
 }
 
@@ -70,11 +77,12 @@ export function accountViews(w: BscWalletsView | null, t: Treasury, live: BscLiv
     const probe = id === "buyer" && w.liveBalanceWei !== undefined;
     const balance = id === "buyer" ? (w.liveBalanceWei ?? w.buyerBalanceWei) : w.launcherBalanceWei;
     const address = id === "buyer" ? w.buyerAddress : w.launcherAddress;
+    const control = id === "buyer" ? w.buyerControl : w.launcherControl;
     return {
       id, name: ACCOUNT_NAME[id], address, chainId: w.chainId, balanceWei: digits(balance),
       source: probe ? "LIVE probe · current runtime status" : `${w.source || "UNKNOWN"} snapshot${w.observedBlock !== undefined ? ` · block ${w.observedBlock}` : ""}`,
       quality: probe ? "LIVE" : w.source ? "SNAPSHOT" : "UNKNOWN",
-      state: address ? "READY" : "NOT_CONFIGURED", reason: address ? "" : "No address reported",
+      state: switchState(address, control), reason: address ? control?.blockReason ?? "" : "No address reported",
       nonce: id === "buyer" ? (w.liveNextNonce ?? live?.nextNonce)?.toString() : undefined, ownerKey: !!address,
     };
   };
@@ -119,12 +127,13 @@ export function economics(t: Treasury, live: BscLiveView | null): Economics {
 export type Tone = "" | "good" | "bad" | "warn" | "blue";
 export const TRANSFER_LABEL: Record<TransferStatus, { label: string; tone: Tone }> = {
   [TransferStatus.UNSPECIFIED]: { label: "Not reported", tone: "warn" },
-  [TransferStatus.DRAFT]: { label: "Draft", tone: "" },
+  [TransferStatus.DRAFT]: { label: "Prepared · awaits authorization", tone: "blue" },
   [TransferStatus.PENDING]: { label: "Pending", tone: "warn" },
   [TransferStatus.SENT]: { label: "Sent", tone: "blue" },
   [TransferStatus.CONFIRMED]: { label: "Confirmed", tone: "good" },
   [TransferStatus.FAILED]: { label: "Failed", tone: "bad" },
   [TransferStatus.UNKNOWN]: { label: "Unknown · the chain decides", tone: "warn" },
+  [TransferStatus.EXPIRED]: { label: "Expired · never sent", tone: "" },
 };
 export const transferLabel = (s: TransferStatus) => TRANSFER_LABEL[s] ?? TRANSFER_LABEL[TransferStatus.UNSPECIFIED];
 export const CHAIN_LABEL: Record<ChainTxStatus, string> = {
@@ -143,17 +152,22 @@ export const MOVEMENT_LABEL: Record<WalletMovementKind, string> = {
   [WalletMovementKind.TRADE_SELL]: "Trade sell",
   [WalletMovementKind.FEE]: "Fee",
   [WalletMovementKind.EXTERNAL_OUT]: "Outgoing · not by DarkBot",
+  [WalletMovementKind.UNATTRIBUTED]: "Unattributed balance change",
+  [WalletMovementKind.CAPITAL_RETURN]: "Capital return · Trading → Main",
+  [WalletMovementKind.LAUNCH]: "G0.7 launch",
+  [WalletMovementKind.NONCE_BURN]: "Nonce burn",
 };
 export const movementLabel = (k: WalletMovementKind) => MOVEMENT_LABEL[k] ?? MOVEMENT_LABEL[WalletMovementKind.UNSPECIFIED];
-export type MovementFilter = "all" | "deposit" | "funding" | "profit" | "payout" | "trades" | "fees";
+export type MovementFilter = "all" | "deposit" | "funding" | "profit" | "payout" | "trades" | "fees" | "other";
 export const MOVEMENT_FILTERS: ReadonlyArray<[MovementFilter, string, WalletMovementKind[]]> = [
   ["all", "All", []],
   ["deposit", "Deposits", [WalletMovementKind.DEPOSIT]],
-  ["funding", "Funding · Main → Trading", [WalletMovementKind.CAPITAL_FUNDING]],
+  ["funding", "Capital · Main ↔ Trading", [WalletMovementKind.CAPITAL_FUNDING, WalletMovementKind.CAPITAL_RETURN]],
   ["profit", "Profit transfers · Trading → Main", [WalletMovementKind.PROFIT_TRANSFER]],
   ["payout", "Payouts · Main → external", [WalletMovementKind.PAYOUT_MANUAL, WalletMovementKind.PAYOUT_AUTO]],
   ["trades", "Trades", [WalletMovementKind.TRADE_BUY, WalletMovementKind.TRADE_SELL]],
-  ["fees", "Fees", [WalletMovementKind.FEE]],
+  ["fees", "Fees and nonce burns", [WalletMovementKind.FEE, WalletMovementKind.NONCE_BURN]],
+  ["other", "Launches, outside and unattributed", [WalletMovementKind.LAUNCH, WalletMovementKind.EXTERNAL_OUT, WalletMovementKind.UNATTRIBUTED]],
 ];
 
 export interface TransferRow { t: WalletTransferState; label: string; tone: Tone; path: string; duplicateTrigger: boolean }
@@ -175,11 +189,38 @@ export function transferRows(s: WalletTreasuryState): TransferRow[] {
 }
 /** The newest transfer of one path. */
 export const lastOf = (rows: readonly TransferRow[], kinds: readonly WalletMovementKind[]) => rows.find(r => kinds.includes(r.t.kind));
-/** The decided states; every other one (PENDING, SENT, UNKNOWN, unspecified, a future value) is open. */
-const DECIDED = new Set<TransferStatus>([TransferStatus.CONFIRMED, TransferStatus.FAILED, TransferStatus.DRAFT]);
-/** A transfer of this path the chain has not decided yet: the next one waits (no double transfer). */
+/** The decided states; every other one (DRAFT, PENDING, SENT, UNKNOWN, unspecified, a future value) is open. */
+const DECIDED = new Set<TransferStatus>([TransferStatus.CONFIRMED, TransferStatus.FAILED, TransferStatus.EXPIRED]);
+/** A transfer of this path not decided yet (a DRAFT awaiting its authorization included): the next
+ *  one waits (no double transfer). */
 export const openOf = (rows: readonly TransferRow[], kinds: readonly WalletMovementKind[]) =>
   rows.find(r => kinds.includes(r.t.kind) && !DECIDED.has(r.t.status));
+/** The first line of a manual transfer's canonical scope text (wallet.proto). */
+export const TRANSFER_SCOPE = "darkbot.bsc.wallet-transfer.v1";
+/** A DRAFT holds its sending wallet's next nonce: while it is open nothing else leaves that wallet. */
+export const draftFrom = (rows: readonly TransferRow[], role: WalletRole) => rows.find(r => r.t.status === TransferStatus.DRAFT && r.t.sourceRole === role);
+const TRANSFER_KIND: Partial<Record<WalletMovementKind, string>> = { [WalletMovementKind.CAPITAL_FUNDING]: "CAPITAL_FUNDING", [WalletMovementKind.PAYOUT_MANUAL]: "PAYOUT_MANUAL" };
+/** Why a DRAFT must not be authorized on this path, or null: its canonical text line by line against
+ *  its own fields and the path's sender and receiver (wallet.proto darkbot.bsc.wallet-transfer.v1). */
+export function draftProblem(t: WalletTransferState, kind: WalletMovementKind, from: string, to: string | undefined): string | null {
+  if (!t.commandId) return "The owner names no draft id";
+  if (t.status !== TransferStatus.DRAFT || t.kind !== kind) return "The draft is not one of this path";
+  if (!to) return "The receiver of this path is not known";
+  const lines = t.scopeText.split("\n");
+  if (lines[0] !== TRANSFER_SCOPE || lines[lines.length - 1] !== "") return "The owner's scope text is not a manual transfer's";
+  const want: Array<[string, string | undefined]> = [["kind", TRANSFER_KIND[kind]], ["chain_id", t.chainId.toString()], ["from", from.toLowerCase()], ["to", to.toLowerCase()],
+    ["amount_wei", t.amountWei], ["max_fee_wei", undefined], ["nonce", t.nonce?.toString()], ["expires_unix_ms", t.expiresUnixMs?.toString()]];
+  const got = lines.slice(1, -1);
+  if (got.length !== want.length) return "The owner's scope text has other lines than a manual transfer's";
+  for (const [i, [key, value]] of want.entries()) {
+    const line = got[i] ?? "";
+    if (!line.startsWith(`${key}=`)) return `The owner's scope text names ${line.split("=")[0] || "nothing"} where ${key} belongs`;
+    const v = line.slice(key.length + 1);
+    if (value === undefined ? !DIGITS.test(v) : v !== value) return `The owner's scope text says ${key}=${v}, the draft ${value ?? "a decimal"}`;
+  }
+  if (t.sourceAddress.toLowerCase() !== from.toLowerCase() || t.destinationAddress.toLowerCase() !== to.toLowerCase()) return "The draft's addresses are not this path's";
+  return null;
+}
 
 // ---------------------------------------------------------------- operator input
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
@@ -210,11 +251,14 @@ export function percentToBps(text: string): Ok<number> | Err {
   return bps < 1 || bps > 10_000 ? err("A share is above 0 % and at most 100 %") : { ok: true, value: bps };
 }
 export const bpsToPercent = (bps: number) => `${Math.floor(bps / 100)}${bps % 100 ? `.${String(bps % 100).padStart(2, "0").replace(/0$/, "")}` : ""}`;
-/** A decimal EUR amount (at most 2 places); `positive` refuses 0. */
+/** A decimal EUR amount (at most 2 places) in its canonical form (wallet.proto: no leading zero, no
+ *  trailing fraction zero, e.g. 1000, 10.5, 0.01); `positive` refuses 0. */
 export function eurText(text: string, what: string, positive = false): Ok<string> | Err {
   const t = text.trim().replace(",", ".");
   if (!/^[0-9]+(?:\.[0-9]{1,2})?$/.test(t)) return err(`${what}: ${text} is no EUR amount with at most 2 places`);
-  return positive && /^0+(?:\.0+)?$/.test(t) ? err(`${what} must be above 0`) : { ok: true, value: t };
+  const [int = "", frac = ""] = t.split(".");
+  const value = `${int.replace(/^0+(?=[0-9])/, "")}${frac.replace(/0+$/, "") ? `.${frac.replace(/0+$/, "")}` : ""}`;
+  return positive && value === "0" ? err(`${what} must be above 0`) : { ok: true, value };
 }
 /** A BSC address of an external receiver: not zero and none of DarkBot's own accounts. */
 export function externalAddress(text: string, own: readonly string[]): Ok<string> | Err {
@@ -233,8 +277,31 @@ export function remaining(available: string | undefined, amount: string, fee: st
 }
 
 export type AmountMode = "fixed" | "share";
-export interface ProfitPolicyForm { enabled: boolean; threshold: string; mode: AmountMode; amount: string; minCapital: string; reserve: string }
-export interface PayoutPolicyForm { enabled: boolean; destinationId: string; unit: "BNB" | "EUR"; threshold: string; mode: AmountMode; amount: string; retain: string }
+/** An enable's authorization as the operator types it (wallet.proto WalletAuthorizationScope). */
+export interface AuthorizationForm { validHours: string; maxPerTransfer: string; maxTotal: string }
+export interface ProfitPolicyForm extends AuthorizationForm { enabled: boolean; threshold: string; mode: AmountMode; amount: string; minCapital: string; reserve: string }
+export interface PayoutPolicyForm extends AuthorizationForm { enabled: boolean; destinationId: string; unit: "BNB" | "EUR"; threshold: string; mode: AmountMode; amount: string; retain: string }
+/** The stored authorization's limits as the start of a new one; its validity is always typed anew. */
+const authorizationForm = (a: ProfitTransferPolicy["authorization"]): AuthorizationForm =>
+  ({ validHours: "", maxPerTransfer: weiToBnb(a?.maxPerTransferWei ?? ""), maxTotal: weiToBnb(a?.maxTotalWei ?? "") });
+
+const HOUR_MS = 3_600_000n;
+export interface AuthorizationLimits { validityMs: bigint; maxPerTransferWei: string; maxTotalWei: string }
+/** An enable's authorization within the owner's configured bounds, or the first error. */
+export function authorizationOf(f: AuthorizationForm, bounds: WalletAuthorizationBounds | undefined): Ok<AuthorizationLimits> | Err {
+  if (!bounds || !digits(bounds.maxPerTransferWei) || !digits(bounds.maxTotalWei)) return err("The owner reports no authorization bounds");
+  if (!/^[1-9][0-9]{0,5}$/.test(f.validHours.trim())) return err("Valid for: whole hours above 0");
+  const validityMs = BigInt(f.validHours.trim()) * HOUR_MS;
+  if (validityMs > bounds.maxValidityMs) return err(`Valid for at most ${(bounds.maxValidityMs / HOUR_MS).toString()} h (the owner's bound)`);
+  const per = positiveWei(f.maxPerTransfer, "Most per transfer");
+  if (!per.ok) return per;
+  if (BigInt(per.value) > BigInt(bounds.maxPerTransferWei)) return err(`Most per transfer is above the owner's bound of ${weiToBnb(bounds.maxPerTransferWei)} BNB`);
+  const total = positiveWei(f.maxTotal, "Most in total");
+  if (!total.ok) return total;
+  if (BigInt(total.value) > BigInt(bounds.maxTotalWei)) return err(`Most in total is above the owner's bound of ${weiToBnb(bounds.maxTotalWei)} BNB`);
+  if (BigInt(total.value) < BigInt(per.value)) return err("Most in total is below most per transfer");
+  return { ok: true, value: { validityMs, maxPerTransferWei: per.value, maxTotalWei: total.value } };
+}
 
 const amountText = (a: ProfitTransferPolicy["amount"], eur = false): [AmountMode, string] => {
   const v = a?.amount;
@@ -246,12 +313,12 @@ const amountText = (a: ProfitTransferPolicy["amount"], eur = false): [AmountMode
 /** The stored policy A as the editor's start; empty and off before the owner ever stored one. */
 export function profitForm(p: ProfitTransferPolicy | undefined): ProfitPolicyForm {
   const [mode, amount] = amountText(p?.amount);
-  return { enabled: !!p?.enabled, threshold: weiToBnb(p?.thresholdRealizedNetProfitWei ?? ""), mode, amount, minCapital: weiToBnb(p?.buyerMinCapitalWei ?? ""), reserve: weiToBnb(p?.buyerReserveWei ?? "") };
+  return { enabled: !!p?.enabled, threshold: weiToBnb(p?.thresholdRealizedNetProfitWei ?? ""), mode, amount, minCapital: weiToBnb(p?.buyerMinCapitalWei ?? ""), reserve: weiToBnb(p?.buyerReserveWei ?? ""), ...authorizationForm(p?.authorization) };
 }
 export function payoutForm(p: MainPayoutPolicy | undefined): PayoutPolicyForm {
   const eur = p?.unit === PolicyUnit.EUR;
   const [mode, amount] = amountText(p?.amount, eur);
-  return { enabled: !!p?.enabled, destinationId: p?.destinationId ?? "", unit: eur ? "EUR" : "BNB", threshold: eur ? p?.thresholdEur ?? "" : weiToBnb(p?.thresholdAvailableMainWei ?? ""), mode, amount, retain: weiToBnb(p?.retainWei ?? "") };
+  return { enabled: !!p?.enabled, destinationId: p?.destinationId ?? "", unit: eur ? "EUR" : "BNB", threshold: eur ? p?.thresholdEur ?? "" : weiToBnb(p?.thresholdAvailableMainWei ?? ""), mode, amount, retain: weiToBnb(p?.retainWei ?? ""), ...authorizationForm(p?.authorization) };
 }
 type AmountInit = { amount: { case: "fixedWei" | "fixedEur"; value: string } | { case: "shareBps"; value: number } };
 function amountOf(mode: AmountMode, text: string, eur: boolean, what: string): Ok<AmountInit> | Err {
@@ -273,11 +340,13 @@ export function profitCommand(f: ProfitPolicyForm) {
   return { ok: true as const, value: { enabled: f.enabled, thresholdRealizedNetProfitWei: threshold.value, amount: amount.value, buyerMinCapitalWei: minCapital.value, buyerReserveWei: reserve.value } };
 }
 /** Policy B's set command, or the first input error (EUR only with a qualified native quote; never
- *  to one of DarkBot's own accounts). */
-export function payoutCommand(f: PayoutPolicyForm, destinations: readonly WalletDestination[], eurQualified: boolean, own: readonly string[] = []) {
+ *  to one of DarkBot's own accounts; only on Main's chain). */
+export function payoutCommand(f: PayoutPolicyForm, destinations: readonly WalletDestination[], eurQualified: boolean, own: readonly string[] = [], mainChainId?: bigint) {
   const dest = destinations.find(d => d.destinationId === f.destinationId);
   if (!dest) return err("Choose a saved external address");
   if (!dest.confirmed) return err("The external address is not confirmed");
+  const chain = chainProblem(dest.chainId, mainChainId);
+  if (chain) return err(chain);
   const external = externalAddress(dest.address, own);
   if (!external.ok) return external;
   const eur = f.unit === "EUR";
@@ -307,9 +376,53 @@ export function eurQualified(s: WalletTreasuryState | undefined): boolean {
   return !!q && q.quality === DataQuality.VERIFIED && q.currency === "EUR" && /^[0-9]+(\.[0-9]+)?$/.test(q.fiatPerBnb) && !/^0+(\.0+)?$/.test(q.fiatPerBnb);
 }
 
+/** Why a destination's chain cannot receive from Main (wallet.proto: Main's chain only), or null. */
+export function chainProblem(chainId: bigint, mainChainId: bigint | undefined): string | null {
+  if (mainChainId === undefined) return "The Main account reports no chain id";
+  return chainId === mainChainId ? null : `The address is saved for chain ${chainId}, Main is on chain ${mainChainId}`;
+}
+
+/** The canonical meaning of a policy form (exact wei, bps, EUR), so that "0.50" and the stored "0.5"
+ *  are the same edit; `withValidity` counts a typed validity as a change (a new authorization). */
+const canonWei = (t: string) => { const r = wei(t, ""); return r.ok ? r.value : `?${t}`; };
+const canonAmount = (mode: AmountMode, t: string, eur: boolean) => mode === "share" ? `bps:${(r => r.ok ? r.value : `?${t}`)(percentToBps(t))}` : eur ? `eur:${(r => r.ok ? r.value : `?${t}`)(eurText(t, ""))}` : `wei:${canonWei(t)}`;
+export function profitKey(f: ProfitPolicyForm, withValidity: boolean): string {
+  return [f.enabled, canonWei(f.threshold), canonAmount(f.mode, f.amount, false), canonWei(f.minCapital), canonWei(f.reserve), canonWei(f.maxPerTransfer), canonWei(f.maxTotal), withValidity ? f.validHours.trim() : ""].join("|");
+}
+export function payoutKey(f: PayoutPolicyForm, withValidity: boolean): string {
+  const eur = f.unit === "EUR";
+  return [f.enabled, f.destinationId, f.unit, eur ? (r => r.ok ? r.value : `?${f.threshold}`)(eurText(f.threshold, "")) : canonWei(f.threshold), canonAmount(f.mode, f.amount, eur), canonWei(f.retain),
+    canonWei(f.maxPerTransfer), canonWei(f.maxTotal), withValidity ? f.validHours.trim() : ""].join("|");
+}
+
 /** Stored vs effective policy version, as the owner reports them. */
 export function versionText(p: { policyVersion: bigint; effectiveVersion?: bigint } | undefined): string {
   if (!p) return "Never stored";
   if (p.effectiveVersion === undefined) return `Stored v${p.policyVersion} · effect not reported`;
   return p.effectiveVersion === p.policyVersion ? `v${p.policyVersion} · effective` : `Stored v${p.policyVersion} · effective v${p.effectiveVersion}`;
+}
+
+// ---------------------------------------------------------------- canonical scope texts
+// wallet.proto: byte for byte the owner's text, lowercase 0x addresses, decimal integers, one
+// `key=value\n` per line; its SHA-256 (model/live.ts scopeSha256) is what the operator confirms.
+type AmountLine = AmountInit["amount"];
+const amountLine = (a: AmountLine) => `${a.case === "shareBps" ? "share_bps" : a.case === "fixedWei" ? "fixed_wei" : "fixed_eur"}:${a.value}`;
+const lines = (name: string, kv: ReadonlyArray<[string, string]>) => `${name}\n${kv.map(([k, v]) => `${k}=${v}\n`).join("")}`;
+const authLines = (a: AuthorizationLimits, expiresUnixMs: bigint): Array<[string, string]> =>
+  [["max_per_transfer_wei", a.maxPerTransferWei], ["max_total_wei", a.maxTotalWei], ["expires_unix_ms", expiresUnixMs.toString()]];
+export type ProfitCommand = Extract<ReturnType<typeof profitCommand>, { ok: true }>["value"];
+export type PayoutCommand = Extract<ReturnType<typeof payoutCommand>, { ok: true }>["value"];
+/** Policy A's canonical scope text (darkbot.bsc.wallet-profit-policy.v1). */
+export function profitScopeText(chainId: bigint, buyer: string, main: string, c: ProfitCommand, a: AuthorizationLimits, expiresUnixMs: bigint): string {
+  return lines("darkbot.bsc.wallet-profit-policy.v1", [["chain_id", chainId.toString()], ["from", buyer.toLowerCase()], ["to", main.toLowerCase()], ["enabled", String(c.enabled)],
+    ["threshold_realized_net_profit_wei", c.thresholdRealizedNetProfitWei], ["amount", amountLine(c.amount.amount)], ["buyer_min_capital_wei", c.buyerMinCapitalWei],
+    ["buyer_reserve_wei", c.buyerReserveWei], ...authLines(a, expiresUnixMs)]);
+}
+/** Policy B's canonical scope text (darkbot.bsc.wallet-payout-policy.v1). */
+export function payoutScopeText(chainId: bigint, main: string, c: PayoutCommand, a: AuthorizationLimits, expiresUnixMs: bigint): string {
+  const eur = c.unit === PolicyUnit.EUR;
+  return lines("darkbot.bsc.wallet-payout-policy.v1", [["chain_id", chainId.toString()], ["from", main.toLowerCase()], ["to", c.destinationAddress.toLowerCase()],
+    ["destination_id", c.destinationId], ["enabled", String(c.enabled)], ["unit", eur ? "EUR" : "BNB"],
+    eur ? ["threshold_eur", c.thresholdEur ?? ""] : ["threshold_available_main_wei", c.thresholdAvailableMainWei], ["amount", amountLine(c.amount.amount)],
+    ["retain_wei", c.retainWei], ...authLines(a, expiresUnixMs)]);
 }

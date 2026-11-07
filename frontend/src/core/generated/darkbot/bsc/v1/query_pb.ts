@@ -2,13 +2,13 @@
 // @generated from file darkbot/bsc/v1/query.proto (package darkbot.bsc.v1, syntax proto3)
 /* eslint-disable */
 
-import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv1";
-import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv1";
+import type { GenEnum, GenFile, GenMessage } from "@bufbuild/protobuf/codegenv1";
+import { enumDesc, fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv1";
 import type { Availability, PerformanceSeries, PerformanceSeriesQuery } from "./common_pb";
 import { file_darkbot_bsc_v1_common } from "./common_pb";
 import type { TradeDetail, TradeDetailQuery, TradeHistoryPage, TradeHistoryQuery } from "./history_pb";
 import { file_darkbot_bsc_v1_history } from "./history_pb";
-import type { StrategyCSettingsQuery, StrategyCSettingsState, TrainingProfiles, TrainingProfilesQuery, TrainingRunPage, TrainingRunQuery } from "./training_pb";
+import type { ReplaySourcePage, ReplaySourceQuery, StrategyCSettingsQuery, StrategyCSettingsState, TrainingProfiles, TrainingProfilesQuery, TrainingRunPage, TrainingRunQuery } from "./training_pb";
 import { file_darkbot_bsc_v1_training } from "./training_pb";
 import type { WalletHistoryPage, WalletHistoryQuery, WalletTreasuryQuery, WalletTreasuryState } from "./wallet_pb";
 import { file_darkbot_bsc_v1_wallet } from "./wallet_pb";
@@ -20,7 +20,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file darkbot/bsc/v1/query.proto.
  */
 export const file_darkbot_bsc_v1_query: GenFile = /*@__PURE__*/
-  fileDesc("ChpkYXJrYm90L2JzYy92MS9xdWVyeS5wcm90bxIOZGFya2JvdC5ic2MudjEivQQKD0JzY1F1ZXJ5UmVxdWVzdBISCgpyZXF1ZXN0X2lkGAEgASgJEjMKBnRyYWRlcxgCIAEoCzIhLmRhcmtib3QuYnNjLnYxLlRyYWRlSGlzdG9yeVF1ZXJ5SAASMQoFdHJhZGUYAyABKAsyIC5kYXJrYm90LmJzYy52MS5UcmFkZURldGFpbFF1ZXJ5SAASOQoNdHJhaW5pbmdfcnVucxgEIAEoCzIgLmRhcmtib3QuYnNjLnYxLlRyYWluaW5nUnVuUXVlcnlIABJCChF0cmFpbmluZ19wcm9maWxlcxgFIAEoCzIlLmRhcmtib3QuYnNjLnYxLlRyYWluaW5nUHJvZmlsZXNRdWVyeUgAEj4KEHdhbGxldF9tb3ZlbWVudHMYBiABKAsyIi5kYXJrYm90LmJzYy52MS5XYWxsZXRIaXN0b3J5UXVlcnlIABI3Cgh0cmVhc3VyeRgHIAEoCzIjLmRhcmtib3QuYnNjLnYxLldhbGxldFRyZWFzdXJ5UXVlcnlIABI4CgZzZXJpZXMYCCABKAsyJi5kYXJrYm90LmJzYy52MS5QZXJmb3JtYW5jZVNlcmllc1F1ZXJ5SAASLgoFd2F0Y2gYCSABKAsyHS5kYXJrYm90LmJzYy52MS5Cc2NXYXRjaFF1ZXJ5SAASQwoRc3RyYXRlZ3lfc2V0dGluZ3MYCiABKAsyJi5kYXJrYm90LmJzYy52MS5TdHJhdGVneUNTZXR0aW5nc1F1ZXJ5SABCBwoFcXVlcnki/QQKEEJzY1F1ZXJ5UmVzcG9uc2USEgoKcmVxdWVzdF9pZBgBIAEoCRIyCgxhdmFpbGFiaWxpdHkYAiABKA4yHC5kYXJrYm90LmJzYy52MS5BdmFpbGFiaWxpdHkSGgoSdW5hdmFpbGFibGVfcmVhc29uGAMgASgJEjIKBnRyYWRlcxgEIAEoCzIgLmRhcmtib3QuYnNjLnYxLlRyYWRlSGlzdG9yeVBhZ2VIABIsCgV0cmFkZRgFIAEoCzIbLmRhcmtib3QuYnNjLnYxLlRyYWRlRGV0YWlsSAASOAoNdHJhaW5pbmdfcnVucxgGIAEoCzIfLmRhcmtib3QuYnNjLnYxLlRyYWluaW5nUnVuUGFnZUgAEj0KEXRyYWluaW5nX3Byb2ZpbGVzGAcgASgLMiAuZGFya2JvdC5ic2MudjEuVHJhaW5pbmdQcm9maWxlc0gAEj0KEHdhbGxldF9tb3ZlbWVudHMYCCABKAsyIS5kYXJrYm90LmJzYy52MS5XYWxsZXRIaXN0b3J5UGFnZUgAEjcKCHRyZWFzdXJ5GAkgASgLMiMuZGFya2JvdC5ic2MudjEuV2FsbGV0VHJlYXN1cnlTdGF0ZUgAEjMKBnNlcmllcxgKIAEoCzIhLmRhcmtib3QuYnNjLnYxLlBlcmZvcm1hbmNlU2VyaWVzSAASLgoFd2F0Y2gYCyABKAsyHS5kYXJrYm90LmJzYy52MS5Cc2NXYXRjaFN0YXRlSAASQwoRc3RyYXRlZ3lfc2V0dGluZ3MYDCABKAsyJi5kYXJrYm90LmJzYy52MS5TdHJhdGVneUNTZXR0aW5nc1N0YXRlSABCCAoGcmVzdWx0QnoKEmNvbS5kYXJrYm90LmJzYy52MUIKUXVlcnlQcm90b1ABogIDREJYqgIORGFya2JvdC5Cc2MuVjHKAg5EYXJrYm90XEJzY1xWMeICGkRhcmtib3RcQnNjXFYxXEdQQk1ldGFkYXRh6gIQRGFya2JvdDo6QnNjOjpWMWIGcHJvdG8z", [file_darkbot_bsc_v1_common, file_darkbot_bsc_v1_history, file_darkbot_bsc_v1_training, file_darkbot_bsc_v1_wallet, file_darkbot_bsc_v1_watch]);
+  fileDesc("ChpkYXJrYm90L2JzYy92MS9xdWVyeS5wcm90bxIOZGFya2JvdC5ic2MudjEi+gQKD0JzY1F1ZXJ5UmVxdWVzdBISCgpyZXF1ZXN0X2lkGAEgASgJEjMKBnRyYWRlcxgCIAEoCzIhLmRhcmtib3QuYnNjLnYxLlRyYWRlSGlzdG9yeVF1ZXJ5SAASMQoFdHJhZGUYAyABKAsyIC5kYXJrYm90LmJzYy52MS5UcmFkZURldGFpbFF1ZXJ5SAASOQoNdHJhaW5pbmdfcnVucxgEIAEoCzIgLmRhcmtib3QuYnNjLnYxLlRyYWluaW5nUnVuUXVlcnlIABJCChF0cmFpbmluZ19wcm9maWxlcxgFIAEoCzIlLmRhcmtib3QuYnNjLnYxLlRyYWluaW5nUHJvZmlsZXNRdWVyeUgAEj4KEHdhbGxldF9tb3ZlbWVudHMYBiABKAsyIi5kYXJrYm90LmJzYy52MS5XYWxsZXRIaXN0b3J5UXVlcnlIABI3Cgh0cmVhc3VyeRgHIAEoCzIjLmRhcmtib3QuYnNjLnYxLldhbGxldFRyZWFzdXJ5UXVlcnlIABI4CgZzZXJpZXMYCCABKAsyJi5kYXJrYm90LmJzYy52MS5QZXJmb3JtYW5jZVNlcmllc1F1ZXJ5SAASLgoFd2F0Y2gYCSABKAsyHS5kYXJrYm90LmJzYy52MS5Cc2NXYXRjaFF1ZXJ5SAASQwoRc3RyYXRlZ3lfc2V0dGluZ3MYCiABKAsyJi5kYXJrYm90LmJzYy52MS5TdHJhdGVneUNTZXR0aW5nc1F1ZXJ5SAASOwoOcmVwbGF5X3NvdXJjZXMYCyABKAsyIS5kYXJrYm90LmJzYy52MS5SZXBsYXlTb3VyY2VRdWVyeUgAQgcKBXF1ZXJ5IoAGChBCc2NRdWVyeVJlc3BvbnNlEhIKCnJlcXVlc3RfaWQYASABKAkSMgoMYXZhaWxhYmlsaXR5GAIgASgOMhwuZGFya2JvdC5ic2MudjEuQXZhaWxhYmlsaXR5EhoKEnVuYXZhaWxhYmxlX3JlYXNvbhgDIAEoCRIyCgZ0cmFkZXMYBCABKAsyIC5kYXJrYm90LmJzYy52MS5UcmFkZUhpc3RvcnlQYWdlSAASLAoFdHJhZGUYBSABKAsyGy5kYXJrYm90LmJzYy52MS5UcmFkZURldGFpbEgAEjgKDXRyYWluaW5nX3J1bnMYBiABKAsyHy5kYXJrYm90LmJzYy52MS5UcmFpbmluZ1J1blBhZ2VIABI9ChF0cmFpbmluZ19wcm9maWxlcxgHIAEoCzIgLmRhcmtib3QuYnNjLnYxLlRyYWluaW5nUHJvZmlsZXNIABI9ChB3YWxsZXRfbW92ZW1lbnRzGAggASgLMiEuZGFya2JvdC5ic2MudjEuV2FsbGV0SGlzdG9yeVBhZ2VIABI3Cgh0cmVhc3VyeRgJIAEoCzIjLmRhcmtib3QuYnNjLnYxLldhbGxldFRyZWFzdXJ5U3RhdGVIABIzCgZzZXJpZXMYCiABKAsyIS5kYXJrYm90LmJzYy52MS5QZXJmb3JtYW5jZVNlcmllc0gAEi4KBXdhdGNoGAsgASgLMh0uZGFya2JvdC5ic2MudjEuQnNjV2F0Y2hTdGF0ZUgAEkMKEXN0cmF0ZWd5X3NldHRpbmdzGAwgASgLMiYuZGFya2JvdC5ic2MudjEuU3RyYXRlZ3lDU2V0dGluZ3NTdGF0ZUgAEjoKDnJlcGxheV9zb3VyY2VzGA0gASgLMiAuZGFya2JvdC5ic2MudjEuUmVwbGF5U291cmNlUGFnZUgAEi0KB3JlZnVzYWwYDiABKA4yHC5kYXJrYm90LmJzYy52MS5RdWVyeVJlZnVzYWwSFgoOcmVmdXNhbF9kZXRhaWwYDyABKAlCCAoGcmVzdWx0KrMBCgxRdWVyeVJlZnVzYWwSHQoZUVVFUllfUkVGVVNBTF9VTlNQRUNJRklFRBAAEh4KGlFVRVJZX1JFRlVTQUxfQ1VSU09SX1NUQUxFEAESIAocUVVFUllfUkVGVVNBTF9DVVJTT1JfSU5WQUxJRBACEiAKHFFVRVJZX1JFRlVTQUxfTElNSVRfRVhDRUVERUQQAxIgChxRVUVSWV9SRUZVU0FMX0lOVkFMSURfRklMVEVSEARCegoSY29tLmRhcmtib3QuYnNjLnYxQgpRdWVyeVByb3RvUAGiAgNEQliqAg5EYXJrYm90LkJzYy5WMcoCDkRhcmtib3RcQnNjXFYx4gIaRGFya2JvdFxCc2NcVjFcR1BCTWV0YWRhdGHqAhBEYXJrYm90OjpCc2M6OlYxYgZwcm90bzM", [file_darkbot_bsc_v1_common, file_darkbot_bsc_v1_history, file_darkbot_bsc_v1_training, file_darkbot_bsc_v1_wallet, file_darkbot_bsc_v1_watch]);
 
 /**
  * One bounded query.
@@ -112,6 +112,14 @@ export type BscQueryRequest = Message<"darkbot.bsc.v1.BscQueryRequest"> & {
      */
     value: StrategyCSettingsQuery;
     case: "strategySettings";
+  } | {
+    /**
+     * A page of the replay catalogue.
+     *
+     * @generated from field: darkbot.bsc.v1.ReplaySourceQuery replay_sources = 11;
+     */
+    value: ReplaySourceQuery;
+    case: "replaySources";
   } | { case: undefined; value?: undefined };
 };
 
@@ -226,7 +234,29 @@ export type BscQueryResponse = Message<"darkbot.bsc.v1.BscQueryResponse"> & {
      */
     value: StrategyCSettingsState;
     case: "strategySettings";
+  } | {
+    /**
+     * A page of the replay catalogue.
+     *
+     * @generated from field: darkbot.bsc.v1.ReplaySourcePage replay_sources = 13;
+     */
+    value: ReplaySourcePage;
+    case: "replaySources";
   } | { case: undefined; value?: undefined };
+
+  /**
+   * Why the owner refused the query (no result then); UNSPECIFIED otherwise.
+   *
+   * @generated from field: darkbot.bsc.v1.QueryRefusal refusal = 14;
+   */
+  refusal: QueryRefusal;
+
+  /**
+   * The owner's detail of the refusal; empty without one.
+   *
+   * @generated from field: string refusal_detail = 15;
+   */
+  refusalDetail: string;
 };
 
 /**
@@ -235,3 +265,51 @@ export type BscQueryResponse = Message<"darkbot.bsc.v1.BscQueryResponse"> & {
  */
 export const BscQueryResponseSchema: GenMessage<BscQueryResponse> = /*@__PURE__*/
   messageDesc(file_darkbot_bsc_v1_query, 1);
+
+/**
+ * Why the owner refused a query.
+ *
+ * @generated from enum darkbot.bsc.v1.QueryRefusal
+ */
+export enum QueryRefusal {
+  /**
+   * No refusal.
+   *
+   * @generated from enum value: QUERY_REFUSAL_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * The cursor's snapshot is gone (compaction, restart): start again from the first page.
+   *
+   * @generated from enum value: QUERY_REFUSAL_CURSOR_STALE = 1;
+   */
+  CURSOR_STALE = 1,
+
+  /**
+   * The cursor is not the owner's, or belongs to another filter or sort.
+   *
+   * @generated from enum value: QUERY_REFUSAL_CURSOR_INVALID = 2;
+   */
+  CURSOR_INVALID = 2,
+
+  /**
+   * The limit is above the owner's cap.
+   *
+   * @generated from enum value: QUERY_REFUSAL_LIMIT_EXCEEDED = 3;
+   */
+  LIMIT_EXCEEDED = 3,
+
+  /**
+   * A filter value the owner does not accept (unknown state, venue or kind, a reversed period).
+   *
+   * @generated from enum value: QUERY_REFUSAL_INVALID_FILTER = 4;
+   */
+  INVALID_FILTER = 4,
+}
+
+/**
+ * Describes the enum darkbot.bsc.v1.QueryRefusal.
+ */
+export const QueryRefusalSchema: GenEnum<QueryRefusal> = /*@__PURE__*/
+  enumDesc(file_darkbot_bsc_v1_query, 0);

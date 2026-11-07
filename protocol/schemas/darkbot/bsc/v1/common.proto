@@ -144,6 +144,8 @@ message PerformanceSeries {
   // The value before the first point (the period's opening balance or PnL), decimal wei;
   // absent when the basis is unknown.
   optional string opening_wei = 8;
+  // The owner thinned the points to its cap (max_points or its own): the shape, not every fact.
+  bool truncated = 9;
 }
 
 // A bounded read of one performance series.
@@ -158,6 +160,7 @@ message PerformanceSeriesQuery {
   optional uint64 from_unix_ms = 4;
   // End of the period, unix ms; absent: now.
   optional uint64 to_unix_ms = 5;
-  // At most this many points; the owner caps it and says so in the series.
+  // At most this many points; 0: the owner's default; the owner thins to its cap and says so
+  // (PerformanceSeries.truncated).
   uint32 max_points = 6;
 }

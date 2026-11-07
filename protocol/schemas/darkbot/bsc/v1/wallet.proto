@@ -2,6 +2,7 @@ syntax = "proto3";
 package darkbot.bsc.v1;
 
 import "darkbot/bsc/v1/common.proto";
+import "darkbot/bsc/v1/status.proto";
 
 // V8 Wallets: accounts, the four money paths and the two independent automatic policies
 // (BSC-V8-13…17, FE-V8-13…16, Bindings §14.1/§14.4 M5, BSC PHASENPLAN §C/C.1, operator decision
@@ -25,14 +26,60 @@ import "darkbot/bsc/v1/common.proto";
 // (`bsc.wallet.set`) stay permissions, never transfers; Project_0's treasury is never the authority.
 //
 // Prepared actions (POST /api/v1/command; NOT registered until the native owner implements them):
-//   bsc.wallet.destination.set     WalletDestinationSetCommand     expected wallet_policy_version = treasury_version
-//   bsc.wallet.fund_trading        WalletFundTradingCommand        expected wallet_policy_version = treasury_version
-//   bsc.wallet.payout              WalletPayoutCommand             expected wallet_policy_version = treasury_version
-//   bsc.wallet.profit_policy.set   ProfitTransferPolicySetCommand  expected wallet_policy_version = policy A's version
-//   bsc.wallet.payout_policy.set   MainPayoutPolicySetCommand      expected wallet_policy_version = policy B's version
-// CommandRequest.resource_id is the destination id for a payout and a destination removal and
-// empty otherwise (the Buyer target of a funding is the owner's, never chosen by the browser). A
-// policy never stored has version 0: its first set expects 0.
+//   bsc.wallet.destination.set      WalletDestinationSetCommand      expected wallet_policy_version = treasury_version
+//   bsc.wallet.destination.confirm  WalletDestinationConfirmCommand  expected wallet_policy_version = treasury_version
+//   bsc.wallet.transfer.prepare     WalletTransferPrepareCommand     expected wallet_policy_version = treasury_version
+//   bsc.wallet.transfer.authorize   WalletTransferAuthorizeCommand   expected wallet_policy_version = treasury_version
+//   bsc.wallet.profit_policy.set    ProfitTransferPolicySetCommand   expected wallet_policy_version = policy A's version
+//   bsc.wallet.payout_policy.set    MainPayoutPolicySetCommand       expected wallet_policy_version = policy B's version
+// CommandRequest.resource_id: the destination id for a destination removal and a confirmation,
+// the DRAFT's command_id for an authorization, empty otherwise (the Buyer target of a funding is the
+// owner's, never chosen by the browser). A policy never stored has version 0: its first set expects 0.
+//
+// A manual transfer (paths 1 and 3) takes two requests, never one: prepare makes a native DRAFT
+// (nonce, fee estimate, reserve after it, expiry and its canonical scope text with scope_sha256);
+// authorize names that DRAFT and echoes its scope_sha256. The owner sends nothing without both, and
+// nothing after the DRAFT's expiry. A DRAFT reserves its sending wallet's next nonce: while one is
+// open, the owner prepares no other transfer from that wallet and that wallet's automatic transfers
+// wait; an EXPIRED DRAFT releases its nonce unused. A restart expires every unsent DRAFT (a DRAFT is
+// never authorized across a restart). An automatic policy (paths 2 and 4) acts only within its
+// authorization: the canonical scope text of the policy and its WalletAuthorizationScope (expiry,
+// per-transfer and total maximum within the owner's configured WalletAuthorizationBounds), whose
+// scope_sha256 the owner recomputes and refuses on a mismatch. An authorization ends at its expiry,
+// at its total and at every runtime restart (block_reason EXPIRED, TOTAL_USED, RESET_BY_RESTART);
+// disabling a policy needs none. An authorization bounds the amounts moved, fees excluded (a fee is
+// bounded by the owner's fee rule): a computed transfer above max_per_transfer_wei is capped to it,
+// one above what remains of max_total_wei to the remainder, and nothing moves once nothing remains
+// (TOTAL_USED). The canonical scope texts, byte for byte (UTF-8): a first line with the text's name,
+// then one `key=value\n` per line in the order below, the last line ending in `\n` too. Addresses
+// lowercase 0x hex; destination_id as the owner gave it; integers (wei, ms, chain id, nonce, bps)
+// decimal without sign or leading zero; EUR decimal with `.`, no leading zero and no trailing
+// fraction zero (1000, 10.5, 0.01), and the command carries it in that same form; booleans `true` or `false`; unit `BNB` or `EUR` followed by
+// exactly the one threshold line of that unit; amount `fixed_wei:<wei>`, `fixed_eur:<eur>` or
+// `share_bps:<bps>`. Golden vectors: protocol/golden/bsc/v8/scope_*.txt. Lines:
+//   darkbot.bsc.wallet-transfer.v1: kind (CAPITAL_FUNDING|PAYOUT_MANUAL), chain_id, from, to,
+//     amount_wei, max_fee_wei, nonce, expires_unix_ms
+//   darkbot.bsc.wallet-profit-policy.v1: chain_id, from (Buyer), to (Main), enabled,
+//     threshold_realized_net_profit_wei, amount (fixed_wei:N|share_bps:N), buyer_min_capital_wei,
+//     buyer_reserve_wei, max_per_transfer_wei, max_total_wei, expires_unix_ms
+//   darkbot.bsc.wallet-payout-policy.v1: chain_id, from (Main), to (the destination's address),
+//     destination_id, enabled, unit (BNB|EUR), threshold_available_main_wei or threshold_eur,
+//     amount (fixed_wei:N|fixed_eur:D|share_bps:N), retain_wei, max_per_transfer_wei,
+//     max_total_wei, expires_unix_ms
+//
+// Idempotency: the native treasury owner keeps every decided receipt durably and forever
+// (receipts/<request_id>) and admits a transfer's intent durably before any byte of it leaves; the
+// gateway's idempotency window is time-bounded and never the authority for a money request.
+//
+// Destinations: a saved destination is UNCONFIRMED until its own confirmation request
+// (bsc.wallet.destination.confirm, address echo); only a confirmed destination receives. A
+// destination's chain must be Main's (refused otherwise). A saved destination is never changed in
+// place (another address is another destination); one policy B pays to cannot be removed (refused
+// DESTINATION_IN_USE) until policy B names another or is disabled.
+//
+// treasury_version increases with every change of an account, a destination or a transfer of any
+// path (a prepare, an authorization, an expiry, an automatic transfer's intent, a receipt); a policy
+// change increases only that policy's own version.
 
 // A wallet's role.
 enum WalletRole {
@@ -71,6 +118,15 @@ enum WalletMovementKind {
   WALLET_MOVEMENT_KIND_FEE = 8;
   // BNB that left the wallet by a transaction no DarkBot owner made.
   WALLET_MOVEMENT_KIND_EXTERNAL_OUT = 9;
+  // A balance change the owner cannot attribute to one transaction (internal value transfers are
+  // not visible without getLogs/traces, which are not free): never counted as a deposit or payout.
+  WALLET_MOVEMENT_KIND_UNATTRIBUTED = 10;
+  // Buyer → Main capital taken back (capital, never profit).
+  WALLET_MOVEMENT_KIND_CAPITAL_RETURN = 11;
+  // A G0.7 launcher's launch (its input and gas).
+  WALLET_MOVEMENT_KIND_LAUNCH = 12;
+  // A nonce burn (a transfer of nothing to itself): gas only.
+  WALLET_MOVEMENT_KIND_NONCE_BURN = 13;
 }
 
 // What the chain made of a wallet transaction.
@@ -163,6 +219,9 @@ message WalletBalanceSnapshot {
 
 // One DarkBot account with its economics, as the native owner separates them.
 message WalletAccount {
+  // 13 was state (a string); the account's switch is control (15).
+  reserved 13;
+  reserved "state";
   // The account.
   WalletRole role = 1;
   // Its address, 0x hex; empty while the owner has none configured.
@@ -177,7 +236,8 @@ message WalletAccount {
   optional string realized_net_pnl_wei = 6;
   // BUYER: realized net profit already transferred to Main, decimal wei.
   optional string transferred_profit_wei = 7;
-  // BUYER: realized net profit not yet transferred (never below zero), decimal wei.
+  // BUYER: realized net profit not yet transferred, policy A's net_since_last_settlement_wei when
+  // positive, else 0, decimal wei.
   optional string untransferred_profit_wei = 8;
   // MAIN: profit received from the Buyer (policy A), decimal wei.
   optional string profit_received_wei = 9;
@@ -187,10 +247,12 @@ message WalletAccount {
   optional uint64 next_nonce = 11;
   // Whether the native owner holds this account's key (never for EXTERNAL).
   bool owner_key = 12;
-  // NOT_CONFIGURED, READY, LOCKED (a wallet or economic switch off) or UNKNOWN, with the owner's reason.
-  string state = 13;
-  // Why it is not READY.
+  // Why the owner cannot use the account apart from its switch (NOT_CONFIGURED, KEY_MISSING,
+  // UNREADABLE); empty when usable.
   string reason = 14;
+  // The account's native wallet switch (BSC_WALLET_MAIN, BSC_WALLET_BUYER, BSC_WALLET_LAUNCHER);
+  // absent for EXTERNAL.
+  ControlSwitch control = 15;
 }
 
 // A bounded, cursor-paged, read-only query of wallet movements.
@@ -205,12 +267,15 @@ message WalletHistoryQuery {
   optional uint64 to_unix_ms = 4;
   // The previous page's next_cursor; empty: the first page.
   string cursor = 5;
-  // At most this many movements; the owner caps it.
+  // At most this many movements; 0: the owner's default; above its cap: refused (LIMIT_EXCEEDED).
   uint32 limit = 6;
 }
 
 // One page of wallet movements, newest first, bound to one owner snapshot.
 message WalletHistoryPage {
+  // 7 and 8 were always-present sums; a sum is unproven while a movement is UNATTRIBUTED (9, 10).
+  reserved 7, 8;
+  reserved "deposited_wei", "paid_out_wei";
   // Whether the native owner answered.
   Availability availability = 1;
   // Why it is not AVAILABLE.
@@ -223,19 +288,23 @@ message WalletHistoryPage {
   string next_cursor = 5;
   // Whether another page follows.
   bool has_more = 6;
-  // External deposits of the whole filtered result, decimal wei.
-  string deposited_wei = 7;
-  // Payouts to external addresses of the whole filtered result, decimal wei (a positive amount).
-  string paid_out_wei = 8;
+  // External deposits of the whole filtered result, decimal wei; absent while an UNATTRIBUTED
+  // movement makes the sum unproven.
+  optional string deposited_total_wei = 9;
+  // Payouts to external addresses of the whole filtered result, decimal wei (a positive amount);
+  // absent while an UNATTRIBUTED movement makes the sum unproven.
+  optional string paid_out_total_wei = 10;
 }
 
 // The lifecycle of a transfer, from native evidence only.
 enum TransferStatus {
   // Not set by any producer; never displayed as a value.
   TRANSFER_STATUS_UNSPECIFIED = 0;
-  // Saved by the owner, not authorized for sending.
+  // Prepared by the owner (bsc.wallet.transfer.prepare): its scope fixed, nothing sent before its
+  // authorization; one open DRAFT per path.
   TRANSFER_STATUS_DRAFT = 1;
-  // Authorized and admitted; not released yet.
+  // Authorized (bsc.wallet.transfer.authorize, or a policy within its authorization) and admitted;
+  // not released yet.
   TRANSFER_STATUS_PENDING = 2;
   // Its bytes were handed to the network.
   TRANSFER_STATUS_SENT = 3;
@@ -245,6 +314,8 @@ enum TransferStatus {
   TRANSFER_STATUS_FAILED = 5;
   // Its handoff did not complete; the chain decides, never sent again automatically.
   TRANSFER_STATUS_UNKNOWN = 6;
+  // A DRAFT not authorized before its expiry: never sent.
+  TRANSFER_STATUS_EXPIRED = 7;
 }
 
 // A saved, confirmed external destination (e.g. a MetaMask wallet's BSC address).
@@ -257,28 +328,39 @@ message WalletDestination {
   string address = 3;
   // Chain identity.
   uint64 chain_id = 4;
-  // Whether the operator confirmed it (only confirmed destinations receive).
+  // Whether the operator confirmed it (bsc.wallet.destination.confirm; only confirmed ones receive).
   bool confirmed = 5;
   // When it was saved, unix ms.
   uint64 created_unix_ms = 6;
+  // Policy B pays to it: it cannot be changed or removed.
+  bool in_use = 7;
 }
 
-// Params of `bsc.wallet.destination.set` (prepared).
+// Params of `bsc.wallet.destination.set` (prepared): saves an UNCONFIRMED destination, or removes one.
 message WalletDestinationSetCommand {
+  // 5 was confirmed; the confirmation is its own request (WalletDestinationConfirmCommand).
+  reserved 5;
+  reserved "confirmed";
   // The operator's label.
   string label = 1;
   // The address, 0x hex.
   string address = 2;
-  // Chain identity.
+  // Chain identity (must be Main's).
   uint64 chain_id = 3;
   // Remove the destination instead (its id in CommandRequest.resource_id).
   bool remove = 4;
-  // The operator confirmed this exact address and chain (required to save; only a confirmed
-  // destination receives).
-  bool confirmed = 5;
 }
 
-// Params of `bsc.wallet.fund_trading` (prepared, path 1): Main → the fixed Buyer address; capital.
+// Params of `bsc.wallet.destination.confirm` (prepared): the operator checked this saved address.
+message WalletDestinationConfirmCommand {
+  // The saved destination (equal to CommandRequest.resource_id).
+  string destination_id = 1;
+  // Its address as the operator checked it, 0x hex (must equal the saved one).
+  string address = 2;
+}
+
+// Path 1 of `bsc.wallet.transfer.prepare` (never an action of its own): Main → the fixed Buyer
+// address; capital.
 message WalletFundTradingCommand {
   // The amount, decimal wei.
   string amount_wei = 1;
@@ -286,9 +368,12 @@ message WalletFundTradingCommand {
   string max_fee_wei = 2;
   // Chain identity (the owner refuses another).
   uint64 chain_id = 3;
+  // The Buyer address the operator was shown, 0x hex (must equal the owner's Buyer).
+  string buyer_address = 4;
 }
 
-// Params of `bsc.wallet.payout` (prepared, path 3): Main → a saved, confirmed external destination.
+// Path 3 of `bsc.wallet.transfer.prepare` (never an action of its own): Main → a saved, confirmed
+// external destination.
 message WalletPayoutCommand {
   // The saved destination.
   string destination_id = 1;
@@ -302,12 +387,33 @@ message WalletPayoutCommand {
   string max_fee_wei = 5;
 }
 
+// Params of `bsc.wallet.transfer.prepare` (prepared): a manual transfer as a native DRAFT.
+message WalletTransferPrepareCommand {
+  // The path.
+  oneof transfer {
+    // Path 1: Main → Buyer capital funding.
+    WalletFundTradingCommand fund_trading = 1;
+    // Path 3: Main → a confirmed external destination.
+    WalletPayoutCommand payout = 2;
+  }
+}
+
+// Params of `bsc.wallet.transfer.authorize` (prepared): CommandRequest.resource_id names the DRAFT.
+message WalletTransferAuthorizeCommand {
+  // The DRAFT's scope_sha256 the operator was shown (must equal the owner's).
+  string scope_sha256 = 1;
+}
+
 // A transfer as its native owner holds it (any of the four paths).
 message WalletTransferState {
+  // 10 was fee_wei and 18 block_number: the estimate is fee_estimate_wei (21), the paid fee and the
+  // block are the chain receipt's (receipt, 20).
+  reserved 10, 18;
+  reserved "fee_wei", "block_number";
   // The request that created it: the operator's CommandRequest.request_id, or for an automatic
   // transfer the owner's own request for its trigger (never a policy's request_id).
   string request_id = 1;
-  // The owner's durable intent.
+  // The owner's durable intent; a DRAFT's identity (the resource_id of its authorization).
   string command_id = 2;
   // The path.
   WalletMovementKind kind = 3;
@@ -323,9 +429,7 @@ message WalletTransferState {
   uint64 chain_id = 8;
   // The amount, decimal wei.
   string amount_wei = 9;
-  // The fee: estimated while pending, the receipt's once included, decimal wei.
-  optional string fee_wei = 10;
-  // The nonce it uses; absent before the owner assigned one.
+  // The nonce it uses (fixed in the DRAFT); absent before the owner assigned one.
   optional uint64 nonce = 11;
   // Its transaction hash, 0x hex; empty before signing.
   string tx_hash = 12;
@@ -339,12 +443,26 @@ message WalletTransferState {
   uint64 updated_unix_ms = 16;
   // The policy version that caused it; absent for a manual transfer.
   optional uint64 policy_version = 17;
-  // The including block; absent while not included.
-  optional uint64 block_number = 18;
   // An automatic transfer's economic trigger (policy A: the settlement id of the closed, chain-
   // confirmed lots it settles; policy B: the qualified balance event): at most one intent per
   // trigger. Empty for a manual transfer.
   string trigger_id = 19;
+  // The chain receipt (fee paid, block); absent before inclusion.
+  WalletTransferReceipt receipt = 20;
+  // The owner's fee estimate, decimal wei; absent when unknown.
+  optional string fee_estimate_wei = 21;
+  // What stays on the sending wallet after it (amount and fee estimate), decimal wei.
+  optional string reserve_after_wei = 22;
+  // The canonical scope text (manual: darkbot.bsc.wallet-transfer.v1; automatic: its policy's).
+  string scope_text = 23;
+  // SHA-256 of scope_text, lowercase hex.
+  string scope_sha256 = 24;
+  // A DRAFT's expiry, unix ms: after it the owner never sends it (EXPIRED).
+  optional uint64 expires_unix_ms = 25;
+  // The last block at which the owner still releases it; absent when unbounded.
+  optional uint64 max_block = 26;
+  // The request that authorized it; empty while a DRAFT and for an automatic transfer.
+  string authorize_request_id = 27;
 }
 
 // The chain receipt of a transfer.
@@ -384,21 +502,67 @@ message PolicyAmount {
   oneof amount {
     // A fixed amount, decimal wei (POLICY_UNIT_BNB).
     string fixed_wei = 1;
-    // A fixed EUR equivalent, decimal (POLICY_UNIT_EUR).
+    // A fixed EUR equivalent, decimal (policy B with POLICY_UNIT_EUR only, refused without a
+    // qualified quote; policy A refuses it).
     string fixed_eur = 2;
-    // A share of the eligible amount, basis points (1…10000).
+    // A share of the eligible amount, basis points (1…10000): policy A of net_since_last_settlement_wei,
+    // policy B of the free Main balance above retain_wei.
     uint32 share_bps = 3;
   }
+}
+
+// The authorization scope of an automatic policy as the operator sets it.
+message WalletAuthorizationScope {
+  // Its expiry, unix ms (within WalletAuthorizationBounds.max_validity_ms).
+  uint64 expires_unix_ms = 1;
+  // The most one transfer may move, decimal wei.
+  string max_per_transfer_wei = 2;
+  // The most all its transfers together may move, decimal wei.
+  string max_total_wei = 3;
+  // SHA-256 of the policy's canonical scope text the operator was shown, lowercase hex.
+  string scope_sha256 = 4;
+}
+
+// An automatic policy's authorization as the native owner holds it.
+message WalletAuthorization {
+  // The canonical scope text.
+  string scope_text = 1;
+  // Its SHA-256, lowercase hex.
+  string scope_sha256 = 2;
+  // Its expiry, unix ms.
+  uint64 expires_unix_ms = 3;
+  // The most one transfer may move, decimal wei.
+  string max_per_transfer_wei = 4;
+  // The most all its transfers together may move, decimal wei.
+  string max_total_wei = 5;
+  // What its transfers moved so far, decimal wei.
+  string used_total_wei = 6;
+  // The request that wrote it.
+  string request_id = 7;
+  // Why it admits nothing (EXPIRED, TOTAL_USED, RESET_BY_RESTART); empty while it holds.
+  string block_reason = 8;
+}
+
+// The owner's configured bounds of every wallet authorization (never a client literal).
+message WalletAuthorizationBounds {
+  // The most one transfer may move, decimal wei.
+  string max_per_transfer_wei = 1;
+  // The most an authorization's transfers may move together, decimal wei.
+  string max_total_wei = 2;
+  // The longest an authorization may hold, ms.
+  uint64 max_validity_ms = 3;
+  // How long a DRAFT may wait for its authorization, ms.
+  uint64 draft_validity_ms = 4;
 }
 
 // Policy A (path 2): Buyer → Main automatic profit transfer, on REALIZED NET trading profit.
 message ProfitTransferPolicy {
   // Whether it is enabled (default off).
   bool enabled = 1;
-  // The realized net profit (after losses, gas and fees, since the last transfer) above which it
-  // transfers, decimal wei.
+  // The realized net profit since the last settlement (net_since_last_settlement_wei: after losses,
+  // gas and fees, a loss carried over) above which it transfers, decimal wei.
   string threshold_realized_net_profit_wei = 2;
-  // How much of the untransferred profit it moves.
+  // How much of net_since_last_settlement_wei it moves (fixed BNB or a share; never fixed EUR).
   PolicyAmount amount = 3;
   // The trading capital that always stays on the Buyer, decimal wei.
   string buyer_min_capital_wei = 4;
@@ -412,14 +576,24 @@ message ProfitTransferPolicy {
   string request_id = 8;
   // The last transfer it caused; absent before any.
   WalletTransferState last_transfer = 9;
-  // Realized net profit not yet transferred, as the owner computes it now, decimal wei.
+  // net_since_last_settlement_wei when positive, else 0, as the owner computes it now, decimal wei.
   optional string untransferred_profit_wei = 10;
   // What is still missing to the threshold, decimal wei (0: the next settled profit triggers).
   optional string to_threshold_wei = 11;
   // The version in effect at the owner (a stored version applies once the owner took it).
   optional uint64 effective_version = 12;
-  // The owner's reason it does not act (DISABLED, NO_AUTHORIZATION, ECONOMIC_LIVE_DISABLED, …).
+  // The owner's reason it does not act (DISABLED, NO_AUTHORIZATION, AUTHORIZATION_EXPIRED,
+  // RESET_BY_RESTART, ECONOMIC_LIVE_DISABLED, …).
   string block_reason = 13;
+  // Its authorization; absent without one (then it acts never).
+  WalletAuthorization authorization = 14;
+  // Realized net PnL of the lots settled since the last settlement, signed decimal wei (a loss
+  // carries over); absent while unresolved.
+  optional string net_since_last_settlement_wei = 15;
+  // The ledger version the settlement cursor is at.
+  optional uint64 settled_ledger_version = 16;
+  // Blocks a lot's SELL must be deep before its profit counts.
+  optional uint64 finality_depth = 17;
 }
 
 // Params of `bsc.wallet.profit_policy.set` (prepared).
@@ -434,6 +608,8 @@ message ProfitTransferPolicySetCommand {
   string buyer_min_capital_wei = 4;
   // The exit and gas reserve that stays on the Buyer, decimal wei.
   string buyer_reserve_wei = 5;
+  // The authorization of an enable; absent for a disable.
+  WalletAuthorizationScope authorization = 6;
 }
 
 // Policy B (path 4): Main → external automatic payout, on the FREE Main balance.
@@ -467,8 +643,10 @@ message MainPayoutPolicy {
   optional string available_main_wei = 13;
   // The version in effect at the owner.
   optional uint64 effective_version = 14;
-  // The owner's reason it does not act.
+  // The owner's reason it does not act (as policy A's).
   string block_reason = 15;
+  // Its authorization; absent without one (then it acts never).
+  WalletAuthorization authorization = 16;
 }
 
 // Params of `bsc.wallet.payout_policy.set` (prepared).
@@ -489,6 +667,8 @@ message MainPayoutPolicySetCommand {
   string retain_wei = 7;
   // The destination's address as the operator confirmed it, 0x hex (must equal the saved one).
   string destination_address = 8;
+  // The authorization of an enable; absent for a disable.
+  WalletAuthorizationScope authorization = 9;
 }
 
 // A native fiat quote of BNB, the only basis of an EUR setting.
@@ -523,7 +703,7 @@ message WalletTreasuryState {
   ProfitTransferPolicy profit_policy = 6;
   // Policy B (Main → external payout); absent before it was ever set.
   MainPayoutPolicy payout_policy = 7;
-  // Pending and recent transfers of every path, newest first (bounded; the history has all).
+  // DRAFT, pending and recent transfers of every path, newest first (bounded; the history has all).
   repeated WalletTransferState transfers = 8;
   // The treasury version: the compare-and-swap of a destination change, a funding or a payout.
   uint64 treasury_version = 9;
@@ -532,6 +712,11 @@ message WalletTreasuryState {
   // The owner's current fee estimate of one plain BNB transfer (gas limit × gas price), decimal
   // wei; absent when unknown (then no manual transfer is offered).
   optional string transfer_fee_estimate_wei = 11;
+  // The configured bounds of every authorization; absent while unreadable (then none is offered).
+  WalletAuthorizationBounds authorization_bounds = 12;
+  // The wallet requests the owner decided most recently (any wallet action), newest first, bounded:
+  // a request whose handoff was unknown is decided once it appears here.
+  repeated string decided_request_ids = 13;
 }
 
 // A read of the treasury state.

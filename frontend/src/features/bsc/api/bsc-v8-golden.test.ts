@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readdirSync, readFileSync } from "node:fs";
 import { classify } from "@/core/realtime/bscQuery";
-import { Availability, DataQuality, ExitReason, TimeSource, TradePlacement, TradeStatus, TransferStatus, TrainingRunStopKind, PolicyUnit, WalletRole, V8_CONTRACTS, decodeV8, encodeV8, type V8ContractName } from "./bscV8Adapter";
+import { Availability, DataQuality, ExitReason, QueryRefusal, ReplayVerdict, TimeSource, TradePlacement, TradeStatus, TransferStatus, TrainingRunStatus, TrainingRunStopKind, PolicyUnit, WalletRole, V8_CONTRACTS, decodeV8, encodeV8, type V8ContractName } from "./bscV8Adapter";
 
 // BSC-V8-09 / FE-V8-17: the prepared V8 contracts, Rust↔TS. gateway/tests/bsc_v8_goldens.rs
 // encodes the bytes with prost; here protobuf-es decodes them, the values survive exactly (u64
@@ -47,7 +47,26 @@ describe("prepared BSC V8 contracts (Rust golden bytes)", () => {
     expect(open.roiPpm).toBeUndefined();
     expect(open.sellTime?.unixMs).toBeUndefined();
     expect(open.quality).toBe(DataQuality.UNRESOLVED);
+    expect(open.qualityReasons).toEqual(["GAS_UPPER_BOUND", "CLOCK_SUSPECT"]);
     expect(page.result.value.counts?.writtenOff).toBe(U64_MAX);
+    // The row names the trigger (LiveAttempt.trigger), fees absent with their reason, an adopted lot its evidence.
+    expect(closed.triggerSource).toBe("BSC_INGRESS_GETH");
+    expect(closed.feesWei).toBeUndefined();
+    expect(closed.feesReason).toBe("FEES_NOT_ATTRIBUTED");
+    expect([open.adopted, open.evidenceSha256]).toEqual([true, "ee".repeat(32)]);
+    expect(page.result.value.realizedNetPnlWei).toBe(`-${U256_MAX}`);
+    expect(page.result.value.burnGasWei).toBeUndefined();
+  });
+
+  it("embeds the ledger's own transaction and attempt records in the trade detail", () => {
+    const d = decodeV8("trade_detail", golden("trade_detail"));
+    const tx = d.transactions[0];
+    expect(tx?.tx).toMatchObject({ intent: "BUY", state: "INCLUDED", nonce: U64_MAX, blockNumber: 0n, source: "RECEIPT" });
+    expect(tx?.orphaned).toBe(true);
+    expect(d.attempt).toMatchObject({ kind: "STRATEGY_BUY", clockId: U64_MAX, tSendNs: U64_MAX, tokens: U256_MAX, t0Exact: false });
+    expect(d.attempt?.tAckNs).toBeUndefined();
+    expect(d.exitTerms).toMatchObject({ ratioPlaces: 18, targetNetMultiple: "1.50", stopNetMultiple: "0.80", holdMs: U64_MAX });
+    expect(d.settingsGeneration).toBe(U64_MAX);
   });
 
   it("keeps the 15 filters with their bounds and the read-only first-buyer window", () => {
@@ -62,15 +81,25 @@ describe("prepared BSC V8 contracts (Rust golden bytes)", () => {
     expect(s.stored?.fillDelayBlocks).toBeUndefined();
     expect(s.running).toBeUndefined();
     expect(s.storedRevision).toBe(U64_MAX);
+    // The effective values (read-only ones included) and the native parser bounds.
+    expect(s.effective?.fillDelayBlocks).toBe(0);
+    expect(s.settingSpecs.map(x => [x.key, x.min, x.max])).toEqual([["BSC_STRATEGY_C_INPUT_WEI", "1", U256_MAX], ["BSC_STRATEGY_C_FIRST_BUYER_WINDOW", "1", undefined]]);
+    // A command carries the settable values only (no ratio places, fill delay or gas price).
+    const all = decodeV8("strategy_set_all_command", golden("strategy_set_all_command"));
+    expect(all.values?.firstBuyerWindow).toBe(100);
+    expect(Object.keys(all.values ?? {})).not.toContain("ratioPlaces");
+    expect(decodeV8("live_strategy_select_command", golden("live_strategy_select_command")).expectedSettingsGeneration).toBe(U64_MAX);
   });
 
   it("keeps an unknown transfer unknown and an absent fee absent", () => {
     const t = decodeV8("treasury_state", golden("treasury_state"));
     expect(t.profitPolicy?.lastTransfer?.status).toBe(TransferStatus.UNKNOWN);
-    expect(t.profitPolicy?.lastTransfer?.feeWei).toBeUndefined();
+    expect(t.profitPolicy?.lastTransfer?.receipt).toBeUndefined();
+    expect(t.profitPolicy?.lastTransfer?.feeEstimateWei).toBe("21000000000000");
     expect(t.profitPolicy?.lastTransfer?.triggerId).toBe("settle-7");
     expect(t.payoutPolicy?.lastPayout?.status).toBe(TransferStatus.CONFIRMED);
-    expect(t.payoutPolicy?.lastPayout?.feeWei).toBe("0");
+    expect(t.payoutPolicy?.lastPayout?.receipt).toMatchObject({ feeWei: "0", blockNumber: U64_MAX, gasUsed: 21000n });
+    expect(t.payoutPolicy?.lastPayout?.maxBlock).toBe(U64_MAX);
     expect(t.accounts[0]?.balance?.reservedWei).toBeUndefined();
     expect(t.accounts[0]?.balance?.availableWei).toBe("0");
     expect(t.provenance?.quality).toBe(DataQuality.STALE);
@@ -94,12 +123,27 @@ describe("prepared BSC V8 contracts (Rust golden bytes)", () => {
     expect(t.eurQuote?.observed?.blockNumber).toBeUndefined();
     expect(t.transferFeeEstimateWei).toBe("21000000000000");
     expect(t.treasuryVersion).toBe(U64_MAX);
+    // The accounts' switches, the authorizations and the owner's bounds.
+    expect(t.accounts.map(a => [a.control?.id, a.control?.effective, a.reason])).toEqual([["BSC_WALLET_MAIN", "ENABLED", ""], ["BSC_WALLET_BUYER", "BLOCKED", ""], [undefined, undefined, "NOT_CONFIGURED"]]);
+    expect(t.profitPolicy?.authorization).toMatchObject({ expiresUnixMs: U64_MAX, usedTotalWei: "0", blockReason: "" });
+    expect(t.profitPolicy?.netSinceLastSettlementWei).toBe(`-${U256_MAX}`);
+    expect(t.payoutPolicy?.authorization?.blockReason).toBe("RESET_BY_RESTART");
+    expect(t.authorizationBounds).toMatchObject({ maxPerTransferWei: "1000000000000000000", maxValidityMs: 604800000n });
+    expect(t.destinations.map(d => [d.destinationId, d.confirmed, d.inUse])).toEqual([["d1", true, false], ["d2", false, false]]);
     const eur = decodeV8("payout_policy_set_command", golden("payout_policy_set_command"));
     expect(eur.unit).toBe(PolicyUnit.EUR);
-    expect(eur.thresholdEur).toBe("1000.00");
+    expect(eur.thresholdEur).toBe("1000.5");
     expect(eur.amount?.amount).toEqual({ case: "fixedEur", value: "0.01" });
-    const fund = decodeV8("fund_trading_command", golden("fund_trading_command"));
-    expect(fund.amountWei).toBe(U256_MAX);
+    expect(eur.authorization?.maxTotalWei).toBe("5000000000000000000");
+    expect(t.decidedRequestIds).toEqual(["pol-b-1", "auth-1"]);
+    expect(decodeV8("profit_policy_set_command", golden("profit_policy_set_command")).authorization).toMatchObject({ maxPerTransferWei: "1", maxTotalWei: U256_MAX, scopeSha256: expect.stringMatching(/^[0-9a-f]{64}$/) });
+    // A manual transfer: a prepare per path, then an authorization of the DRAFT's digest.
+    const fund = decodeV8("transfer_prepare_fund_command", golden("transfer_prepare_fund_command"));
+    expect(fund.transfer.case).toBe("fundTrading");
+    expect(fund.transfer.value).toMatchObject({ amountWei: U256_MAX, buyerAddress: `0x${"61".repeat(20)}` });
+    expect(decodeV8("transfer_prepare_payout_command", golden("transfer_prepare_payout_command")).transfer.case).toBe("payout");
+    expect(decodeV8("transfer_authorize_command", golden("transfer_authorize_command")).scopeSha256).toBe(decodeV8("transfer_draft", golden("transfer_draft")).scopeSha256);
+    expect(decodeV8("destination_confirm_command", golden("destination_confirm_command"))).toMatchObject({ destinationId: "d2", address: `0x${"93".repeat(20)}` });
   });
 
   it("keeps the run plans and an unresolved net result absent", () => {
@@ -108,6 +152,12 @@ describe("prepared BSC V8 contracts (Rust golden bytes)", () => {
     expect(p.runs[0]?.result?.netWei).toBeUndefined();
     expect(p.runs[1]?.result?.netWei).toBe("-1");
     expect(p.runs[1]?.plan?.maxLaunches).toBe(0n);
+    expect(p.runs[1]?.status).toBe(TrainingRunStatus.INTERRUPTED);
+    expect([p.runs[1]?.replaySource, p.runs[1]?.result?.replayVerdict, p.runs[1]?.result?.configMatch]).toEqual(["rec-run-1", ReplayVerdict.DIFFERS, false]);
+    expect(p.runs[0]?.result?.configMatch).toBeUndefined();
+    expect(p.runs[0]?.result?.cancelled).toBe(U64_MAX);
+    const r = decodeV8("replay_source_page", golden("replay_source_page"));
+    expect(r.sources.map(x => [x.sourceId, x.kind, x.records])).toEqual([["rec-run-1", "RECORDED_RUN", U64_MAX]]);
   });
 
   it("reads NOT_IMPLEMENTED as such", () => {
@@ -127,6 +177,9 @@ describe("bounded BSC query transport (no route yet)", () => {
   });
   it("passes the owner's NOT_IMPLEMENTED and its result through", () => {
     expect(classify(200, pb, golden("query_not_implemented"))).toEqual({ kind: "NOT_IMPLEMENTED", reason: "BSC-V8-10" });
+    // A refusal is never a page: its reason, no result.
+    expect(decodeV8("query_refused", golden("query_refused")).refusal).toBe(QueryRefusal.CURSOR_STALE);
+    expect(classify(200, pb, golden("query_refused"))).toEqual({ kind: "UNAVAILABLE", reason: "QUERY_REFUSED CURSOR_STALE (SNAPSHOT_COMPACTED)" });
     const answer = classify(200, pb, golden("trade_page"));
     expect(answer.kind).toBe("ANSWER");
     if (answer.kind === "ANSWER") expect(answer.result.case).toBe("trades");

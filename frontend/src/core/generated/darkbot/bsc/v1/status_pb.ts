@@ -719,7 +719,7 @@ export const BscStatusSchema: GenMessage<BscStatus> = /*@__PURE__*/
  */
 export type ControlSwitch = Message<"darkbot.bsc.v1.ControlSwitch"> & {
   /**
-   * Native ID: BSC_WALLET_LAUNCHER, BSC_WALLET_BUYER, BSC_ECON_SIGN, BSC_ECON_ARM,
+   * Native ID: BSC_WALLET_LAUNCHER, BSC_WALLET_BUYER, BSC_WALLET_MAIN, BSC_ECON_SIGN, BSC_ECON_ARM,
    * BSC_ECON_SEND, BSC_ECON_ATTEMPT or BSC_ECON_LIVE.
    *
    * @generated from field: string id = 1;
@@ -1503,7 +1503,8 @@ export type LiveTransaction = Message<"darkbot.bsc.v1.LiveTransaction"> & {
   nonce: bigint;
 
   /**
-   * RELEASED, UNKNOWN, INCLUDED, REVERTED or REPLACED.
+   * RELEASED, UNKNOWN, WITHDRAWN (admitted, no byte left: never on chain), INCLUDED, REVERTED or
+   * REPLACED.
    *
    * @generated from field: string state = 5;
    */

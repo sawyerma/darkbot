@@ -5,7 +5,11 @@ import { BscLiveStateSchema, BscMonitoringStateSchema } from "../src/core/genera
 import { BscQueryResponseSchema } from "../src/core/generated/darkbot/bsc/v1/query_pb";
 import { Availability } from "../src/core/generated/darkbot/bsc/v1/common_pb";
 import { BscQueryRequestSchema } from "../src/core/generated/darkbot/bsc/v1/query_pb";
-import { MainPayoutPolicySetCommandSchema, ProfitTransferPolicySetCommandSchema, TransferStatus, WalletFundTradingCommandSchema, WalletMovementKind, WalletPayoutCommandSchema, WalletTreasuryStateSchema, type WalletTreasuryState } from "../src/core/generated/darkbot/bsc/v1/wallet_pb";
+import { createHash } from "node:crypto";
+import {
+  MainPayoutPolicySetCommandSchema, ProfitTransferPolicySetCommandSchema, TransferStatus, WalletDestinationConfirmCommandSchema, WalletDestinationSetCommandSchema, WalletMovementKind,
+  WalletTransferAuthorizeCommandSchema, WalletTransferPrepareCommandSchema, WalletTransferStateSchema, WalletTreasuryStateSchema, type WalletTreasuryState,
+} from "../src/core/generated/darkbot/bsc/v1/wallet_pb";
 import { AckStatus, ClientMessageSchema, ServerMessageSchema, StateQuality, WelcomeStatus } from "../src/core/generated/darkbot/control/v1/stream_pb";
 import { CommandLookupResponseSchema, CommandPhase, CommandRequestSchema, CommandResponseSchema, CommandStatus, type CommandRequest } from "../src/core/generated/darkbot/control/v1/commands_pb";
 import { ProjectId, TopicClass, TopicId } from "../src/core/generated/darkbot/control/v1/topics_pb";
@@ -620,7 +624,8 @@ async function treasuryOwner(page: Page, treasury: (() => WalletTreasuryState) |
   });
   return asked;
 }
-const goldenTreasury = () => fromBinary(WalletTreasuryStateSchema, Buffer.from(readFileSync(new URL("../../protocol/golden/bsc/v8/treasury_state.hex", import.meta.url), "utf8").trim(), "hex"));
+const goldenHex = (name: string) => Buffer.from(readFileSync(new URL(`../../protocol/golden/bsc/v8/${name}.hex`, import.meta.url), "utf8").trim(), "hex");
+const goldenTreasury = () => fromBinary(WalletTreasuryStateSchema, goldenHex("treasury_state"));
 const U64_MAX = 18446744073709551615n;
 const U256_MAX = "115792089237316195423570985008687907853269984665640564039457584007913129639935";
 
@@ -683,12 +688,18 @@ test("Wallets without the treasury owner: seven sections in order, everything ow
   expect(errors).toEqual([]);
 });
 
-test("Wallets with the treasury owner's state: accounts apart, transfer states, one funding at the treasury version, an open transfer blocks its path (FE-V8-13…16)", async ({ page }) => {
+test("Wallets with the treasury owner's state: accounts apart, prepare then authorize at the treasury version, an open transfer blocks its path, authorized policies (FE-V8-13…16)", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   const sent = await commands(page);
   let step = 0;
+  let tamper = true;
   let versionA = 11n;
+  const MAIN = `0x${"4d".repeat(20)}`, BUYER = `0x${"61".repeat(20)}`, EXTERNAL = `0x${"82".repeat(20)}`, SECOND = `0x${"93".repeat(20)}`;
+  // The owner's DRAFT of the funding: the Rust golden (its canonical text is the shared vector).
+  const draft = fromBinary(WalletTransferStateSchema, goldenHex("transfer_draft"));
+  const FUND_SHA = createHash("sha256").update(draft.scopeText, "utf8").digest("hex");
+  expect(draft.scopeSha256).toBe(FUND_SHA);
   const treasury = () => {
     const s = goldenTreasury();
     // Distinct CAS versions: the treasury's, policy A's and policy B's (1 in the golden).
@@ -696,8 +707,10 @@ test("Wallets with the treasury owner's state: accounts apart, transfer states, 
     s.profitPolicy!.policyVersion = versionA; s.profitPolicy!.effectiveVersion = versionA;
     const main = s.accounts[0]!.balance!;
     main.availableWei = "1000000000000000000";
-    if (step > 0) s.transfers.unshift({ ...s.transfers[1]!, requestId: "fund-1", commandId: "intent-f-1", kind: WalletMovementKind.CAPITAL_FUNDING, status: TransferStatus.PENDING,
-      txHash: "", blockNumber: undefined, triggerId: "", policyVersion: undefined, updatedUnixMs: U64_MAX });
+    // Policy B pays to d1: it cannot be removed.
+    s.destinations[0]!.inUse = true;
+    if (step > 0) s.transfers.unshift({ ...draft, status: step === 1 ? TransferStatus.DRAFT : TransferStatus.PENDING, updatedUnixMs: U64_MAX,
+      scopeSha256: step === 1 && tamper ? "00".repeat(32) : FUND_SHA, authorizeRequestId: step === 1 ? "" : "auth-f-1" });
     return s;
   };
   const asked = await treasuryOwner(page, treasury);
@@ -705,59 +718,123 @@ test("Wallets with the treasury owner's state: accounts apart, transfer states, 
   await page.goto("/bsc");
   await area(page, "Wallets");
   await expect(page.getByTestId("bsc-wallet-owner")).toHaveCount(0);
-  // Accounts and economics from the owner, kept apart.
+  // Accounts and economics from the owner, kept apart; each account's state is its native switch.
   await expect(page.getByTestId("bsc-wallet-main")).toContainText("0x4d4d4d…4d4d4d");
   await expect(page.getByTestId("bsc-wallet-external")).toContainText("CONFIRMED");
   await expect(page.getByTestId("bsc-wallet-economics-main")).toContainText("Other capital");
   await expect(page.getByTestId("bsc-wallets-pnl")).toContainText("Treasury owner");
-  // Both policies with their own state and version; the transfers with their lifecycle.
+  await page.getByTestId("bsc-wallet-main").click();
+  await expect(page.getByTestId("bsc-wallet-detail-main")).toContainText("BSC_WALLET_MAIN");
+  // Both policies with their own state, version and authorization; the transfers with their lifecycle.
   await expect(page.getByTestId("bsc-wallet-policy-a-state")).toHaveText("Enabled");
   await expect(page.getByTestId("bsc-wallet-policy-a-version")).toHaveText("v11 · effective");
   await expect(page.getByTestId("bsc-wallet-policy-a-last")).toHaveAttribute("data-status", "Unknown · the chain decides");
   await expect(page.getByTestId("bsc-wallet-policy-b-state")).toHaveText("Disabled");
   await expect(page.getByTestId("bsc-wallet-policy-b-version")).toHaveText("Stored v1 · effective v0");
   await expect(page.getByTestId("bsc-wallet-policy-b-last")).toHaveAttribute("data-status", "Confirmed");
+  await expect(page.getByTestId("bsc-wallet-policy-b-authorization")).toContainText("RESET_BY_RESTART");
   await expect(page.getByTestId("bsc-wallet-transfers").locator("tbody tr")).toHaveCount(2);
-  // A funding: exact amount, the owner's fee estimate as its bound, at the treasury version; one request.
+  // A funding is prepared first: exact amount, the owner's fee estimate as its bound, at the treasury version.
   await page.getByTestId("bsc-wallet-fund-amount").fill("0.5");
   await expect(page.getByTestId("bsc-wallet-fund")).toContainText("0.499979 BNB");
   await page.getByTestId("bsc-wallet-fund-review").click();
   await expect(page.getByTestId("bsc-wallet-fund-dialog")).toContainText("500000000000000000 wei");
+  await expect(page.getByTestId("bsc-wallet-fund-dialog")).toContainText("sends nothing");
   step = 1;
   await page.getByTestId("bsc-wallet-fund-dialog-confirm").click();
-  await expect(page.getByTestId("bsc-wallet-fund-receipt")).toContainText("outcome=APPLIED bsc.wallet.fund_trading");
-  expect(sent.map(r => [r.action, r.resourceId, r.expected?.version])).toEqual([["bsc.wallet.fund_trading", "", { case: "walletPolicyVersion", value: 7n }]]);
-  expect(fromBinary(WalletFundTradingCommandSchema, sent[0]!.params)).toMatchObject({ amountWei: "500000000000000000", maxFeeWei: "21000000000000", chainId: 56n });
-  // The decided request reads the treasury once more: the funding is PENDING, no second one is offered.
+  await expect(page.getByTestId("bsc-wallet-fund-receipt")).toContainText("outcome=APPLIED bsc.wallet.transfer.prepare");
+  expect(sent.map(r => [r.action, r.resourceId, r.expected?.version])).toEqual([["bsc.wallet.transfer.prepare", "", { case: "walletPolicyVersion", value: 7n }]]);
+  const prepare = fromBinary(WalletTransferPrepareCommandSchema, sent[0]!.params);
+  expect(prepare.transfer.case).toBe("fundTrading");
+  expect(prepare.transfer.value).toMatchObject({ amountWei: "500000000000000000", maxFeeWei: "21000000000000", chainId: 56n, buyerAddress: BUYER });
+  // The owner's DRAFT: no second prepare; a digest that does not fit its text is never authorized.
+  await expect(page.getByTestId("bsc-wallet-fund-last")).toHaveAttribute("data-status", "Prepared · awaits authorization");
+  await expect(page.getByTestId("bsc-wallet-fund-review")).toBeDisabled();
+  await expect(page.getByTestId("bsc-wallet-fund-locked")).toContainText("awaits its authorization");
+  await expect(page.getByTestId("bsc-wallet-fund-draft-scope")).toContainText("kind=CAPITAL_FUNDING");
+  await expect(page.getByTestId("bsc-wallet-fund-draft-locked")).toContainText("disagree");
+  await expect(page.getByTestId("bsc-wallet-fund-authorize")).toBeDisabled();
+  // The DRAFT holds Main's next nonce: the other path from Main waits too.
+  await page.getByTestId("bsc-wallet-send-amount").fill("0.25");
+  await expect(page.getByTestId("bsc-wallet-send-review")).toBeDisabled();
+  await expect(page.getByTestId("bsc-wallet-send-locked")).toContainText("it holds Main's next nonce");
+  tamper = false;
+  await page.getByTestId("bsc-wallet-refresh").click();
+  await expect(page.getByTestId("bsc-wallet-fund-draft-sha")).toHaveText(FUND_SHA);
+  await expect(page.getByTestId("bsc-wallet-fund-authorize")).toBeEnabled();
+  expect(asked.filter(a => a === "treasury")).toHaveLength(3);
+  // Its authorization names the DRAFT and echoes its digest: the second request.
+  await page.getByTestId("bsc-wallet-fund-authorize").click();
+  await expect(page.getByTestId("bsc-wallet-fund-authorize-dialog")).toContainText(FUND_SHA);
+  step = 2;
+  await page.getByTestId("bsc-wallet-fund-authorize-dialog-confirm").click();
+  await expect(page.getByTestId("bsc-wallet-fund-receipt")).toContainText("outcome=APPLIED bsc.wallet.transfer.authorize");
+  expect([sent[1]?.action, sent[1]?.resourceId, sent[1]?.expected?.version]).toEqual(["bsc.wallet.transfer.authorize", "draft-f-1", { case: "walletPolicyVersion", value: 7n }]);
+  expect(fromBinary(WalletTransferAuthorizeCommandSchema, sent[1]!.params).scopeSha256).toBe(FUND_SHA);
+  // The authorized funding is PENDING: nothing more is offered on this path.
   await expect(page.getByTestId("bsc-wallet-fund-last")).toHaveAttribute("data-status", "Pending");
+  await expect(page.getByTestId("bsc-wallet-fund-draft")).toHaveCount(0);
   await expect(page.getByTestId("bsc-wallet-fund-review")).toBeDisabled();
   await expect(page.getByTestId("bsc-wallet-fund-locked")).toContainText("the chain decides first, nothing is sent twice");
-  expect(asked.filter(a => a === "treasury")).toHaveLength(2);
-  // A payout to the saved, confirmed address; the profit transfer's open UNKNOWN does not block it.
-  await page.getByTestId("bsc-wallet-send-amount").fill("0.25");
+  // A payout to the saved, confirmed address is prepared; the profit transfer's open UNKNOWN does not block it.
   await page.getByTestId("bsc-wallet-send-review").click();
   await page.getByTestId("bsc-wallet-send-dialog-confirm").click();
-  await expect(page.getByTestId("bsc-wallet-send-receipt")).toContainText("outcome=APPLIED bsc.wallet.payout");
-  expect(sent[1]?.resourceId).toBe("d1");
-  expect(sent[1]?.expected?.version).toEqual({ case: "walletPolicyVersion", value: 7n });
+  await expect(page.getByTestId("bsc-wallet-send-receipt")).toContainText("outcome=APPLIED bsc.wallet.transfer.prepare");
+  expect([sent[2]?.resourceId, sent[2]?.expected?.version]).toEqual(["", { case: "walletPolicyVersion", value: 7n }]);
   // One treasury read per decided request, none while it is being sent.
-  await expect.poll(() => asked.filter(a => a === "treasury").length).toBe(3);
-  expect(fromBinary(WalletPayoutCommandSchema, sent[1]!.params)).toMatchObject({ destinationId: "d1", destinationAddress: `0x${"82".repeat(20)}`, chainId: 56n, amountWei: "250000000000000000" });
-  // Policy A at its own version, exact.
+  await expect.poll(() => asked.filter(a => a === "treasury").length).toBe(5);
+  const payout = fromBinary(WalletTransferPrepareCommandSchema, sent[2]!.params);
+  expect(payout.transfer.case).toBe("payout");
+  expect(payout.transfer.value).toMatchObject({ destinationId: "d1", destinationAddress: EXTERNAL, chainId: 56n, amountWei: "250000000000000000" });
+  // Policy A at its own version, exact, with an authorization within the owner's bounds.
   await page.getByTestId("bsc-wallet-policy-a-threshold").fill("0.2");
   await expect(page.getByTestId("bsc-wallet-policy-a-check")).toHaveText(`Exact: threshold 200000000000000000 wei · 100 % · keeps ${U256_MAX} + 0 wei`);
+  await expect(page.getByTestId("bsc-wallet-policy-a-auth-check")).toHaveText("Valid for: whole hours above 0");
+  await expect(page.getByTestId("bsc-wallet-policy-a-save")).toBeDisabled();
+  await page.getByTestId("bsc-wallet-policy-a-valid-hours").fill("24");
+  await expect(page.getByTestId("bsc-wallet-policy-a-auth-check")).toContainText("above the owner's bound of 1 BNB");
+  await page.getByTestId("bsc-wallet-policy-a-max-per-transfer").fill("0.5");
+  await page.getByTestId("bsc-wallet-policy-a-max-total").fill("2");
+  await expect(page.getByTestId("bsc-wallet-policy-a-auth-check")).toHaveText("Authorization: 24 h · ≤ 500000000000000000 wei per transfer · ≤ 2000000000000000000 wei in total");
   await page.getByTestId("bsc-wallet-policy-a-save").click();
+  const scopeA = (await page.getByTestId("bsc-wallet-policy-a-dialog").locator("pre").innerText()).replace(/\n?$/, "\n");
+  expect(scopeA).toContain(`darkbot.bsc.wallet-profit-policy.v1\nchain_id=56\nfrom=${BUYER}\nto=${MAIN}\nenabled=true\nthreshold_realized_net_profit_wei=200000000000000000\n`);
   await page.getByTestId("bsc-wallet-policy-a-dialog-confirm").click();
   await expect(page.getByTestId("bsc-wallet-policy-a-receipt")).toContainText("outcome=APPLIED bsc.wallet.profit_policy.set");
-  expect(sent[2]?.expected?.version).toEqual({ case: "walletPolicyVersion", value: 11n });
-  expect(fromBinary(ProfitTransferPolicySetCommandSchema, sent[2]!.params)).toMatchObject({ enabled: true, thresholdRealizedNetProfitWei: "200000000000000000", amount: { amount: { case: "shareBps", value: 10000 } } });
-  // Policy B, independent, at its own version 1.
+  expect(sent[3]?.expected?.version).toEqual({ case: "walletPolicyVersion", value: 11n });
+  const a = fromBinary(ProfitTransferPolicySetCommandSchema, sent[3]!.params);
+  expect(a).toMatchObject({ enabled: true, thresholdRealizedNetProfitWei: "200000000000000000", amount: { amount: { case: "shareBps", value: 10000 } } });
+  expect(a.authorization).toMatchObject({ maxPerTransferWei: "500000000000000000", maxTotalWei: "2000000000000000000", scopeSha256: createHash("sha256").update(scopeA, "utf8").digest("hex") });
+  expect(scopeA).toContain(`expires_unix_ms=${a.authorization!.expiresUnixMs}\n`);
+  // Policy B, independent, at its own version 1; a disabled rule needs no authorization.
   await page.getByTestId("bsc-wallet-policy-b-amount").fill("0.3");
+  await expect(page.getByTestId("bsc-wallet-policy-b-auth-check")).toHaveText("A disable needs no authorization");
   await page.getByTestId("bsc-wallet-policy-b-save").click();
   await page.getByTestId("bsc-wallet-policy-b-dialog-confirm").click();
   await expect(page.getByTestId("bsc-wallet-policy-b-receipt")).toContainText("outcome=APPLIED bsc.wallet.payout_policy.set");
-  expect(sent[3]?.expected?.version).toEqual({ case: "walletPolicyVersion", value: 1n });
-  expect(fromBinary(MainPayoutPolicySetCommandSchema, sent[3]!.params)).toMatchObject({ enabled: false, destinationId: "d1", destinationAddress: `0x${"82".repeat(20)}`, amount: { amount: { case: "fixedWei", value: "300000000000000000" } } });
+  expect(sent[4]?.expected?.version).toEqual({ case: "walletPolicyVersion", value: 1n });
+  const b = fromBinary(MainPayoutPolicySetCommandSchema, sent[4]!.params);
+  expect(b).toMatchObject({ enabled: false, destinationId: "d1", destinationAddress: EXTERNAL, amount: { amount: { case: "fixedWei", value: "300000000000000000" } } });
+  expect(b.authorization).toBeUndefined();
+  // A saved address is confirmed on its own request, only after the operator checked it; a new one is saved unconfirmed.
+  await page.getByTestId("bsc-wallet-destination-open").click();
+  await expect(page.getByTestId("bsc-wallet-destination-remove-d1")).toBeDisabled();
+  await expect(page.getByTestId("bsc-wallet-destination-remove-d2")).toBeEnabled();
+  await expect(page.getByTestId("bsc-wallet-destination-confirm-d2")).toBeDisabled();
+  await page.getByTestId("bsc-wallet-destination-check-d2").check();
+  await page.getByTestId("bsc-wallet-destination-confirm-d2").click();
+  await page.getByTestId("bsc-wallet-destination-dialog-confirm").click();
+  await expect(page.getByTestId("bsc-wallet-destination-receipt")).toContainText("outcome=APPLIED bsc.wallet.destination.confirm");
+  expect([sent[5]?.action, sent[5]?.resourceId, sent[5]?.expected?.version]).toEqual(["bsc.wallet.destination.confirm", "d2", { case: "walletPolicyVersion", value: 7n }]);
+  expect(fromBinary(WalletDestinationConfirmCommandSchema, sent[5]!.params)).toMatchObject({ destinationId: "d2", address: SECOND });
+  await page.getByTestId("bsc-wallet-destination-label").fill("Cold");
+  await page.getByTestId("bsc-wallet-destination-address").fill(`0x${"84".repeat(20)}`);
+  await page.getByTestId("bsc-wallet-destination-save").click();
+  await expect(page.getByTestId("bsc-wallet-destination-dialog")).toContainText("saved unconfirmed");
+  await page.getByTestId("bsc-wallet-destination-dialog-confirm").click();
+  await expect(page.getByTestId("bsc-wallet-destination-receipt")).toContainText("outcome=APPLIED bsc.wallet.destination.set");
+  expect(fromBinary(WalletDestinationSetCommandSchema, sent[6]!.params)).toMatchObject({ label: "Cold", address: `0x${"84".repeat(20)}`, chainId: 56n, remove: false });
+  await page.keyboard.press("Escape");
   // Another session moves policy A under the open edit: the edit is refused until Reset (no CAS bypass).
   versionA = 12n;
   await page.getByTestId("bsc-wallet-refresh").click();
@@ -765,11 +842,21 @@ test("Wallets with the treasury owner's state: accounts apart, transfer states, 
   await expect(page.getByTestId("bsc-wallet-policy-a-save")).toBeDisabled();
   await page.getByTestId("bsc-wallet-policy-a-reset").click();
   await expect(page.getByTestId("bsc-wallet-policy-a-threshold")).toHaveValue("0.1");
+  // Disabling the enabled policy A needs no authorization: its stored values at its version 12.
+  await page.getByTestId("bsc-wallet-policy-a-enabled").uncheck();
+  await expect(page.getByTestId("bsc-wallet-policy-a-auth-check")).toHaveText("A disable needs no authorization");
+  await page.getByTestId("bsc-wallet-policy-a-save").click();
+  await expect(page.getByTestId("bsc-wallet-policy-a-dialog")).toContainText("values unchanged");
+  await page.getByTestId("bsc-wallet-policy-a-dialog-confirm").click();
+  await expect(page.getByTestId("bsc-wallet-policy-a-receipt")).toContainText("outcome=APPLIED bsc.wallet.profit_policy.set");
+  expect(sent[7]?.expected?.version).toEqual({ case: "walletPolicyVersion", value: 12n });
+  const off = fromBinary(ProfitTransferPolicySetCommandSchema, sent[7]!.params);
+  expect([off.enabled, off.authorization, off.thresholdRealizedNetProfitWei]).toEqual([false, undefined, "100000000000000000"]);
   // A draft lives in this view only: a reload shows the stored policy.
   await page.getByTestId("bsc-wallet-policy-b-amount").fill("0.4");
   await page.reload();
   await area(page, "Wallets");
   await expect(page.getByTestId("bsc-wallet-policy-b-amount")).toHaveValue("0");
-  expect(sent).toHaveLength(4);
+  expect(sent).toHaveLength(8);
   expect(errors).toEqual([]);
 });
