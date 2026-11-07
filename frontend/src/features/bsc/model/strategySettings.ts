@@ -7,6 +7,7 @@
 // stored generation is in effect; nothing here decides a value.
 import type { BscQueryOutcome } from "@/core/realtime/bscQuery";
 import { Availability, CreatorSellExit, CreatorSoldBeforeFill, SettingsApplyStatus, type StrategyCSettings } from "../api/bscV8Adapter";
+import type { StrategySettableValues } from "./strategyForm";
 import type { NativeRecordView } from "./types";
 import { RUNTIME_SCHEMA, SOURCE_SCHEMA, runtimeView } from "./sources";
 import { BACKEND_UNAVAILABLE } from "./status";
@@ -105,8 +106,14 @@ export function strategySettingsView(records: readonly NativeRecordView[], warni
   };
 }
 
-/** A typed settings basis as the native canonical strings (enum UNSPECIFIED, an absent value: none). */
-function nativeText(s: StrategyCSettings): Record<string, string | undefined> {
+/** The ten settable values as a state, a profile and a command carry them (StrategyCSettings,
+ *  StrategyCSettableValues). */
+export type SettableShape = Pick<StrategyCSettings, "inputWei" | "targetNetMultiple" | "stopNetMultiple" | "observationMs" | "holdMs" | "maxOpen"
+  | "creatorSoldBeforeFill" | "creatorSellExit" | "filters" | "firstBuyerWindow">;
+
+/** Typed settable values as the native canonical strings (enum UNSPECIFIED, an absent value: none;
+ *  the filters: the enabled rules in their order). */
+export function nativeText(s: SettableShape): Record<string, string | undefined> {
   const n = (x: bigint | number | undefined) => x?.toString();
   const choice = (name: string | undefined) => name === undefined || name === "UNSPECIFIED" ? undefined : name;
   return {
@@ -158,4 +165,11 @@ export function generationText(view: StrategySettingsView): string {
     case "REFUSED": return `${saved} · refused at the start: ${b.refusal}`;
     default: return `${saved} · running state unknown${b.reasons.length ? ` (${b.reasons.join("; ")})` : ""}`;
   }
+}
+
+/** A command's typed values (StrategyCSettableValues) with their enums; an absent choice is UNSPECIFIED. */
+export function settableInit(v: StrategySettableValues) {
+  const { creatorSoldBeforeFill: sold, creatorSellExit: exit, ...rest } = v;
+  return { ...rest, creatorSoldBeforeFill: sold ? CreatorSoldBeforeFill[sold] : CreatorSoldBeforeFill.UNSPECIFIED,
+    creatorSellExit: exit ? CreatorSellExit[exit] : CreatorSellExit.UNSPECIFIED };
 }

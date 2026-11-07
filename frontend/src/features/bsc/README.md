@@ -12,10 +12,12 @@ under the owner's LIVE gate for the operator's granted scope, and the browser si
 - **V8 contracts:** training, Strategy C settings, trade history, wallets and WATCH in
   `protocol/schemas/darkbot/bsc/v1/{common,training,history,wallet,watch,query}.proto` (`api/bscV8Adapter.ts`,
   golden bytes `protocol/golden/bsc/v8`). Their bounded query (`core/realtime/bscQuery.ts`,
-  `POST /api/v1/bsc/query`, the reporter's `--query`) answers the Strategy C settings state natively
+  `POST /api/v1/bsc/query`, the reporter's `--query`) answers natively the Strategy C settings state
   (`pages/useStrategySettings.ts`: the form basis = stored over the configuration file, the native bounds,
-  the apply status); every other query is NOT_IMPLEMENTED until its native owner exists, and the UI shows
-  that function disabled with its reason, never data of its own.
+  the apply status) and the training profiles (`model/profiles.ts`, `pages/TrainingModule.tsx`: modules
+  created, edited as whole revisions, duplicated, deleted or archived at the owner's catalog/revision CAS);
+  every other query is NOT_IMPLEMENTED until its native owner exists, and the UI shows that function
+  disabled with its reason, never data of its own.
 - **Wallets** (`pages/Wallet*.tsx`, `model/wallets.ts`): Accounts → Balances → Manual transfers → Automatic
   profit transfer (policy A) → Automatic payout (policy B) → Transaction history → Balance & profit. Main,
   Trading (Buyer), External (receive-only, no MetaMask connection) and the separate G0.7 launcher are never
@@ -31,7 +33,8 @@ under the owner's LIVE gate for the operator's granted scope, and the browser si
 - **Controls:** one command client (`core/realtime/bscControl.ts`): readiness, candidate, source/venue/
   component modes, wallet and economic switches, limits, the LIVE grant/revoke/lot/nonce decisions and
   Strategy C settings (one change: `bsc.strategy.set`; several: one `bsc.strategy.set_all` generation
-  with the complete filter list, `model/strategyForm.ts` `saveRequest`). A lost acknowledgement gets one lookup.
+  with the complete filter list, `model/strategyForm.ts` `saveRequest`) and the training modules
+  (`bsc.training.profile.*`, `profileCommand`). A lost acknowledgement gets one lookup.
 - **Never shown:** salts, raw transaction bytes, the private B economics record and absolute local paths.
   Wei amounts are exact (`pages/V8.tsx` `bnb()`, `model/strategyForm.ts`), never floating point.
 

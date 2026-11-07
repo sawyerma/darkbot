@@ -287,7 +287,15 @@ export function releaseWalletRequest(requestId: string): void {
   const { busy, receipt } = useWalletControl.getState();
   if (busy && receipt?.id === requestId && receipt.phase === "UNKNOWN") useWalletControl.setState({ busy: false });
 }
-async function ownerSend(origin: string, action: OwnerAction | "bsc.live.grant" | "bsc.strategy.set" | "bsc.strategy.set_all" | LiveDecision["action"], resourceId: string, params: Uint8Array,
+/** V8 Training (BSC-V8-01): the four profile commands at the native profile owner. create and
+ *  clone carry the catalog version (`configVersion`), update and delete the profile's revision
+ *  (`profileVersion`); the params are the adapter's encoding of the training.proto command. */
+export type ProfileAction = "bsc.training.profile.create" | "bsc.training.profile.update" | "bsc.training.profile.clone" | "bsc.training.profile.delete";
+export async function profileCommand(origin: string, action: ProfileAction, resourceId: string, params: Uint8Array,
+  version: { case: "configVersion" | "profileVersion"; value: bigint }, detail: string): Promise<void> {
+  await ownerSend(origin, action, resourceId, params, version, detail);
+}
+async function ownerSend(origin: string, action: OwnerAction | ProfileAction | "bsc.live.grant" | "bsc.strategy.set" | "bsc.strategy.set_all" | LiveDecision["action"], resourceId: string, params: Uint8Array,
   version: { case: "walletPolicyVersion" | "configVersion" | "profileVersion"; value: bigint }, detail: string): Promise<void> {
   if (useSourceControl.getState().busy) return;
   const requestId = crypto.randomUUID();

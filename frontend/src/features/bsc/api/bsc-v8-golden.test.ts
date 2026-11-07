@@ -91,6 +91,18 @@ describe("prepared BSC V8 contracts (Rust golden bytes)", () => {
     expect(decodeV8("live_strategy_select_command", golden("live_strategy_select_command")).expectedSettingsGeneration).toBe(U64_MAX);
   });
 
+  it("sends a module revision whole and clones any kept revision under a new name (BSC-V8-01)", () => {
+    const created = decodeV8("training_profile_create_command", golden("training_profile_create_command"));
+    expect([created.name, created.venues, created.values?.filters.length, created.values?.firstBuyerWindow]).toEqual(["Flap fast", ["BSC_VENUE_FLAP", "BSC_VENUE_OPENFOUR"], 15, 100]);
+    expect(created.values?.inputWei).toBeDefined();
+    const updated = decodeV8("training_profile_update_command", golden("training_profile_update_command"));
+    expect([updated.profileId, updated.name, updated.venues]).toEqual(["p000001", "Flap fast", ["BSC_VENUE_FLAP"]]);
+    const cloned = decodeV8("training_profile_clone_command", golden("training_profile_clone_command"));
+    expect([cloned.sourceProfileId, cloned.sourceRevision, cloned.name]).toEqual(["p000001", U64_MAX, "Flap fast (copy)"]);
+    const deleted = decodeV8("training_profile_delete_command", golden("training_profile_delete_command"));
+    expect([deleted.profileId, deleted.archive]).toEqual(["p000001", true]);
+  });
+
   it("keeps an unknown transfer unknown and an absent fee absent", () => {
     const t = decodeV8("treasury_state", golden("treasury_state"));
     expect(t.profitPolicy?.lastTransfer?.status).toBe(TransferStatus.UNKNOWN);

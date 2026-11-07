@@ -7,7 +7,7 @@ import { strategySetAllCommand, strategySettingCommand, useSourceControl } from 
 import { selectLive, selectStatus, useBscStore } from "../store/bscStore";
 import { tradingState } from "../model/overview";
 import { sourceControlView } from "../model/sources";
-import { generationText } from "../model/strategySettings";
+import { generationText, settableInit } from "../model/strategySettings";
 import { featureHints, fieldRanges, formOf, runningNotes, saveRequest, type SaveRequest, type StrategyForm } from "../model/strategyForm";
 import { LABEL_TONE, RIGHT_ALIGNED, TRADE_COLUMNS, TRADE_COL_DEFAULT, blockClock, counts, filterTrades, nsToMs, safeColumns, tradeViews, tradesCsv, type TradeColumn, type TradeFilter, type TradeView } from "../model/trades";
 import { detection, nsMs3, share, sourceLines, usToMs, type Market } from "../model/monitor";
@@ -15,7 +15,7 @@ import { SOURCE_STATUS, age, sourceName, venueName } from "../model/health";
 import { LiveLotActions, Receipt, LIVE_LOT } from "../LiveActions";
 import { operatorDecisions } from "../model/live";
 import { SourceActions } from "../SourceActions";
-import { CreatorSellExit, CreatorSoldBeforeFill, TradeSort, v8Params } from "../api/bscV8Adapter";
+import { TradeSort, v8Params } from "../api/bscV8Adapter";
 import { LiveSections } from "./LiveSections";
 import { StrategyEditor } from "./StrategyEditor";
 import { useNativeRecords } from "./useNativeRecords";
@@ -27,7 +27,7 @@ import { Badge, DetailLine, Drawer, Icon, PanelHead, StateBadge, TopHeading, Wei
 const STRATEGY = "bsc-live-strategy";
 const COLUMNS_KEY = "bsc_trade_columns_v8";
 const PAGE = 6;
-const NO_PROFILES = "Training modules need their native profile owner (BSC-V8-01); Live uses the native Strategy C configuration.";
+const NO_PROFILES = "Selecting a training module for LIVE needs the native LIVE selection (bsc.live.strategy.select), not implemented yet; Live uses the native Strategy C configuration.";
 
 // The column choice is a display preference of this browser: a comma-separated id list (no JSON).
 function loadColumns(): TradeColumn[] {
@@ -89,10 +89,7 @@ export function LivePanel() {
     const r = confirm.request;
     if (r.kind === "one") void strategySettingCommand(STRATEGY, r.key, r.value, confirm.generation);
     else {
-      const { creatorSoldBeforeFill: sold, creatorSellExit: exit, ...rest } = r.values;
-      const params = v8Params("strategy_set_all_command", { values: { ...rest,
-        creatorSoldBeforeFill: sold ? CreatorSoldBeforeFill[sold] : CreatorSoldBeforeFill.UNSPECIFIED,
-        creatorSellExit: exit ? CreatorSellExit[exit] : CreatorSellExit.UNSPECIFIED } });
+      const params = v8Params("strategy_set_all_command", { values: settableInit(r.values) });
       void strategySetAllCommand(STRATEGY, params, confirm.generation, `set_all keys=${r.changed.length}`);
     }
     setDraft(null);

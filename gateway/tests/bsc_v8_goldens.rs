@@ -1,6 +1,7 @@
 //! Rust↔TS golden bytes of the prepared BSC V8 contracts (BSC-V8-09, FE-V8-17): training,
-//! Strategy C settings, trade history, wallets, WATCH and the bounded query envelope. No native
-//! producer exists yet; these bytes pin the wire shape the backend implements against: u64/i64
+//! Strategy C settings, trade history, wallets, WATCH and the bounded query envelope. These bytes
+//! pin the wire shape the native owners and the browser share (answered natively so far: the
+//! settings state, `bsc.strategy.set_all` and the training profiles; the rest prepared): u64/i64
 //! limits, signed and >u128 decimal wei, absent vs present-zero optionals, enums and oneofs.
 //! frontend/src/features/bsc/api/bsc-v8-golden.test.ts decodes the same bytes and re-encodes
 //! them byte for byte.
@@ -16,15 +17,16 @@ use darkbot_gateway::proto::bsc::v1::{
     StrategyCSettings, StrategyCSettingsSetAllCommand, StrategyCSettingsState, StrategyFeatureSpec,
     StrategyFilterRule, StrategySettingSpec, TimeSource, TradeCounts, TradeDetail, TradeExitTerms,
     TradeHistoryPage, TradeHistoryQuery, TradePlacement, TradeRow, TradeSighting, TradeSort,
-    TradeStatus, TradeTransaction, TrainingProfile, TrainingProfileStatus, TrainingProfiles,
-    TrainingResult, TrainingRun, TrainingRunMode, TrainingRunPage, TrainingRunPlan,
-    TrainingRunStartCommand, TrainingRunStatus, TrainingRunStopKind, TransferStatus, WalletAccount,
-    WalletAuthorization, WalletAuthorizationBounds, WalletAuthorizationScope,
-    WalletBalanceSnapshot, WalletDestination, WalletDestinationConfirmCommand,
-    WalletDestinationSetCommand, WalletFundTradingCommand, WalletHistoryPage, WalletMovement,
-    WalletMovementKind, WalletPayoutCommand, WalletRole, WalletTransferAuthorizeCommand,
-    WalletTransferPrepareCommand, WalletTransferReceipt, WalletTransferState, WalletTreasuryState,
-    WatchSubjectKind, WatchSubjectState, WatchVerdict,
+    TradeStatus, TradeTransaction, TrainingProfile, TrainingProfileCloneCommand,
+    TrainingProfileCreateCommand, TrainingProfileDeleteCommand, TrainingProfileStatus,
+    TrainingProfileUpdateCommand, TrainingProfiles, TrainingResult, TrainingRun, TrainingRunMode,
+    TrainingRunPage, TrainingRunPlan, TrainingRunStartCommand, TrainingRunStatus,
+    TrainingRunStopKind, TransferStatus, WalletAccount, WalletAuthorization,
+    WalletAuthorizationBounds, WalletAuthorizationScope, WalletBalanceSnapshot, WalletDestination,
+    WalletDestinationConfirmCommand, WalletDestinationSetCommand, WalletFundTradingCommand,
+    WalletHistoryPage, WalletMovement, WalletMovementKind, WalletPayoutCommand, WalletRole,
+    WalletTransferAuthorizeCommand, WalletTransferPrepareCommand, WalletTransferReceipt,
+    WalletTransferState, WalletTreasuryState, WatchSubjectKind, WatchSubjectState, WatchVerdict,
 };
 use prost::Message;
 use std::{fs, path::PathBuf};
@@ -582,6 +584,44 @@ fn bsc_v8_contract_golden_bytes() {
             ],
             next_cursor: String::new(),
             has_more: false,
+        }
+        .encode_to_vec(),
+    );
+    // The four profile commands: a revision whole (name, venues, every value), a clone of any kept
+    // revision under a new name, a delete that archives.
+    check(
+        "training_profile_create_command",
+        TrainingProfileCreateCommand {
+            name: "Flap fast".into(),
+            venues: vec!["BSC_VENUE_FLAP".into(), "BSC_VENUE_OPENFOUR".into()],
+            values: Some(values()),
+        }
+        .encode_to_vec(),
+    );
+    check(
+        "training_profile_update_command",
+        TrainingProfileUpdateCommand {
+            profile_id: "p000001".into(),
+            name: "Flap fast".into(),
+            venues: vec!["BSC_VENUE_FLAP".into()],
+            values: Some(values()),
+        }
+        .encode_to_vec(),
+    );
+    check(
+        "training_profile_clone_command",
+        TrainingProfileCloneCommand {
+            source_profile_id: "p000001".into(),
+            source_revision: u64::MAX,
+            name: "Flap fast (copy)".into(),
+        }
+        .encode_to_vec(),
+    );
+    check(
+        "training_profile_delete_command",
+        TrainingProfileDeleteCommand {
+            profile_id: "p000001".into(),
+            archive: true,
         }
         .encode_to_vec(),
     );

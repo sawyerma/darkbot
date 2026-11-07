@@ -1623,7 +1623,7 @@ A named, versioned Strategy C configuration of the native owner (one strategy, m
 | profile_id | [string](#string) |  | Stable owner identity, never reused. |
 | name | [string](#string) |  | The operator&#39;s name. |
 | revision | [uint64](#uint64) |  | The profile revision: the compare-and-swap of an update, delete or run start. |
-| config_sha256 | [string](#string) |  | The configuration hash of this revision&#39;s effective values. |
+| config_sha256 | [string](#string) |  | The configuration hash of this revision&#39;s ten values (the settings&#39; rule above). |
 | venues | [string](#string) | repeated | The venues it trains on (BSC_VENUE_FLAP, BSC_VENUE_FOUR_CLASSIC, BSC_VENUE_OPENFOUR), as the owner offers them; never an implicit &#34;all markets&#34;. |
 | created_unix_ms | [uint64](#uint64) |  | Creation time, unix ms. |
 | updated_unix_ms | [uint64](#uint64) |  | Time of this revision, unix ms. |
@@ -1642,7 +1642,8 @@ A named, versioned Strategy C configuration of the native owner (one strategy, m
 <a name="darkbot-bsc-v1-TrainingProfileCloneCommand"></a>
 
 ### TrainingProfileCloneCommand
-Params of `bsc.training.profile.clone` (prepared): a new profile from one revision.
+Params of `bsc.training.profile.clone`: a new profile (a fresh id at revision 1) with the venues and
+values of any kept revision of a non-deleted profile, under a new unique name.
 
 
 | Field | Type | Label | Description |
@@ -1659,7 +1660,10 @@ Params of `bsc.training.profile.clone` (prepared): a new profile from one revisi
 <a name="darkbot-bsc-v1-TrainingProfileCreateCommand"></a>
 
 ### TrainingProfileCreateCommand
-Params of `bsc.training.profile.create` (prepared).
+Params of `bsc.training.profile.create`: a new profile at revision 1. Every value is set (an
+absent value or an enum UNSPECIFIED is InvalidParams); the filters are the complete form as in a
+set_all; venues are BSC_VENUE_* of the native venue list, each at most once, stored in native
+order, never empty.
 
 
 | Field | Type | Label | Description |
@@ -1676,7 +1680,7 @@ Params of `bsc.training.profile.create` (prepared).
 <a name="darkbot-bsc-v1-TrainingProfileDeleteCommand"></a>
 
 ### TrainingProfileDeleteCommand
-Params of `bsc.training.profile.delete` (prepared): refused while a run or LIVE uses it.
+Params of `bsc.training.profile.delete`: refused while a run or LIVE uses it (REJECTED_IN_USE).
 
 
 | Field | Type | Label | Description |
@@ -1692,7 +1696,9 @@ Params of `bsc.training.profile.delete` (prepared): refused while a run or LIVE 
 <a name="darkbot-bsc-v1-TrainingProfileUpdateCommand"></a>
 
 ### TrainingProfileUpdateCommand
-Params of `bsc.training.profile.update` (prepared): a new revision of one profile.
+Params of `bsc.training.profile.update`: a new revision of one profile, replacing its name, venues
+and every value as a whole (the same rules as a create); refused while it is in use
+(REJECTED_IN_USE: a clone takes the change).
 
 
 | Field | Type | Label | Description |
@@ -1718,7 +1724,7 @@ The training profiles of the native owner.
 | availability | [Availability](#darkbot-bsc-v1-Availability) |  | Whether the native owner answered. |
 | unavailable_reason | [string](#string) |  | Why it is not AVAILABLE. |
 | provenance | [OwnerProvenance](#darkbot-bsc-v1-OwnerProvenance) |  | The owner and its catalog version. |
-| profiles | [TrainingProfile](#darkbot-bsc-v1-TrainingProfile) | repeated | Every non-deleted profile. |
+| profiles | [TrainingProfile](#darkbot-bsc-v1-TrainingProfile) | repeated | The non-deleted profiles in creation order; archived ones only with include_archived. |
 | catalog_version | [uint64](#uint64) |  | The catalog version: the compare-and-swap of a create or clone. |
 | live_profile_id | [string](#string) |  | The profile the LIVE selection names; empty without one. |
 | live_profile_revision | [uint64](#uint64) | optional | The revision the LIVE selection is bound to. |
@@ -1982,7 +1988,7 @@ The lifecycle of a training profile.
 | TRAINING_PROFILE_STATUS_UNSPECIFIED | 0 | Not set by any producer; never displayed as a value. |
 | TRAINING_PROFILE_STATUS_ACTIVE | 1 | Usable for runs and the LIVE selection. |
 | TRAINING_PROFILE_STATUS_ARCHIVED | 2 | Kept with its runs and results, not selectable. |
-| TRAINING_PROFILE_STATUS_DELETED | 3 | Deleted; kept only while a run or result references it. |
+| TRAINING_PROFILE_STATUS_DELETED | 3 | Deleted: gone from every command and from the catalog query; a run or result may still name it. |
 
 
 

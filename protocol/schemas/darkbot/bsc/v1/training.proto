@@ -4,8 +4,9 @@ package darkbot.bsc.v1;
 import "darkbot/bsc/v1/common.proto";
 
 // V8 Training and Strategy C settings (BSC-V8-01…06, FE-V8-04…09, Bindings §14.1/§14.2/§14.4
-// M1–M3). Answered natively: StrategyCSettingsState (POST /api/v1/bsc/query, the reporter's
-// `--query`) and `bsc.strategy.set_all`; every other contract here is prepared (no producer yet).
+// M1–M3). Answered natively: StrategyCSettingsState and TrainingProfiles (POST /api/v1/bsc/query,
+// the reporter's `--query`), `bsc.strategy.set_all` and the four `bsc.training.profile.*` commands;
+// every other contract here is prepared (no producer yet).
 // Strategy C stays the one BSC strategy; a profile is
 // a named, versioned Strategy C configuration, a training run executes it PAPER/SHADOW/REPLAY on
 // the one existing core, never with real funds. The ten settable keys exist natively
@@ -27,9 +28,9 @@ import "darkbot/bsc/v1/common.proto";
 // string). The read-only configuration values are not hashed; the same values give the same hash
 // in every owner.
 //
-// Actions (POST /api/v1/command, CommandRequest.action). Registered: bsc.strategy.set_all, resource_id
-// empty. Prepared (NOT registered in the gateway until the native owner implements them, the
-// frontend keeps them disabled): every other one.
+// Actions (POST /api/v1/command, CommandRequest.action). Registered: bsc.strategy.set_all (resource_id
+// empty) and bsc.training.profile.create/update/clone/delete. Prepared (NOT registered in the
+// gateway until the native owner implements them, the frontend keeps them disabled): every other one.
 //   bsc.strategy.set_all          StrategyCSettingsSetAllCommand  expected profile_version = stored revision
 //   bsc.training.profile.create   TrainingProfileCreateCommand    expected config_version = catalog_version
 //   bsc.training.profile.update   TrainingProfileUpdateCommand    expected profile_version = profile revision, resource_id = profile_id
@@ -38,7 +39,14 @@ import "darkbot/bsc/v1/common.proto";
 //   bsc.training.run.start        TrainingRunStartCommand         expected profile_version = profile revision, resource_id = profile_id
 //   bsc.training.run.stop         TrainingRunStopCommand          resource_id = run_id
 //   bsc.live.strategy.select      LiveStrategySelectCommand       expected profile_version = the bound revision, resource_id = profile_id
-// A profile revision records the request that wrote it (TrainingProfile.request_id). One training
+// A profile revision records the request that wrote it (TrainingProfile.request_id). The profile
+// owner assigns the ids (p000001, …, never reused) and keeps at most BSC_STRATEGY_PROFILES_MAX
+// non-deleted profiles. A name is unique among the non-deleted profiles, at most 64 bytes, never
+// blank, never with surrounding space or a control character. An archived profile can still be
+// updated and cloned, not archived again; a deleted one is gone from every command and query.
+// A profile command's receipt detail line is `outcome=<APPLIED|REJECTED_STALE|REJECTED_INVALID|
+// REJECTED_NOT_FOUND|REJECTED_IN_USE> action=<CREATE|UPDATE|CLONE|ARCHIVE|DELETE> profile_id=<id|->
+// revision=<n|-> catalog=<n> request_id=<id>[ reason=<…>]`. One training
 // run at a time: a start while another runs is refused (TRAINING_RUN_ACTIVE), as is a start whose
 // mode conflicts with the runtime's BSC_RUNTIME_MODE (RUNTIME_MODE_CONFLICT). A LIVE selection writes
 // the revision's settable values as ONE settings generation (its compare-and-swap
@@ -246,7 +254,7 @@ enum TrainingProfileStatus {
   TRAINING_PROFILE_STATUS_ACTIVE = 1;
   // Kept with its runs and results, not selectable.
   TRAINING_PROFILE_STATUS_ARCHIVED = 2;
-  // Deleted; kept only while a run or result references it.
+  // Deleted: gone from every command and from the catalog query; a run or result may still name it.
   TRAINING_PROFILE_STATUS_DELETED = 3;
 }
 
@@ -261,7 +269,7 @@ message TrainingProfile {
   string name = 2;
   // The profile revision: the compare-and-swap of an update, delete or run start.
   uint64 revision = 3;
-  // The configuration hash of this revision's effective values.
+  // The configuration hash of this revision's ten values (the settings' rule above).
   string config_sha256 = 5;
   // The venues it trains on (BSC_VENUE_FLAP, BSC_VENUE_FOUR_CLASSIC, BSC_VENUE_OPENFOUR), as the
   // owner offers them; never an implicit "all markets".
@@ -292,7 +300,7 @@ message TrainingProfiles {
   string unavailable_reason = 2;
   // The owner and its catalog version.
   OwnerProvenance provenance = 3;
-  // Every non-deleted profile.
+  // The non-deleted profiles in creation order; archived ones only with include_archived.
   repeated TrainingProfile profiles = 4;
   // The catalog version: the compare-and-swap of a create or clone.
   uint64 catalog_version = 5;
@@ -308,7 +316,10 @@ message TrainingProfilesQuery {
   bool include_archived = 1;
 }
 
-// Params of `bsc.training.profile.create` (prepared).
+// Params of `bsc.training.profile.create`: a new profile at revision 1. Every value is set (an
+// absent value or an enum UNSPECIFIED is InvalidParams); the filters are the complete form as in a
+// set_all; venues are BSC_VENUE_* of the native venue list, each at most once, stored in native
+// order, never empty.
 message TrainingProfileCreateCommand {
   // 2 was settings (StrategyCSettings); a command carries settable values only.
   reserved 2;
@@ -321,7 +332,9 @@ message TrainingProfileCreateCommand {
   StrategyCSettableValues values = 4;
 }
 
-// Params of `bsc.training.profile.update` (prepared): a new revision of one profile.
+// Params of `bsc.training.profile.update`: a new revision of one profile, replacing its name, venues
+// and every value as a whole (the same rules as a create); refused while it is in use
+// (REJECTED_IN_USE: a clone takes the change).
 message TrainingProfileUpdateCommand {
   // 3 was settings (StrategyCSettings); a command carries settable values only.
   reserved 3;
@@ -336,7 +349,8 @@ message TrainingProfileUpdateCommand {
   StrategyCSettableValues values = 5;
 }
 
-// Params of `bsc.training.profile.clone` (prepared): a new profile from one revision.
+// Params of `bsc.training.profile.clone`: a new profile (a fresh id at revision 1) with the venues and
+// values of any kept revision of a non-deleted profile, under a new unique name.
 message TrainingProfileCloneCommand {
   // The profile copied.
   string source_profile_id = 1;
@@ -346,7 +360,7 @@ message TrainingProfileCloneCommand {
   string name = 3;
 }
 
-// Params of `bsc.training.profile.delete` (prepared): refused while a run or LIVE uses it.
+// Params of `bsc.training.profile.delete`: refused while a run or LIVE uses it (REJECTED_IN_USE).
 message TrainingProfileDeleteCommand {
   // The profile.
   string profile_id = 1;

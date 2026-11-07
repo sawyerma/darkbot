@@ -535,7 +535,7 @@ export type TrainingProfile = Message<"darkbot.bsc.v1.TrainingProfile"> & {
   revision: bigint;
 
   /**
-   * The configuration hash of this revision's effective values.
+   * The configuration hash of this revision's ten values (the settings' rule above).
    *
    * @generated from field: string config_sha256 = 5;
    */
@@ -641,7 +641,7 @@ export type TrainingProfiles = Message<"darkbot.bsc.v1.TrainingProfiles"> & {
   provenance?: OwnerProvenance;
 
   /**
-   * Every non-deleted profile.
+   * The non-deleted profiles in creation order; archived ones only with include_archived.
    *
    * @generated from field: repeated darkbot.bsc.v1.TrainingProfile profiles = 4;
    */
@@ -698,7 +698,10 @@ export const TrainingProfilesQuerySchema: GenMessage<TrainingProfilesQuery> = /*
   messageDesc(file_darkbot_bsc_v1_training, 9);
 
 /**
- * Params of `bsc.training.profile.create` (prepared).
+ * Params of `bsc.training.profile.create`: a new profile at revision 1. Every value is set (an
+ * absent value or an enum UNSPECIFIED is InvalidParams); the filters are the complete form as in a
+ * set_all; venues are BSC_VENUE_* of the native venue list, each at most once, stored in native
+ * order, never empty.
  *
  * @generated from message darkbot.bsc.v1.TrainingProfileCreateCommand
  */
@@ -733,7 +736,9 @@ export const TrainingProfileCreateCommandSchema: GenMessage<TrainingProfileCreat
   messageDesc(file_darkbot_bsc_v1_training, 10);
 
 /**
- * Params of `bsc.training.profile.update` (prepared): a new revision of one profile.
+ * Params of `bsc.training.profile.update`: a new revision of one profile, replacing its name, venues
+ * and every value as a whole (the same rules as a create); refused while it is in use
+ * (REJECTED_IN_USE: a clone takes the change).
  *
  * @generated from message darkbot.bsc.v1.TrainingProfileUpdateCommand
  */
@@ -775,7 +780,8 @@ export const TrainingProfileUpdateCommandSchema: GenMessage<TrainingProfileUpdat
   messageDesc(file_darkbot_bsc_v1_training, 11);
 
 /**
- * Params of `bsc.training.profile.clone` (prepared): a new profile from one revision.
+ * Params of `bsc.training.profile.clone`: a new profile (a fresh id at revision 1) with the venues and
+ * values of any kept revision of a non-deleted profile, under a new unique name.
  *
  * @generated from message darkbot.bsc.v1.TrainingProfileCloneCommand
  */
@@ -810,7 +816,7 @@ export const TrainingProfileCloneCommandSchema: GenMessage<TrainingProfileCloneC
   messageDesc(file_darkbot_bsc_v1_training, 12);
 
 /**
- * Params of `bsc.training.profile.delete` (prepared): refused while a run or LIVE uses it.
+ * Params of `bsc.training.profile.delete`: refused while a run or LIVE uses it (REJECTED_IN_USE).
  *
  * @generated from message darkbot.bsc.v1.TrainingProfileDeleteCommand
  */
@@ -1817,7 +1823,7 @@ export enum TrainingProfileStatus {
   ARCHIVED = 2,
 
   /**
-   * Deleted; kept only while a run or result references it.
+   * Deleted: gone from every command and from the catalog query; a run or result may still name it.
    *
    * @generated from enum value: TRAINING_PROFILE_STATUS_DELETED = 3;
    */

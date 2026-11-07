@@ -5,7 +5,7 @@ import { FILTER_GROUPS, activeFilters, type StrategyForm } from "../model/strate
  *  owner has no value for shows the configuration file's (never selectable: no native "unset");
  *  the team-sell exit is shown as what it is: not implemented. The native ranges and the features'
  *  units are the owner's settings state, shown as hints. */
-export function StrategyEditor({ form, onChange, disabled, venues, idPrefix, notes = {}, ranges = {}, features = {} }: {
+export function StrategyEditor({ form, onChange, disabled, venues, idPrefix, notes = {}, ranges = {}, features = {}, name, market }: {
   form: StrategyForm; onChange: (f: StrategyForm) => void; disabled: boolean; venues: string; idPrefix: string;
   /** Per field: the running strategy's own value where the stored one differs (effective at the next start). */
   notes?: Partial<Record<keyof StrategyForm, string>>;
@@ -13,6 +13,10 @@ export function StrategyEditor({ form, onChange, disabled, venues, idPrefix, not
   ranges?: Partial<Record<keyof StrategyForm, string>>;
   /** Per filter: its native unit, places and sign (StrategyFeatureSpec). */
   features?: Readonly<Record<string, string>>;
+  /** A training module's name (V8 “Module name”, first field). */
+  name?: { value: string; onChange: (v: string) => void };
+  /** A training module's market choice; without it the venues are shown read-only. */
+  market?: { value: string; options: readonly { key: string; label: string }[]; onChange: (key: string) => void };
 }) {
   const set = <K extends keyof StrategyForm>(k: K, v: StrategyForm[K]) => onChange({ ...form, [k]: v });
   const field = (k: "stake" | "target" | "stop" | "hold" | "observation" | "maxOpen" | "firstBuyerWindow", label: string) =>
@@ -20,7 +24,11 @@ export function StrategyEditor({ form, onChange, disabled, venues, idPrefix, not
       onChange={e => set(k, e.target.value)} data-testid={`${idPrefix}-${k}`} />{notes[k] ? <small data-testid={`${idPrefix}-${k}-running`}>{notes[k]}</small> : null}</div>;
   return <fieldset disabled={disabled} style={{ padding: 0, border: 0, margin: 0, minWidth: 0 }}>
     <div className="editor-fields">
-      <div className="field"><label htmlFor={`${idPrefix}-market`}>Market</label><input id={`${idPrefix}-market`} className="input" value={venues} readOnly title="The venues Strategy C follows (source modes, Settings)" /></div>
+      {name ? <div className="field"><label htmlFor={`${idPrefix}-name`}>Module name</label><input id={`${idPrefix}-name`} className="input" value={name.value} required
+        onChange={e => name.onChange(e.target.value)} data-testid={`${idPrefix}-name`} /></div> : null}
+      {market ? <div className="field"><label htmlFor={`${idPrefix}-market`}>Market</label><select id={`${idPrefix}-market`} className="select" value={market.value} onChange={e => market.onChange(e.target.value)} data-testid={`${idPrefix}-market`}>
+        {market.value === "" ? <option value="" disabled>Choose a market</option> : null}{market.options.map(o => <option key={o.key} value={o.key}>{o.label}</option>)}</select></div>
+        : <div className="field"><label htmlFor={`${idPrefix}-market`}>Market</label><input id={`${idPrefix}-market`} className="input" value={venues} readOnly title="The venues Strategy C follows (source modes, Settings)" /></div>}
       {field("stake", "Investment per buy · BNB")}
       {field("target", "Profit target · net ×")}
       {field("stop", "Stop loss · net ×")}

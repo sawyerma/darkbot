@@ -186,7 +186,10 @@ export function featureHints(view: StrategySettingsView): Record<string, string>
 }
 
 export function formOf(view: StrategySettingsView): { form: StrategyForm; filterError?: string } {
-  const v = nativeValues(view);
+  return formOfValues(nativeValues(view));
+}
+/** The form of native values (each key's canonical string, absent: empty). */
+export function formOfValues(v: Readonly<Record<string, string | undefined>>): { form: StrategyForm; filterError?: string } {
   const parsed = parseFilters(v[KEY_OF.filters] ?? "");
   return {
     form: {
@@ -208,25 +211,13 @@ export function changes(view: StrategySettingsView, form: StrategyForm): { chang
   const v = nativeValues(view);
   const out: { key: string; value: string }[] = [];
   let emptied: string | undefined;
-  const add = (key: string, value: string) => {
-    if (value === (v[key] ?? "")) return;
+  const native = formNative(form);
+  if ("error" in native) return native;
+  for (const [key, value] of native.values) {
+    if (value === (v[key] ?? "")) continue;
     if (value === "") emptied ??= key;
     else out.push({ key, value });
-  };
-  const stake = form.stake.trim() ? bnbToWei(form.stake) : { wei: "" };
-  if ("error" in stake) return stake;
-  add(KEY_OF.stake, stake.wei);
-  add(KEY_OF.target, form.target.trim().replace(",", "."));
-  add(KEY_OF.stop, form.stop.trim().replace(",", "."));
-  for (const [field, key] of [["hold", KEY_OF.hold], ["observation", KEY_OF.observation]] as const) {
-    const t = form[field].trim() ? secondsToMs(form[field]) : { ms: "" };
-    if ("error" in t) return t;
-    add(key, t.ms);
   }
-  add(KEY_OF.maxOpen, form.maxOpen.trim());
-  add(KEY_OF.firstBuyerWindow, form.firstBuyerWindow.trim());
-  add(KEY_OF.creatorSoldBeforeFill, form.creatorSoldBeforeFill);
-  add(KEY_OF.creatorSellExit, form.creatorSellExit);
   if (emptied) return { error: `${emptied} cannot be empty: clearing never restores the configuration file's value, enter the value itself` };
   for (const { key, value } of out) {
     const error = specError(key, value, view.basis?.specs[key]);
@@ -241,10 +232,29 @@ export function changes(view: StrategySettingsView, form: StrategyForm): { chang
   return { changed: out };
 }
 
+/** The form's nine scalar keys as native canonical strings, in the form's order (empty: not entered);
+ *  a BNB amount or a time the conversion cannot represent exactly is refused. */
+function formNative(form: StrategyForm): { values: [string, string][] } | { error: string } {
+  const stake = form.stake.trim() ? bnbToWei(form.stake) : { wei: "" };
+  if ("error" in stake) return stake;
+  const time = (text: string) => text.trim() ? secondsToMs(text) : { ms: "" };
+  const hold = time(form.hold), observation = time(form.observation);
+  if ("error" in hold) return hold;
+  if ("error" in observation) return observation;
+  return { values: [
+    [KEY_OF.stake, stake.wei], [KEY_OF.target, form.target.trim().replace(",", ".")], [KEY_OF.stop, form.stop.trim().replace(",", ".")],
+    [KEY_OF.hold, hold.ms], [KEY_OF.observation, observation.ms], [KEY_OF.maxOpen, form.maxOpen.trim()], [KEY_OF.firstBuyerWindow, form.firstBuyerWindow.trim()],
+    [KEY_OF.creatorSoldBeforeFill, form.creatorSoldBeforeFill], [KEY_OF.creatorSellExit, form.creatorSellExit],
+  ] };
+}
+
 const sameFilters = (a: Filters, b: Filters) => FILTER_KEYS.every(k => {
   const x = a[k], y = b[k];
   return x?.on === y?.on && x?.min === y?.min && x?.max === y?.max;
 });
+/** Whether two forms show the same entries (every field and every filter). */
+export const sameForm = (a: StrategyForm, b: StrategyForm) =>
+  (Object.keys(KEY_OF) as (keyof StrategyForm)[]).every(k => k === "filters" ? sameFilters(a.filters, b.filters) : a[k] === b[k]);
 
 /** The wire types' ranges (uint32, uint64): a representation limit of the request, never a
  *  setting's bound (those are the native parser's, StrategySettingSpec). */
@@ -283,26 +293,37 @@ export function saveRequest(view: StrategySettingsView, form: StrategyForm): Sav
   const stored = v[KEY_OF.filters];
   if (stored === undefined) return { kind: "refused", reason: "Several changes are saved together with the complete filter list, and the filters in effect are not reported (settings state not loaded, none stored, Strategy C not running): save one change at a time" };
   if (formOf(view).filterError) return { kind: "refused", reason: "The stored filters cannot be shown here, and a combined save would replace them: save one change at a time" };
-  const differs = catalogueDiffers(view);
+  const differs = catalogueDiffers(view.basis?.features);
   if (differs) return { kind: "refused", reason: `${differs}: save one change at a time` };
   const order = filterOrder(stored);
   const text = serializeFilters(form.filters, order, view.basis?.features);
   if ("error" in text) return { kind: "refused", reason: text.error };
-  const values: StrategySettableValues = {
-    filters: order.map(feature => {
-      const f = form.filters[feature] ?? { on: false, min: "", max: "" };
-      const min = f.min.trim().replace(",", "."), max = f.max.trim().replace(",", ".");
-      return { feature, enabled: f.on, ...(f.on && min ? { min } : {}), ...(f.on && max ? { max } : {}) };
-    }),
-  };
-  for (const { key, value } of diff.changed) {
+  const values = typedValues(diff.changed, completeFilters(form.filters, order));
+  if ("error" in values) return { kind: "refused", reason: values.error };
+  return { kind: "all", changed: diff.changed, filters: text.text, values };
+}
+
+/** The complete filter list of a command: every feature in `order`, a disabled one without bounds. */
+function completeFilters(filters: Filters, order: readonly string[]): StrategySettableValues["filters"] {
+  return order.map(feature => {
+    const f = filters[feature] ?? { on: false, min: "", max: "" };
+    const min = f.min.trim().replace(",", "."), max = f.max.trim().replace(",", ".");
+    return { feature, enabled: f.on, ...(f.on && min ? { min } : {}), ...(f.on && max ? { max } : {}) };
+  });
+}
+
+/** Native key/value pairs as the command's typed values (a whole number past its wire type, an
+ *  unknown choice: refused). */
+function typedValues(entries: readonly { key: string; value: string }[], filters: StrategySettableValues["filters"]): StrategySettableValues | { error: string } {
+  const values: StrategySettableValues = { filters };
+  for (const { key, value } of entries) {
     switch (key) {
       case KEY_OF.stake: values.inputWei = value; break;
       case KEY_OF.target: values.targetNetMultiple = value; break;
       case KEY_OF.stop: values.stopNetMultiple = value; break;
       case KEY_OF.observation: case KEY_OF.hold: case KEY_OF.maxOpen: case KEY_OF.firstBuyerWindow: {
         const n = whole(key, value, key === KEY_OF.observation || key === KEY_OF.hold ? U64_MAX : U32_MAX);
-        if (typeof n !== "bigint") return { kind: "refused", reason: n.error };
+        if (typeof n !== "bigint") return n;
         if (key === KEY_OF.observation) values.observationMs = n;
         else if (key === KEY_OF.hold) values.holdMs = n;
         else if (key === KEY_OF.maxOpen) values.maxOpen = Number(n);
@@ -310,20 +331,38 @@ export function saveRequest(view: StrategySettingsView, form: StrategyForm): Sav
         break;
       }
       case KEY_OF.creatorSoldBeforeFill:
-        if (value !== "FREE_CANCEL" && value !== "TX_LANDS") return { kind: "refused", reason: `${key}: ${value} is no choice` };
+        if (value !== "FREE_CANCEL" && value !== "TX_LANDS") return { error: `${key}: ${value} is no choice` };
         values.creatorSoldBeforeFill = value; break;
       case KEY_OF.creatorSellExit:
-        if (value !== "ENABLED" && value !== "DISABLED") return { kind: "refused", reason: `${key}: ${value} is no choice` };
+        if (value !== "ENABLED" && value !== "DISABLED") return { error: `${key}: ${value} is no choice` };
         values.creatorSellExit = value; break;
-      case KEY_OF.filters: break;
     }
   }
-  return { kind: "all", changed: diff.changed, filters: text.text, values };
+  return values;
 }
 
-/** Whether the owner's filterable features are not the form's 15 (a set_all sends every shown one). */
-function catalogueDiffers(view: StrategySettingsView): string | undefined {
-  const features = view.basis?.features;
+/** Every settable value of a profile command (create, update: a whole revision, nothing absent):
+ *  each key entered, within the native bounds where known, the filters complete in `order`. */
+export function profileValues(form: StrategyForm, order: readonly string[], specs?: Readonly<Record<string, SettingSpec>>, features?: Readonly<Record<string, FeatureSpec>>):
+  { values: StrategySettableValues; filters: string } | { error: string } {
+  const native = formNative(form);
+  if ("error" in native) return native;
+  const missing = native.values.find(([, v]) => v === "");
+  if (missing) return { error: `${missing[0]} is required: a module carries every value` };
+  for (const [key, value] of native.values) {
+    const error = specError(key, value, specs?.[key]);
+    if (error) return { error };
+  }
+  const differs = catalogueDiffers(features);
+  if (differs) return { error: differs };
+  const text = serializeFilters(form.filters, order, features);
+  if ("error" in text) return text;
+  const values = typedValues(native.values.map(([key, value]) => ({ key, value })), completeFilters(form.filters, order));
+  return "error" in values ? values : { values, filters: text.text };
+}
+
+/** Whether the owner's filterable features are not the form's 15 (a command sends every shown one). */
+function catalogueDiffers(features?: Readonly<Record<string, FeatureSpec>>): string | undefined {
   if (!features || !Object.keys(features).length) return undefined;
   const native = Object.entries(features).filter(([, f]) => f.filterable).map(([name]) => name);
   const unknown = native.filter(k => !FILTER_KEYS.includes(k)), missing = FILTER_KEYS.filter(k => !native.includes(k));

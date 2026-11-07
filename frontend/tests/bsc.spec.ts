@@ -5,7 +5,11 @@ import { BscLiveStateSchema, BscMonitoringStateSchema } from "../src/core/genera
 import { BscQueryResponseSchema } from "../src/core/generated/darkbot/bsc/v1/query_pb";
 import { Availability } from "../src/core/generated/darkbot/bsc/v1/common_pb";
 import { BscQueryRequestSchema } from "../src/core/generated/darkbot/bsc/v1/query_pb";
-import { CreatorSellExit, CreatorSoldBeforeFill, SettingsApplyStatus, StrategyCSettingsSetAllCommandSchema, StrategyCSettingsStateSchema } from "../src/core/generated/darkbot/bsc/v1/training_pb";
+import {
+  CreatorSellExit, CreatorSoldBeforeFill, SettingsApplyStatus, StrategyCSettingsSetAllCommandSchema, StrategyCSettingsStateSchema, TrainingProfileCloneCommandSchema,
+  TrainingProfileCreateCommandSchema, TrainingProfileDeleteCommandSchema, TrainingProfileSchema, TrainingProfileStatus, TrainingProfileUpdateCommandSchema, TrainingProfilesSchema,
+  type TrainingProfile,
+} from "../src/core/generated/darkbot/bsc/v1/training_pb";
 import { createHash } from "node:crypto";
 import {
   MainPayoutPolicySetCommandSchema, ProfitTransferPolicySetCommandSchema, TransferStatus, WalletDestinationConfirmCommandSchema, WalletDestinationSetCommandSchema, WalletMovementKind,
@@ -500,9 +504,9 @@ const STORED_5: [string, string][] = [["generation", "5"], ["request_id", "r-5"]
 const RUNNING_4: [string, string][] = [["strategy[0].state", "SHADOW"], ["strategy[0].settings_generation", "4"], ["strategy[0].settings[0].id", "BSC_STRATEGY_C_MAX_OPEN"], ["strategy[0].settings[0].value", "3"],
   ["strategy[0].settings[1].id", "BSC_STRATEGY_C_CREATOR_SELL_EXIT"], ["strategy[0].settings[1].value", "ENABLED"],
   ["strategy[0].gains", "2"], ["strategy[0].gain_wei", "30000000000000000"], ["strategy[0].losses", "1"], ["strategy[0].loss_wei", "10000000000000000"], ["strategy[0].launches", "37"]];
-const strategyMonitoring = (extra: [string, string][] = [], stored = STORED_5, strategy = RUNNING_4) => toBinary(BscMonitoringStateSchema, create(BscMonitoringStateSchema, { state: "NOT_EXECUTED", records: [
+const strategyMonitoring = (extra: [string, string][] = [], stored = STORED_5, strategy = RUNNING_4, modes: [string, string][] = []) => toBinary(BscMonitoringStateSchema, create(BscMonitoringStateSchema, { state: "NOT_EXECUTED", records: [
   record("darkbot.bsc.source-modes.v1", [["generation", "9"], ["sources[0].source_id", "BSC_INGRESS_GETH"], ["sources[0].requested", "SHADOW"], ["sources[0].effective", "SHADOW"],
-    ["sources[1].source_id", "BSC_INGRESS_DRPC"], ["sources[1].requested", "OFF"], ["sources[1].effective", "OFF"]]),
+    ["sources[1].source_id", "BSC_INGRESS_DRPC"], ["sources[1].requested", "OFF"], ["sources[1].effective", "OFF"], ...modes]),
   record("darkbot.bsc.strategy-settings.v1", stored),
   record("darkbot.bsc.runtime-status.v1", [["_provenance.observed_unix_ms", String(Date.now())], ["status_interval_ms", "60000"], ["status_stale_intervals", "3"], ["mode", "SHADOW"],
     ...strategy,
@@ -598,8 +602,7 @@ test("Live saves several Strategy C settings as ONE set_all generation with the 
 /** The query route stand-in of the settings owner: the reporter's `--query` answer shape for
  *  bsc/config/ingress.public.env with nothing stored (TEST_ONLY values), every other query
  *  NOT_IMPLEMENTED. Returns the queries asked. */
-async function settingsOwner(page: Page): Promise<string[]> {
-  const asked: string[] = [];
+function settingsState() {
   const spec = (key: string, unit: string, min?: string, max?: string, places = 0) => ({ key: `BSC_STRATEGY_C_${key}`, unit, min, max, places });
   const features = ["buy_count", "sell_count", "buy_volume_bnb", "sell_volume_bnb", "net_buy_flow_bnb", "unique_buyers", "unique_buyer_ratio", "largest_buy_bnb", "buyer_volume_concentration",
     "first5_buyer_concentration", "first_sell_latency_ms", "price_change", "max_drawdown", "dev_initial_buy", "curve_progress_pct", "provider_gap_flag"];
@@ -612,6 +615,11 @@ async function settingsOwner(page: Page): Promise<string[]> {
       spec("TARGET_NET_MULTIPLE", "ratio", "1.0001", undefined, 4), spec("STOP_NET_MULTIPLE", "ratio", "0.0000", "0.9999", 4), spec("HOLD_MS", "ms", "1", "86400000"),
       spec("MAX_OPEN", "count", "1", "1000"), spec("CREATOR_SOLD_BEFORE_FILL", "enum"), spec("CREATOR_SELL_EXIT", "enum"), spec("FIRST_BUYER_WINDOW", "count", "1", "100")],
     features: features.map((name, index) => ({ name, index, unit: "count", places: 0, signed: false, filterable: name !== "provider_gap_flag" })) });
+  return state;
+}
+async function settingsOwner(page: Page): Promise<string[]> {
+  const asked: string[] = [];
+  const state = settingsState();
   await page.route("**/api/v1/bsc/query", async (r) => {
     const q = fromBinary(BscQueryRequestSchema, r.request().postDataBuffer()!);
     asked.push(q.query.case ?? "");
@@ -663,6 +671,129 @@ test("Live takes the owner's settings state over bsc/query: the file's values, n
   await page.getByRole("button", { name: "Open Strategy C module" }).click();
   await expect(page.getByTestId("bsc-training-stake")).toHaveValue("0.01");
   expect(asked.filter(x => x === "strategySettings")).toHaveLength(2);
+  expect(errors).toEqual([]);
+});
+
+/** A stand-in of the native profile owner (TEST_ONLY, BSC_v2's V8-01 contract): its catalog over
+ *  bsc/query (with the settings state), its four commands at /api/v1/command, each decided with
+ *  the owner's receipt line `outcome=… action=… profile_id=… revision=… catalog=… request_id=…`. */
+async function profileOwner(page: Page, seed: TrainingProfile[]): Promise<{ sent: CommandRequest[]; asked: string[] }> {
+  const sent: CommandRequest[] = [], asked: string[] = [];
+  const profiles = [...seed];
+  let catalog = 1n, next = profiles.length + 1, detail = "";
+  const proto = (bytes: Uint8Array) => ({ body: Buffer.from(bytes), contentType: "application/x-protobuf" });
+  await page.route("**/api/v1/command**", async (r) => {
+    if (r.request().method() !== "POST") return r.fulfill(proto(toBinary(CommandLookupResponseSchema, create(CommandLookupResponseSchema,
+      { found: true, commandId: sent.at(-1)?.requestId ?? "", phase: CommandPhase.COMPLETED, detail }))));
+    const req = fromBinary(CommandRequestSchema, r.request().postDataBuffer()!);
+    sent.push(req);
+    const line = (action: string, id: string, revision: bigint | "-") => `outcome=APPLIED action=${action} profile_id=${id} revision=${revision} catalog=${catalog} request_id=${req.requestId}`;
+    const now = BigInt(Date.now());
+    if (req.action === "bsc.training.profile.create") {
+      const c = fromBinary(TrainingProfileCreateCommandSchema, req.params);
+      const id = `p${String(next++).padStart(6, "0")}`;
+      catalog++;
+      profiles.push(create(TrainingProfileSchema, { profileId: id, name: c.name, revision: 1n, configSha256: "cd".repeat(32), venues: c.venues, status: TrainingProfileStatus.ACTIVE, values: c.values, createdUnixMs: now, updatedUnixMs: now, requestId: req.requestId }));
+      detail = line("CREATE", id, 1n);
+    } else if (req.action === "bsc.training.profile.update") {
+      const u = fromBinary(TrainingProfileUpdateCommandSchema, req.params);
+      const p = profiles.find(x => x.profileId === u.profileId)!;
+      Object.assign(p, { name: u.name, venues: u.venues, values: u.values, revision: p.revision + 1n, updatedUnixMs: now, requestId: req.requestId });
+      detail = line("UPDATE", p.profileId, p.revision);
+    } else if (req.action === "bsc.training.profile.clone") {
+      const c = fromBinary(TrainingProfileCloneCommandSchema, req.params);
+      const src = profiles.find(x => x.profileId === c.sourceProfileId)!;
+      const id = `p${String(next++).padStart(6, "0")}`;
+      catalog++;
+      profiles.push(create(TrainingProfileSchema, { ...src, profileId: id, name: c.name, revision: 1n, inUse: false, inUseReason: "", requestId: req.requestId }));
+      detail = line("CLONE", id, 1n);
+    } else if (req.action === "bsc.training.profile.delete") {
+      const d = fromBinary(TrainingProfileDeleteCommandSchema, req.params);
+      const at = profiles.findIndex(x => x.profileId === d.profileId);
+      if (d.archive) profiles[at]!.status = TrainingProfileStatus.ARCHIVED; else profiles.splice(at, 1);
+      detail = line(d.archive ? "ARCHIVE" : "DELETE", d.profileId, "-");
+    }
+    return r.fulfill(proto(toBinary(CommandResponseSchema, create(CommandResponseSchema, { status: CommandStatus.ACCEPTED, commandId: req.requestId, requestId: req.requestId, phase: CommandPhase.COMPLETED }))));
+  });
+  await page.route("**/api/v1/bsc/query", async (r) => {
+    const q = fromBinary(BscQueryRequestSchema, r.request().postDataBuffer()!);
+    asked.push(q.query.case ?? "");
+    const answer = q.query.case === "trainingProfiles"
+      ? create(BscQueryResponseSchema, { requestId: q.requestId, availability: Availability.AVAILABLE, result: { case: "trainingProfiles", value: create(TrainingProfilesSchema,
+        { availability: Availability.AVAILABLE, catalogVersion: catalog, profiles, provenance: { owner: "bsc_runtime strategy profiles", provenance: "NATIVE_CREATED" } }) } })
+      : q.query.case === "strategySettings"
+        ? create(BscQueryResponseSchema, { requestId: q.requestId, availability: Availability.AVAILABLE, result: { case: "strategySettings", value: settingsState() } })
+        : create(BscQueryResponseSchema, { requestId: q.requestId, availability: Availability.NOT_IMPLEMENTED, unavailableReason: "BSC-V8-02" });
+    return r.fulfill(proto(toBinary(BscQueryResponseSchema, answer)));
+  });
+  return { sent, asked };
+}
+
+test("Training modules at the native profile owner: create, edit, duplicate and delete at its versions (FE-V8-04, BSC-V8-01)", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  // TEST_ONLY: one module in use by a run; the venues of the source-modes record (Flap on, the Four venues off).
+  const busy = create(TrainingProfileSchema, { profileId: "p000001", name: "Flap fast", revision: 3n, configSha256: "ab".repeat(32), venues: ["BSC_VENUE_FLAP"],
+    status: TrainingProfileStatus.ACTIVE, inUse: true, inUseReason: "run t1", values: settingsState().effective });
+  const { sent, asked } = await profileOwner(page, [busy]);
+  await feed(page, liveOf({}), strategyMonitoring([], [["generation", "0"]], [["strategy[0].state", "OFF"]], [
+    ["venues[0].venue_id", "BSC_VENUE_FLAP"], ["venues[0].requested", "SHADOW"], ["venues[0].effective", "SHADOW"],
+    ["venues[1].venue_id", "BSC_VENUE_FOUR_CLASSIC"], ["venues[1].requested", "OFF"], ["venues[1].effective", "OFF"],
+    ["venues[2].venue_id", "BSC_VENUE_OPENFOUR"], ["venues[2].requested", "OFF"], ["venues[2].effective", "OFF"]]));
+  await page.goto("/bsc");
+  await area(page, "Training");
+  const id = (k: string) => page.getByTestId(`bsc-training-profile-${k}`);
+  await expect(page.getByTestId("bsc-training-module-p000001")).toContainText("In use: run t1");
+  await expect(page.getByRole("button", { name: "Delete Flap fast" })).toBeDisabled();
+  // New module: the current Strategy C configuration as its start; a name no other module has.
+  await page.getByTestId("bsc-training-new").click();
+  await expect(id("new-stake")).toHaveValue("0.01");
+  await expect(id("new-market")).toHaveValue("BSC_VENUE_FLAP");
+  await expect(id("new-state")).toHaveText("Enter a module name");
+  await id("new-name").fill("Flap fast");
+  await expect(id("new-state")).toHaveText("A module named “Flap fast” exists");
+  await expect(id("create")).toBeDisabled();
+  await id("new-name").fill("Four slow");
+  await id("new-market").selectOption({ label: "All markets" });
+  await id("new-hold").fill("900");
+  await id("create").click();
+  // The owner applied it: the catalog is read again and the new module opens.
+  await expect(page.getByRole("heading", { name: "Four slow" })).toBeVisible();
+  await expect(id("receipt")).toContainText("outcome=APPLIED action=CREATE profile_id=p000002");
+  await expect(id("state")).toHaveText("Revision 1 · changes apply to this module only.");
+  // Edit: a whole new revision at the module's revision.
+  await id("maxOpen").fill("7");
+  await id("market").selectOption({ label: "OpenFour" });
+  await expect(id("state")).toHaveText("Saves revision 2 of this module.");
+  await id("save").click();
+  await expect(id("state")).toHaveText("Revision 2 · changes apply to this module only.");
+  await expect(id("maxOpen")).toHaveValue("7");
+  // Duplicate: a clone of this revision under a new name at the catalog version; it opens.
+  await id("duplicate").click();
+  await expect(page.getByRole("heading", { name: "Four slow (copy)" })).toBeVisible();
+  await page.getByRole("button", { name: "‹ All modules" }).click();
+  // Delete (not archive) at the module's revision: it leaves the list.
+  await page.getByRole("button", { name: "Delete Four slow", exact: true }).click();
+  await expect(id("delete-dialog")).toContainText("“Four slow” is deleted by the native profile owner");
+  await id("delete-confirm").click();
+  await expect(page.getByTestId("bsc-training-module-p000002")).toHaveCount(0);
+  await expect(page.getByTestId("bsc-training-module-p000003")).toContainText("Four slow (copy)");
+  expect(sent.map(r => [r.action, r.resourceId, r.expected?.version])).toEqual([
+    ["bsc.training.profile.create", "", { case: "configVersion", value: 1n }],
+    ["bsc.training.profile.update", "p000002", { case: "profileVersion", value: 1n }],
+    ["bsc.training.profile.clone", "p000002", { case: "configVersion", value: 2n }],
+    ["bsc.training.profile.delete", "p000002", { case: "profileVersion", value: 2n }],
+  ]);
+  const created = fromBinary(TrainingProfileCreateCommandSchema, sent[0]!.params);
+  expect([created.name, created.venues, created.values?.holdMs, created.values?.maxOpen, created.values?.creatorSoldBeforeFill, created.values?.filters.length])
+    .toEqual(["Four slow", ["BSC_VENUE_FLAP", "BSC_VENUE_FOUR_CLASSIC", "BSC_VENUE_OPENFOUR"], 900000n, 5, CreatorSoldBeforeFill.FREE_CANCEL, 15]);
+  const updated = fromBinary(TrainingProfileUpdateCommandSchema, sent[1]!.params);
+  expect([updated.profileId, updated.name, updated.venues, updated.values?.maxOpen, updated.values?.holdMs]).toEqual(["p000002", "Four slow", ["BSC_VENUE_OPENFOUR"], 7, 900000n]);
+  const cloned = fromBinary(TrainingProfileCloneCommandSchema, sent[2]!.params);
+  expect([cloned.sourceProfileId, cloned.sourceRevision, cloned.name]).toEqual(["p000002", 2n, "Four slow (copy)"]);
+  expect(fromBinary(TrainingProfileDeleteCommandSchema, sent[3]!.params)).toMatchObject({ profileId: "p000002", archive: false });
+  // One catalog read per view and per decided request, never polled.
+  expect(asked.filter(q => q === "trainingProfiles")).toHaveLength(5);
   expect(errors).toEqual([]);
 });
 
