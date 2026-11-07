@@ -1,0 +1,19 @@
+# bugs_v4 D2 after-measurement and F3/AG1 QoS A/B (instrumented scratch copy of the bugs_v4 engine, release, 30-min setup, 5 min each, 07.11. 01:2x-01:5x local)
+# run6/run9 without, run7/run8 with QoS USER_INTERACTIVE on the decision thread (DIAG_QOS: set_current_thread_qos, outcome Applied(UserInteractive)); last 3 s (stop) excluded
+run6 qos=0 publicnode_full=57066 queue_waits_ge_1ms=668 queue_max_us=7631 offcpu_events_ge_1ms=18 offcpu_cpu_share=11%
+  every pass checkpoint: n=592 p50=1 p99=1283 max=1910 us
+  every pass reconcile: n=593 p50=457 p99=978 max=6554 us
+  every pass status: n=592 p50=81 p99=601 max=937 us
+run7 qos=1 publicnode_full=57504 queue_waits_ge_1ms=217 queue_max_us=15017 offcpu_events_ge_1ms=5 offcpu_cpu_share=22%
+  every pass checkpoint: n=592 p50=1 p99=1332 max=2099 us
+  every pass reconcile: n=593 p50=498 p99=855 max=8743 us
+  every pass status: n=592 p50=83 p99=571 max=602 us
+run8 qos=1 publicnode_full=61875 queue_waits_ge_1ms=214 queue_max_us=14361 offcpu_events_ge_1ms=2 offcpu_cpu_share=28%
+  every pass checkpoint: n=596 p50=1 p99=1748 max=2205 us
+  every pass reconcile: n=597 p50=478 p99=2233 max=10162 us
+  every pass status: n=596 p50=84 p99=588 max=941 us
+run9 qos=0 publicnode_full=57874 queue_waits_ge_1ms=227 queue_max_us=22005 offcpu_events_ge_1ms=6 offcpu_cpu_share=5%
+  every pass checkpoint: n=595 p50=1 p99=1803 max=2066 us
+  every pass reconcile: n=596 p50=491 p99=933 max=10624 us
+  every pass status: n=595 p50=86 p99=573 max=873 us
+# before (R14 code, status written on the loop): status pass p99 4033-5328 us, max 6324-20173 us; queue waits >= 1 ms 268-519 per run (r14/r14_20261106/diag_sections.txt)

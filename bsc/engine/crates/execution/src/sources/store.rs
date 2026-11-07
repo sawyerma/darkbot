@@ -1014,6 +1014,15 @@ impl Store {
             }
             Err(e) => return Err(format!("{LIVE_SPEND_UNREADABLE}: entry not written: {e}")),
         }
+        // bugs_v4 L2: a grant revoked or replaced meanwhile (a request takes
+        // no spend lock) holds, as a limit lowered meanwhile does (BSC3-004):
+        // the entry stays (it over-counts), nothing is admitted.
+        let held = self.current()?;
+        if held.live.as_ref() != Some(grant)
+            || held.live_set_by.as_ref().map(|by| by.generation) != Some(armed.grant_generation)
+        {
+            return Err(LIVE_GRANT_CHANGED.into());
+        }
         // BSC3-023: the slots and the entry were handed to the drive; one
         // flush puts them on the medium before the admission returns, so
         // before any byte of the intent can leave (BSC3-024). Not flushed:

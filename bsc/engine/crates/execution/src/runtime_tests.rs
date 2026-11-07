@@ -894,7 +894,7 @@ fn the_gas_limits_cover_the_frozen_evidence() {
         (Action::Sell, exec.sell_gas_limit),
         (Action::Approve, exec.approve_gas_limit),
     ] {
-        let mut over = GasEvidence::default();
+        let mut over = gas.clone();
         over.add(
             PathClass {
                 venue: Venue::Flap,
@@ -915,7 +915,7 @@ fn the_gas_limits_cover_the_frozen_evidence() {
     };
     assert!(gas.class(classic(Action::Buy)).unwrap().gas_used_max <= four.gas_limit);
     for action in [Action::Buy, Action::BuyInLaunchBlock] {
-        let mut over = GasEvidence::default();
+        let mut over = gas.clone();
         over.add(classic(action), four.gas_limit + 1).unwrap();
         let e = gas_limits_cover(&exec, &over).unwrap_err();
         assert!(
@@ -946,7 +946,7 @@ fn the_gas_limits_cover_the_frozen_evidence() {
     assert_eq!(estimates.len(), 20);
     assert!(estimates.iter().all(|g| *g <= openfour.gas_limit));
     for action in [Action::Buy, Action::BuyInLaunchBlock] {
-        let mut over = GasEvidence::default();
+        let mut over = gas.clone();
         over.add(open(action), openfour.gas_limit + 1).unwrap();
         let e = gas_limits_cover(&exec, &over).unwrap_err();
         assert!(
@@ -985,7 +985,7 @@ fn the_gas_limits_cover_the_frozen_evidence() {
         ] {
             let class = PathClass { venue, action };
             assert!(gas.class(class).unwrap().gas_used_max <= limit, "{class:?}");
-            let mut over = GasEvidence::default();
+            let mut over = gas.clone();
             over.add(class, limit + 1).unwrap();
             let e = gas_limits_cover(&exec, &over).unwrap_err();
             assert!(
@@ -1001,10 +1001,47 @@ fn the_gas_limits_cover_the_frozen_evidence() {
     let mut flap_only = exec.clone();
     flap_only.four = None;
     flap_only.openfour = None;
-    let mut over = GasEvidence::default();
+    let mut over = gas.clone();
     over.add(classic(Action::Buy), u64::MAX).unwrap();
     over.add(open(Action::Buy), u64::MAX).unwrap();
     gas_limits_cover(&flap_only, &over).unwrap();
+    // bugs_v4 AH1: each class a configured path needs, missing, refuses
+    // the start (before: taken as 0); the Four launch-block BUY, never
+    // witnessed, is the one class held to its family's BUY class.
+    let needed = [
+        (Venue::Flap, Action::Buy),
+        (Venue::Flap, Action::BuyInLaunchBlock),
+        (Venue::Flap, Action::Sell),
+        (Venue::Flap, Action::Approve),
+        (Venue::FourClassic, Action::Buy),
+        (Venue::FourClassic, Action::Approve),
+        (Venue::FourClassic, Action::Sell),
+        (Venue::OpenFour, Action::Buy),
+        (Venue::OpenFour, Action::Approve),
+        (Venue::OpenFour, Action::Sell),
+    ];
+    let without = |skip: Option<PathClass>| {
+        let mut e = GasEvidence::default();
+        for (venue, action) in needed {
+            let class = PathClass { venue, action };
+            if Some(class) != skip {
+                e.add(class, gas.class(class).unwrap().gas_used_max)
+                    .unwrap();
+            }
+        }
+        e
+    };
+    gas_limits_cover(&exec, &without(None)).unwrap();
+    for (venue, action) in needed {
+        let e = gas_limits_cover(&exec, &without(Some(PathClass { venue, action }))).unwrap_err();
+        assert!(
+            e.contains(&format!("no {venue:?} {action:?} gas evidence")),
+            "{e}"
+        );
+    }
+    assert!(gas.class(classic(Action::BuyInLaunchBlock)).is_none());
+    assert!(gas.class(open(Action::BuyInLaunchBlock)).is_none());
+    assert!(gas_limits_cover(&exec, &GasEvidence::default()).is_err());
 }
 
 /// BSC3-079 review: the start's check reads the build's frozen evidence,
@@ -2766,7 +2803,11 @@ fn an_idle_runtime_writes_its_status_and_stops_cleanly() {
     // flushing it to the device (counted on the loop's own thread).
     let runner = thread::spawn(move || {
         let ran = run(&config, &sources, &rundir, Path::new("/nonexistent-repo"));
-        (ran, FLUSHED.with(std::cell::Cell::get))
+        (
+            ran,
+            FLUSHED.with(std::cell::Cell::get),
+            VOLATILE.with(std::cell::Cell::get),
+        )
     });
     let status = base.join("bsc-runtime/status.dbrec");
     let started = Instant::now();
@@ -2776,11 +2817,14 @@ fn an_idle_runtime_writes_its_status_and_stops_cleanly() {
         thread::sleep(Duration::from_millis(20));
     }
     fs::write(base.join("bsc.runtime.stop"), b"stop\n").unwrap();
-    let (ran, flushed) = runner.join().unwrap();
+    let (ran, flushed, volatile) = runner.join().unwrap();
     ran.unwrap();
     // The census at the stop is durable; the status, written every
     // interval, never is.
     assert_eq!(flushed, 1, "the loop flushes only its final census");
+    // bugs_v4 D2: the loop writes only the stop's status itself; every
+    // status before it went to the writer thread (before: every one here).
+    assert_eq!(volatile, 1, "the loop wrote {volatile} statuses itself");
     // Paket 8 review L7: the stop is consumed; the next start runs.
     assert!(!base.join("bsc.runtime.stop").exists());
     let r = darkbot_bsc_record::decode(&rs::SCHEMA, &fs::read(&status).unwrap()).unwrap();
@@ -3204,4 +3248,57 @@ fn a_strategy_start_journals_its_settings_before_its_switch() {
         matches!(&c.strategy_refused, Some(("SETTINGS_REFUSED", why)) if why.starts_with("STRATEGY_SETTINGS_INVALID"))
     );
     fs::remove_dir_all(&base).unwrap();
+}
+
+/// bugs_v4 AR2: a source switched off parks its adapter: the decision
+/// loop never waits for it (before: joined there, R14 25–177 ms); it is
+/// joined once it ended, at the stop waited for as before.
+#[test]
+fn a_switched_off_adapter_is_parked_not_waited_for() {
+    let ending = || {
+        let stop = Arc::new(AtomicBool::new(false));
+        let flag = Arc::clone(&stop);
+        let handle = thread::spawn(move || {
+            while !flag.load(Ordering::Acquire) {
+                thread::sleep(Duration::from_millis(1));
+            }
+            thread::sleep(Duration::from_millis(200));
+        });
+        Adapter { stop, handle }
+    };
+    let mut adapters = HashMap::from([(1, ending()), (2, ending())]);
+    let mut parked = HashMap::new();
+    let t = Instant::now();
+    park_adapter(&mut adapters, &mut parked, 1);
+    assert!(t.elapsed() < Duration::from_millis(50), "{:?}", t.elapsed());
+    assert!(!adapters.contains_key(&1) && parked.contains_key(&1));
+    assert!(reap_adapters(&mut parked, false).is_empty(), "still ending");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while parked.values().any(|a| !a.handle.is_finished()) {
+        assert!(Instant::now() < deadline, "the adapter never ended");
+        thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(reap_adapters(&mut parked, false), [1]);
+    // At the stop a parked adapter is waited for.
+    park_adapter(&mut adapters, &mut parked, 2);
+    assert_eq!(reap_adapters(&mut parked, true), [2]);
+    assert!(parked.is_empty() && adapters.is_empty());
+}
+
+/// bugs_v4 AR2 (review): each reconcile's step per source: switched off
+/// while running parks, at the stop waits; switched on again while the old
+/// adapter still ends starts nothing (no second adapter, no Started before
+/// its Stopped).
+#[test]
+fn a_reconcile_parks_switched_off_adapters_and_starts_none_beside_them() {
+    use AdapterStep::*;
+    // (want, running, parked, finished, stopping)
+    assert_eq!(adapter_step(false, true, false, false, false), Park);
+    assert_eq!(adapter_step(false, true, false, false, true), StopNow);
+    assert_eq!(adapter_step(true, false, true, false, false), Keep);
+    assert_eq!(adapter_step(true, false, false, false, false), Start);
+    assert_eq!(adapter_step(true, true, false, true, false), Restart);
+    assert_eq!(adapter_step(true, true, false, false, false), Keep);
+    assert_eq!(adapter_step(false, false, true, false, false), Keep);
+    assert_eq!(adapter_step(false, false, false, false, true), Keep);
 }

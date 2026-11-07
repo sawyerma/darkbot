@@ -3172,7 +3172,9 @@ impl<E: End> Executor<E> {
         // canonical; it comes back as an exit with the approval out.
         let defer_sell = E::CHAIN_ORDERED && approved.is_none();
         let needed = if approved.is_some() { 1 } else { 2 };
-        if self.strategy_lanes.len() - self.strategy_used < needed {
+        // bugs_v4 C4: C3's nonce, still to be skipped, takes a lane too.
+        let skip = usize::from(self.strategy_used == 0 && self.c3_took_nonce);
+        if self.strategy_lanes.len() < self.strategy_used + skip + needed {
             return Err(Refusal::LanesExhausted);
         }
         let approve_index = match approved {
@@ -3452,10 +3454,14 @@ impl<E: End> Executor<E> {
     /// exposure plus the gas spent, and whether a nonce hole stopped the
     /// strategy's intents.
     pub fn strategy_lanes(&self) -> (usize, usize, u64, U256, bool) {
+        // bugs_v4 C4 (review): C3's nonce, still to be skipped, takes a lane.
+        let skip = usize::from(self.strategy_used == 0 && self.c3_took_nonce);
         (
             self.strategy_lanes.len(),
-            self.strategy_lanes.len() - self.strategy_used,
-            self.strategy_first_nonce + self.strategy_used as u64,
+            self.strategy_lanes
+                .len()
+                .saturating_sub(self.strategy_used + skip),
+            self.strategy_next_nonce(),
             self.strategy_spent_wei,
             self.strategy_nonce_gap,
         )

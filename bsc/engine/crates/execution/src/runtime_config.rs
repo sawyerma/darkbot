@@ -105,9 +105,16 @@ pub fn gas_limits_cover(
     gas: &darkbot_bsc_trading::economics::network::GasEvidence,
 ) -> Result<(), String> {
     use darkbot_bsc_trading::economics::network::{Action, PathClass, Venue};
-    let largest = |venue, action| {
-        gas.class(PathClass { venue, action })
-            .map_or(0, |c| c.gas_used_max)
+    // bugs_v4 AH1: a class a configured path needs and the evidence lacks
+    // refuses the start (before: taken as 0). The one unwitnessed class:
+    // a Four launch-block BUY (the frozen Four receipts hold none; LIVE C3
+    // is Flap only), held to its family's BUY class.
+    let largest = |venue: Venue, action: Action| match gas.class(PathClass { venue, action }) {
+        Some(c) => Ok(Some(c.gas_used_max)),
+        None if action == Action::BuyInLaunchBlock && venue != Venue::Flap => Ok(None),
+        None => Err(format!(
+            "no {venue:?} {action:?} gas evidence in the frozen receipts"
+        )),
     };
     let buys = &[Action::Buy, Action::BuyInLaunchBlock][..];
     // A configured Four.meme family's BUY of its BUYs; SC4 c (B1) its exits'
@@ -161,7 +168,9 @@ pub fn gas_limits_cover(
     .chain(openfour)
     {
         for action in actions {
-            let most = largest(venue, *action);
+            let Some(most) = largest(venue, *action)? else {
+                continue;
+            };
             if limit < most {
                 return Err(format!(
                     "{name} {limit} is below the largest {action:?} gas {most} of the frozen evidence"
@@ -268,6 +277,10 @@ pub struct CanonicalConfig {
     /// Phase E review L3: how often the Four.meme drift guard reads the
     /// live deployment against the freeze (`BSC_CANONICAL_FOUR_PROBE_MS`).
     pub four_probe_ms: u64,
+    /// bugs_v4 G5: failed probes in a row the last validation stands
+    /// through (`BSC_CANONICAL_FOUR_PROBE_FAILURES`); one more leaves every
+    /// Four launch's curve unclassified until a probe matches again.
+    pub four_probe_failures: u32,
     /// 01.11. (R1): at most this many curve reads of open LIVE lots at a
     /// time (`BSC_CANONICAL_LOT_READS_MAX`), and a lot read again no
     /// earlier than this after a failed or overtaken read
@@ -603,6 +616,7 @@ impl RuntimeConfig {
                     join_delay_ms: take("BSC_CANONICAL_JOIN_DELAY_MS", 0, 600_000)?,
                     join_horizon_ms: take("BSC_CANONICAL_JOIN_HORIZON_MS", 1_000, 86_400_000)?,
                     four_probe_ms: take("BSC_CANONICAL_FOUR_PROBE_MS", 60_000, 86_400_000)?,
+                    four_probe_failures: take("BSC_CANONICAL_FOUR_PROBE_FAILURES", 0, 100)? as u32,
                     lot_reads_max: usize::try_from(take("BSC_CANONICAL_LOT_READS_MAX", 1, 64)?)
                         .map_err(|_| "BSC_CANONICAL_LOT_READS_MAX")?,
                     lot_read_retry_ms: take("BSC_CANONICAL_LOT_READ_RETRY_MS", 100, 600_000)?,

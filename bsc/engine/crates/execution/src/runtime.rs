@@ -194,6 +194,67 @@ struct Adapter {
     handle: JoinHandle<()>,
 }
 
+/// bugs_v4 AR2: a source switched off while the runtime runs: its adapter
+/// is told to stop and parked, never waited for on the decision loop (R14:
+/// such joins took 25–177 ms).
+fn park_adapter(
+    adapters: &mut HashMap<usize, Adapter>,
+    parked: &mut HashMap<usize, Adapter>,
+    i: usize,
+) {
+    if let Some(a) = adapters.remove(&i) {
+        a.stop.store(true, Ordering::Release);
+        parked.insert(i, a);
+    }
+}
+
+/// bugs_v4 AR2: what one reconcile does with a source's adapter.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AdapterStep {
+    Start,
+    /// Switched off while running: told to stop, parked.
+    Park,
+    /// At the stop: told to stop and waited for (as before).
+    StopNow,
+    /// Ended on its own: disconnected, started again next reconcile.
+    Restart,
+    Keep,
+}
+
+fn adapter_step(
+    want: bool,
+    running: bool,
+    parked: bool,
+    finished: bool,
+    stopping: bool,
+) -> AdapterStep {
+    match (want, running) {
+        // A parked adapter of this source ends first.
+        (true, false) if !parked => AdapterStep::Start,
+        (false, true) if !stopping => AdapterStep::Park,
+        (false, true) => AdapterStep::StopNow,
+        (true, true) if finished => AdapterStep::Restart,
+        _ => AdapterStep::Keep,
+    }
+}
+
+/// The parked adapters that ended (at the stop: all, waited for, as before),
+/// joined; their sources' indices, in order, for their Stopped records.
+fn reap_adapters(parked: &mut HashMap<usize, Adapter>, stopping: bool) -> Vec<usize> {
+    let mut ended: Vec<usize> = parked
+        .iter()
+        .filter(|(_, a)| stopping || a.handle.is_finished())
+        .map(|(i, _)| *i)
+        .collect();
+    ended.sort_unstable();
+    for i in &ended {
+        if let Some(a) = parked.remove(i) {
+            let _ = a.handle.join();
+        }
+    }
+    ended
+}
+
 /// Every LIVE transaction a Strategy C decision handed over, journaled.
 fn journal_live(
     journal: &mut RuntimeJournal,
@@ -769,6 +830,8 @@ pub fn replace(path: &Path, bytes: &[u8]) -> Result<(), String> {
 /// until the next interval rewrites it. A full flush costs milliseconds
 /// here (F_FULLFSYNC on macOS), each interval, while launches wait.
 fn replace_volatile(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    #[cfg(test)]
+    VOLATILE.with(|n| n.set(n.get() + 1));
     replace_with(path, bytes, false)
 }
 
@@ -776,6 +839,8 @@ fn replace_volatile(path: &Path, bytes: &[u8]) -> Result<(), String> {
 thread_local! {
     /// Tests: the replacements this thread flushed to the device.
     static FLUSHED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    /// Tests (bugs_v4 D2): the volatile replacements this thread wrote.
+    static VOLATILE: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
 fn replace_with(path: &Path, bytes: &[u8], flush: bool) -> Result<(), String> {
@@ -1320,6 +1385,8 @@ pub fn run(
     let mut four_job: Option<std::thread::JoinHandle<FourProbe>> = None;
     let mut next_four = Instant::now();
     let mut adapters: HashMap<usize, Adapter> = HashMap::new();
+    // bugs_v4 AR2: adapters of sources switched off, until they ended.
+    let mut parked: HashMap<usize, Adapter> = HashMap::new();
     let mut rate_limited_last = [false; 5];
     // The owner's start (and launchd's crash restart): every wallet and
     // economic switch DISABLED before anything runs (plan 27.10.).
@@ -1373,6 +1440,13 @@ pub fn run(
         .as_ref()
         .map(|_| CheckpointWriter::spawn(checkpoint_path.clone(), Arc::new(replace)))
         .transpose()?;
+    // bugs_v4 D2: the status file too (R14: its replacement took 0.8–1.2 ms
+    // p50 and up to 12 ms on this loop); the last one at the stop here.
+    let status_writer = CheckpointWriter::spawn_named(
+        "bsc-status-writer",
+        status_path.clone(),
+        Arc::new(replace_volatile),
+    )?;
     let c2_wanted =
         |g: &Generation| g.component(ComponentId::StateC2).effective == Effective::Shadow;
     // The C2 owner restores its window at start; the follower resumes after it.
@@ -1639,11 +1713,25 @@ pub fn run(
                     refresh_lot_deciders(c, &mut live);
                 }
             }
+            for i in reap_adapters(&mut parked, stopping) {
+                journal.record(
+                    RecordKind::Runtime,
+                    clock.now_ns(),
+                    source_event_payload(SourceId::ALL[i], SourceEvent::Stopped),
+                );
+            }
             for source in SourceId::ALL {
                 let i = index(source);
                 let want = !stopping && source_on[i] && config.endpoint(source).is_some();
-                match (want, adapters.contains_key(&i)) {
-                    (true, false) => {
+                let step = adapter_step(
+                    want,
+                    adapters.contains_key(&i),
+                    parked.contains_key(&i),
+                    adapters.get(&i).is_some_and(|a| a.handle.is_finished()),
+                    stopping,
+                );
+                match step {
+                    AdapterStep::Start => {
                         let url = config.endpoint(source).unwrap_or_default().to_string();
                         let a = match (source, &config.geth) {
                             // R6: the local geth over its arena.
@@ -1669,8 +1757,9 @@ pub fn run(
                             source_event_payload(source, SourceEvent::Started),
                         );
                     }
-                    (false, true) => {
-                        // The adapter reports its own last Disconnected(Stopped).
+                    // The adapter reports its own last Disconnected(Stopped).
+                    AdapterStep::Park => park_adapter(&mut adapters, &mut parked, i),
+                    AdapterStep::StopNow => {
                         if let Some(a) = adapters.remove(&i) {
                             a.stop.store(true, Ordering::Release);
                             let _ = a.handle.join();
@@ -1681,7 +1770,7 @@ pub fn run(
                             source_event_payload(source, SourceEvent::Stopped),
                         );
                     }
-                    (true, true) if adapters.get(&i).is_some_and(|a| a.handle.is_finished()) => {
+                    AdapterStep::Restart => {
                         // An adapter that ended on its own (refused config, panic) is
                         // disconnected and started again at the next reconcile.
                         if let Some(a) = adapters.remove(&i) {
@@ -1701,7 +1790,7 @@ pub fn run(
                             source_event_payload(source, SourceEvent::Stopped),
                         );
                     }
-                    _ => {}
+                    AdapterStep::Keep => {}
                 }
             }
         }
@@ -1927,6 +2016,10 @@ pub fn run(
                 c.state = "FAILING";
             }
         }
+        // bugs_v4 D2: a status write that failed ends the run, as before.
+        for written in status_writer.finished() {
+            written?;
+        }
         if Instant::now() >= next_status || stopping {
             next_status = Instant::now() + status_every;
             journal_drops(&mut journal, &dropped, &mut journaled_drops, clock.now_ns());
@@ -1988,7 +2081,15 @@ pub fn run(
                 (config.status_stale_intervals, config.owner),
                 &census_refresh,
             )?;
-            replace_volatile(&status_path, &bytes)?;
+            if stopping {
+                status_writer.write_now(&status_path, &bytes, replace_volatile)?;
+                // Review: a write that ran beside it reports here.
+                for written in status_writer.finished() {
+                    written?;
+                }
+            } else {
+                status_writer.submit(bytes);
+            }
         }
         if let (Some(o), Some(w)) = (owner.as_mut(), &checkpoints) {
             let due = stopping || Instant::now() >= next_checkpoint;
@@ -2054,33 +2155,17 @@ pub fn run(
         // verdict is journaled and in the status, a drift makes every Four
         // token derivation UNKNOWN until a probe matches again.
         if let (Some(cc), Some(c)) = (canonical_config.as_ref(), canonical.as_mut()) {
+            let current =
+                darkbot_bsc_trading::venues::fourmeme::deployment::bsc_mainnet_r12d_131608421;
             if let Some(job) = four_job.take_if(|j| j.is_finished()) {
-                let current =
-                    darkbot_bsc_trading::venues::fourmeme::deployment::bsc_mainnet_r12d_131608421();
-                let (code, block, verdict) = match job.join() {
-                    Ok(Ok(o)) if current.validate(&o.observed, o.block_number).is_ok() => {
-                        c.four_drift = false;
-                        c.four_validated = current.validate(&o.observed, o.block_number).ok();
-                        (
-                            1,
-                            o.block_number,
-                            format!("MATCH at block {}", o.block_number),
-                        )
-                    }
-                    Ok(Ok(o)) => {
-                        c.four_drift = true;
-                        c.four_validated = None;
-                        let at = o.block_number;
-                        let drifts: Vec<String> = current
-                            .drifts(&o.observed)
-                            .iter()
-                            .map(ToString::to_string)
-                            .collect();
-                        (2, at, format!("DRIFT at block {at}: {}", drifts.join("; ")))
-                    }
-                    Ok(Err(e)) => (3, 0, format!("PROBE_FAILED: {e}")),
-                    Err(_) => (3, 0, "PROBE_FAILED: the probe thread panicked".to_owned()),
+                // bugs_v4 G5: a failure keeps the last validation for a
+                // bounded run of them only.
+                let outcome = match job.join() {
+                    Ok(answer) => answer.map_err(|e| e.to_string()),
+                    Err(_) => Err("the probe thread panicked".to_owned()),
                 };
+                let (code, block, verdict) =
+                    c.four_probe_outcome(outcome, &current(), cc.four_probe_failures);
                 c.four_deployment = verdict;
                 journal.record(
                     RecordKind::Runtime,
@@ -2090,7 +2175,7 @@ pub fn run(
             }
             if four_job.is_none() && Instant::now() >= next_four && !stopping {
                 let (endpoint, limits) = (cc.endpoint_at(c.active).to_string(), cc.limits);
-                four_job = std::thread::Builder::new()
+                let spawned = std::thread::Builder::new()
                     .name("bsc-four-probe".into())
                     .spawn(move || {
                         crate::venue_probe::probe_four(
@@ -2098,13 +2183,27 @@ pub fn run(
                             &limits,
                             &darkbot_bsc_trading::venues::fourmeme::deployment::bsc_mainnet_r12d_131608421(),
                         )
-                    })
-                    .map_err(|e| {
+                    });
+                four_job = match spawned {
+                    Ok(job) => Some(job),
+                    Err(e) => {
                         eprintln!("four probe thread: {e}");
-                        // BSC3-016: shown, not only logged.
-                        c.four_deployment = format!("PROBE_FAILED: no probe thread: {e}");
-                    })
-                    .ok();
+                        // BSC3-016: shown, not only logged; bugs_v4 G5: a
+                        // failure like any other (counted, journaled).
+                        let (code, block, verdict) = c.four_probe_outcome(
+                            Err(format!("no probe thread: {e}")),
+                            &current(),
+                            cc.four_probe_failures,
+                        );
+                        c.four_deployment = verdict;
+                        journal.record(
+                            RecordKind::Runtime,
+                            clock.now_ns(),
+                            crate::runtime_journal::four_probe_payload(code, block),
+                        );
+                        None
+                    }
+                };
                 next_four = Instant::now() + Duration::from_millis(cc.four_probe_ms);
             }
         }

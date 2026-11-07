@@ -1,0 +1,17 @@
+C1-stale-validation-arms: exit 101 RED
+C2-armed-without-c2: exit 101 RED
+C4-skip-ignored: exit 101 RED
+D5-lost-passes: exit 101 RED
+D5-manifest-lost-unread: exit 101 RED
+G5-stale-four-kept: exit 101 RED
+G5-match-keeps-count: exit 101 RED
+AH1-missing-class-zero: exit 101 RED
+AH1-four-launch-block-required: exit 101 RED
+D2-status-on-the-loop: exit 101 RED
+AR2-park-joins: exit 101 RED
+AR2-switch-off-joins-on-the-loop: exit 101 RED
+AR2-start-beside-parked: exit 101 RED
+C4-status-ignores-skip: exit 101 RED (rerun after the status assertion was added to the C4 test)
+C1-fresh-result-reprobed: exit 101 RED (rerun with the new test a_probe_slower_than_the_reprobe_interval_still_arms)
+L2-revoke-ignored: exit 101 RED
+DONE

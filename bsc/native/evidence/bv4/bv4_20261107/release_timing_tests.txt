@@ -1,0 +1,4 @@
+test runtime::exec::tests::a_runtime_pass_reaches_the_sink_and_the_journal ... ok
+test runtime::live::tests::a_strategy_buy_starts_within_its_deadline_after_its_admission ... ok
+test runtime::live::tests::a_live_buy_starts_within_its_deadline_on_the_real_clock ... ok
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 584 filtered out; finished in 0.96s

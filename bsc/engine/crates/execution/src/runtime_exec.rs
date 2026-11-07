@@ -525,10 +525,16 @@ impl ExecRuntime {
             return;
         }
         let (Some(owner), Some((endpoint, limits))) = (owner, canonical) else {
+            // bugs_v4 C2: C2 gone while armed (switched off): the path
+            // disarms (its fence goes) and arms again once C2 is back.
+            if self.executor.is_some() {
+                return self.stop(Phase::WaitingC2);
+            }
             self.phase = Phase::WaitingC2;
             return;
         };
         // A probe in flight: its outcome first.
+        let mut fresh = false;
         if let Some(rx) = &self.probe {
             match rx.try_recv() {
                 Err(TryRecvError::Empty) => {
@@ -543,6 +549,7 @@ impl ExecRuntime {
                 }
                 Ok(result) => {
                     self.probe = None;
+                    fresh = true;
                     self.observed(result);
                     if self.phase.terminal() {
                         return;
@@ -572,6 +579,21 @@ impl ExecRuntime {
             }
             return;
         };
+        // bugs_v4 C1: a validation older than the re-probe interval (a
+        // nonce wait outlasted it) is probed again before the first arm; one
+        // just observed is fresh however long its probe took (review).
+        if !fresh
+            && self
+                .last_probe
+                .is_none_or(|at| at.elapsed() >= self.setup.reprobe)
+        {
+            self.validated = None;
+            self.spawn_probe(endpoint, limits, sender);
+            if !self.phase.terminal() {
+                self.phase = Phase::Probing;
+            }
+            return;
+        }
         let Some(next_nonce) = owner.clean_next_nonce(&sender) else {
             self.phase = Phase::WaitingNonce;
             return;
@@ -1614,6 +1636,182 @@ pub(crate) mod tests {
         assert_eq!(r.u64(e::LAUNCHES).unwrap(), 1);
         assert_eq!(r.texts(e::REFUSALS).unwrap(), ["NONCE_TAKEN=1"]);
         assert_eq!(r.text(e::SENDER_PATHS).unwrap(), "C3+STRATEGY_C");
+        x.shutdown();
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// bugs_v4 C1: a nonce wait longer than the re-probe interval arms only
+    /// on a fresh probe: a Portal upgraded meanwhile refuses the first arm
+    /// (before: armed on the old validation).
+    #[test]
+    fn a_nonce_wait_beyond_the_reprobe_arms_only_on_a_fresh_probe() {
+        let dir = std::env::temp_dir().join(format!("bsc-exec-c1-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let repo = Path::new("/nonexistent-repo");
+        let key = dir.join("id/paper.key");
+        PaperIdentity::create(&key, repo).unwrap();
+        let fences = dir.join("fences");
+        let reprobe = Duration::from_secs(60);
+        let mut x = ExecRuntime::with_prober(
+            setup(key, reprobe),
+            repo,
+            fences.clone(),
+            witnessed,
+            no_four,
+        );
+        let sender = x.sender().unwrap();
+        let mut owner = owner(&dir, sender);
+        settle(&mut x, &owner, "https://probe.invalid");
+        assert_eq!(state(&x).0, "WAITING_NONCE");
+        // The wait outlasts the interval; the Portal is upgraded meanwhile.
+        x.last_probe = Instant::now().checked_sub(reprobe + Duration::from_secs(1));
+        x.prober = upgraded;
+        owner.canonical(&CanonicalEvent::Block {
+            number: HEAD,
+            hash: [0xb1; 32],
+            parent_hash: [0xb0; 32],
+            timestamp_s: 1_793_000_000,
+            timestamp_ms: 1_793_000_000_000,
+            observed: Instant::now(),
+            observed_unix_ms: None,
+            txs: Vec::new(),
+        });
+        owner.canonical(&CanonicalEvent::NonceFact {
+            sender,
+            next_nonce: 0,
+            block_number: HEAD,
+            block_hash: [0xb1; 32],
+        });
+        settle(&mut x, &owner, "https://probe.invalid");
+        let (s, reason) = state(&x);
+        assert_eq!(s, "DEPLOYMENT_DRIFT");
+        assert!(reason.unwrap().contains("v5.28.0"));
+        assert_eq!(x.arms, 0, "no arm on the stale validation");
+        assert!(std::fs::read_dir(&fences).map_or(0, |d| d.count()) == 0);
+        x.shutdown();
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// bugs_v4 G5: the Four drift guard keeps its last validation through
+    /// the configured failed probes in a row only; one more drops it (every
+    /// Four launch's curve unclassified) until a probe matches again.
+    #[test]
+    fn the_four_guard_drops_its_validation_after_its_failures_in_a_row() {
+        use crate::runtime::{Canonical, RuntimeConfig};
+        let config =
+            RuntimeConfig::parse(include_str!("../../../../config/ingress.public.env")).unwrap();
+        let cc = config.canonical.as_ref().unwrap();
+        assert_eq!(cc.four_probe_failures, 2);
+        let mut c = Canonical::new(cc, 0);
+        let d = darkbot_bsc_trading::venues::fourmeme::deployment::bsc_mainnet_r12d_131608421();
+        let (code, block, verdict) = c.four_probe_outcome(Ok(four_observation(&d)), &d, 2);
+        assert_eq!((code, block), (1, HEAD), "{verdict}");
+        assert!(verdict.starts_with("MATCH") && c.four_validated.is_some());
+        for n in 1..=2 {
+            let (code, _, verdict) = c.four_probe_outcome(Err("timeout".into()), &d, 2);
+            assert_eq!(code, 3);
+            assert!(
+                verdict.contains(&format!("{n} in a row (at most 2)")),
+                "{verdict}"
+            );
+            assert!(c.four_validated.is_some(), "kept through failure {n}");
+        }
+        let (_, _, verdict) = c.four_probe_outcome(Err("timeout".into()), &d, 2);
+        assert!(verdict.contains("Four curves unclassified"), "{verdict}");
+        assert!(c.four_validated.is_none());
+        c.four_probe_outcome(Ok(four_observation(&d)), &d, 2);
+        assert!(c.four_validated.is_some() && c.four_probe_failed == 0);
+    }
+
+    /// bugs_v4 C1 (review): a probe slower than the re-probe interval still
+    /// arms on its own result (before the review's fix: probed again
+    /// forever, never armed).
+    #[test]
+    fn a_probe_slower_than_the_reprobe_interval_still_arms() {
+        let dir = std::env::temp_dir().join(format!("bsc-exec-c1-slow-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let repo = Path::new("/nonexistent-repo");
+        let key = dir.join("id/paper.key");
+        PaperIdentity::create(&key, repo).unwrap();
+        let fences = dir.join("fences");
+        let mut x = ExecRuntime::with_prober(
+            setup(key, Duration::from_millis(1)),
+            repo,
+            fences.clone(),
+            witnessed,
+            no_four,
+        );
+        let sender = x.sender().unwrap();
+        let mut owner = owner(&dir, sender);
+        owner.canonical(&CanonicalEvent::Block {
+            number: HEAD,
+            hash: [0xb1; 32],
+            parent_hash: [0xb0; 32],
+            timestamp_s: 1_793_000_000,
+            timestamp_ms: 1_793_000_000_000,
+            observed: Instant::now(),
+            observed_unix_ms: None,
+            txs: Vec::new(),
+        });
+        owner.canonical(&CanonicalEvent::NonceFact {
+            sender,
+            next_nonce: 0,
+            block_number: HEAD,
+            block_hash: [0xb1; 32],
+        });
+        // Each result is consumed at least 5 ms after its probe started
+        // (`settle` sleeps between ticks): older than the 1 ms interval.
+        settle(&mut x, &owner, "https://probe.invalid");
+        assert_eq!(state(&x).0, "ARMED");
+        x.shutdown();
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// bugs_v4 C2: C2 switched off under an armed path disarms it (status,
+    /// lanes and fence agree); with C2 back it arms again.
+    #[test]
+    fn an_armed_path_without_c2_disarms_and_arms_again() {
+        let dir = std::env::temp_dir().join(format!("bsc-exec-c2-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let repo = Path::new("/nonexistent-repo");
+        let key = dir.join("id/paper.key");
+        PaperIdentity::create(&key, repo).unwrap();
+        let fences = dir.join("fences");
+        let mut x = ExecRuntime::with_prober(
+            setup(key, Duration::from_secs(3_600)),
+            repo,
+            fences.clone(),
+            witnessed,
+            no_four,
+        );
+        let sender = x.sender().unwrap();
+        let mut owner = owner(&dir, sender);
+        owner.canonical(&CanonicalEvent::Block {
+            number: HEAD,
+            hash: [0xb1; 32],
+            parent_hash: [0xb0; 32],
+            timestamp_s: 1_793_000_000,
+            timestamp_ms: 1_793_000_000_000,
+            observed: Instant::now(),
+            observed_unix_ms: None,
+            txs: Vec::new(),
+        });
+        owner.canonical(&CanonicalEvent::NonceFact {
+            sender,
+            next_nonce: 0,
+            block_number: HEAD,
+            block_hash: [0xb1; 32],
+        });
+        settle(&mut x, &owner, "https://probe.invalid");
+        assert_eq!(state(&x).0, "ARMED");
+        let lim = limits();
+        x.tick(true, None, Some(("https://probe.invalid", &lim)), 7);
+        assert_eq!(state(&x).0, "WAITING_C2");
+        assert_eq!(record(&x).u64(e::LANES_ARMED).unwrap(), 0);
+        assert_eq!(std::fs::read_dir(&fences).unwrap().count(), 0);
+        settle(&mut x, &owner, "https://probe.invalid");
+        assert_eq!(state(&x).0, "ARMED");
+        assert_eq!(std::fs::read_dir(&fences).unwrap().count(), 1);
         x.shutdown();
         std::fs::remove_dir_all(&dir).unwrap();
     }

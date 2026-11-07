@@ -1377,6 +1377,9 @@ pub struct Replay {
     pub open_at_end: u64,
     /// Each entry's position against the foreign BUYs of its token.
     pub positions: Vec<Position>,
+    /// bugs_v4 D5: records the capture lost (the run manifest's count, or
+    /// the journal's gap spans without one): such a replay is incomplete.
+    pub lost: u64,
 }
 
 /// Phase I (PHASENPLAN §17 J input): one entry, a strategy PASS (SHADOW,
@@ -1509,8 +1512,10 @@ pub fn replay(
             .flatten()
             .zip(config_sha256)
             .map(|(a, b)| a == b);
+        out.lost = m.u64(cr::LOST_RECORDS).unwrap_or(0);
     }
     let mut reader = RunReader::open(&run, max_payload).map_err(|e| e.to_string())?;
+    let mut gap_spans = 0u64;
     let mut strategy: Option<StrategyRuntime> = None;
     // Frontend package (06.11.): the operator's settings the next start
     // takes (its `p` record), on the configuration `config_text`.
@@ -1534,6 +1539,10 @@ pub fn replay(
         };
         out.records += 1;
         match (r.kind, &*r.payload) {
+            (RecordKind::GapSpan, p) => {
+                let span = <[u8; 8]>::try_from(p).map_or(1, u64::from_le_bytes);
+                gap_spans = gap_spans.saturating_add(span);
+            }
             (RecordKind::Runtime, p @ ([b'U', _] | [b'U', 1, _])) => {
                 // The counters of every period the strategy ran add up.
                 if let Some(s) = strategy.take() {
@@ -1625,6 +1634,7 @@ pub fn replay(
         add(&mut out.counters, &s.counters);
         out.open_at_end += s.engine.open_positions() as u64;
     }
+    out.lost = out.lost.max(gap_spans);
     out.journaled = journaled.len() as u64;
     out.replayed = replayed.len() as u64;
     out.first_difference = journaled
@@ -1680,6 +1690,9 @@ impl Replay {
             "INCOMPLETE"
         } else if self.starts == 0 {
             "NOT_RUN"
+        } else if self.lost > 0 {
+            // bugs_v4 D5: a lost input or output was never compared.
+            "INCOMPLETE"
         } else if self.config_match.is_none() {
             // No run manifest names the configuration: nothing says the
             // replay ran with the run's (H gate L6).
@@ -1701,6 +1714,12 @@ impl Replay {
         }
         if self.config_match.is_none() {
             out.push("no run manifest names the run's configuration".into());
+        }
+        if self.lost > 0 {
+            out.push(format!(
+                "{} journal records lost: not every input and output was compared",
+                self.lost
+            ));
         }
         if let Some(i) = self.first_difference {
             out.push(format!(
@@ -2774,7 +2793,7 @@ mod tests {
         };
         let set = effective(CONFIG, &settings).unwrap().strategy.engine;
         let max = 16_384;
-        let journal = |run: u64, with_settings: bool| {
+        let journal = |run: u64, with_settings: bool, lose: bool| {
             let base = std::env::temp_dir().join(format!(
                 "bsc-strategy-settings-replay-{run}-{}",
                 std::process::id()
@@ -2805,11 +2824,14 @@ mod tests {
                 s.record(k, &p, 3, Some(&mut j));
             }
             assert!(s.counters.passed > 0);
+            if lose {
+                assert!(!j.record(RecordKind::Runtime, 5, vec![0; max + 1]));
+            }
             assert!(j.record(RecordKind::Runtime, 6, EXIT_PAYLOAD.to_vec()));
             j.finish().unwrap();
             base
         };
-        let base = journal(7, true);
+        let base = journal(7, true, false);
         let r = replay(
             &base,
             "7",
@@ -2825,7 +2847,7 @@ mod tests {
         let r = replay(&base, "7", max, &file, &gas(), Some([0xC0; 32]), None).unwrap();
         assert_eq!(r.verdict(), "INCOMPLETE", "{}", r.summary());
         std::fs::remove_dir_all(&base).unwrap();
-        let base = journal(8, false);
+        let base = journal(8, false, false);
         let r = replay(
             &base,
             "8",
@@ -2837,6 +2859,26 @@ mod tests {
         )
         .unwrap();
         assert_eq!(r.verdict(), "DIFFERS", "{}", r.summary());
+        std::fs::remove_dir_all(&base).unwrap();
+        // bugs_v4 D5: a record the capture lost leaves the replay
+        // INCOMPLETE, never PASS (before: PASS).
+        let base = journal(9, true, true);
+        let r = replay(
+            &base,
+            "9",
+            max,
+            &file,
+            &gas(),
+            Some([0xC0; 32]),
+            Some(CONFIG),
+        )
+        .unwrap();
+        assert_eq!((r.verdict(), r.lost), ("INCOMPLETE", 1), "{}", r.summary());
+        assert!(
+            r.reasons()
+                .iter()
+                .any(|x| x.contains("1 journal records lost"))
+        );
         std::fs::remove_dir_all(&base).unwrap();
     }
 

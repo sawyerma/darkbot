@@ -779,6 +779,8 @@ pub(super) struct Canonical {
     /// classified on it for Strategy C.
     pub(super) four_validated:
         Option<darkbot_bsc_trading::venues::fourmeme::deployment::ValidatedFourDeployment>,
+    /// bugs_v4 G5: the drift guard's failed probes since its last answer.
+    pub(super) four_probe_failed: u32,
     /// The largest launch calldata the decoders read (the follower's).
     max_launch_calldata: usize,
     pub(super) head: Option<(u64, [u8; 32])>,
@@ -1250,12 +1252,73 @@ impl LotDeciders {
 }
 
 impl Canonical {
+    /// bugs_v4 G5: one Four drift-guard probe outcome (`Err`: it failed,
+    /// its thread panicked or never started), its journal code, block and
+    /// verdict. A failure keeps the last validation through `failures`
+    /// failed probes in a row; one more drops it (every Four launch's curve
+    /// unclassified until a probe matches again). G6: validated once.
+    pub(super) fn four_probe_outcome(
+        &mut self,
+        outcome: Result<crate::venue_probe::FourObservation, String>,
+        current: &darkbot_bsc_trading::venues::fourmeme::deployment::FourDeployment,
+        failures: u32,
+    ) -> (u8, u64, String) {
+        match outcome {
+            Ok(o) => {
+                self.four_probe_failed = 0;
+                match current.validate(&o.observed, o.block_number) {
+                    Ok(v) => {
+                        self.four_drift = false;
+                        self.four_validated = Some(v);
+                        (
+                            1,
+                            o.block_number,
+                            format!("MATCH at block {}", o.block_number),
+                        )
+                    }
+                    Err(_) => {
+                        self.four_drift = true;
+                        self.four_validated = None;
+                        let at = o.block_number;
+                        let drifts: Vec<String> = current
+                            .drifts(&o.observed)
+                            .iter()
+                            .map(ToString::to_string)
+                            .collect();
+                        (2, at, format!("DRIFT at block {at}: {}", drifts.join("; ")))
+                    }
+                }
+            }
+            Err(e) => {
+                self.four_probe_failed = self.four_probe_failed.saturating_add(1);
+                let n = self.four_probe_failed;
+                if n > failures {
+                    self.four_validated = None;
+                    (
+                        3,
+                        0,
+                        format!(
+                            "PROBE_FAILED {n} in a row (more than {failures}: Four curves unclassified): {e}"
+                        ),
+                    )
+                } else {
+                    (
+                        3,
+                        0,
+                        format!("PROBE_FAILED {n} in a row (at most {failures}): {e}"),
+                    )
+                }
+            }
+        }
+    }
+
     pub(super) fn new(config: &CanonicalConfig, window_from_ms: u64) -> Self {
         Canonical {
             state: "CONNECTING",
             four_deployment: "UNPROBED".into(),
             four_drift: false,
             four_validated: None,
+            four_probe_failed: 0,
             max_launch_calldata: config.limits.max_launch_calldata,
             head: None,
             head_seen_ns: None,

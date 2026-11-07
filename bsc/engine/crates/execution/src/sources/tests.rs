@@ -4101,3 +4101,81 @@ fn a_withdrawn_attempts_slots_go_back_and_the_clock_still_holds() {
     assert!(s.return_attempt("not-an-attempt").is_err());
     fs::remove_dir_all(dir).unwrap();
 }
+
+/// bugs_v4 L2: a grant revoked while an admission holds its read (another
+/// process's request takes no spend lock) refuses that admission, as a
+/// limit lowered meanwhile does (BSC3-004); before: admitted on the grant
+/// read before the revoke.
+#[test]
+fn a_grant_revoked_during_an_admission_refuses_it() {
+    let (dir, _s, now) = live_ready_granting("live-spend-revoke", |now| LiveGrant {
+        max_input_wei: 1_000,
+        max_spend_wei: 10_000,
+        ..grant_of(now + 3_600_000, LiveStrategies::C3)
+    });
+    let s = Store::open_in_session(&dir, keeping(8), Ok("boot-1".into())).unwrap();
+    let q = qualified_in(&s);
+    let armed = s.live_now(&[ComponentId::ExecC3], &q, now).unwrap();
+    let at = dir.clone();
+    AFTER_SPEND_READ.with(|h| {
+        *h.borrow_mut() = Some(Box::new(move || {
+            let other = Store::open_in_session(&at, keeping(8), Ok("boot-1".into())).unwrap();
+            let g = other.current().unwrap().generation;
+            other
+                .request("revoke", Entity::LiveGrant, Mode::Disabled, g, now)
+                .unwrap();
+        }))
+    });
+    let id = hex32(&[1; 32]);
+    let admitted = s.admit_live(&armed, &nonce_buy(&id, 7, 6_000), &q, now);
+    AFTER_SPEND_READ.with(|h| *h.borrow_mut() = None);
+    assert!(s.current().unwrap().live.is_none(), "the revoke applied");
+    assert_eq!(
+        admitted.map(|a| a.spent_wei),
+        Err(LIVE_GRANT_CHANGED.to_string())
+    );
+    fs::remove_dir_all(dir).unwrap();
+}
+
+/// bugs_v4 L3: a lease returned while an admission holds its read (a
+/// return takes no spend lock) only makes that admission still count it:
+/// refused, never above the grant; afterwards the room is there.
+#[test]
+fn a_lease_returned_during_an_admission_only_over_counts() {
+    let (dir, s, now) = live_ready_limited("live-lease-race", (5, 5), |now| LiveGrant {
+        max_attempts: 5,
+        max_input_wei: 1_000,
+        max_spend_wei: 10_000,
+        ..grant_of(now + 3_600_000, LiveStrategies::C3)
+    });
+    let q = qualified_in(&s);
+    let armed = s.live_now(&[ComponentId::ExecC3], &q, now).unwrap();
+    let leased = hex32(&[0xa1; 32]);
+    let lease = LiveIntent {
+        token: [0; 20],
+        ..nonce_buy(&leased, 7, 6_000)
+    };
+    s.lease_live(&armed, &lease, &hex32(&[0xa0; 32]), &q, now)
+        .unwrap();
+    let at = dir.clone();
+    AFTER_SPEND_READ.with(|h| {
+        *h.borrow_mut() = Some(Box::new(move || {
+            let other = Store::open_in_session(&at, keeping(8), Ok("boot-1".into())).unwrap();
+            other.return_leases(&[[0xa1; 32]]).unwrap();
+        }))
+    });
+    let (during, after) = (hex32(&[0xb1; 32]), hex32(&[0xb2; 32]));
+    let refused = s.admit_live(&armed, &nonce_buy(&during, 8, 6_000), &q, now);
+    AFTER_SPEND_READ.with(|h| *h.borrow_mut() = None);
+    assert_eq!(
+        refused.map(|a| a.spent_wei),
+        Err(LIVE_GRANT_SPEND_EXHAUSTED.to_string())
+    );
+    assert_eq!(spent_by_grant(&dir, armed.grant_generation).unwrap(), 0);
+    assert_eq!(
+        s.admit_live(&armed, &nonce_buy(&after, 8, 6_000), &q, now)
+            .map(|a| a.spent_wei),
+        Ok(6_000)
+    );
+    fs::remove_dir_all(dir).unwrap();
+}

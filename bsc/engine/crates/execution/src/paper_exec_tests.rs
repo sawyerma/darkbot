@@ -2011,6 +2011,95 @@ fn c3_and_the_strategy_share_one_nonce_sequence() {
     fs::remove_dir_all(&d).unwrap();
 }
 
+/// bugs_v4 C4: with C3 on the arm's first nonce, an exit that needs more
+/// strategy lanes than are left past that skip is refused before it takes
+/// one (before: the approval's lane was taken and lost, and a later exit
+/// with the approval out found none).
+#[test]
+fn an_exit_counts_the_c3_skip_before_it_takes_a_lane() {
+    let portal = bsc_mainnet_v5_27_2().portal.into_array();
+    let token = [0xAB; 20];
+    let input = U256::from(10_000_000_000_000_000u64);
+    let curve = curve_after(1_000_000_000_000_000_000);
+    // A position bought on an earlier arm.
+    let mut cfg = config(2, 2);
+    cfg.strategy_lanes = 4;
+    let (mut first, d) = armed("c4-earlier-arm", cfg.clone());
+    let buy = first
+        .on_strategy_buy(
+            token,
+            [0; 20],
+            curve,
+            input,
+            &strategy_c2(Some(HEAD)),
+            &clock(500, 3),
+            500,
+            None,
+        )
+        .unwrap();
+    let tokens = decode_swap_exact_input_native(decode_signed(&buy.raw).unwrap().tx.input)
+        .unwrap()
+        .min_output_amount;
+    first.disarm().unwrap();
+    fs::remove_dir_all(&d).unwrap();
+    let after = StrategyCurve::Flap {
+        reserve: flap(curve).1 + input,
+        circulating: flap(curve).2 + tokens,
+        terms: flap(curve).0,
+    };
+    // This arm: two strategy lanes, C3 takes nonce 0, the position adopted.
+    cfg.strategy_lanes = 2;
+    let (mut exec, d) = armed("c4-this-arm", cfg);
+    let (hash, raw, call) = launch(0, 7);
+    exec.on_launch(
+        PendingLaunch {
+            hash,
+            raw: &raw,
+            from: [0; 20],
+            to: Some(portal),
+            value: &[],
+            input: &call,
+            ingress_ns: 100,
+        },
+        &c2(Some(HEAD)),
+        &clock(100, 7),
+    )
+    .unwrap();
+    exec.adopt(token, tokens, crate::sources::VenueId::Flap);
+    let before = exec.strategy_lanes();
+    // The status counts the skip too: one lane left, at nonce 1.
+    assert_eq!((before.0, before.1, before.2), (2, 1, 1));
+    let (exits, refused) = exec.on_strategy_exit(
+        token,
+        tokens,
+        after,
+        &strategy_c2(Some(HEAD)),
+        &clock(900, 3),
+        900,
+    );
+    assert!(exits.is_empty());
+    assert_eq!(refused, Some(Refusal::LanesExhausted));
+    assert_eq!(exec.strategy_lanes(), before, "no lane taken");
+    // With the approval out, the SELL alone finds its lane (nonce 1, past C3's 0).
+    exec.adopt_approval(token, tokens);
+    let (exits, refused) = exec.on_strategy_exit(
+        token,
+        tokens,
+        after,
+        &strategy_c2(Some(HEAD)),
+        &clock(950, 3),
+        950,
+    );
+    assert_eq!(refused, None);
+    let [sell]: [PaperIntent; 1] = exits.try_into().unwrap();
+    assert_eq!(
+        (sell.kind, decode_signed(&sell.raw).unwrap().tx.nonce),
+        (IntentKind::Sell, 1)
+    );
+    exec.disarm().unwrap();
+    fs::remove_dir_all(&d).unwrap();
+}
+
 /// Phase I gate M2: a PAPER path left out of `sender_paths` is refused
 /// PATH_OFF and counted; it takes no lane and no nonce.
 #[test]

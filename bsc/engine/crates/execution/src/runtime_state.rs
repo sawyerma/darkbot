@@ -535,12 +535,22 @@ struct Slot {
 
 impl CheckpointWriter {
     pub fn spawn(path: PathBuf, replace: Replace) -> Result<CheckpointWriter, String> {
+        Self::spawn_named("bsc-c2-checkpoint", path, replace)
+    }
+
+    /// bugs_v4 D2: the same writer for another file (the runtime status),
+    /// its thread named `name`.
+    pub fn spawn_named(
+        name: &str,
+        path: PathBuf,
+        replace: Replace,
+    ) -> Result<CheckpointWriter, String> {
         let shared = Arc::new((Mutex::new(Slot::default()), Condvar::new()));
         let (tx, done) = channel();
         let theirs = Arc::clone(&shared);
         let (their_path, their_replace) = (path.clone(), Arc::clone(&replace));
         let handle = thread::Builder::new()
-            .name("bsc-c2-checkpoint".into())
+            .name(name.into())
             .spawn(move || {
                 let (slot, changed) = &*theirs;
                 loop {
@@ -561,7 +571,7 @@ impl CheckpointWriter {
                     changed.notify_all();
                 }
             })
-            .map_err(|e| format!("c2 checkpoint writer: {e}"))?;
+            .map_err(|e| format!("{name} writer: {e}"))?;
         Ok(CheckpointWriter {
             shared,
             done,
