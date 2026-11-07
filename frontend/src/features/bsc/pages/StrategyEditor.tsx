@@ -3,15 +3,20 @@ import { FILTER_GROUPS, activeFilters, type StrategyForm } from "../model/strate
 /** The V8 module settings (the ten native keys) and the 15 entry filters, always visible
  *  (FE-V8-05/06). The values are the native settings; `disabled` locks the whole form. A choice the
  *  owner has no value for shows the configuration file's (never selectable: no native "unset");
- *  the team-sell exit is shown as what it is: not implemented. */
-export function StrategyEditor({ form, onChange, disabled, venues, idPrefix, notes = {} }: {
+ *  the team-sell exit is shown as what it is: not implemented. The native ranges and the features'
+ *  units are the owner's settings state, shown as hints. */
+export function StrategyEditor({ form, onChange, disabled, venues, idPrefix, notes = {}, ranges = {}, features = {} }: {
   form: StrategyForm; onChange: (f: StrategyForm) => void; disabled: boolean; venues: string; idPrefix: string;
   /** Per field: the running strategy's own value where the stored one differs (effective at the next start). */
   notes?: Partial<Record<keyof StrategyForm, string>>;
+  /** Per field: its key's native range (StrategySettingSpec). */
+  ranges?: Partial<Record<keyof StrategyForm, string>>;
+  /** Per filter: its native unit, places and sign (StrategyFeatureSpec). */
+  features?: Readonly<Record<string, string>>;
 }) {
   const set = <K extends keyof StrategyForm>(k: K, v: StrategyForm[K]) => onChange({ ...form, [k]: v });
   const field = (k: "stake" | "target" | "stop" | "hold" | "observation" | "maxOpen" | "firstBuyerWindow", label: string) =>
-    <div className="field"><label htmlFor={`${idPrefix}-${k}`}>{label}</label><input id={`${idPrefix}-${k}`} className="input" inputMode="decimal" value={form[k]}
+    <div className="field"><label htmlFor={`${idPrefix}-${k}`}>{label}</label><input id={`${idPrefix}-${k}`} className="input" inputMode="decimal" value={form[k]} title={ranges[k]}
       onChange={e => set(k, e.target.value)} data-testid={`${idPrefix}-${k}`} />{notes[k] ? <small data-testid={`${idPrefix}-${k}-running`}>{notes[k]}</small> : null}</div>;
   return <fieldset disabled={disabled} style={{ padding: 0, border: 0, margin: 0, minWidth: 0 }}>
     <div className="editor-fields">
@@ -35,7 +40,7 @@ export function StrategyEditor({ form, onChange, disabled, venues, idPrefix, not
         {g.items.map(({ key, label, unit }) => {
           const v = form.filters[key] ?? { on: false, min: "", max: "" };
           const put = (next: Partial<typeof v>) => set("filters", { ...form.filters, [key]: { ...v, ...next } });
-          return <div className="filter-row" key={key} data-testid={`${idPrefix}-filter-${key}`}>
+          return <div className="filter-row" key={key} data-testid={`${idPrefix}-filter-${key}`} title={features[key]}>
             <label className="check-label"><input type="checkbox" checked={v.on} onChange={e => put({ on: e.target.checked })} aria-label={`${label} filter`} /><span>{label}{unit ? <> <span className="tiny">({unit})</span></> : null}</span></label>
             <label><span className="minmax-label">Min.</span><input className="input" inputMode="decimal" placeholder="–" value={v.min} disabled={!v.on} onChange={e => put({ min: e.target.value })} aria-label={`${label} minimum`} /></label>
             <label><span className="minmax-label">Max.</span><input className="input" inputMode="decimal" placeholder="–" value={v.max} disabled={!v.on} onChange={e => put({ max: e.target.value })} aria-label={`${label} maximum`} /></label>

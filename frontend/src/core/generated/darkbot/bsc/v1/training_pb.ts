@@ -79,7 +79,8 @@ export type StrategyFeatureSpec = Message<"darkbot.bsc.v1.StrategyFeatureSpec"> 
   index: number;
 
   /**
-   * Native unit: count, bnb (decimal BNB at 18 places), ratio, percent or milliseconds.
+   * Native unit: count, bnb (decimal BNB at 18 places), ratio, percent, milliseconds or flag
+   * (provider_gap_flag, never filterable).
    *
    * @generated from field: string unit = 3;
    */
@@ -326,7 +327,7 @@ export type StrategySettingSpec = Message<"darkbot.bsc.v1.StrategySettingSpec"> 
   key: string;
 
   /**
-   * Its unit: wei, ratio, ms, count or enum.
+   * Its unit: wei, ratio, ms, count, enum or rules (BSC_STRATEGY_C_FILTERS).
    *
    * @generated from field: string unit = 2;
    */
@@ -410,7 +411,8 @@ export type StrategyCSettingsState = Message<"darkbot.bsc.v1.StrategyCSettingsSt
   storedConfigSha256: string;
 
   /**
-   * What the running strategy took at its start; absent while it does not run.
+   * What the running strategy took at its start, from a current runtime status only; absent while
+   * it does not run or its status is stale.
    *
    * @generated from field: darkbot.bsc.v1.StrategyCSettings running = 7;
    */
@@ -438,7 +440,8 @@ export type StrategyCSettingsState = Message<"darkbot.bsc.v1.StrategyCSettingsSt
   applyStatus: SettingsApplyStatus;
 
   /**
-   * The strategy's refusal of its settings; empty without one.
+   * The strategy's refusal of its settings, `<SETTINGS_REFUSED|GAS_EVIDENCE_REFUSED>: <reason>`;
+   * empty without one.
    *
    * @generated from field: string refusal_reason = 11;
    */
@@ -1742,14 +1745,16 @@ export const CreatorSellExitSchema: GenEnum<CreatorSellExit> = /*@__PURE__*/
  */
 export enum SettingsApplyStatus {
   /**
-   * Not set by any producer; never displayed as a value.
+   * The running state is unknown: the runtime status does not read (provenance quality
+   * INCOMPLETE, quality_reasons RUNTIME_STATUS_INVALID); never displayed as a value.
    *
    * @generated from enum value: SETTINGS_APPLY_STATUS_UNSPECIFIED = 0;
    */
   UNSPECIFIED = 0,
 
   /**
-   * The running strategy took the stored revision at its start.
+   * The running strategy took the stored revision at its start (its generation and its
+   * configuration hash equal the stored ones).
    *
    * @generated from enum value: SETTINGS_APPLY_STATUS_IN_EFFECT = 1;
    */
@@ -1763,7 +1768,8 @@ export enum SettingsApplyStatus {
   SAVED_APPLIES_NEXT_START = 2,
 
   /**
-   * Strategy C does not run: the stored revision applies at its next start.
+   * Strategy C does not run, or its runtime status is stale (quality_reasons
+   * RUNTIME_STATUS_STALE): the stored revision applies at its next start.
    *
    * @generated from enum value: SETTINGS_APPLY_STATUS_NOT_RUNNING = 3;
    */

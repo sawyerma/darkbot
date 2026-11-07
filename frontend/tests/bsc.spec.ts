@@ -5,7 +5,7 @@ import { BscLiveStateSchema, BscMonitoringStateSchema } from "../src/core/genera
 import { BscQueryResponseSchema } from "../src/core/generated/darkbot/bsc/v1/query_pb";
 import { Availability } from "../src/core/generated/darkbot/bsc/v1/common_pb";
 import { BscQueryRequestSchema } from "../src/core/generated/darkbot/bsc/v1/query_pb";
-import { CreatorSellExit, CreatorSoldBeforeFill, StrategyCSettingsSetAllCommandSchema } from "../src/core/generated/darkbot/bsc/v1/training_pb";
+import { CreatorSellExit, CreatorSoldBeforeFill, SettingsApplyStatus, StrategyCSettingsSetAllCommandSchema, StrategyCSettingsStateSchema } from "../src/core/generated/darkbot/bsc/v1/training_pb";
 import { createHash } from "node:crypto";
 import {
   MainPayoutPolicySetCommandSchema, ProfitTransferPolicySetCommandSchema, TransferStatus, WalletDestinationConfirmCommandSchema, WalletDestinationSetCommandSchema, WalletMovementKind,
@@ -497,14 +497,15 @@ test("an unreadable campaign verdict is INVALID, an exact T0 leaves only the loc
 const leaf = (name: string, value: string) => ({ name, value, kind: 7, unit: "" });
 const record = (schema: string, fields: [string, string][]) => ({ schema, provenance: "NATIVE_CREATED", fields: fields.map(([n, v]) => leaf(n, v)) });
 const STORED_5: [string, string][] = [["generation", "5"], ["request_id", "r-5"], ["settings[0].id", "BSC_STRATEGY_C_MAX_OPEN"], ["settings[0].value", "4"]];
-const strategyMonitoring = (extra: [string, string][] = [], stored = STORED_5) => toBinary(BscMonitoringStateSchema, create(BscMonitoringStateSchema, { state: "NOT_EXECUTED", records: [
+const RUNNING_4: [string, string][] = [["strategy[0].state", "SHADOW"], ["strategy[0].settings_generation", "4"], ["strategy[0].settings[0].id", "BSC_STRATEGY_C_MAX_OPEN"], ["strategy[0].settings[0].value", "3"],
+  ["strategy[0].settings[1].id", "BSC_STRATEGY_C_CREATOR_SELL_EXIT"], ["strategy[0].settings[1].value", "ENABLED"],
+  ["strategy[0].gains", "2"], ["strategy[0].gain_wei", "30000000000000000"], ["strategy[0].losses", "1"], ["strategy[0].loss_wei", "10000000000000000"], ["strategy[0].launches", "37"]];
+const strategyMonitoring = (extra: [string, string][] = [], stored = STORED_5, strategy = RUNNING_4) => toBinary(BscMonitoringStateSchema, create(BscMonitoringStateSchema, { state: "NOT_EXECUTED", records: [
   record("darkbot.bsc.source-modes.v1", [["generation", "9"], ["sources[0].source_id", "BSC_INGRESS_GETH"], ["sources[0].requested", "SHADOW"], ["sources[0].effective", "SHADOW"],
     ["sources[1].source_id", "BSC_INGRESS_DRPC"], ["sources[1].requested", "OFF"], ["sources[1].effective", "OFF"]]),
   record("darkbot.bsc.strategy-settings.v1", stored),
   record("darkbot.bsc.runtime-status.v1", [["_provenance.observed_unix_ms", String(Date.now())], ["status_interval_ms", "60000"], ["status_stale_intervals", "3"], ["mode", "SHADOW"],
-    ["strategy[0].state", "SHADOW"], ["strategy[0].settings_generation", "4"], ["strategy[0].settings[0].id", "BSC_STRATEGY_C_MAX_OPEN"], ["strategy[0].settings[0].value", "3"],
-    ["strategy[0].settings[1].id", "BSC_STRATEGY_C_CREATOR_SELL_EXIT"], ["strategy[0].settings[1].value", "ENABLED"],
-    ["strategy[0].gains", "2"], ["strategy[0].gain_wei", "30000000000000000"], ["strategy[0].losses", "1"], ["strategy[0].loss_wei", "10000000000000000"], ["strategy[0].launches", "37"],
+    ...strategy,
     ["sources[0].source_id", "BSC_INGRESS_GETH"], ["sources[0].health", "HEALTHY"], ["sources[0].last_event_age_ms", "1200"], ["sources[0].capability", "FULL"], ...extra]),
 ] }));
 
@@ -591,6 +592,77 @@ test("Live saves several Strategy C settings as ONE set_all generation with the 
   expect([v.inputWei, v.holdMs, v.maxOpen, v.firstBuyerWindow, v.creatorSellExit, v.creatorSoldBeforeFill]).toEqual([undefined, undefined, 5, 8, CreatorSellExit.DISABLED, CreatorSoldBeforeFill.UNSPECIFIED]);
   expect(v.filters).toHaveLength(15);
   expect(v.filters.slice(0, 3).map(f => [f.feature, f.enabled, f.min, f.max])).toEqual([["unique_buyers", false, undefined, undefined], ["buy_count", true, "3", undefined], ["sell_count", true, undefined, "2"]]);
+  expect(errors).toEqual([]);
+});
+
+/** The query route stand-in of the settings owner: the reporter's `--query` answer shape for
+ *  bsc/config/ingress.public.env with nothing stored (TEST_ONLY values), every other query
+ *  NOT_IMPLEMENTED. Returns the queries asked. */
+async function settingsOwner(page: Page): Promise<string[]> {
+  const asked: string[] = [];
+  const spec = (key: string, unit: string, min?: string, max?: string, places = 0) => ({ key: `BSC_STRATEGY_C_${key}`, unit, min, max, places });
+  const features = ["buy_count", "sell_count", "buy_volume_bnb", "sell_volume_bnb", "net_buy_flow_bnb", "unique_buyers", "unique_buyer_ratio", "largest_buy_bnb", "buyer_volume_concentration",
+    "first5_buyer_concentration", "first_sell_latency_ms", "price_change", "max_drawdown", "dev_initial_buy", "curve_progress_pct", "provider_gap_flag"];
+  const state = create(StrategyCSettingsStateSchema, { availability: Availability.AVAILABLE, storedRevision: 0n, applyStatus: SettingsApplyStatus.NOT_RUNNING,
+    provenance: { owner: "bsc_runtime strategy settings", provenance: "NATIVE_CREATED" },
+    effective: { inputWei: "10000000000000000", targetNetMultiple: "2", stopNetMultiple: "0.5", observationMs: 3000n, holdMs: 600000n, maxOpen: 5, firstBuyerWindow: 5,
+      creatorSoldBeforeFill: CreatorSoldBeforeFill.FREE_CANCEL, creatorSellExit: CreatorSellExit.ENABLED, ratioPlaces: 4, fillDelayBlocks: 1, gasPriceWei: "50000000",
+      filters: [{ feature: "buy_count", enabled: true, min: "2" }, { feature: "unique_buyers", enabled: true, min: "2" }] },
+    settingSpecs: [spec("OBSERVATION_MS", "ms", "0", "3600000"), spec("FILTERS", "rules"), spec("INPUT_WEI", "wei", "1", "18446744073709551615"),
+      spec("TARGET_NET_MULTIPLE", "ratio", "1.0001", undefined, 4), spec("STOP_NET_MULTIPLE", "ratio", "0.0000", "0.9999", 4), spec("HOLD_MS", "ms", "1", "86400000"),
+      spec("MAX_OPEN", "count", "1", "1000"), spec("CREATOR_SOLD_BEFORE_FILL", "enum"), spec("CREATOR_SELL_EXIT", "enum"), spec("FIRST_BUYER_WINDOW", "count", "1", "100")],
+    features: features.map((name, index) => ({ name, index, unit: "count", places: 0, signed: false, filterable: name !== "provider_gap_flag" })) });
+  await page.route("**/api/v1/bsc/query", async (r) => {
+    const q = fromBinary(BscQueryRequestSchema, r.request().postDataBuffer()!);
+    asked.push(q.query.case ?? "");
+    const answer = q.query.case === "strategySettings"
+      ? create(BscQueryResponseSchema, { requestId: q.requestId, availability: Availability.AVAILABLE, result: { case: "strategySettings", value: state } })
+      : create(BscQueryResponseSchema, { requestId: q.requestId, availability: Availability.NOT_IMPLEMENTED, unavailableReason: "BSC-V8-01" });
+    return r.fulfill({ status: 200, contentType: "application/x-protobuf", body: Buffer.from(toBinary(BscQueryResponseSchema, answer)) });
+  });
+  return asked;
+}
+
+test("Live takes the owner's settings state over bsc/query: the file's values, native bounds, several changes with nothing stored (BSC-V8-04)", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  const sent = await commands(page);
+  const asked = await settingsOwner(page);
+  // TEST_ONLY: nothing stored (generation 0), Strategy C not running.
+  await feed(page, liveOf({}), strategyMonitoring([], [["generation", "0"]], [["strategy[0].state", "OFF"]]));
+  await page.goto("/bsc");
+  await area(page, "Live");
+  const field = (k: string) => page.getByTestId(`bsc-live-strategy-${k}`);
+  await expect(field("stake")).toHaveValue("0.01");
+  await expect(field("firstBuyerWindow")).toHaveValue("5");
+  await expect(field("creatorSoldBeforeFill")).toHaveValue("FREE_CANCEL");
+  await expect(field("filter-buy_count").getByLabel("Buy count minimum")).toHaveValue("2");
+  await expect(field("generation")).toHaveText("Saved generation 0 · applies at the next start");
+  await expect(field("basis")).toHaveCount(0);
+  await expect(field("firstBuyerWindow")).toHaveAttribute("title", "Native range: 1 – 100");
+  // A value past the native bound is refused before any request.
+  await field("firstBuyerWindow").fill("101");
+  await expect(field("generation")).toContainText("BSC_STRATEGY_C_FIRST_BUYER_WINDOW: 101 is above the native maximum 100");
+  await expect(field("save")).toBeDisabled();
+  // Two changes with nothing stored and Strategy C off: one set_all over the file's filters.
+  await field("firstBuyerWindow").fill("8");
+  await field("maxOpen").fill("6");
+  await expect(field("generation")).toContainText("2 changes, saved together");
+  await field("save").click();
+  await expect(field("dialog")).toContainText("Save 2 Strategy C settings?");
+  await expect(field("request")).toHaveText(["BSC_STRATEGY_C_MAX_OPEN=6", "BSC_STRATEGY_C_FIRST_BUYER_WINDOW=8", "BSC_STRATEGY_C_FILTERS=buy_count:2:,unique_buyers:2:"].join("\n"));
+  await field("confirm").click();
+  await expect(field("receipt")).toContainText("outcome=APPLIED bsc.strategy.set_all");
+  expect(sent.map(r => [r.action, r.resourceId, r.expected?.version])).toEqual([["bsc.strategy.set_all", "", { case: "profileVersion", value: 0n }]]);
+  const v = fromBinary(StrategyCSettingsSetAllCommandSchema, sent[0]!.params).values!;
+  expect([v.maxOpen, v.firstBuyerWindow, v.inputWei, v.filters.length]).toEqual([6, 8, undefined, 15]);
+  expect(v.filters.slice(0, 2).map(f => [f.feature, f.enabled, f.min])).toEqual([["buy_count", true, "2"], ["unique_buyers", true, "2"]]);
+  // Training shows the same basis read-only; its state is asked for only when the module opens.
+  await area(page, "Training");
+  expect(asked.filter(x => x === "strategySettings")).toHaveLength(1);
+  await page.getByRole("button", { name: "Open Strategy C module" }).click();
+  await expect(page.getByTestId("bsc-training-stake")).toHaveValue("0.01");
+  expect(asked.filter(x => x === "strategySettings")).toHaveLength(2);
   expect(errors).toEqual([]);
 });
 

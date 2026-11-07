@@ -4,7 +4,9 @@ package darkbot.bsc.v1;
 import "darkbot/bsc/v1/common.proto";
 
 // V8 Training and Strategy C settings (BSC-V8-01…06, FE-V8-04…09, Bindings §14.1/§14.2/§14.4
-// M1–M3). Prepared contracts: no producer yet. Strategy C stays the one BSC strategy; a profile is
+// M1–M3). Answered natively: StrategyCSettingsState (POST /api/v1/bsc/query, the reporter's
+// `--query`) and `bsc.strategy.set_all`; every other contract here is prepared (no producer yet).
+// Strategy C stays the one BSC strategy; a profile is
 // a named, versioned Strategy C configuration, a training run executes it PAPER/SHADOW/REPLAY on
 // the one existing core, never with real funds. The ten settable keys exist natively
 // (execution/src/strategy_settings.rs KEYS, the first-buyer window BSC_STRATEGY_C_FIRST_BUYER_WINDOW
@@ -83,7 +85,8 @@ message StrategyFeatureSpec {
   string name = 1;
   // Its position in features.rs NAMES.
   uint32 index = 2;
-  // Native unit: count, bnb (decimal BNB at 18 places), ratio, percent or milliseconds.
+  // Native unit: count, bnb (decimal BNB at 18 places), ratio, percent, milliseconds or flag
+  // (provider_gap_flag, never filterable).
   string unit = 3;
   // Decimal places a bound may have (BNB amounts 18, ratios BSC_STRATEGY_C_RATIO_PLACES).
   uint32 places = 4;
@@ -160,7 +163,7 @@ message StrategyCSettableValues {
 message StrategySettingSpec {
   // The native key, e.g. BSC_STRATEGY_C_HOLD_MS.
   string key = 1;
-  // Its unit: wei, ratio, ms, count or enum.
+  // Its unit: wei, ratio, ms, count, enum or rules (BSC_STRATEGY_C_FILTERS).
   string unit = 2;
   // The smallest accepted value, exact decimal; absent: unbounded below.
   optional string min = 3;
@@ -172,13 +175,16 @@ message StrategySettingSpec {
 
 // Whether a stored Strategy C configuration is in effect.
 enum SettingsApplyStatus {
-  // Not set by any producer; never displayed as a value.
+  // The running state is unknown: the runtime status does not read (provenance quality
+  // INCOMPLETE, quality_reasons RUNTIME_STATUS_INVALID); never displayed as a value.
   SETTINGS_APPLY_STATUS_UNSPECIFIED = 0;
-  // The running strategy took the stored revision at its start.
+  // The running strategy took the stored revision at its start (its generation and its
+  // configuration hash equal the stored ones).
   SETTINGS_APPLY_STATUS_IN_EFFECT = 1;
   // Stored; the running strategy keeps the revision of its start until its next start.
   SETTINGS_APPLY_STATUS_SAVED_APPLIES_NEXT_START = 2;
-  // Strategy C does not run: the stored revision applies at its next start.
+  // Strategy C does not run, or its runtime status is stale (quality_reasons
+  // RUNTIME_STATUS_STALE): the stored revision applies at its next start.
   SETTINGS_APPLY_STATUS_NOT_RUNNING = 3;
   // The strategy refused its settings at its start (SETTINGS_REFUSED, GAS_EVIDENCE_REFUSED).
   SETTINGS_APPLY_STATUS_REFUSED = 4;
@@ -198,7 +204,8 @@ message StrategyCSettingsState {
   uint64 stored_revision = 5;
   // The configuration hash of the stored revision's effective values.
   string stored_config_sha256 = 6;
-  // What the running strategy took at its start; absent while it does not run.
+  // What the running strategy took at its start, from a current runtime status only; absent while
+  // it does not run or its status is stale.
   StrategyCSettings running = 7;
   // The revision the running strategy took; absent while it does not run.
   optional uint64 running_revision = 8;
@@ -206,7 +213,8 @@ message StrategyCSettingsState {
   string running_config_sha256 = 9;
   // Whether the stored revision is in effect.
   SettingsApplyStatus apply_status = 10;
-  // The strategy's refusal of its settings; empty without one.
+  // The strategy's refusal of its settings, `<SETTINGS_REFUSED|GAS_EVIDENCE_REFUSED>: <reason>`;
+  // empty without one.
   string refusal_reason = 11;
   // The request that wrote the stored revision; empty while none.
   string request_id = 12;

@@ -3,8 +3,8 @@ import { TopicId } from "@/core/realtime";
 import { useTopic } from "@/core/realtime/hooks";
 import { selectStatus, useBscStore } from "../store/bscStore";
 import { RUNTIME_SCHEMA, runtimeView, sourceControlView } from "../model/sources";
-import { strategySettingsView } from "../model/strategySettings";
-import { formOf } from "../model/strategyForm";
+import { generationText } from "../model/strategySettings";
+import { featureHints, fieldRanges, formOf } from "../model/strategyForm";
 import { venueName } from "../model/health";
 import { PerformanceMetric, PerformanceScope } from "../api/bscV8Adapter";
 import type { BscView } from "../BscPage";
@@ -12,6 +12,7 @@ import { useNativeRecords } from "./useNativeRecords";
 import { useNowMs } from "./useNowMs";
 import { queryReason, useBscQuery } from "./useBscQuery";
 import { StrategyEditor } from "./StrategyEditor";
+import { useStrategySettings } from "./useStrategySettings";
 import { PlacedSection } from "./PlacedSection";
 import { Badge, DetailLine, Icon, PanelHead, StateBadge, TopHeading, bnb } from "./V8";
 
@@ -32,7 +33,8 @@ export function TrainingPanel({ goto }: { goto: (v: BscView) => void }) {
   const profiles = useBscQuery("training_profiles", { case: "trainingProfiles", value: {} });
   const from = period === "All" ? undefined : BigInt(nowMs - (period === "7T" ? 7 : 30) * 86_400_000);
   const series = useBscQuery(`training-series:${period}`, { case: "series", value: { metric: PerformanceMetric.TRAINING_NET_RESULT, scope: PerformanceScope.TRAINING_PROFILE, fromUnixMs: from } });
-  const settings = strategySettingsView(records, status?.warnings ?? [], nowMs);
+  // The settings state is asked for only while the module detail shows it.
+  const settings = useStrategySettings(records, status?.warnings ?? [], nowMs, open);
   const { form } = useMemo(() => formOf(settings), [settings]);
   const runtime = runtimeView(records, nowMs).view;
   const venues = sourceControlView(records, nowMs).venues.filter(v => v.effective !== "OFF").map(v => venueName(v.id)).join(", ") || "No venue";
@@ -59,7 +61,7 @@ export function TrainingPanel({ goto }: { goto: (v: BscView) => void }) {
       <p className="tiny mt">{fresh ? `Passed ${y("passed") ?? "?"} · entered ${y("entered") ?? "?"} · exits target ${y("exits_target") ?? "?"}, stop ${y("exits_stop") ?? "?"}, creator sell ${y("exits_creator_sell") ?? "?"}, timeout ${y("exits_timeout") ?? "?"} · open ${y("open") ?? "?"} (not valued) · unresolved ${y("unresolved") ?? "?"}` : "No current runtime status: no result is shown."} The PAPER ledger of the running strategy; not a proven outcome.</p>
     </div>
     <section className="card editor-card mtl"><div className="editor-heading"><div><h2>Module settings</h2><p className="small">The one native Strategy C configuration; edit it in Live → Custom settings.</p></div><Badge label="15 filters available" /></div>
-      <StrategyEditor form={form} onChange={() => undefined} disabled venues={venues} idPrefix="bsc-training" />
+      <StrategyEditor form={form} onChange={() => undefined} disabled venues={venues} idPrefix="bsc-training" ranges={fieldRanges(settings)} features={featureHints(settings)} />
       <h3 style={{ fontSize: 14, margin: "22px 0 12px" }}>Test run</h3>
       <div className="test-plan"><div className="test-plan-row">
         <div className="field"><label htmlFor="bsc-run-mode">Stop test by</label><select id="bsc-run-mode" className="select" value={runMode} onChange={e => setRunMode(e.target.value as typeof runMode)}>
@@ -68,7 +70,7 @@ export function TrainingPanel({ goto }: { goto: (v: BscView) => void }) {
         {runMode === "iterations" ? <div className="field"><label>Maximum launches processed</label><input className="input" type="number" disabled /></div> : null}
       </div><div className="module-run-meta">{NO_RUN_OWNER}</div></div>
       <div className="v8-section-group" data-testid="bsc-training-native-record"><PlacedSection panel="live" section={10} records={records}>
-        <DetailLine label="Settings generation" value={`${settings.generation.toString()} stored${settings.running ? ` · ${settings.startedGeneration?.toString() ?? "?"} in effect` : ""}`} />
+        <DetailLine label="Settings generation" value={generationText(settings)} />
       </PlacedSection></div>
       <div className="editor-footer"><span className="small">{running ? "Strategy C runs in the runtime (its switch and the runtime mode, Settings)." : "Strategy C is not running."}</span>
         <div className="editor-actions"><button type="button" className="btn quiet" onClick={() => goto("live")}>Edit in Live</button><button type="button" className="btn primary" disabled title={NO_RUN_OWNER} data-testid="bsc-training-start">Start test</button></div></div>

@@ -7,8 +7,8 @@ import { strategySetAllCommand, strategySettingCommand, useSourceControl } from 
 import { selectLive, selectStatus, useBscStore } from "../store/bscStore";
 import { tradingState } from "../model/overview";
 import { sourceControlView } from "../model/sources";
-import { strategySettingsView } from "../model/strategySettings";
-import { formOf, runningNotes, saveRequest, type SaveRequest, type StrategyForm } from "../model/strategyForm";
+import { generationText } from "../model/strategySettings";
+import { featureHints, fieldRanges, formOf, runningNotes, saveRequest, type SaveRequest, type StrategyForm } from "../model/strategyForm";
 import { LABEL_TONE, RIGHT_ALIGNED, TRADE_COLUMNS, TRADE_COL_DEFAULT, blockClock, counts, filterTrades, nsToMs, safeColumns, tradeViews, tradesCsv, type TradeColumn, type TradeFilter, type TradeView } from "../model/trades";
 import { detection, nsMs3, share, sourceLines, usToMs, type Market } from "../model/monitor";
 import { SOURCE_STATUS, age, sourceName, venueName } from "../model/health";
@@ -21,6 +21,7 @@ import { StrategyEditor } from "./StrategyEditor";
 import { useNativeRecords } from "./useNativeRecords";
 import { useNowMs } from "./useNowMs";
 import { queryReason, useBscQuery } from "./useBscQuery";
+import { useStrategySettings } from "./useStrategySettings";
 import { Badge, DetailLine, Drawer, Icon, PanelHead, StateBadge, TopHeading, Wei, signTone, signedBnbText } from "./V8";
 
 const STRATEGY = "bsc-live-strategy";
@@ -73,7 +74,7 @@ export function LivePanel() {
   const [layer, setLayer] = useState<"controls" | "limits" | "columns" | "ledger" | { trade: string } | null>(null);
   const [mode, setMode] = useState<"module" | "manual">("manual");
   const trading = tradingState(live, liveTopic);
-  const settings = useMemo(() => strategySettingsView(records, status?.warnings ?? [], nowMs), [records, status?.warnings, nowMs]);
+  const settings = useStrategySettings(records, status?.warnings ?? [], nowMs);
   const native = useMemo(() => formOf(settings), [settings]);
   // The operator's draft over the native values: shown as the owner holds them until edited.
   const [draft, setDraft] = useState<StrategyForm | null>(null);
@@ -139,10 +140,12 @@ export function LivePanel() {
         <button type="button" className={`btn ${mode === "module" ? "primary" : "quiet"}`} disabled title={NO_PROFILES}>Use training module</button>
         <button type="button" className={`btn ${mode === "manual" ? "primary" : "quiet"}`} onClick={() => setMode("manual")}>Custom settings</button>
       </div>
-      <StrategyEditor form={form} onChange={setDraft} disabled={!settings.available || busy} venues={venues} idPrefix={STRATEGY} notes={runningNotes(settings)} />
+      <StrategyEditor form={form} onChange={setDraft} disabled={!settings.available || busy} venues={venues} idPrefix={STRATEGY} notes={runningNotes(settings)}
+        ranges={fieldRanges(settings)} features={featureHints(settings)} />
       {native.filterError ? <p className="tiny v8-unavailable">Stored filters unreadable here: {native.filterError}</p> : null}
+      {!settings.basis && settings.basisNote ? <p className="tiny v8-unavailable" data-testid={`${STRATEGY}-basis`}>Settings state not loaded ({settings.basisNote}): the configuration file's values are not shown, only stored and running ones.</p> : null}
       <div className="editor-footer">
-        <span className="small" data-testid={`${STRATEGY}-generation`}>{!settings.available ? `Native owner ${settings.reason}` : `Saved generation ${settings.generation.toString()}${settings.running ? ` · ${settings.startedGeneration?.toString() ?? "?"} in effect` : " · applies at the next start"}`}
+        <span className="small" data-testid={`${STRATEGY}-generation`}>{generationText(settings)}
           {save.kind === "refused" ? ` · ${save.reason}` : save.kind === "all" ? ` · ${save.changed.length} changes, saved together` : ""}</span>
         <div className="editor-actions">
           <button type="button" className="btn quiet" disabled={!edited} onClick={() => setDraft(null)}>Reset</button>

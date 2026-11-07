@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { bnbToWei, changes, filterOrder, formOf, msToSeconds, parseFilters, saveRequest, secondsToMs, serializeFilters, weiToBnb, FILTER_KEYS } from "./strategyForm";
+import { create, type MessageInitShape } from "@bufbuild/protobuf";
+import { bnbToWei, changes, featureHints, fieldRanges, filterOrder, formOf, msToSeconds, parseFilters, saveRequest, secondsToMs, serializeFilters, weiToBnb, FILTER_KEYS } from "./strategyForm";
+import { Availability, CreatorSellExit, CreatorSoldBeforeFill, SettingsApplyStatus, V8_CONTRACTS } from "../api/bscV8Adapter";
 import { blockClock, counts, filterTrades, nsToMs, safeColumns, tradeLabel, tradeViews } from "./trades";
 import { share, usToMs, detection, CENSUS_SCHEMA } from "./monitor";
 import { capital, pendingTransactions, tradingState } from "./overview";
 import { healthView } from "./health";
 import { RUNTIME_SCHEMA, SOURCE_SCHEMA } from "./sources";
-import { SETTINGS_SCHEMA, strategySettingsView } from "./strategySettings";
+import { SETTINGS_SCHEMA, generationText, strategySettingsView, withSettingsState } from "./strategySettings";
 import type { BscLiveView, BscWalletsView, LivePositionView, NativeRecordView } from "./types";
 
 const rec = (schema: string, fields: Record<string, string>): NativeRecordView =>
@@ -120,6 +122,106 @@ describe("V8 Strategy C form: exact conversions, the native filter string", () =
     expect(saveRequest(running, { ...rf, maxOpen: "2", firstBuyerWindow: "8" })).toMatchObject({ kind: "all", filters: "buy_count:3:" });
     const odd = stored6("not:a:filter:rule");
     expect(saveRequest(odd, { ...formOf(odd).form, maxOpen: "2", firstBuyerWindow: "8" })).toEqual({ kind: "refused", reason: expect.stringContaining("stored filters cannot be shown") });
+  });
+});
+
+// TEST_ONLY: the shape of the reporter's `--query` answer for bsc/config/ingress.public.env with
+// nothing stored (probed against ca4a5646): effective = the file's values, the parser's bounds, the
+// feature catalogue in native order.
+const NATIVE_FEATURES: [string, string, number, boolean][] = [["buy_count", "count", 0, false], ["sell_count", "count", 0, false], ["buy_volume_bnb", "bnb", 18, false],
+  ["sell_volume_bnb", "bnb", 18, false], ["net_buy_flow_bnb", "bnb", 18, true], ["unique_buyers", "count", 0, false], ["unique_buyer_ratio", "ratio", 4, false],
+  ["largest_buy_bnb", "bnb", 18, false], ["buyer_volume_concentration", "ratio", 4, false], ["first5_buyer_concentration", "ratio", 4, false],
+  ["first_sell_latency_ms", "milliseconds", 0, false], ["price_change", "ratio", 4, true], ["max_drawdown", "ratio", 4, false], ["dev_initial_buy", "ratio", 4, false],
+  ["curve_progress_pct", "percent", 4, false], ["provider_gap_flag", "flag", 0, false]];
+const spec = (key: string, unit: string, min?: string, max?: string, places = 0) => ({ key: `BSC_STRATEGY_C_${key}`, unit, min, max, places });
+type StateInit = MessageInitShape<typeof V8_CONTRACTS.strategy_settings_state>;
+const FILE_VALUES = { inputWei: "10000000000000000", targetNetMultiple: "2", stopNetMultiple: "0.5", observationMs: 3000n, holdMs: 600000n, maxOpen: 5, firstBuyerWindow: 5,
+  creatorSoldBeforeFill: CreatorSoldBeforeFill.FREE_CANCEL, creatorSellExit: CreatorSellExit.ENABLED, ratioPlaces: 4, fillDelayBlocks: 1, gasPriceWei: "50000000",
+  filters: [{ feature: "buy_count", enabled: true, min: "2" }, { feature: "unique_buyers", enabled: true, min: "2" }] };
+const STATE: StateInit = {
+  availability: Availability.AVAILABLE, storedRevision: 0n, applyStatus: SettingsApplyStatus.NOT_RUNNING,
+  provenance: { owner: "bsc_runtime strategy settings", provenance: "NATIVE_CREATED" },
+  effective: FILE_VALUES,
+  settingSpecs: [spec("OBSERVATION_MS", "ms", "0", "3600000"), spec("FILTERS", "rules"), spec("INPUT_WEI", "wei", "1", "18446744073709551615"),
+    spec("TARGET_NET_MULTIPLE", "ratio", "1.0001", undefined, 4), spec("STOP_NET_MULTIPLE", "ratio", "0.0000", "0.9999", 4), spec("HOLD_MS", "ms", "1", "86400000"),
+    spec("MAX_OPEN", "count", "1", "1000"), spec("CREATOR_SOLD_BEFORE_FILL", "enum"), spec("CREATOR_SELL_EXIT", "enum"), spec("FIRST_BUYER_WINDOW", "count", "1", "100")],
+  features: NATIVE_FEATURES.map(([name, unit, places, signed], index) => ({ name, index, unit, places, signed, filterable: name !== "provider_gap_flag" })),
+};
+const settingsState = (over: StateInit = {}) => create(V8_CONTRACTS.strategy_settings_state, { ...STATE, ...over } as StateInit);
+const answer = (value: ReturnType<typeof settingsState>) => ({ kind: "ANSWER" as const, requestId: "q", result: { case: "strategySettings" as const, value } });
+// TEST_ONLY records: the owner with nothing stored and Strategy C not running.
+const off0 = strategySettingsView([rec(SOURCE_SCHEMA, { generation: "4", "sources[0].source_id": "BSC_INGRESS_GETH" })], [], 0);
+
+describe("V8 Strategy C settings state (bsc/query, BSC-V8-04): the form basis, native bounds, apply status", () => {
+  it("shows the configuration file's values and saves several changes as one set_all with nothing stored", () => {
+    const v = withSettingsState(off0, answer(settingsState()));
+    expect(v.basis?.values).toEqual({ BSC_STRATEGY_C_OBSERVATION_MS: "3000", BSC_STRATEGY_C_FILTERS: "buy_count:2:,unique_buyers:2:", BSC_STRATEGY_C_INPUT_WEI: "10000000000000000",
+      BSC_STRATEGY_C_TARGET_NET_MULTIPLE: "2", BSC_STRATEGY_C_STOP_NET_MULTIPLE: "0.5", BSC_STRATEGY_C_HOLD_MS: "600000", BSC_STRATEGY_C_MAX_OPEN: "5",
+      BSC_STRATEGY_C_CREATOR_SOLD_BEFORE_FILL: "FREE_CANCEL", BSC_STRATEGY_C_CREATOR_SELL_EXIT: "ENABLED", BSC_STRATEGY_C_FIRST_BUYER_WINDOW: "5" });
+    const { form } = formOf(v);
+    expect({ ...form, filters: undefined }).toEqual({ stake: "0.01", target: "2", stop: "0.5", hold: "600", observation: "3", maxOpen: "5", firstBuyerWindow: "5",
+      creatorSoldBeforeFill: "FREE_CANCEL", creatorSellExit: "ENABLED", filters: undefined });
+    expect(form.filters.buy_count).toEqual({ on: true, min: "2", max: "" });
+    expect(generationText(v)).toBe("Saved generation 0 · applies at the next start");
+    expect(saveRequest(v, form)).toEqual({ kind: "none" });
+    // Without the state the same two changes have no filter basis; with it, one set_all at CAS 0.
+    expect(saveRequest(off0, { ...formOf(off0).form, maxOpen: "6", firstBuyerWindow: "8" })).toHaveProperty("kind", "refused");
+    const r = saveRequest(v, { ...form, maxOpen: "6", firstBuyerWindow: "8" });
+    if (r.kind !== "all") throw new Error(JSON.stringify(r));
+    expect([r.filters, r.values.maxOpen, r.values.firstBuyerWindow, r.values.inputWei]).toEqual(["buy_count:2:,unique_buyers:2:", 6, 8, undefined]);
+    expect(r.values.filters).toHaveLength(15);
+    expect(r.values.filters.slice(0, 3)).toEqual([{ feature: "buy_count", enabled: true, min: "2" }, { feature: "unique_buyers", enabled: true, min: "2" }, { feature: "sell_count", enabled: false }]);
+    // Emptying a file value is refused like a stored one: no native unset.
+    expect(saveRequest(v, { ...form, hold: "" })).toEqual({ kind: "refused", reason: expect.stringContaining("BSC_STRATEGY_C_HOLD_MS cannot be empty") });
+  });
+  it("refuses a value outside the native bounds, places or sign before any request", () => {
+    const v = withSettingsState(off0, answer(settingsState()));
+    const { form } = formOf(v);
+    const refused = (f: Partial<typeof form>) => { const r = saveRequest(v, { ...form, ...f }); return r.kind === "refused" ? r.reason : r.kind; };
+    expect(refused({ firstBuyerWindow: "101" })).toBe("BSC_STRATEGY_C_FIRST_BUYER_WINDOW: 101 is above the native maximum 100");
+    expect(refused({ firstBuyerWindow: "0" })).toBe("BSC_STRATEGY_C_FIRST_BUYER_WINDOW: 0 is below the native minimum 1");
+    expect(refused({ firstBuyerWindow: "100" })).toBe("one");
+    expect(refused({ target: "1.00001" })).toBe("BSC_STRATEGY_C_TARGET_NET_MULTIPLE: 1.00001 is no number with at most 4 decimal places");
+    expect(refused({ target: "1" })).toBe("BSC_STRATEGY_C_TARGET_NET_MULTIPLE: 1 is below the native minimum 1.0001");
+    expect(refused({ stop: "1" })).toBe("BSC_STRATEGY_C_STOP_NET_MULTIPLE: 1 is above the native maximum 0.9999");
+    expect(refused({ stake: "0" })).toBe("BSC_STRATEGY_C_INPUT_WEI: 0 BNB is below the native minimum 0.000000000000000001 BNB");
+    expect(refused({ hold: "86400.001" })).toBe("BSC_STRATEGY_C_HOLD_MS: 86400.001 s is above the native maximum 86400 s");
+    const rule = (key: string, min: string, max = "") => ({ filters: { ...form.filters, [key]: { on: true, min, max } } });
+    expect(refused(rule("sell_count", "-1"))).toBe("sell_count: -1 cannot be negative");
+    expect(refused(rule("sell_count", "1.5"))).toBe("sell_count: 1.5 is no whole number");
+    expect(refused({ maxOpen: "2.5" })).toBe("BSC_STRATEGY_C_MAX_OPEN: 2.5 is no whole number");
+    expect(refused(rule("unique_buyer_ratio", "", "0.12345"))).toBe("unique_buyer_ratio: 0.12345 has more than 4 decimal places");
+    expect(saveRequest(v, { ...form, ...rule("net_buy_flow_bnb", "-0.5") })).toEqual({ kind: "one", key: "BSC_STRATEGY_C_FILTERS", value: "buy_count:2:,unique_buyers:2:,net_buy_flow_bnb:-0.5:" });
+    expect(fieldRanges(v)).toMatchObject({ firstBuyerWindow: "Native range: 1 – 100", target: "Native range: 1.0001 – …", hold: "Native range: 0.001 s – 86400 s" });
+    expect(featureHints(v)).toMatchObject({ net_buy_flow_bnb: "Native unit bnb, at most 18 decimal places, may be negative", curve_progress_pct: "Native unit percent, at most 4 decimal places" });
+    expect(featureHints(v)).not.toHaveProperty("provider_gap_flag");
+    // A native catalogue other than the form's 15 features: a set_all would not send each of them.
+    const other = withSettingsState(off0, answer(settingsState({ features: ([...NATIVE_FEATURES.slice(0, 14), ["new_feature", "count", 0, false]] as [string, string, number, boolean][])
+      .map(([name, unit, places, signed], index) => ({ name, index, unit, places, signed, filterable: true })) })));
+    expect(saveRequest(other, { ...formOf(other).form, maxOpen: "6", firstBuyerWindow: "8" })).toEqual({ kind: "refused",
+      reason: "The native filter catalogue differs from the form (+new_feature, -curve_progress_pct): save one change at a time" });
+    expect(saveRequest(other, { ...formOf(other).form, maxOpen: "6" })).toHaveProperty("kind", "one");
+  });
+  it("keeps the stored and running basis for another generation or no answer, and shows the owner's apply status", () => {
+    const note = (v: ReturnType<typeof withSettingsState>) => [v.basis, v.basisNote];
+    expect(note(withSettingsState(off0, answer(settingsState({ storedRevision: 3n }))))).toEqual([undefined, "the settings state is of generation 3, the snapshot names 0"]);
+    expect(note(withSettingsState(off0, { kind: "UNAVAILABLE", reason: "HTTP 503" }))).toEqual([undefined, "HTTP 503"]);
+    expect(withSettingsState(off0, { kind: "LOADING" })).toBe(off0);
+    expect(withSettingsState(off0, answer(settingsState({ availability: Availability.UNAVAILABLE, unavailableReason: "the Strategy C settings owner: x" }))).basisNote).toBe("the Strategy C settings owner: x");
+    const gone = strategySettingsView([], [], 0);
+    expect(withSettingsState(gone, answer(settingsState()))).toBe(gone);
+    const at = (over: StateInit) => generationText(withSettingsState(off0, answer(settingsState(over))));
+    expect(at({ applyStatus: SettingsApplyStatus.IN_EFFECT, runningRevision: 0n })).toBe("Saved generation 0 · in effect");
+    expect(at({ applyStatus: SettingsApplyStatus.SAVED_APPLIES_NEXT_START, runningRevision: 0n })).toBe("Saved generation 0 · running it with older configuration file values until the next start");
+    expect(at({ applyStatus: SettingsApplyStatus.SAVED_APPLIES_NEXT_START, runningRevision: 2n })).toBe("Saved generation 0 · running generation 2 until the next start");
+    expect(at({ provenance: { qualityReasons: ["RUNTIME_STATUS_STALE"] } })).toBe("Saved generation 0 · applies at the next start (runtime status stale)");
+    expect(at({ applyStatus: SettingsApplyStatus.REFUSED, refusalReason: "SETTINGS_REFUSED: x" })).toBe("Saved generation 0 · refused at the start: SETTINGS_REFUSED: x");
+    expect(at({ applyStatus: SettingsApplyStatus.UNSPECIFIED, provenance: { qualityReasons: ["RUNTIME_STATUS_INVALID: y"] } })).toBe("Saved generation 0 · running state unknown (RUNTIME_STATUS_INVALID: y)");
+    // A stored generation: the state of that generation is the basis (stored over the file), its revision the CAS.
+    const six = strategySettingsView([rec(SOURCE_SCHEMA, { generation: "6", "sources[0].source_id": "BSC_INGRESS_GETH" }),
+      rec(SETTINGS_SCHEMA, { generation: "6", "settings[0].id": "BSC_STRATEGY_C_MAX_OPEN", "settings[0].value": "4" })], [], 0);
+    const effective6 = withSettingsState(six, answer(settingsState({ storedRevision: 6n, effective: { ...FILE_VALUES, maxOpen: 4 } })));
+    expect([formOf(effective6).form.maxOpen, formOf(effective6).form.stake, effective6.basis?.revision]).toEqual(["4", "0.01", 6n]);
   });
 });
 

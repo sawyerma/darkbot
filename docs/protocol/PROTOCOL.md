@@ -1538,11 +1538,11 @@ The stored and the running Strategy C configuration of the native owner.
 | stored | [StrategyCSettings](#darkbot-bsc-v1-StrategyCSettings) |  | The stored settable values (absent keys: the configuration file&#39;s). |
 | stored_revision | [uint64](#uint64) |  | The stored revision (settings generation): the compare-and-swap of the next save. |
 | stored_config_sha256 | [string](#string) |  | The configuration hash of the stored revision&#39;s effective values. |
-| running | [StrategyCSettings](#darkbot-bsc-v1-StrategyCSettings) |  | What the running strategy took at its start; absent while it does not run. |
+| running | [StrategyCSettings](#darkbot-bsc-v1-StrategyCSettings) |  | What the running strategy took at its start, from a current runtime status only; absent while it does not run or its status is stale. |
 | running_revision | [uint64](#uint64) | optional | The revision the running strategy took; absent while it does not run. |
 | running_config_sha256 | [string](#string) |  | The configuration hash of what the running strategy took; empty while it does not run. |
 | apply_status | [SettingsApplyStatus](#darkbot-bsc-v1-SettingsApplyStatus) |  | Whether the stored revision is in effect. |
-| refusal_reason | [string](#string) |  | The strategy&#39;s refusal of its settings; empty without one. |
+| refusal_reason | [string](#string) |  | The strategy&#39;s refusal of its settings, `&lt;SETTINGS_REFUSED|GAS_EVIDENCE_REFUSED&gt;: &lt;reason&gt;`; empty without one. |
 | request_id | [string](#string) |  | The request that wrote the stored revision; empty while none. |
 | features | [StrategyFeatureSpec](#darkbot-bsc-v1-StrategyFeatureSpec) | repeated | The filterable features with their unit and places, in native order. |
 | effective | [StrategyCSettings](#darkbot-bsc-v1-StrategyCSettings) |  | The values in effect for the next start: every stored key over the configuration file&#39;s, the read-only configuration values included. |
@@ -1563,7 +1563,7 @@ One filterable native feature as the owner defines it (no frontend list of units
 | ----- | ---- | ----- | ----------- |
 | name | [string](#string) |  | The native feature name. |
 | index | [uint32](#uint32) |  | Its position in features.rs NAMES. |
-| unit | [string](#string) |  | Native unit: count, bnb (decimal BNB at 18 places), ratio, percent or milliseconds. |
+| unit | [string](#string) |  | Native unit: count, bnb (decimal BNB at 18 places), ratio, percent, milliseconds or flag (provider_gap_flag, never filterable). |
 | places | [uint32](#uint32) |  | Decimal places a bound may have (BNB amounts 18, ratios BSC_STRATEGY_C_RATIO_PLACES). |
 | signed | [bool](#bool) |  | Whether a bound may be negative (signed features such as net_buy_flow_bnb, price_change). |
 | filterable | [bool](#bool) |  | False for provider_gap_flag: a data-quality flag, never a filter. |
@@ -1602,7 +1602,7 @@ One settable key&#39;s bounds as the native parser enforces them (no client lite
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
 | key | [string](#string) |  | The native key, e.g. BSC_STRATEGY_C_HOLD_MS. |
-| unit | [string](#string) |  | Its unit: wei, ratio, ms, count or enum. |
+| unit | [string](#string) |  | Its unit: wei, ratio, ms, count, enum or rules (BSC_STRATEGY_C_FILTERS). |
 | min | [string](#string) | optional | The smallest accepted value, exact decimal; absent: unbounded below. |
 | max | [string](#string) | optional | The largest accepted value, exact decimal; absent: unbounded above. |
 | places | [uint32](#uint32) |  | Decimal places a value may have. |
@@ -1964,10 +1964,10 @@ Whether a stored Strategy C configuration is in effect.
 
 | Name | Number | Description |
 | ---- | ------ | ----------- |
-| SETTINGS_APPLY_STATUS_UNSPECIFIED | 0 | Not set by any producer; never displayed as a value. |
-| SETTINGS_APPLY_STATUS_IN_EFFECT | 1 | The running strategy took the stored revision at its start. |
+| SETTINGS_APPLY_STATUS_UNSPECIFIED | 0 | The running state is unknown: the runtime status does not read (provenance quality INCOMPLETE, quality_reasons RUNTIME_STATUS_INVALID); never displayed as a value. |
+| SETTINGS_APPLY_STATUS_IN_EFFECT | 1 | The running strategy took the stored revision at its start (its generation and its configuration hash equal the stored ones). |
 | SETTINGS_APPLY_STATUS_SAVED_APPLIES_NEXT_START | 2 | Stored; the running strategy keeps the revision of its start until its next start. |
-| SETTINGS_APPLY_STATUS_NOT_RUNNING | 3 | Strategy C does not run: the stored revision applies at its next start. |
+| SETTINGS_APPLY_STATUS_NOT_RUNNING | 3 | Strategy C does not run, or its runtime status is stale (quality_reasons RUNTIME_STATUS_STALE): the stored revision applies at its next start. |
 | SETTINGS_APPLY_STATUS_REFUSED | 4 | The strategy refused its settings at its start (SETTINGS_REFUSED, GAS_EVIDENCE_REFUSED). |
 
 

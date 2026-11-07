@@ -9,10 +9,11 @@ import {
 } from "@/core/generated/darkbot/bsc/v1/wallet_pb";
 import { BscWatchStateSchema } from "@/core/generated/darkbot/bsc/v1/watch_pb";
 
-// V8 (BSC-V8-09, FE-V8-17): the prepared V8 contracts of protocol/schemas/darkbot/bsc/v1/
+// V8 (BSC-V8-09, FE-V8-17): the V8 contracts of protocol/schemas/darkbot/bsc/v1/
 // {common,training,history,wallet,watch,query}.proto, decoded in one place (the generated types
-// stay behind adapters). No producer exists yet; the frontend shows these functions as
-// NOT_IMPLEMENTED or UNAVAILABLE until the native owner answers (core/realtime/bscQuery.ts).
+// stay behind adapters). Answered natively: StrategyCSettingsState (bsc/query) and
+// `bsc.strategy.set_all`; every other one is prepared, and the frontend shows it NOT_IMPLEMENTED
+// or UNAVAILABLE until its native owner answers (core/realtime/bscQuery.ts).
 
 export { Availability, DataQuality, TimeSource, PerformanceMetric, PerformanceScope } from "@/core/generated/darkbot/bsc/v1/common_pb";
 export type { PerformanceSeries } from "@/core/generated/darkbot/bsc/v1/common_pb";
@@ -20,7 +21,7 @@ export { TradeStatus, ExitReason, ExitReasonSource, TradePlacement, TradeSort } 
 export type { TradeRow, TradeDetail, TradeHistoryPage } from "@/core/generated/darkbot/bsc/v1/history_pb";
 export { QueryRefusal } from "@/core/generated/darkbot/bsc/v1/query_pb";
 export { CreatorSoldBeforeFill, CreatorSellExit, ReplayVerdict, SettingsApplyStatus, TrainingProfileStatus, TrainingRunMode, TrainingRunStatus, TrainingRunStopKind } from "@/core/generated/darkbot/bsc/v1/training_pb";
-export type { TrainingProfile, TrainingProfiles, TrainingRun, TrainingRunPage } from "@/core/generated/darkbot/bsc/v1/training_pb";
+export type { StrategyCSettings, StrategyCSettingsState, TrainingProfile, TrainingProfiles, TrainingRun, TrainingRunPage } from "@/core/generated/darkbot/bsc/v1/training_pb";
 export { ChainTxStatus, PolicyUnit, TransferStatus, WalletMovementKind, WalletRole } from "@/core/generated/darkbot/bsc/v1/wallet_pb";
 export type {
   FiatQuote, MainPayoutPolicy, PolicyAmount, ProfitTransferPolicy, WalletAccount, WalletAuthorization, WalletAuthorizationBounds, WalletDestination, WalletHistoryPage,

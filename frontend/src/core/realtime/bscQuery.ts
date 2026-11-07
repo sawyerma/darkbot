@@ -3,13 +3,14 @@ import { Availability } from "../generated/darkbot/bsc/v1/common_pb";
 import { BscQueryRequestSchema, BscQueryResponseSchema, QueryRefusal, type BscQueryResponse } from "../generated/darkbot/bsc/v1/query_pb";
 import { READ_TIMEOUT_MS, session } from "./bscControl";
 
-// V8 (BSC-V8-10, prepared): the one bounded, read-only BSC query (protocol/schemas/darkbot/bsc/v1/
+// V8 (BSC-V8-10): the one bounded, read-only BSC query (protocol/schemas/darkbot/bsc/v1/
 // query.proto): one POST per operator view or page step, never polling, never a STATE topic. The
-// gateway route is registered once its native owner answers; until then every answer is
-// UNAVAILABLE with its reason (405 from the gateway's static fallback, a non-protobuf answer) or
-// the owner's NOT_IMPLEMENTED. A refused query (a stale or foreign cursor, a limit above the owner's
-// cap, a filter it does not accept) is UNAVAILABLE with the refusal, never another page. Nothing
-// here substitutes, caches or computes a value.
+// gateway route is registered (session, origin and CSRF like a command; the deployed reporter's
+// `--query` answers): strategy_settings by its native owner, every other query NOT_IMPLEMENTED with
+// its missing BSC-V8 owner. A failed answer is UNAVAILABLE with its reason (503: no reporter
+// answer within its bound; a non-protobuf answer). A refused query (a stale or foreign cursor, a
+// limit above the owner's cap, a filter it does not accept) is UNAVAILABLE with the refusal, never
+// another page. Nothing here substitutes, caches or computes a value.
 
 export const BSC_QUERY_PATH = "/api/v1/bsc/query";
 
@@ -24,7 +25,7 @@ const PROTOBUF = "application/x-protobuf";
 
 /** Classifies an answer of the query route; exported for the transport tests. */
 export function classify(status: number, contentType: string | null, body: Uint8Array | null): BscQueryOutcome {
-  // The static SPA fallback answers an unregistered POST route with 405: no route yet.
+  // A gateway without the route (an older release) answers through its static SPA fallback: 405.
   if (status === 404 || status === 405) return { kind: "NOT_IMPLEMENTED", reason: `QUERY_ROUTE_NOT_REGISTERED (HTTP ${status}, BSC-V8-10)` };
   if (status < 200 || status > 299) return { kind: "UNAVAILABLE", reason: `HTTP ${status}` };
   if (!contentType?.toLowerCase().startsWith(PROTOBUF) || !body) return { kind: "UNAVAILABLE", reason: "QUERY_ANSWER_NOT_PROTOBUF" };

@@ -9,11 +9,13 @@ under the owner's LIVE gate for the operator's granted scope, and the browser si
 - **Data:** `bsc.status`, `bsc.launch.state`, `bsc.monitoring.state`, `bsc.wallets.state` and
   `bsc.live.state` are decoded from `darkbot.bsc.v1` (`api/bscAdapter.ts`); `bsc.live.state` is the one LIVE
   source. Public native leaves arrive as `NativeRecord`s with kind and unit.
-- **V8 contracts:** training, Strategy C settings, trade history, wallets and WATCH are prepared in
+- **V8 contracts:** training, Strategy C settings, trade history, wallets and WATCH in
   `protocol/schemas/darkbot/bsc/v1/{common,training,history,wallet,watch,query}.proto` (`api/bscV8Adapter.ts`,
   golden bytes `protocol/golden/bsc/v8`). Their bounded query (`core/realtime/bscQuery.ts`,
-  `POST /api/v1/bsc/query`) answers NOT_IMPLEMENTED/UNAVAILABLE until the native owner exists; the UI then
-  shows the function disabled with its reason, never data of its own.
+  `POST /api/v1/bsc/query`, the reporter's `--query`) answers the Strategy C settings state natively
+  (`pages/useStrategySettings.ts`: the form basis = stored over the configuration file, the native bounds,
+  the apply status); every other query is NOT_IMPLEMENTED until its native owner exists, and the UI shows
+  that function disabled with its reason, never data of its own.
 - **Wallets** (`pages/Wallet*.tsx`, `model/wallets.ts`): Accounts → Balances → Manual transfers → Automatic
   profit transfer (policy A) → Automatic payout (policy B) → Transaction history → Balance & profit. Main,
   Trading (Buyer), External (receive-only, no MetaMask connection) and the separate G0.7 launcher are never
