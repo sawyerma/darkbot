@@ -15,6 +15,10 @@
 //! bsc_runtime profile create|update <BSC_STRATEGY_C_KEY>=<VALUE>... [--profile <id>] --name <name> --venues <BSC_VENUE_*,...> --expect <n> --request-id <id> --state <dir> --config <ingress.public.env>
 //! bsc_runtime profile clone --source <id> --source-revision <n> --name <name> --expect <n> --request-id <id> --state <dir> --config <ingress.public.env>
 //! bsc_runtime profile archive|delete --profile <id> --expect <n> --request-id <id> --state <dir> --config <ingress.public.env>
+//! bsc_runtime training show --state <dir>
+//! bsc_runtime training start --profile <id> --expect <revision> --mode REPLAY --venues <BSC_VENUE_*,...> --stop-kind <DURATION|LAUNCH_COUNT|UNTIL_STOPPED> [--bound <n>] --replay-source <run> --job <RUNNING|NONE> --request-id <id> --state <dir> --rundir <dir> --config <ingress.public.env>
+//! bsc_runtime training stop --run <id> --reason <text> --request-id <id> --state <dir> --rundir <dir> --config <ingress.public.env>
+//! bsc_runtime training execute|end-orphans --run <id>|--reason <text> --state <dir> --rundir <dir> --config <ingress.public.env>
 //! bsc_runtime control require [--state <dir>] <SWITCH_ID>...
 //! bsc_runtime live scope|grant|revoke|qualify|status|positions|idle|bound-inputs|loopback-identity ...
 //! bsc_runtime live key init --key <file> --root <repo>
@@ -1366,17 +1370,109 @@ fn run(args: &[String]) -> Result<bool, String> {
             let c = profiles::command(cmd, rest)?;
             let text = std::fs::read_to_string(&c.config).map_err(|e| format!("{}: {e}", c.config))?;
             let owner = profiles::Owner::open(std::path::Path::new(&c.state))?;
-            // No training run or LIVE selection uses a profile yet (BSC-V8-02, -09).
+            // A profile an active training run uses stays (BSC-V8-02; the
+            // LIVE selection, BSC-V8-09, has none yet).
+            let sources = std::path::Path::new(&c.state);
+            let used = |p: &profiles::Profile| {
+                darkbot_bsc_execution::training_runs::in_use(sources, p)
+                    .unwrap_or_else(|e| Some(format!("the training runs do not read: {e}")))
+            };
             let receipt = owner.apply(
                 &c.request_id,
                 &c.request,
                 c.expected,
                 &text,
-                &|_| None,
+                &used,
                 darkbot_bsc_record::observed_now()?,
             )?;
             println!("{}", receipt.line());
             Ok(receipt.applied())
+        }
+        // BSC-V8-02/03: the training runs and their job.
+        [area, cmd, rest @ ..] if area == "training" && cmd == "show" => {
+            use darkbot_bsc_execution::training_runs as training;
+            for r in training::runs(std::path::Path::new(flag(rest, "--state")?))? {
+                println!(
+                    "run={} status={} profile={} revision={} mode={} source={} launches={}",
+                    r.run_id,
+                    r.status.name(),
+                    r.profile_id,
+                    r.profile_revision,
+                    r.mode.name(),
+                    r.replay_source,
+                    r.result.as_ref().map_or(0, |t| t.counters.launches)
+                );
+            }
+            Ok(true)
+        }
+        [area, cmd, rest @ ..]
+            if area == "training"
+                && ["start", "stop", "execute", "end-orphans"].contains(&cmd.as_str()) =>
+        {
+            use darkbot_bsc_execution::training_runs::{self as training, Command};
+            let (c, at) = training::command(cmd, rest)?;
+            let text = std::fs::read_to_string(&at.config).map_err(|e| format!("{}: {e}", at.config))?;
+            let owner = training::Owner::open(std::path::Path::new(&at.state))?;
+            let rundir = std::path::Path::new(&at.rundir);
+            let now = || darkbot_bsc_record::observed_now().unwrap_or(0);
+            match c {
+                Command::Start {
+                    start,
+                    expected,
+                    job,
+                    request_id,
+                } => {
+                    let receipt =
+                        owner.start(&request_id, &start, expected, job, rundir, &text, now())?;
+                    println!("{}", receipt.line());
+                    // The controller launches the job of a run still PENDING.
+                    if let Some(r) = receipt.run_id.as_deref().map(|id| owner.run(id)).transpose()?.flatten() {
+                        println!("run={} status={}", r.run_id, r.status.name());
+                    }
+                    Ok(receipt.applied())
+                }
+                Command::Stop {
+                    run_id,
+                    reason,
+                    request_id,
+                } => {
+                    let receipt = owner.stop(&request_id, &run_id, &reason, now())?;
+                    println!("{}", receipt.line());
+                    Ok(receipt.applied())
+                }
+                Command::EndOrphans { reason } => {
+                    if let Some(r) = owner.end_orphans(&reason, now())? {
+                        println!("run={} status={}", r.run_id, r.status.name());
+                    }
+                    Ok(true)
+                }
+                Command::Execute { run_id } => {
+                    // The controller's stop: SIGTERM after the stop request.
+                    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+                    for s in [SIGTERM, SIGINT] {
+                        signal_hook::flag::register(s, std::sync::Arc::clone(&stop))
+                            .map_err(|e| format!("signal handler: {e}"))?;
+                    }
+                    let root = std::path::Path::new(&at.config)
+                        .canonicalize()
+                        .map_err(|e| format!("{}: {e}", at.config))?
+                        .ancestors()
+                        .nth(3)
+                        .ok_or("--config is not under <repo>/bsc/config/")?
+                        .to_path_buf();
+                    let r = owner.execute(&run_id, &root, rundir, &text, &stop, &now)?;
+                    println!(
+                        "run={} status={}{}",
+                        r.run_id,
+                        r.status.name(),
+                        r.stop_reason
+                            .as_deref()
+                            .map(|s| format!(" reason={s}"))
+                            .unwrap_or_default()
+                    );
+                    Ok(r.status != training::Status::Failed)
+                }
+            }
         }
         [area, cmd, source, mode, rest @ ..] if area == "source" && cmd == "request" => {
             let source =

@@ -433,6 +433,160 @@ fn the_profiles_are_the_owners_catalog() {
     std::fs::remove_dir_all(dir).unwrap();
 }
 
+/// BSC-V8-02/03: the training runs newest first with their results, paged
+/// by the owner (a cursor bound to its filter, a limit above the cap
+/// refused); the catalogue lists the recorded runs.
+#[test]
+fn the_training_runs_and_the_catalogue_are_the_owners() {
+    use darkbot_bsc_execution::runtime_journal::{JournalSetup, RunIdentity, RuntimeJournal};
+    use darkbot_bsc_execution::strategy_profiles::{Owner as Profiles, Request};
+    use darkbot_bsc_execution::training_runs::{Job, Owner, Start};
+    use w::bsc_query_request::Query;
+    let dir = rundir("training");
+    let journal = dir.join("bsc-runtime/journal");
+    std::fs::create_dir_all(&journal).unwrap();
+    for run in [40u64, 41] {
+        let mut j =
+            RuntimeJournal::open(&journal, run, 1, JournalSetup::whole(64, 16_384)).unwrap();
+        j.set_identity(RunIdentity {
+            host: "test".into(),
+            build: "test".into(),
+            config_sha256: [0xC0; 32],
+            build_sha256: None,
+            build_dirty: None,
+            capture_pending: "VENUES",
+        });
+        j.finish().unwrap();
+    }
+    let sources = dir.join("bsc-sources");
+    let values = settings::effective_values(&config(), &Default::default())
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), v))
+        .collect();
+    let create = Request::Create {
+        name: "a".into(),
+        venues: vec!["BSC_VENUE_FLAP".into()],
+        values,
+    };
+    Profiles::open(&sources)
+        .unwrap()
+        .apply("c1", &create, 0, &config(), &|_| None, 1)
+        .unwrap();
+    let o = Owner::open(&sources).unwrap();
+    let stop = std::sync::atomic::AtomicBool::new(false);
+    for (i, source) in ["40", "41", "40"].into_iter().enumerate() {
+        let start = Start {
+            profile_id: "p000001".into(),
+            mode: "REPLAY".into(),
+            venues: vec!["BSC_VENUE_FLAP".into()],
+            stop_kind: "UNTIL_STOPPED".into(),
+            bound: None,
+            replay_source: source.into(),
+        };
+        let r = o
+            .start(&format!("s{i}"), &start, 1, Job::None, &dir, &config(), 10)
+            .unwrap();
+        assert!(r.applied(), "{}", r.line());
+        let id = r.run_id.unwrap();
+        if i < 2 {
+            o.execute(&id, &root(), &dir, &config(), &stop, &|| 20)
+                .unwrap();
+        }
+    }
+    let page = |q: w::TrainingRunQuery| ask(Query::TrainingRuns(q), &dir);
+    let r = page(w::TrainingRunQuery {
+        limit: 2,
+        ..Default::default()
+    });
+    assert_eq!(r.availability, w::Availability::Available as i32);
+    let Some(w::bsc_query_response::Result::TrainingRuns(first)) = r.result else {
+        panic!("no page")
+    };
+    let ids: Vec<_> = first.runs.iter().map(|r| r.run_id.as_str()).collect();
+    assert_eq!((ids, first.has_more), (vec!["t000003", "t000002"], true));
+    assert_eq!(first.runs[0].status, w::TrainingRunStatus::Pending as i32);
+    let done = &first.runs[1];
+    assert_eq!(done.status, w::TrainingRunStatus::Completed as i32);
+    assert_eq!(
+        (
+            done.replay_source.as_str(),
+            done.profile_revision,
+            done.mode
+        ),
+        ("41", 1, w::TrainingRunMode::Replay as i32)
+    );
+    let result = done.result.clone().unwrap();
+    // Nothing recorded: nothing taken, settled, the net exact.
+    assert_eq!(
+        (result.evaluated, result.net_wei.as_deref()),
+        (0, Some("0"))
+    );
+    assert_eq!(result.replay_verdict, w::ReplayVerdict::NotRun as i32);
+    assert_eq!(result.quality, w::DataQuality::Verified as i32);
+    assert!(done.provenance.clone().unwrap().evidence.is_some());
+    let next = page(w::TrainingRunQuery {
+        cursor: first.next_cursor.clone(),
+        limit: 2,
+        ..Default::default()
+    });
+    let Some(w::bsc_query_response::Result::TrainingRuns(second)) = next.result else {
+        panic!("no second page")
+    };
+    let ids: Vec<_> = second.runs.iter().map(|r| r.run_id.as_str()).collect();
+    assert_eq!(
+        (ids, second.has_more, second.next_cursor.as_str()),
+        (vec!["t000001"], false, "")
+    );
+    // The cursor is bound to its filter; a limit above the cap is refused.
+    let refused = |q: w::TrainingRunQuery| page(q).refusal;
+    assert_eq!(
+        refused(w::TrainingRunQuery {
+            cursor: first.next_cursor.clone(),
+            profile_id: "p000001".into(),
+            ..Default::default()
+        }),
+        w::QueryRefusal::CursorInvalid as i32
+    );
+    assert_eq!(
+        refused(w::TrainingRunQuery {
+            limit: u32::MAX,
+            ..Default::default()
+        }),
+        w::QueryRefusal::LimitExceeded as i32
+    );
+    assert_eq!(
+        refused(w::TrainingRunQuery {
+            statuses: vec![0],
+            ..Default::default()
+        }),
+        w::QueryRefusal::InvalidFilter as i32
+    );
+    let running = page(w::TrainingRunQuery {
+        statuses: vec![w::TrainingRunStatus::Pending as i32],
+        ..Default::default()
+    });
+    let Some(w::bsc_query_response::Result::TrainingRuns(pending)) = running.result else {
+        panic!("no filtered page")
+    };
+    assert_eq!(pending.runs.len(), 1);
+    let r = ask(Query::ReplaySources(Default::default()), &dir);
+    let Some(w::bsc_query_response::Result::ReplaySources(catalogue)) = r.result else {
+        panic!("no catalogue")
+    };
+    let ids: Vec<_> = catalogue
+        .sources
+        .iter()
+        .map(|s| s.source_id.as_str())
+        .collect();
+    assert_eq!(ids, ["41", "40"]);
+    assert_eq!(catalogue.sources[0].kind, "MARKET_JOURNAL");
+    assert_eq!(
+        catalogue.sources[0].quality,
+        w::DataQuality::Verified as i32
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 /// Every other query names its missing BSC-V8 owner; garbage is refused.
 #[test]
 fn a_query_without_an_owner_is_not_implemented() {

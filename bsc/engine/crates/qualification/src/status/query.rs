@@ -43,9 +43,12 @@ fn respond(req: w::BscQueryRequest, root: &Path, rundir: &Path) -> w::BscQueryRe
         Some(Query::Trades(_)) | Some(Query::Trade(_)) => {
             missing("BSC-V8-07..10 trade-history projection")
         }
-        Some(Query::TrainingRuns(_)) | Some(Query::ReplaySources(_)) => {
-            missing("BSC-V8-02/03 training runs")
-        }
+        Some(Query::TrainingRuns(q)) => paged(&req, training_runs(q, root, rundir), |p| {
+            w::bsc_query_response::Result::TrainingRuns(p)
+        }),
+        Some(Query::ReplaySources(q)) => paged(&req, replay_sources(q, root, rundir), |p| {
+            w::bsc_query_response::Result::ReplaySources(p)
+        }),
         Some(Query::TrainingProfiles(q)) => {
             let profiles = training_profiles(q.include_archived, rundir);
             w::BscQueryResponse {
@@ -68,6 +71,444 @@ fn respond(req: w::BscQueryRequest, root: &Path, rundir: &Path) -> w::BscQueryRe
             ..Default::default()
         },
     }
+}
+
+/// A page's answer, or the owner's refusal of the query as asked.
+type Paged<T> = Result<T, (w::QueryRefusal, String)>;
+
+fn paged<T>(
+    req: &w::BscQueryRequest,
+    page: Paged<(T, i32, String)>,
+    wrap: impl FnOnce(T) -> w::bsc_query_response::Result,
+) -> w::BscQueryResponse {
+    match page {
+        Ok((page, availability, reason)) => w::BscQueryResponse {
+            request_id: req.request_id.clone(),
+            availability,
+            unavailable_reason: reason,
+            result: Some(wrap(page)),
+            ..Default::default()
+        },
+        Err((refusal, detail)) => w::BscQueryResponse {
+            request_id: req.request_id.clone(),
+            availability: w::Availability::Available as i32,
+            refusal: refusal as i32,
+            refusal_detail: detail,
+            ..Default::default()
+        },
+    }
+}
+
+/// One page of `items` (newest first) after `cursor` for the filter
+/// `digest`, at most `limit` (0: the configured default; above the
+/// configured cap: refused). The cursor is `<digest>.<last item's key>`:
+/// bound to the filter, stale once its item is gone.
+fn page_of<T: Clone>(
+    items: &[T],
+    key: impl Fn(&T) -> String,
+    cursor: &str,
+    limit: u32,
+    digest: &str,
+    config: &darkbot_bsc_execution::runtime::RuntimeConfig,
+) -> Paged<(Vec<T>, String, bool)> {
+    let limit = match limit {
+        0 => config.query_page_default,
+        n if n > config.query_page_max => {
+            return Err((
+                w::QueryRefusal::LimitExceeded,
+                format!(
+                    "the owner's cap is {} (BSC_QUERY_PAGE_MAX)",
+                    config.query_page_max
+                ),
+            ));
+        }
+        n => n,
+    } as usize;
+    let start = match cursor {
+        "" => 0,
+        c => {
+            let Some((d, last)) = c.split_once('.') else {
+                return Err((
+                    w::QueryRefusal::CursorInvalid,
+                    "not this owner's cursor".into(),
+                ));
+            };
+            if d != digest {
+                return Err((
+                    w::QueryRefusal::CursorInvalid,
+                    "the cursor belongs to another filter".into(),
+                ));
+            }
+            match items.iter().position(|i| key(i) == last) {
+                Some(i) => i + 1,
+                None => {
+                    return Err((
+                        w::QueryRefusal::CursorStale,
+                        "the cursor's item is gone: start again".into(),
+                    ));
+                }
+            }
+        }
+    };
+    let page: Vec<T> = items.iter().skip(start).take(limit).cloned().collect();
+    let more = start + page.len() < items.len();
+    let next = match (more, page.last()) {
+        (true, Some(l)) => format!("{digest}.{}", key(l)),
+        _ => String::new(),
+    };
+    Ok((page, next, more))
+}
+
+fn digest(text: &str) -> String {
+    darkbot_bsc_record::hex(&darkbot_bsc_record::sha256(text.as_bytes())[..8])
+}
+
+fn runtime_config(root: &Path) -> Result<darkbot_bsc_execution::runtime::RuntimeConfig, String> {
+    let path = root.join(darkbot_bsc_execution::sources::RUNTIME_CONFIG_PATH);
+    let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    darkbot_bsc_execution::runtime::RuntimeConfig::parse(&text)
+}
+
+/// BSC-V8-02/03: a page of the training runs, newest first, with their
+/// results from the native owner (its newest state each).
+fn training_runs(
+    q: &w::TrainingRunQuery,
+    root: &Path,
+    rundir: &Path,
+) -> Paged<(w::TrainingRunPage, i32, String)> {
+    use darkbot_bsc_execution::training_runs as training;
+    let observed = darkbot_bsc_record::observed_now().unwrap_or(0);
+    let unavailable = |why: String| {
+        Ok((
+            w::TrainingRunPage::default(),
+            w::Availability::Unavailable as i32,
+            why,
+        ))
+    };
+    let config = match runtime_config(root) {
+        Ok(c) => c,
+        Err(e) => return unavailable(e),
+    };
+    let sources = rundir.join("bsc-sources");
+    let runs = match training::runs(&sources) {
+        Ok(r) => r,
+        Err(e) => return unavailable(format!("the training run owner: {e}")),
+    };
+    let mut wanted = Vec::new();
+    for s in &q.statuses {
+        wanted.push(match w::TrainingRunStatus::try_from(*s) {
+            Ok(w::TrainingRunStatus::Unspecified) | Err(_) => {
+                return Err((
+                    w::QueryRefusal::InvalidFilter,
+                    format!("{s} is no run status"),
+                ));
+            }
+            Ok(st) => st,
+        });
+    }
+    let runs: Vec<training::Run> = runs
+        .into_iter()
+        .filter(|r| q.profile_id.is_empty() || r.profile_id == q.profile_id)
+        .filter(|r| wanted.is_empty() || wanted.contains(&run_status(r.status)))
+        .collect();
+    let filter = format!("profile={};statuses={:?}", q.profile_id, q.statuses);
+    let (page, next, more) = page_of(
+        &runs,
+        |r| r.run_id.clone(),
+        &q.cursor,
+        q.limit,
+        &digest(&filter),
+        &config,
+    )?;
+    // The owner's version: its newest run's number (review L6: never falls).
+    let newest = runs
+        .first()
+        .and_then(|r| r.run_id.strip_prefix('t'))
+        .and_then(|n| n.parse().ok())
+        .unwrap_or(0);
+    Ok((
+        w::TrainingRunPage {
+            availability: w::Availability::Available as i32,
+            provenance: Some(w::OwnerProvenance {
+                owner: "bsc_runtime training runs".into(),
+                owner_version: newest,
+                observed_unix_ms: observed,
+                quality: w::DataQuality::Verified as i32,
+                provenance: "NATIVE_CREATED".into(),
+                ..Default::default()
+            }),
+            runs: page
+                .iter()
+                .map(|r| run_proto(r, &sources, observed))
+                .collect(),
+            next_cursor: next,
+            has_more: more,
+            ..Default::default()
+        },
+        w::Availability::Available as i32,
+        String::new(),
+    ))
+}
+
+fn run_status(s: darkbot_bsc_execution::training_runs::Status) -> w::TrainingRunStatus {
+    use darkbot_bsc_execution::training_runs::Status;
+    match s {
+        Status::Pending => w::TrainingRunStatus::Pending,
+        Status::Running => w::TrainingRunStatus::Running,
+        Status::Completed => w::TrainingRunStatus::Completed,
+        Status::Stopped => w::TrainingRunStatus::Stopped,
+        Status::Failed => w::TrainingRunStatus::Failed,
+        Status::Interrupted => w::TrainingRunStatus::Interrupted,
+    }
+}
+
+fn run_proto(
+    r: &darkbot_bsc_execution::training_runs::Run,
+    sources: &Path,
+    observed: u64,
+) -> w::TrainingRun {
+    use darkbot_bsc_execution::training_runs::Plan;
+    let (stop_kind, duration_ms, max_launches) = match r.plan {
+        Plan::Duration(ms) => (w::TrainingRunStopKind::Duration, Some(ms), None),
+        Plan::Launches(n) => (w::TrainingRunStopKind::LaunchCount, None, Some(n)),
+        Plan::UntilStopped => (w::TrainingRunStopKind::UntilStopped, None, None),
+    };
+    let run_dir = sources
+        .join(darkbot_bsc_execution::training_runs::DIR)
+        .join("runs")
+        .join(&r.run_id);
+    let state = run_dir.join(format!("{:020}.dbrec", r.seq));
+    // Review L9: a RUNNING run with a stop request is STOPPING; its counts
+    // are its end's (none while it runs: not zero, incomplete).
+    use darkbot_bsc_execution::training_runs::Status;
+    let status = match r.status {
+        Status::Running if run_dir.join("stop.dbrec").exists() => w::TrainingRunStatus::Stopping,
+        other => run_status(other),
+    };
+    let reasons: Vec<String> = match r.status {
+        Status::Pending | Status::Running => vec!["RUNNING: its counts are its end's".into()],
+        _ => Vec::new(),
+    };
+    w::TrainingRun {
+        run_id: r.run_id.clone(),
+        profile_id: r.profile_id.clone(),
+        profile_revision: r.profile_revision,
+        config_sha256: darkbot_bsc_record::hex(&r.config_sha256),
+        mode: w::TrainingRunMode::Replay as i32,
+        venues: r.venues.iter().map(|v| v.name().to_string()).collect(),
+        plan: Some(w::TrainingRunPlan {
+            stop_kind: stop_kind as i32,
+            duration_ms,
+            max_launches,
+        }),
+        started_unix_ms: r.started_unix_ms,
+        ended_unix_ms: r.ended_unix_ms,
+        status: status as i32,
+        stop_reason: r.stop_reason.clone().unwrap_or_default(),
+        // Review M4: the decided launches (the engine's Decided outputs).
+        launches_processed: r.result.as_ref().map_or(0, |t| t.decided()),
+        result: r.result.as_ref().map(|t| result_proto(t, r)),
+        provenance: Some(w::OwnerProvenance {
+            owner: "bsc_runtime training runs".into(),
+            owner_version: r.seq,
+            observed_unix_ms: observed,
+            evidence: std::fs::read(&state).ok().map(|bytes| w::Evidence {
+                path: format!(
+                    "bsc-sources/{}/runs/{}/{:020}.dbrec",
+                    darkbot_bsc_execution::training_runs::DIR,
+                    r.run_id,
+                    r.seq
+                ),
+                sha256: darkbot_bsc_record::hex(&darkbot_bsc_record::sha256(&bytes)),
+                observed_unix_s: r.ended_unix_ms.or(r.started_unix_ms).unwrap_or(0) / 1_000,
+            }),
+            quality: match reasons.is_empty() {
+                true => w::DataQuality::Verified,
+                false => w::DataQuality::Incomplete,
+            } as i32,
+            quality_reasons: reasons,
+            provenance: "NATIVE_CREATED".into(),
+        }),
+        request_id: r.request_id.clone(),
+        replay_source: r.replay_source.clone(),
+    }
+}
+
+/// A run's result as the journal's counts: the net only once nothing is
+/// followed any more and nothing is unresolved (never a zero for unknown);
+/// lost records, a read error, a source without a manifest, an end before
+/// the plan's bound or launches left undecided make it incomplete.
+fn result_proto(
+    t: &darkbot_bsc_execution::runtime_strategy::Training,
+    run: &darkbot_bsc_execution::training_runs::Run,
+) -> w::TrainingResult {
+    use darkbot_bsc_execution::runtime_strategy::TrainingEnd;
+    use darkbot_bsc_execution::training_runs::Plan;
+    let c = &t.counters;
+    let bounded = run.plan != Plan::UntilStopped;
+    let mut reasons = Vec::new();
+    if t.lost > 0 {
+        reasons.push(format!("LOST_RECORDS: {}", t.lost));
+    }
+    if !t.manifest {
+        reasons.push("SOURCE_WITHOUT_MANIFEST".into());
+    }
+    if let Some(e) = &t.read_error {
+        reasons.push(format!("READ_ERROR: {e}"));
+    }
+    match t.end {
+        Some(TrainingEnd::Stopped) if bounded => reasons.push("STOPPED_BEFORE_ITS_BOUND".into()),
+        Some(TrainingEnd::JournalEnd) if bounded => {
+            reasons.push("JOURNAL_ENDED_BEFORE_ITS_BOUND".into())
+        }
+        _ => {}
+    }
+    if t.followed_at_end > 0 || c.unresolved > 0 {
+        reasons.push(format!(
+            "FOLLOWED_OR_UNRESOLVED_AT_END: {} followed, {} unresolved",
+            t.followed_at_end, c.unresolved
+        ));
+    }
+    let settled = t.followed_at_end == 0 && t.open_at_end == 0 && c.unresolved == 0;
+    let net = settled.then(|| {
+        if c.gain_wei >= c.loss_wei {
+            (c.gain_wei - c.loss_wei).to_string()
+        } else {
+            format!("-{}", c.loss_wei - c.gain_wei)
+        }
+    });
+    w::TrainingResult {
+        evaluated: t.decided(),
+        passed: c.passed,
+        rejected: c.rejected,
+        data_incomplete: c.data_incomplete,
+        not_tracked: c.not_tracked,
+        unresolved: c.unresolved,
+        entered: c.entered,
+        exits_target: c.exits_target,
+        exits_stop: c.exits_stop,
+        exits_creator_sell: c.exits_creator_sell,
+        exits_timeout: c.exits_timeout,
+        wins: c.gains,
+        losses: c.losses,
+        gain_wei: c.gain_wei.to_string(),
+        loss_wei: c.loss_wei.to_string(),
+        net_wei: net,
+        open_positions: t.open_at_end,
+        sources: vec![format!("recorded run {}", run.replay_source)],
+        // Review L5: only with complete coverage.
+        observable_ms: (t.lost == 0 && t.read_error.is_none())
+            .then(|| t.first_ns.zip(t.last_ns))
+            .flatten()
+            .map(|(a, b)| b.saturating_sub(a) / 1_000_000),
+        lost_records: t.lost,
+        quality: match reasons.is_empty() {
+            true => w::DataQuality::Verified,
+            false => w::DataQuality::Incomplete,
+        } as i32,
+        quality_reasons: reasons,
+        slot_limit: c.slot_limit,
+        creator_sold: c.creator_sold,
+        cancelled: c.cancelled,
+        cancelled_creator_sold: c.cancelled_creator_sold,
+        cancelled_not_tracked: c.cancelled_not_tracked,
+        cancelled_quote: c.cancelled_quote,
+        cancelled_cost: c.cancelled_cost,
+        superseded: c.superseded,
+        paper_unpriced: c.paper_unpriced,
+        open_at_end: t.open_at_end,
+        // A training runs its own configuration: nothing to compare with.
+        replay_verdict: w::ReplayVerdict::NotRun as i32,
+        config_match: None,
+        ..Default::default()
+    }
+}
+
+/// BSC-V8-02: a page of the recorded runtime runs a REPLAY can take,
+/// newest first (a run still recording has no manifest yet: its counts
+/// unknown, incomplete).
+fn replay_sources(
+    q: &w::ReplaySourceQuery,
+    root: &Path,
+    rundir: &Path,
+) -> Paged<(w::ReplaySourcePage, i32, String)> {
+    let observed = darkbot_bsc_record::observed_now().unwrap_or(0);
+    let unavailable = |why: String| {
+        Ok((
+            w::ReplaySourcePage::default(),
+            w::Availability::Unavailable as i32,
+            why,
+        ))
+    };
+    let config = match runtime_config(root) {
+        Ok(c) => c,
+        Err(e) => return unavailable(e),
+    };
+    let list = match darkbot_bsc_execution::training_runs::replay_sources(rundir) {
+        Ok(l) => l,
+        Err(e) => return unavailable(format!("the runtime journal: {e}")),
+    };
+    let (page, next, more) = page_of(
+        &list,
+        |s| s.run_id.clone(),
+        &q.cursor,
+        q.limit,
+        &digest("all"),
+        &config,
+    )?;
+    let time = |ms: Option<u64>| w::SourcedTime {
+        unix_ms: ms,
+        source: w::TimeSource::LocalWall as i32,
+        block_number: None,
+    };
+    Ok((
+        w::ReplaySourcePage {
+            availability: w::Availability::Available as i32,
+            provenance: Some(w::OwnerProvenance {
+                owner: "bsc_runtime journal".into(),
+                owner_version: list.len() as u64,
+                observed_unix_ms: observed,
+                quality: w::DataQuality::Verified as i32,
+                provenance: "NATIVE_CREATED".into(),
+                ..Default::default()
+            }),
+            sources: page
+                .iter()
+                .map(|s| {
+                    let mut reasons = Vec::new();
+                    if !s.manifest {
+                        reasons.push("NO_MANIFEST: a run still recording or cut off".to_string());
+                    }
+                    if let Some(n) = s.lost_records.filter(|n| *n > 0) {
+                        reasons.push(format!("LOST_RECORDS: {n}"));
+                    }
+                    w::ReplaySource {
+                        source_id: s.run_id.clone(),
+                        // A recorded runtime run: the market's journal.
+                        kind: "MARKET_JOURNAL".into(),
+                        from: Some(time(s.started_unix_ms)),
+                        to: Some(time(s.ended_unix_ms)),
+                        records: s.records.unwrap_or(0),
+                        config_sha256: s
+                            .config_sha256
+                            .map(|h| darkbot_bsc_record::hex(&h))
+                            .unwrap_or_default(),
+                        quality: match reasons.is_empty() {
+                            true => w::DataQuality::Verified,
+                            false => w::DataQuality::Incomplete,
+                        } as i32,
+                        quality_reasons: reasons,
+                        ..Default::default()
+                    }
+                })
+                .collect(),
+            next_cursor: next,
+            has_more: more,
+            ..Default::default()
+        },
+        w::Availability::Available as i32,
+        String::new(),
+    ))
 }
 
 /// What the runtime status says of the running strategy's settings.

@@ -2,6 +2,7 @@
 BSC_REPORTER_LABEL="${LABEL%.gateway}.bsc.reporter"
 BSC_READINESS_LABEL="${LABEL%.gateway}.bsc.readiness"
 BSC_RUNTIME_LABEL="${LABEL%.gateway}.bsc.runtime"
+BSC_TRAINING_LABEL="${LABEL%.gateway}.bsc.training"
 # Audit E 3.5: the reporter's socket lies beside the controller's other feed sockets (the
 # directory of $SOCK, the test directory in an isolated run). The reporter and the gateway feed
 # take it, like the readiness label, only from here.
@@ -13,14 +14,17 @@ BSC_SOCKET="$(dirname "$SOCK")/bsc.sock"
 BSC_LAUNCHD_THROTTLE_S="$(app_conf BSC_LAUNCHD_THROTTLE_S 5)"
 BSC_STOP_BUDGET_S="$(app_conf BSC_STOP_BUDGET_S "$STOP_BUDGET_S")"
 BSC_READINESS_ARM_WAIT_S="$(app_conf BSC_READINESS_ARM_WAIT_S 5)"
+# BSC-V8-02: how long a training start waits for its job to take the run up.
+BSC_TRAINING_START_WAIT_S="$(app_conf BSC_TRAINING_START_WAIT_S 5)"
 bsc_launchd_conf() {
-  for v in "$BSC_LAUNCHD_THROTTLE_S" "$BSC_STOP_BUDGET_S" "$BSC_READINESS_ARM_WAIT_S"; do
-    case "$v" in ''|*[!0-9]*|0*) die "app.conf: BSC_LAUNCHD_THROTTLE_S, BSC_STOP_BUDGET_S and BSC_READINESS_ARM_WAIT_S are positive whole seconds" ;; esac
+  for v in "$BSC_LAUNCHD_THROTTLE_S" "$BSC_STOP_BUDGET_S" "$BSC_READINESS_ARM_WAIT_S" "$BSC_TRAINING_START_WAIT_S"; do
+    case "$v" in ''|*[!0-9]*|0*) die "app.conf: BSC_LAUNCHD_THROTTLE_S, BSC_STOP_BUDGET_S, BSC_READINESS_ARM_WAIT_S and BSC_TRAINING_START_WAIT_S are positive whole seconds" ;; esac
   done
 }
 BSC_JOB_PLIST="$RUNDIR/$BSC_READINESS_LABEL.plist"
 BSC_REPORTER_PLIST="$RUNDIR/$BSC_REPORTER_LABEL.plist"
 BSC_RUNTIME_PLIST="$RUNDIR/$BSC_RUNTIME_LABEL.plist"
+BSC_TRAINING_PLIST="$RUNDIR/$BSC_TRAINING_LABEL.plist"
 BSC_ROOT="$APP_HOME/bsc-source"
 # The runtime configuration of the snapshot: the runtime's, and the owner's bounds (Audit E 3.1/3.4).
 BSC_CONFIG="$BSC_ROOT/bsc/config/ingress.public.env"
@@ -394,8 +398,86 @@ bsc_profile() {
     *) "${rt[@]}" --profile "$id" --expect "$number" "${owner[@]}" ;;
   esac
 }
+# BSC-V8-02/03: a training run (REPLAY of a recorded run) at its native owner; its job is its
+# own launchd program (away from the runtime's hot path). A start whose run the owner applied
+# launches the job unless one runs; a run whose job is gone ends first (PENDING FAILED, RUNNING
+# INTERRUPTED). A stop is the owner's request, then the job's SIGTERM.
+BSC_TRAINING_USAGE="bsc training start <profile_id> <revision> REPLAY <BSC_VENUE_*,...> <DURATION|LAUNCH_COUNT|UNTIL_STOPPED> <bound|-> <replay_source> <request_id>; bsc training stop <run_id> <reason|-> <request_id>; bsc training show"
+# The run the loaded training job executes (its program's --run argument).
+bsc_training_job_run() { launchctl list "$BSC_TRAINING_LABEL" 2>/dev/null | sed -n '/"--run";/{n;s/[^t0-9]//g;p;}' || true; }
+bsc_training_pid() { launchctl list "$BSC_TRAINING_LABEL" 2>/dev/null | sed -n 's/.*"PID" = \([0-9][0-9]*\);/\1/p' || true; }
+bsc_training_rt() {
+  [ -x "$APP_HOME/current/bsc_runtime" ] || die "BSC runtime nicht deployed"
+  /usr/bin/env -i PATH=/usr/bin:/bin "$APP_HOME/current/bsc_runtime" training "$@" \
+    --state "$RUNDIR/bsc-sources" --rundir "$RUNDIR" --config "$BSC_CONFIG"
+}
+bsc_training_id() {
+  case "$1" in ''|-*|*[!$BSC_ID_CHARS]*) die "$2 is letters, digits and hyphens" ;; esac
+  [ "${#1}" -le 64 ] || die "$2 is letters, digits and hyphens"
+}
+bsc_training_start() {
+  [ "$#" -eq 8 ] || die "$BSC_TRAINING_USAGE"
+  bsc_training_id "$1" "the profile id"; bsc_training_id "$7" "the replay source"; bsc_training_id "$8" "the request id"
+  case "$2" in ''|*[!0-9]*) die "the revision must be an unsigned integer" ;; esac
+  case "$3" in REPLAY|SHADOW|PAPER) ;; *) die "unknown training mode" ;; esac
+  case "$4" in ''|*[!ABCDEFGHIJKLMNOPQRSTUVWXYZ_,]*) die "the venues are BSC_VENUE_* names" ;; esac
+  case "$5" in DURATION|LAUNCH_COUNT|UNTIL_STOPPED) ;; *) die "unknown training bound" ;; esac
+  local bound=()
+  case "$6" in -) ;; ''|*[!0-9]*) die "the bound must be an unsigned integer or -" ;; *) bound=(--bound "$6") ;; esac
+  bsc_launchd_conf
+  # The owner ends an active run of another request whose job is gone (review M2: never its own).
+  local job=NONE; [ -z "$(bsc_training_pid)" ] || job=RUNNING
+  local out rc=0
+  out="$(bsc_training_rt start --profile "$1" --expect "$2" --mode "$3" --venues "$4" --stop-kind "$5" ${bound[@]+"${bound[@]}"} \
+    --replay-source "$7" --job "$job" --request-id "$8")" || rc=$?
+  printf '%s\n' "$out"
+  [ "$rc" -eq 0 ] || return "$rc"
+  local run status
+  run="$(printf '%s\n' "$out" | sed -n 's/^run=\(t[0-9][0-9]*\) status=[A-Z]*$/\1/p')"
+  status="$(printf '%s\n' "$out" | sed -n 's/^run=t[0-9][0-9]* status=\([A-Z]*\)$/\1/p')"
+  [ -n "$run" ] || die "BSC training: kein Lauf im Beleg"
+  # Only a PENDING run needs its job (the same request again gets its run back).
+  [ "$status" = PENDING ] || { say "BSC training run=$run status=$status"; return 0; }
+  # A job that still runs: this run's (nothing to do) or an older run's end (wait for it).
+  local i=0
+  while [ -n "$(bsc_training_pid)" ]; do
+    [ "$(bsc_training_job_run)" != "$run" ] || { say "BSC training run=$run läuft bereits"; return 0; }
+    sleep 1; i=$((i+1)); [ "$i" -lt "$BSC_STOP_BUDGET_S" ] || die "BSC training: der Job eines früheren Laufs endet noch"
+  done
+  launchctl bootout "$DOMAIN/$BSC_TRAINING_LABEL" >/dev/null 2>&1 || true
+  local args="<string>training</string><string>execute</string><string>--run</string><string>$run</string>"
+  args="$args<string>--state</string><string>$(printf '%s' "$RUNDIR/bsc-sources" | xml_escape)</string>"
+  args="$args<string>--rundir</string><string>$(printf '%s' "$RUNDIR" | xml_escape)</string>"
+  args="$args<string>--config</string><string>$(printf '%s' "$BSC_CONFIG" | xml_escape)</string>"
+  bsc_plist "$BSC_TRAINING_LABEL" "$APP_HOME/current/bsc_runtime" "$args" "$LOGDIR/bsc-training-$run.log" false > "$BSC_TRAINING_PLIST"
+  launchctl bootstrap "$DOMAIN" "$BSC_TRAINING_PLIST" || die "BSC training: Job nicht gestartet (derselbe Auftrag startet ihn erneut)"
+  i=0
+  while [ -z "$(bsc_training_pid)" ] && [ "$i" -lt $((BSC_TRAINING_START_WAIT_S * 10)) ]; do sleep 0.1; i=$((i+1)); done
+  say "BSC training gestartet run=$run (REPLAY, read-only)"
+}
+bsc_training_stop() {
+  [ "$#" -eq 3 ] || die "$BSC_TRAINING_USAGE"
+  bsc_training_id "$1" "the run id"; bsc_training_id "$3" "the request id"
+  local reason="$2"; [ "$reason" != - ] || reason=""
+  local rc=0
+  bsc_training_rt stop --run "$1" --reason "$reason" --request-id "$3" || rc=$?
+  [ "$rc" -eq 0 ] || return "$rc"
+  if [ -n "$(bsc_training_pid)" ]; then
+    launchctl kill SIGTERM "$DOMAIN/$BSC_TRAINING_LABEL" || say "BSC training: Signal nicht zugestellt (der Lauf endet mit seinem Job)"
+  else
+    # No job: a run it left RUNNING ends now (INTERRUPTED).
+    bsc_training_rt end-orphans --reason "stopped while its job was gone" >/dev/null || die "BSC training: Laufstand nicht lesbar"
+  fi
+}
 cmd_bsc() {
   case "${1:-}" in
+    training) case "${2:-}" in
+      start) locked bsc_training_start "${@:3}" ;;
+      stop) locked bsc_training_stop "${@:3}" ;;
+      show) [ -x "$APP_HOME/current/bsc_runtime" ] || die "BSC runtime nicht deployed"
+        /usr/bin/env -i PATH=/usr/bin:/bin "$APP_HOME/current/bsc_runtime" training show --state "$RUNDIR/bsc-sources" ;;
+      *) die "$BSC_TRAINING_USAGE" ;;
+    esac ;;
     profile) case "${2:-}" in
       create|update|clone|archive|delete) locked bsc_profile "${@:2}" ;;
       show) [ -x "$APP_HOME/current/bsc_runtime" ] || die "BSC runtime nicht deployed"

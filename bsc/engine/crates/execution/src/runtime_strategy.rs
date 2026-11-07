@@ -1875,9 +1875,292 @@ pub fn creator_sold_policy(text: &str) -> Result<CreatorSoldBeforeFill, String> 
     }
 }
 
+/// BSC-V8-02: how a training replay ended.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TrainingEnd {
+    /// The recorded run's last record (or an unreadable one: `read_error`).
+    JournalEnd,
+    /// Its bound (a duration of journal time, a number of launches): no
+    /// launch past it, the ones taken decided and their positions closed
+    /// (or the journal ended first: `followed_at_end`).
+    Bound,
+    /// A stop request.
+    Stopped,
+}
+
+/// BSC-V8-02: a training replay's position, for its bound and its stop.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct TrainingProgress {
+    pub records: u64,
+    /// Journal time since the run's first record.
+    pub elapsed_ns: u64,
+    /// The launches of its venues the strategy took so far (each is then
+    /// decided: a bounded run ends only once every one taken is).
+    pub launches: u64,
+}
+
+/// BSC-V8-02: what a training replay asks its owner after every record.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TrainingStep {
+    Continue,
+    /// The bound is reached: no further launch.
+    Bounded,
+    Stop,
+}
+
+/// BSC-V8-02/03: the result of one training replay.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Training {
+    pub records: u64,
+    pub counters: Counters,
+    /// Positions still open at its end (not valued).
+    pub open_at_end: u64,
+    /// Tokens still followed at its end (launches not decided yet,
+    /// entries waiting for their fill, open positions): review H2.
+    pub followed_at_end: u64,
+    /// Records the capture lost (its manifest's count or its gap spans).
+    pub lost: u64,
+    /// The recorded run had a manifest (its counts known).
+    pub manifest: bool,
+    pub read_error: Option<String>,
+    pub end: Option<TrainingEnd>,
+    /// The journal time it covered (the run's monotonic record times).
+    pub first_ns: Option<u64>,
+    pub last_ns: Option<u64>,
+}
+
+impl Training {
+    /// The launches it decided (each launch taken is decided once).
+    pub fn decided(&self) -> u64 {
+        let c = &self.counters;
+        c.passed + c.rejected + c.data_incomplete + c.not_tracked + c.slot_limit + c.creator_sold
+    }
+}
+
+/// BSC-V8-02: Strategy C with `config` on `venues` over the market records
+/// of the recorded run `run_id` under `journal_dir`, from its first record
+/// whatever the recorded runtime ran: every record the runtime feeds its
+/// strategy (the canonical chain and its reorgs and resyncs, review H1)
+/// but its own (decisions, switches, settings, real lots: a training is a
+/// simulation of its own). After every record `step` says whether to go
+/// on; once it is bounded no launch is taken, and the run ends when no
+/// token is followed any more (every launch taken decided, every position
+/// closed; review H2) or at the journal's end.
+pub fn train(
+    journal_dir: &std::path::Path,
+    run_id: &str,
+    max_payload: usize,
+    config: &Config,
+    gas: &GasEvidence,
+    venues: StrategyVenues,
+    step: &mut dyn FnMut(&TrainingProgress) -> TrainingStep,
+) -> Result<Training, String> {
+    use darkbot_bsc_journal::storage::run::RunReader;
+    use darkbot_bsc_record::schema::bsc_capture::capture_run as cr;
+    let run = journal_dir.join(run_id);
+    if !run.is_dir() {
+        return Err(format!("{}: no run directory", run.display()));
+    }
+    let mut out = Training::default();
+    if let Ok(bytes) = std::fs::read(run.join(crate::runtime_journal::RUN_MANIFEST))
+        && let Ok(m) = cr::decode_run(&bytes)
+    {
+        out.lost = m.u64(cr::LOST_RECORDS).unwrap_or(0);
+        out.manifest = true;
+    }
+    let mut reader = RunReader::open(&run, max_payload).map_err(|e| e.to_string())?;
+    let mut strategy = StrategyRuntime::new(config.clone(), gas.clone(), venues);
+    let mut gap_spans = 0u64;
+    let mut bounded = false;
+    loop {
+        // A journal that ends while a bounded run drains: it ran to its bound.
+        let at_end = match bounded {
+            true => TrainingEnd::Bound,
+            false => TrainingEnd::JournalEnd,
+        };
+        let r = match reader.next_record() {
+            Ok(Some(r)) => r,
+            Ok(None) => {
+                out.end = Some(at_end);
+                break;
+            }
+            Err(e) => {
+                out.read_error = Some(e.to_string());
+                out.end = Some(at_end);
+                break;
+            }
+        };
+        out.records += 1;
+        let first = *out.first_ns.get_or_insert(r.timestamp_ns);
+        out.last_ns = Some(r.timestamp_ns);
+        match (r.kind, &*r.payload) {
+            (RecordKind::GapSpan, p) => {
+                let span = <[u8; 8]>::try_from(p).map_or(1, u64::from_le_bytes);
+                gap_spans = gap_spans.saturating_add(span);
+            }
+            (RecordKind::Runtime, _) => {}
+            (kind, p) => {
+                let launch = matches!(
+                    input_of_record(kind, p),
+                    Some(Input::Launch { .. } | Input::FourLaunch { .. })
+                );
+                if !(launch && bounded) {
+                    strategy.record(kind, p, r.timestamp_ns, None);
+                }
+            }
+        }
+        if bounded && strategy.followed() == 0 {
+            out.end = Some(TrainingEnd::Bound);
+            break;
+        }
+        let progress = TrainingProgress {
+            records: out.records,
+            elapsed_ns: r.timestamp_ns.saturating_sub(first),
+            launches: strategy.counters.launches,
+        };
+        match step(&progress) {
+            TrainingStep::Continue => {}
+            TrainingStep::Bounded => bounded = true,
+            TrainingStep::Stop => {
+                out.end = Some(TrainingEnd::Stopped);
+                break;
+            }
+        }
+    }
+    out.counters = strategy.counters;
+    out.open_at_end = strategy.engine.open_positions() as u64;
+    out.followed_at_end = strategy.followed() as u64;
+    out.lost = out.lost.max(gap_spans);
+    Ok(out)
+}
+
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
+
+    /// BSC-V8-02: a recorded run of `launches` Flap launches (blocks 100,
+    /// 200, …, each followed by six blocks: the PASS at its fifth) under
+    /// `journal_dir/<run>`, never switched on: what a training replays.
+    pub(crate) fn recorded_run(journal_dir: &std::path::Path, run: u64, launches: u64) -> Config {
+        use crate::runtime_journal::{EXIT_PAYLOAD, JournalSetup, RunIdentity};
+        let max = 16_384;
+        let mut j =
+            RuntimeJournal::open(journal_dir, run, 1, JournalSetup::whole(64, max)).unwrap();
+        j.set_identity(RunIdentity {
+            host: "test".into(),
+            build: "test".into(),
+            config_sha256: [0xC0; 32],
+            build_sha256: None,
+            build_dirty: None,
+            capture_pending: "VENUES",
+        });
+        for n in 1..=launches {
+            let at = n * 100;
+            let mut records = launch_records(at);
+            records.extend((at + 1..=at + 7).map(block));
+            for (k, p) in records {
+                // A launch's records 1 ms apart in the run's time.
+                assert!(j.record(k, at * 1_000_000, p));
+            }
+        }
+        let end = (launches * 100 + 8) * 1_000_000;
+        assert!(j.record(RecordKind::Runtime, end, EXIT_PAYLOAD.to_vec()));
+        j.finish().unwrap();
+        config()
+    }
+
+    /// BSC-V8-02: a training replays every market record of a run the
+    /// runtime never switched Strategy C on for, with the configuration it
+    /// is given; its bound takes no launch past it, a stop ends it at once.
+    #[test]
+    fn a_training_replays_a_run_strategy_c_never_ran_on() {
+        let base = std::env::temp_dir().join(format!("bsc-train-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let cfg = recorded_run(&base, 9, 3);
+        let max = 16_384;
+        let go = &mut |_: &TrainingProgress| TrainingStep::Continue;
+        let t = train(&base, "9", max, &cfg, &gas(), StrategyVenues::FLAP, go).unwrap();
+        assert_eq!(t.end, Some(TrainingEnd::JournalEnd));
+        assert_eq!((t.counters.launches, t.counters.passed), (3, 3));
+        assert!(t.records > 0 && t.read_error.is_none());
+        assert_eq!((t.first_ns, t.lost), (Some(100_000_000), 0));
+        // The recorded run's replay has nothing to compare: it never ran.
+        let r = replay(&base, "9", max, &cfg, &gas(), None, None).unwrap();
+        assert_eq!(r.starts, 0);
+        // A venue the profile does not train on takes none of its launches.
+        let four = StrategyVenues {
+            flap: false,
+            four: true,
+            openfour: false,
+        };
+        let t = train(&base, "9", max, &cfg, &gas(), four, go).unwrap();
+        assert_eq!(t.counters.launches, 0);
+        // Bounded after the first launch: no further one, its PASS decided.
+        let first = &mut |p: &TrainingProgress| match p.launches {
+            0 => TrainingStep::Continue,
+            _ => TrainingStep::Bounded,
+        };
+        let t = train(&base, "9", max, &cfg, &gas(), StrategyVenues::FLAP, first).unwrap();
+        assert_eq!((t.counters.launches, t.counters.passed), (1, 1));
+        assert_eq!(t.end, Some(TrainingEnd::Bound));
+        // Review H2: the PASS entered (its fill a block later), not cut off
+        // by the bound: as far as the unbounded run took its first launch.
+        let all = train(&base, "9", max, &cfg, &gas(), StrategyVenues::FLAP, go).unwrap();
+        assert!(t.counters.entered >= 1 && all.counters.entered >= t.counters.entered);
+        assert_eq!(t.followed_at_end, t.open_at_end);
+        // A stop at the 5th record: nothing after it.
+        let stop = &mut |p: &TrainingProgress| match p.records {
+            5 => TrainingStep::Stop,
+            _ => TrainingStep::Continue,
+        };
+        let t = train(&base, "9", max, &cfg, &gas(), StrategyVenues::FLAP, stop).unwrap();
+        assert_eq!((t.records, t.end), (5, Some(TrainingEnd::Stopped)));
+        assert!(train(&base, "8", max, &cfg, &gas(), StrategyVenues::FLAP, go).is_err());
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    /// Review H1: a training takes the chain's reorgs and resyncs as the
+    /// runtime does: a resync inside the observation window leaves the
+    /// launch's curve not exact (DATA_INCOMPLETE), never a PASS.
+    #[test]
+    fn a_training_takes_the_reorgs_and_resyncs() {
+        use crate::runtime_journal::{EXIT_PAYLOAD, JournalSetup, RunIdentity, resync_payload};
+        let base = std::env::temp_dir().join(format!("bsc-train-resync-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let max = 16_384;
+        for (run, resync) in [(1u64, false), (2, true)] {
+            let mut j = RuntimeJournal::open(&base, run, 1, JournalSetup::whole(64, max)).unwrap();
+            j.set_identity(RunIdentity {
+                host: "test".into(),
+                build: "test".into(),
+                config_sha256: [0xC0; 32],
+                build_sha256: None,
+                build_dirty: None,
+                capture_pending: "VENUES",
+            });
+            for (k, p) in launch_records(100) {
+                assert!(j.record(k, 1, p));
+            }
+            if resync {
+                assert!(j.record(RecordKind::Reorg, 2, resync_payload(101, 101)));
+            }
+            for (k, p) in (101..=107).map(block) {
+                assert!(j.record(k, 3, p));
+            }
+            assert!(j.record(RecordKind::Runtime, 4, EXIT_PAYLOAD.to_vec()));
+            j.finish().unwrap();
+        }
+        let go = &mut |_: &TrainingProgress| TrainingStep::Continue;
+        let plain = train(&base, "1", max, &config(), &gas(), StrategyVenues::FLAP, go).unwrap();
+        assert_eq!(
+            (plain.counters.passed, plain.counters.data_incomplete),
+            (1, 0)
+        );
+        let cut = train(&base, "2", max, &config(), &gas(), StrategyVenues::FLAP, go).unwrap();
+        assert_eq!((cut.counters.passed, cut.counters.data_incomplete), (0, 1));
+        assert_eq!(cut.counters.incomplete, 1);
+        std::fs::remove_dir_all(&base).unwrap();
+    }
 
     /// 01.11. (R1): the re-held position's record reads back as the input
     /// it was journaled for (a replay steps the same engine); any other

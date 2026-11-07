@@ -50,7 +50,7 @@ fn test_g06a_state_pin_cjs() {
 /// and launchctl (no job started, no host reached).
 #[test]
 fn test_bsc_control_py() {
-    run("test_bsc_control.py", 8, &[]);
+    run("test_bsc_control.py", 9, &[]);
 }
 
 /// The runner counts every outcome: a failure, an error (Node: cancelled),

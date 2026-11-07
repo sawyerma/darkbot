@@ -268,6 +268,13 @@ pub struct RuntimeConfig {
     pub max_launch_calldata: usize,
     /// Phase H: Strategy C (component `BSC_STRATEGY_C`).
     pub strategy: StrategyConfig,
+    /// BSC-V8: a query page's default and largest size
+    /// (`BSC_QUERY_PAGE_DEFAULT`, `BSC_QUERY_PAGE_MAX`; default <= max).
+    pub query_page_default: u32,
+    pub query_page_max: u32,
+    /// BSC-V8-02: how often a training job looks for its stop request
+    /// (`BSC_TRAINING_STOP_POLL_MS`).
+    pub training_stop_poll_ms: u64,
     /// SHA-256 of the configuration text this was parsed from.
     pub source_sha256: [u8; 32],
     /// Frontend package (06.11.): that text (the operator's Strategy C
@@ -1229,9 +1236,15 @@ impl RuntimeConfig {
                     )? as usize,
                 }
             },
+            query_page_default: take("BSC_QUERY_PAGE_DEFAULT", 1, u64::from(u32::MAX))? as u32,
+            query_page_max: take("BSC_QUERY_PAGE_MAX", 1, u64::from(u32::MAX))? as u32,
+            training_stop_poll_ms: take("BSC_TRAINING_STOP_POLL_MS", 1, 60_000)?,
             source_sha256: darkbot_bsc_record::sha256(text.as_bytes()),
             source_text: text.to_string(),
         };
+        if config.query_page_default > config.query_page_max {
+            return Err("BSC_QUERY_PAGE_DEFAULT is above BSC_QUERY_PAGE_MAX".into());
+        }
         // A6: the exit multiples, by the strategy's own check.
         config.strategy.engine.validate().map_err(|e| {
             format!(

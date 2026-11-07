@@ -142,6 +142,13 @@ const BSC_PROFILE_ACTIONS: [&str; 4] = [
     BSC_PROFILE_CLONE,
     BSC_PROFILE_DELETE,
 ];
+/// BSC-V8-02/03: a training run at its native owner (`darkbotctl bsc training`): a start names
+/// the profile as resource and its revision as `profile_version`, with the typed
+/// `TrainingRunStartCommand` (mode, venues, exactly one bound, the recorded run it replays); a
+/// stop names the run as resource. The owner decides (one run at a time, the profile's venues,
+/// the catalogue); its job runs away from the runtime's hot path. Never real funds.
+const BSC_TRAINING_START: &str = "bsc.training.run.start";
+const BSC_TRAINING_STOP: &str = "bsc.training.run.stop";
 const BSC_STRATEGY_KEYS: [&str; 10] = [
     "BSC_STRATEGY_C_OBSERVATION_MS",
     "BSC_STRATEGY_C_FILTERS",
@@ -466,6 +473,7 @@ fn allowed(project: i32, action: &str) -> bool {
                 || action == BSC_STRATEGY_SET
                 || action == BSC_STRATEGY_SET_ALL
                 || BSC_PROFILE_ACTIONS.contains(&action)
+                || [BSC_TRAINING_START, BSC_TRAINING_STOP].contains(&action)
                 || BSC_OWNER_ACTIONS.contains(&action)
                 || BSC_LIVE_DECISIONS.contains(&action)))
 }
@@ -669,6 +677,86 @@ fn settable_pairs(
         set.push(("BSC_STRATEGY_C_FIRST_BUYER_WINDOW", x.to_string()));
     }
     (!complete || set.len() == BSC_STRATEGY_KEYS.len()).then_some(set)
+}
+
+/// BSC-V8-02: a training request as the arguments of `darkbotctl bsc training` without the request
+/// id: a start's resource is the profile (its params name the same one) at the revision as
+/// `profile_version`, a stop's the run.
+fn training_request(req: &CommandRequest) -> Option<Vec<String>> {
+    use crate::proto::bsc::v1::{
+        TrainingRunMode, TrainingRunStartCommand, TrainingRunStopCommand, TrainingRunStopKind,
+    };
+    let id_ok = |s: &str| {
+        !s.is_empty()
+            && !s.starts_with('-')
+            && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+    };
+    let words = |w: &[&str]| w.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+    match req.action.as_str() {
+        BSC_TRAINING_START => {
+            let expected_version::Version::ProfileVersion(revision) =
+                req.expected.as_ref()?.version?
+            else {
+                return None;
+            };
+            let c = TrainingRunStartCommand::decode(req.params.as_ref()).ok()?;
+            (id_ok(&c.profile_id) && c.profile_id == req.resource_id && id_ok(&c.replay_source))
+                .then_some(())?;
+            let mode = match TrainingRunMode::try_from(c.mode).ok()? {
+                TrainingRunMode::Replay => "REPLAY",
+                TrainingRunMode::Shadow => "SHADOW",
+                TrainingRunMode::Paper => "PAPER",
+                TrainingRunMode::Unspecified => return None,
+            };
+            let venues = (!c.venues.is_empty()
+                && c.venues.iter().all(|v| BSC_VENUE_IDS.contains(&v.as_str())))
+            .then(|| c.venues.join(","))?;
+            let plan = c.plan?;
+            let (kind, bound) = match (
+                TrainingRunStopKind::try_from(plan.stop_kind).ok()?,
+                plan.duration_ms,
+                plan.max_launches,
+            ) {
+                (TrainingRunStopKind::Duration, Some(ms), None) if ms > 0 => {
+                    ("DURATION", ms.to_string())
+                }
+                (TrainingRunStopKind::LaunchCount, None, Some(n)) if n > 0 => {
+                    ("LAUNCH_COUNT", n.to_string())
+                }
+                (TrainingRunStopKind::UntilStopped, None, None) => ("UNTIL_STOPPED", "-".into()),
+                _ => return None,
+            };
+            let mut args = words(&["bsc", "training", "start"]);
+            args.extend([
+                c.profile_id.clone(),
+                revision.to_string(),
+                mode.into(),
+                venues,
+                kind.into(),
+                bound,
+                c.replay_source.clone(),
+            ]);
+            Some(args)
+        }
+        BSC_TRAINING_STOP => {
+            // A stop changes no version: no compare-and-swap.
+            req.expected
+                .as_ref()
+                .and_then(|e| e.version)
+                .is_none()
+                .then_some(())?;
+            let c = TrainingRunStopCommand::decode(req.params.as_ref()).ok()?;
+            (id_ok(&req.resource_id) && !c.reason.chars().any(char::is_control)).then_some(())?;
+            let reason = match c.reason.trim() {
+                "" => "-".to_string(),
+                r => r.to_string(),
+            };
+            let mut args = words(&["bsc", "training", "stop"]);
+            args.extend([req.resource_id.clone(), reason]);
+            Some(args)
+        }
+        _ => None,
+    }
 }
 
 /// BSC-V8-01: a profile request as the arguments of `darkbotctl bsc profile` without the request
@@ -1975,6 +2063,18 @@ impl Control {
                         CommandStatus::Rejected,
                         CommandRejectReason::InvalidParams,
                         "Strategy C setting takes exactly <BSC_STRATEGY_C_OBSERVATION_MS|FILTERS|INPUT_WEI|TARGET_NET_MULTIPLE|STOP_NET_MULTIPLE|HOLD_MS|MAX_OPEN|CREATOR_SOLD_BEFORE_FILL|CREATOR_SELL_EXIT|FIRST_BUYER_WINDOW>:<value, printable ASCII without spaces> and the profile_version generation; the runtime configuration decides the value",
+                    );
+                }
+            }
+        } else if [BSC_TRAINING_START, BSC_TRAINING_STOP].contains(&req.action.as_str()) {
+            match training_request(req) {
+                Some(args) => Some(args),
+                None => {
+                    return reply(
+                        id,
+                        CommandStatus::Rejected,
+                        CommandRejectReason::InvalidParams,
+                        "Training run: a start takes the profile as resource and its revision as profile_version, a TrainingRunStartCommand naming the same profile (a mode, venues from BSC_VENUE_FLAP|FOUR_CLASSIC|OPENFOUR, exactly one bound of its stop kind, the recorded run); a stop the run as resource, no version and a reason without control characters; the native owner decides",
                     );
                 }
             }
@@ -5438,6 +5538,186 @@ mod tests {
         assert_eq!(strategy_set_all_request(&junk), None);
         assert!(allowed(ProjectId::Bsc as i32, BSC_STRATEGY_SET_ALL));
         assert!(!allowed(ProjectId::Project0 as i32, BSC_STRATEGY_SET_ALL));
+    }
+    /// BSC-V8-02: a training start reaches `darkbotctl bsc training start` with the profile, its
+    /// revision, the mode, venues, exactly one bound of its kind and the recorded run; a stop with
+    /// the run and its reason; nothing else passes.
+    #[test]
+    fn a_training_request_maps_to_one_owner_call() {
+        use crate::proto::bsc::v1::{
+            TrainingRunMode, TrainingRunPlan, TrainingRunStartCommand, TrainingRunStopCommand,
+            TrainingRunStopKind,
+        };
+        let request = |action: &str,
+                       resource: &str,
+                       v: Option<expected_version::Version>,
+                       params: Vec<u8>| CommandRequest {
+            project: ProjectId::Bsc as i32,
+            request_id: "x".into(),
+            action: action.into(),
+            resource_id: resource.into(),
+            expected: v.map(|v| crate::proto::ExpectedVersion { version: Some(v) }),
+            params: params.into(),
+            issued_at_unix_ns: crate::overview::unix_ns_now(),
+        };
+        let start = |mode: TrainingRunMode, kind: TrainingRunStopKind, d, n| {
+            TrainingRunStartCommand {
+                profile_id: "p000001".into(),
+                mode: mode as i32,
+                venues: vec!["BSC_VENUE_FLAP".into(), "BSC_VENUE_OPENFOUR".into()],
+                plan: Some(TrainingRunPlan {
+                    stop_kind: kind as i32,
+                    duration_ms: d,
+                    max_launches: n,
+                }),
+                replay_source: "1794026420785".into(),
+            }
+            .encode_to_vec()
+        };
+        let revision = |n| Some(expected_version::Version::ProfileVersion(n));
+        let strings = |w: &[&str]| w.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        use TrainingRunMode::{Replay, Shadow, Unspecified};
+        use TrainingRunStopKind::{Duration, LaunchCount, UntilStopped};
+        for (kind, d, n, words) in [
+            (Duration, Some(3_600_000), None, ["DURATION", "3600000"]),
+            (LaunchCount, None, Some(100), ["LAUNCH_COUNT", "100"]),
+            (UntilStopped, None, None, ["UNTIL_STOPPED", "-"]),
+        ] {
+            let mut want = strings(&[
+                "bsc",
+                "training",
+                "start",
+                "p000001",
+                "2",
+                "REPLAY",
+                "BSC_VENUE_FLAP,BSC_VENUE_OPENFOUR",
+            ]);
+            want.extend(strings(&words));
+            want.push("1794026420785".into());
+            assert_eq!(
+                training_request(&request(
+                    BSC_TRAINING_START,
+                    "p000001",
+                    revision(2),
+                    start(Replay, kind, d, n)
+                )),
+                Some(want)
+            );
+        }
+        // The mode is the owner's to refuse (SHADOW: its reason in the receipt).
+        assert!(training_request(&request(
+            BSC_TRAINING_START,
+            "p000001",
+            revision(2),
+            start(Shadow, UntilStopped, None, None)
+        ))
+        .is_some());
+        let stop = |reason: &str| {
+            TrainingRunStopCommand {
+                reason: reason.into(),
+            }
+            .encode_to_vec()
+        };
+        assert_eq!(
+            training_request(&request(
+                BSC_TRAINING_STOP,
+                "t000001",
+                None,
+                stop(" enough ")
+            )),
+            Some(strings(&["bsc", "training", "stop", "t000001", "enough"]))
+        );
+        assert_eq!(
+            training_request(&request(BSC_TRAINING_STOP, "t000001", None, stop(""))),
+            Some(strings(&["bsc", "training", "stop", "t000001", "-"]))
+        );
+        for (r, why) in [
+            (
+                request(
+                    BSC_TRAINING_START,
+                    "p000002",
+                    revision(2),
+                    start(Replay, UntilStopped, None, None),
+                ),
+                "two profiles",
+            ),
+            (
+                request(
+                    BSC_TRAINING_START,
+                    "p000001",
+                    None,
+                    start(Replay, UntilStopped, None, None),
+                ),
+                "no CAS",
+            ),
+            (
+                request(
+                    BSC_TRAINING_START,
+                    "p000001",
+                    Some(expected_version::Version::ConfigVersion(2)),
+                    start(Replay, UntilStopped, None, None),
+                ),
+                "the wrong CAS",
+            ),
+            (
+                request(
+                    BSC_TRAINING_START,
+                    "p000001",
+                    revision(2),
+                    start(Unspecified, UntilStopped, None, None),
+                ),
+                "no mode",
+            ),
+            (
+                request(
+                    BSC_TRAINING_START,
+                    "p000001",
+                    revision(2),
+                    start(Replay, Duration, None, None),
+                ),
+                "a bound missing",
+            ),
+            (
+                request(
+                    BSC_TRAINING_START,
+                    "p000001",
+                    revision(2),
+                    start(Replay, UntilStopped, Some(1), None),
+                ),
+                "a bound too many",
+            ),
+            (
+                request(
+                    BSC_TRAINING_START,
+                    "p000001",
+                    revision(2),
+                    start(Replay, LaunchCount, None, Some(0)),
+                ),
+                "a zero bound",
+            ),
+            (
+                request(BSC_TRAINING_STOP, "t000001", revision(1), stop("")),
+                "a stop with a CAS",
+            ),
+            (
+                request(BSC_TRAINING_STOP, "-t", None, stop("")),
+                "a flag as run",
+            ),
+            (
+                request(BSC_TRAINING_STOP, "t000001", None, stop("a\nb")),
+                "a control character",
+            ),
+            (
+                request(BSC_TRAINING_STOP, "t000001", None, vec![0xff, 0xff]),
+                "garbage",
+            ),
+        ] {
+            assert_eq!(training_request(&r), None, "{why}");
+        }
+        for action in [BSC_TRAINING_START, BSC_TRAINING_STOP] {
+            assert!(allowed(ProjectId::Bsc as i32, action));
+            assert!(!allowed(ProjectId::Project0 as i32, action));
+        }
     }
     /// BSC-V8-01: a profile request reaches `darkbotctl bsc profile` with its resource, its CAS
     /// kind (catalog version: create, clone; revision: update, delete) and its typed params; a

@@ -15,7 +15,7 @@ app_conf() { printf '%s' "${2:-}"; }
 xml_escape() { cat; }
 plist_env() { :; }
 assert_not_down() { :; }
-launchctl() { printf 'launchctl %s\n' "$*" >> "$W/launchctl.log"; [ "$1" != list ]; }
+launchctl() { printf 'launchctl %s\n' "$*" >> "$W/launchctl.log"; if [ "$1" = list ] && [ -f "$W/job.list" ]; then cat "$W/job.list"; return 0; fi; [ "$1" != list ]; }
 . "$CONTROL"
 "$@"
 '''
@@ -176,6 +176,64 @@ class ControlTests(unittest.TestCase):
         code, out = self.sh('cmd_bsc', 'profile', 'show')
         self.assertEqual(code, 0, out)
         self.assertEqual(self.calls()[-1], ['profile', 'show', '--state', f'{self.w}/run/bsc-sources'])
+
+    def test_a_training_run_starts_its_job_and_stops_by_the_owner_then_the_signal(self):
+        # BSC-V8-02: the owner's start (it ends a run left behind by another request when no job
+        # runs), then the job's launchd program for a PENDING run; a stop is the owner's request,
+        # then the job's SIGTERM, or, without a job, the run left RUNNING ends.
+        places = ['--state', f'{self.w}/run/bsc-sources', '--rundir', f'{self.w}/run',
+                  '--config', f'{self.snapshot}/bsc/config/ingress.public.env']
+        for args, why in [(['p1', 'x', 'REPLAY', 'BSC_VENUE_FLAP', 'UNTIL_STOPPED', '-', '77', 'r-1'], 'unsigned integer'),
+                          (['p1', '1', 'LIVE', 'BSC_VENUE_FLAP', 'UNTIL_STOPPED', '-', '77', 'r-1'], 'unknown training mode'),
+                          (['p1', '1', 'REPLAY', 'bsc_venue_flap', 'UNTIL_STOPPED', '-', '77', 'r-1'], 'BSC_VENUE_* names'),
+                          (['p1', '1', 'REPLAY', 'BSC_VENUE_FLAP', 'FOREVER', '-', '77', 'r-1'], 'unknown training bound'),
+                          (['p1', '1', 'REPLAY', 'BSC_VENUE_FLAP', 'DURATION', 'x', '77', 'r-1'], 'unsigned integer or -'),
+                          (['-p', '1', 'REPLAY', 'BSC_VENUE_FLAP', 'UNTIL_STOPPED', '-', '77', 'r-1'], 'profile id'),
+                          (['p1', '1', 'REPLAY', 'BSC_VENUE_FLAP', 'UNTIL_STOPPED', '-', '77'], 'bsc training start')]:
+            code, out = self.sh('cmd_bsc', 'training', 'start', *args)
+            self.assertEqual(code, 1, out); self.assertIn(why, out)
+        self.assertEqual(self.calls(), [])
+        # The stand-in runtime answers no run line: no job.
+        code, out = self.sh('cmd_bsc', 'training', 'start', 'p1', '2', 'REPLAY', 'BSC_VENUE_FLAP', 'DURATION', '60000', '77', 'r-1')
+        self.assertEqual(code, 1, out); self.assertIn('kein Lauf im Beleg', out)
+        self.assertEqual(self.calls(), [['training', 'start', '--profile', 'p1', '--expect', '2', '--mode', 'REPLAY',
+                                         '--venues', 'BSC_VENUE_FLAP', '--stop-kind', 'DURATION', '--bound', '60000',
+                                         '--replay-source', '77', '--job', 'NONE', '--request-id', 'r-1', *places]])
+        self.assertNotIn('bootstrap', self.launchd())
+        answer = lambda status: RUNTIME.format(w=self.w).replace(
+            'echo "config=OK live=OFF"',
+            f'echo "outcome=APPLIED action=START run_id=t000004 request_id=r-2"; echo "run=t000004 status={status}"')
+        # A run that is no longer PENDING (the same request again): no job.
+        self.rt.write_text(answer('COMPLETED'))
+        code, out = self.sh('cmd_bsc', 'training', 'start', 'p1', '2', 'REPLAY', 'BSC_VENUE_FLAP', 'UNTIL_STOPPED', '-', '77', 'r-2')
+        self.assertEqual(code, 0, out); self.assertIn('run=t000004 status=COMPLETED', out)
+        self.assertNotIn('bootstrap', self.launchd())
+        self.assertNotIn('--bound', self.calls()[-1])
+        # A PENDING run gets its job, with its run.
+        self.rt.write_text(answer('PENDING'))
+        code, out = self.sh('cmd_bsc', 'training', 'start', 'p1', '2', 'REPLAY', 'BSC_VENUE_FLAP', 'UNTIL_STOPPED', '-', '77', 'r-2')
+        self.assertEqual(code, 0, out); self.assertIn('BSC training gestartet run=t000004', out)
+        self.assertIn('launchctl bootstrap gui/0', self.launchd())
+        plist = (self.w / 'run' / 'com.darkbot.unit.bsc.training.plist').read_text()
+        self.assertIn('<string>training</string><string>execute</string><string>--run</string><string>t000004</string>', plist)
+        # Its job runs (launchd lists it with its run): the controller says RUNNING, launches nothing.
+        (self.w / 'job.list').write_text('{\n\t"PID" = 4242;\n\t"ProgramArguments" = (\n\t\t"bsc_runtime";\n\t\t"--run";\n\t\t"t000004";\n\t);\n};\n')
+        boots = self.launchd().count('bootstrap')
+        code, out = self.sh('cmd_bsc', 'training', 'start', 'p1', '2', 'REPLAY', 'BSC_VENUE_FLAP', 'UNTIL_STOPPED', '-', '77', 'r-2')
+        self.assertEqual(code, 0, out); self.assertIn('run=t000004 läuft bereits', out)
+        self.assertEqual(self.launchd().count('bootstrap'), boots)
+        self.assertIn('--job', self.calls()[-1]); self.assertEqual(self.calls()[-1][self.calls()[-1].index('--job') + 1], 'RUNNING')
+        # A stop with its job running: the owner's request, then the job's SIGTERM.
+        code, out = self.sh('cmd_bsc', 'training', 'stop', 't000004', 'enough for now', 'r-3')
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.calls()[-1], ['training', 'stop', '--run', 't000004', '--reason', 'enough for now', '--request-id', 'r-3', *places])
+        self.assertIn('launchctl kill SIGTERM gui/0/com.darkbot.unit.bsc.training', self.launchd())
+        # Without a job: the run left RUNNING ends.
+        (self.w / 'job.list').unlink()
+        code, out = self.sh('cmd_bsc', 'training', 'stop', 't000004', '-', 'r-4')
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.calls()[-2][4:6], ['--reason', ''])
+        self.assertEqual(self.calls()[-1], ['training', 'end-orphans', '--reason', 'stopped while its job was gone', *places])
 
 if __name__ == '__main__':
     unittest.main()

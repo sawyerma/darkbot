@@ -1391,6 +1391,216 @@ pub mod strategy_profile_receipt {
     };
 }
 
+/// BSC-V8-02/03: one state of a training run (`<sources>/training/runs/<run_id>/<seq>.dbrec`,
+/// create-new, every state kept): the profile revision it runs with its values, its mode,
+/// venues, bound and replay source, its status and, once it ended, its result.
+pub mod training_run {
+    use super::*;
+
+    /// The result of a run (BSC-V8-03), Strategy C's own counters.
+    pub mod result {
+        use super::*;
+
+        pub const RECORDS: u16 = 1;
+        pub const LAUNCHES: u16 = 2;
+        pub const PASSED: u16 = 3;
+        pub const REJECTED: u16 = 4;
+        pub const DATA_INCOMPLETE: u16 = 5;
+        pub const NOT_TRACKED: u16 = 6;
+        pub const SLOT_LIMIT: u16 = 7;
+        pub const CREATOR_SOLD: u16 = 8;
+        pub const ENTERED: u16 = 9;
+        pub const CANCELLED: u16 = 10;
+        pub const CANCELLED_CREATOR_SOLD: u16 = 11;
+        pub const CANCELLED_NOT_TRACKED: u16 = 12;
+        pub const CANCELLED_QUOTE: u16 = 13;
+        pub const CANCELLED_COST: u16 = 14;
+        pub const EXITS_CREATOR_SELL: u16 = 15;
+        pub const EXITS_TARGET: u16 = 16;
+        pub const EXITS_STOP: u16 = 17;
+        pub const EXITS_TIMEOUT: u16 = 18;
+        pub const GAINS: u16 = 19;
+        pub const LOSSES: u16 = 20;
+        pub const GAIN_WEI: u16 = 21;
+        pub const LOSS_WEI: u16 = 22;
+        pub const UNRESOLVED: u16 = 23;
+        pub const SUPERSEDED: u16 = 24;
+        pub const PAPER_UNPRICED: u16 = 25;
+        pub const OPEN_AT_END: u16 = 26;
+        /// Records the capture lost (its manifest, its gap spans).
+        pub const LOST_RECORDS: u16 = 27;
+        /// The journal time covered, ns of the run's monotonic clock.
+        pub const FIRST_NS: u16 = 28;
+        pub const LAST_NS: u16 = 29;
+        /// A record that did not read (the result covers what came before).
+        pub const READ_ERROR: u16 = 30;
+        /// `JOURNAL_END`, `BOUND` or `STOPPED`.
+        pub const END: u16 = 31;
+        /// The inputs taken (trades, terms, migrations, records that made a
+        /// curve incomplete) and the decisions no PAPER executor took.
+        pub const TRADES: u16 = 32;
+        pub const TERMS: u16 = 33;
+        pub const MIGRATIONS: u16 = 34;
+        pub const INCOMPLETE: u16 = 35;
+        pub const PAPER_UNARMED: u16 = 36;
+        /// Tokens still followed at its end (undecided launches, entries
+        /// waiting for their fill, open positions).
+        pub const FOLLOWED_AT_END: u16 = 37;
+        /// The recorded run had a manifest.
+        pub const MANIFEST: u16 = 38;
+
+        pub const SCHEMA: Schema = Schema {
+            name: "darkbot.bsc.training-result",
+            record_type: 0,
+            schema_version: 1,
+            fields: &[
+                Field::req(RECORDS, "records", U64),
+                Field::req(LAUNCHES, "launches", U64),
+                Field::req(PASSED, "passed", U64),
+                Field::req(REJECTED, "rejected", U64),
+                Field::req(DATA_INCOMPLETE, "data_incomplete", U64),
+                Field::req(NOT_TRACKED, "not_tracked", U64),
+                Field::req(SLOT_LIMIT, "slot_limit", U64),
+                Field::req(CREATOR_SOLD, "creator_sold", U64),
+                Field::req(ENTERED, "entered", U64),
+                Field::req(CANCELLED, "cancelled", U64),
+                Field::req(CANCELLED_CREATOR_SOLD, "cancelled_creator_sold", U64),
+                Field::req(CANCELLED_NOT_TRACKED, "cancelled_not_tracked", U64),
+                Field::req(CANCELLED_QUOTE, "cancelled_quote", U64),
+                Field::req(CANCELLED_COST, "cancelled_cost", U64),
+                Field::req(EXITS_CREATOR_SELL, "exits_creator_sell", U64),
+                Field::req(EXITS_TARGET, "exits_target", U64),
+                Field::req(EXITS_STOP, "exits_stop", U64),
+                Field::req(EXITS_TIMEOUT, "exits_timeout", U64),
+                Field::req(GAINS, "gains", U64),
+                Field::req(LOSSES, "losses", U64),
+                Field::req(GAIN_WEI, "gain_wei", U256),
+                Field::req(LOSS_WEI, "loss_wei", U256),
+                Field::req(UNRESOLVED, "unresolved", U64),
+                Field::req(SUPERSEDED, "superseded", U64),
+                Field::req(PAPER_UNPRICED, "paper_unpriced", U64),
+                Field::req(OPEN_AT_END, "open_at_end", U64),
+                Field::req(LOST_RECORDS, "lost_records", U64),
+                Field::opt(FIRST_NS, "first_ns", U64),
+                Field::opt(LAST_NS, "last_ns", U64),
+                Field::opt(READ_ERROR, "read_error", Text),
+                Field::req(END, "end", Text),
+                Field::req(TRADES, "trades", U64),
+                Field::req(TERMS, "terms", U64),
+                Field::req(MIGRATIONS, "migrations", U64),
+                Field::req(INCOMPLETE, "incomplete", U64),
+                Field::req(PAPER_UNARMED, "paper_unarmed", U64),
+                Field::req(FOLLOWED_AT_END, "followed_at_end", U64),
+                Field::req(MANIFEST, "manifest", Bool),
+            ],
+        };
+    }
+
+    pub const RUN_ID: u16 = 1;
+    /// This state's number (1 = the start request's PENDING).
+    pub const SEQ: u16 = 2;
+    pub const PROVENANCE_TOOL: u16 = crate::schema::PROVENANCE_TOOL;
+    pub const PROVENANCE_OBSERVED_UNIX_MS: u16 = crate::schema::PROVENANCE_OBSERVED_UNIX_MS;
+    pub const PROFILE_ID: u16 = 5;
+    pub const PROFILE_REVISION: u16 = 6;
+    /// The profile revision's configuration hash.
+    pub const CONFIG_SHA256: u16 = 7;
+    /// `REPLAY` (SHADOW and PAPER need the live inputs: not yet).
+    pub const MODE: u16 = 8;
+    pub const VENUES: u16 = 9;
+    /// `DURATION`, `LAUNCH_COUNT` or `UNTIL_STOPPED`, and its bound.
+    pub const STOP_KIND: u16 = 10;
+    pub const DURATION_MS: u16 = 11;
+    pub const MAX_LAUNCHES: u16 = 12;
+    /// The recorded run it replays (the catalogue's source id).
+    pub const REPLAY_SOURCE: u16 = 13;
+    /// `PENDING`, `RUNNING`, `COMPLETED`, `STOPPED`, `FAILED` or `INTERRUPTED`.
+    pub const STATUS: u16 = 14;
+    pub const STOP_REASON: u16 = 15;
+    pub const STARTED_UNIX_MS: u16 = 16;
+    pub const ENDED_UNIX_MS: u16 = 17;
+    /// The request that started it.
+    pub const REQUEST_ID: u16 = 18;
+    /// The profile revision's values (every settable key) it runs with.
+    pub const VALUES: u16 = 19;
+    pub const RESULT: u16 = 20;
+    /// The configuration file its job ran on.
+    pub const CONFIG_FILE_SHA256: u16 = 21;
+
+    pub const SCHEMA: Schema = Schema {
+        name: "darkbot.bsc.training-run.v1",
+        record_type: 81,
+        schema_version: 1,
+        fields: &[
+            Field::req(RUN_ID, "run_id", Text).max(32),
+            Field::req(SEQ, "seq", U64),
+            Field::req(PROVENANCE_TOOL, "_provenance.tool", Text),
+            Field::req(
+                PROVENANCE_OBSERVED_UNIX_MS,
+                "_provenance.observed_unix_ms",
+                U64,
+            ),
+            Field::req(PROFILE_ID, "profile_id", Text).max(32),
+            Field::req(PROFILE_REVISION, "profile_revision", U64),
+            Field::req(CONFIG_SHA256, "config_sha256", B256),
+            Field::req(MODE, "mode", Text),
+            Field::rep(VENUES, "venues", Text),
+            Field::req(STOP_KIND, "stop_kind", Text),
+            Field::opt(DURATION_MS, "duration_ms", U64),
+            Field::opt(MAX_LAUNCHES, "max_launches", U64),
+            Field::req(REPLAY_SOURCE, "replay_source", Text).max(64),
+            Field::req(STATUS, "status", Text),
+            Field::opt(STOP_REASON, "stop_reason", Text),
+            Field::opt(STARTED_UNIX_MS, "started_unix_ms", U64),
+            Field::opt(ENDED_UNIX_MS, "ended_unix_ms", U64),
+            Field::req(REQUEST_ID, "request_id", Text),
+            Field::nested(
+                VALUES,
+                "values",
+                Presence::Repeated,
+                &strategy_settings::setting::SCHEMA,
+            ),
+            Field::nested(RESULT, "result", Presence::Optional, &result::SCHEMA),
+            Field::opt(CONFIG_FILE_SHA256, "config_file_sha256", B256),
+        ],
+    };
+}
+
+/// BSC-V8-02: the outcome of one training request (a start or a stop).
+pub mod training_receipt {
+    use super::*;
+
+    pub const REQUEST_ID: u16 = 1;
+    /// `START` or `STOP`.
+    pub const ACTION: u16 = 2;
+    pub const REQUEST_SHA256: u16 = 3;
+    /// The profile revision a start expected (0 for a stop).
+    pub const EXPECTED: u16 = 4;
+    /// `APPLIED`, `REJECTED_STALE`, `REJECTED_INVALID`, `REJECTED_NOT_FOUND`,
+    /// `REJECTED_ACTIVE` (another run is active) or `REJECTED_ENDED`;
+    /// `PENDING` for the request's intent (kept before any state).
+    pub const OUTCOME: u16 = 5;
+    pub const RUN_ID: u16 = 6;
+    pub const REASON: u16 = 7;
+    pub const OBSERVED_UNIX_MS: u16 = 8;
+
+    pub const SCHEMA: Schema = Schema {
+        name: "darkbot.bsc.training-receipt.v1",
+        record_type: 82,
+        schema_version: 1,
+        fields: &[
+            Field::req(REQUEST_ID, "request_id", Text),
+            Field::req(ACTION, "action", Text),
+            Field::req(REQUEST_SHA256, "request_sha256", B256),
+            Field::req(EXPECTED, "expected", U64),
+            Field::req(OUTCOME, "outcome", Text),
+            Field::opt(RUN_ID, "run_id", Text),
+            Field::opt(REASON, "reason", Text),
+            Field::req(OBSERVED_UNIX_MS, "observed_unix_ms", U64),
+        ],
+    };
+}
+
 /// The running runtime's state, rewritten while it runs: per source its
 /// effective mode, derived health and counters (plan §5a.2/§5a.3).
 pub mod runtime_status {
@@ -2975,6 +3185,8 @@ pub const ALL: &[&Schema] = &[
     &strategy_setting_receipt::V1,
     &strategy_profiles::SCHEMA,
     &strategy_profile_receipt::SCHEMA,
+    &training_run::SCHEMA,
+    &training_receipt::SCHEMA,
     &buy_attempt_slot::SCHEMA,
     &buy_attempt_total_slot::SCHEMA,
     &live_spend::SCHEMA,

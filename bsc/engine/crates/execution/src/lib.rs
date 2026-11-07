@@ -129,6 +129,10 @@ pub mod strategy_settings;
 /// configurations for training runs and the LIVE selection).
 #[cfg(feature = "runtime")]
 pub mod strategy_profiles;
+/// BSC-V8-02/03: the native owner of the Strategy C training runs (REPLAY
+/// on a recorded run, its own job) and their results.
+#[cfg(feature = "runtime")]
+pub mod training_runs;
 /// The native canonical chain follower: G0.4 launches from canonical receipts.
 #[cfg(feature = "runtime")]
 pub mod chain_follower;
