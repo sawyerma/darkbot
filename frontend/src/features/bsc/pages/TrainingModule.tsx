@@ -1,5 +1,5 @@
 import "@/shared/ui/graphite/control-dialog.css";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import * as AlertDialog from "@radix-ui/react-alert-dialog";
 import { profileCommand, useSourceControl } from "@/core/realtime/bscControl";
 import { v8Params } from "../api/bscV8Adapter";
@@ -9,14 +9,18 @@ import { featureHints, fieldRanges, filterOrder, formOfValues, sameForm, type St
 import { settableInit, type StrategySettingsView } from "../model/strategySettings";
 import { venueName } from "../model/health";
 import { StrategyEditor } from "./StrategyEditor";
+import { RUN, RunHero, RunList, useRunControls, useRuns } from "./TrainingRuns";
+import { appliedRun } from "../model/training";
 import { Badge, Drawer, TopHeading } from "./V8";
 
 // V8 Training modules (FE-V8-04, BSC-V8-01): the native profile owner's modules. A module is
 // edited as a whole revision (name, market, every value) and saved at its revision; a new one and
-// a duplicate at the catalog version. Runs and results need the native run owner (BSC-V8-02/03).
+// a duplicate at the catalog version. Its test runs (REPLAY) and their results are the native run
+// owner's (FE-V8-07/08, BSC-V8-02/03, ./TrainingRuns).
 
 export const PROFILE = "bsc-training-profile";
-export const NO_RUN_OWNER = "Training runs need their native owner (BSC-V8-02): no test starts from here.";
+/** A new module is tested once saved (a run replays a saved revision). */
+export const RUN_AFTER_SAVE = "A test replays a saved revision: save the module, then start its test in the module.";
 
 const FILTERS_KEY = "BSC_STRATEGY_C_FILTERS";
 const sameDraft = (a: ModuleDraft, b: ModuleDraft) => a.name === b.name && a.venues.join(",") === b.venues.join(",") && sameForm(a.form, b.form);
@@ -33,17 +37,37 @@ function ModuleEditor({ draft, onChange, offered, settings, disabled, idPrefix }
     market={{ value: draft.venues.join(","), options, onChange: key => onChange({ ...draft, venues: options.find(o => o.key === key)?.venues ?? [] }) }} />;
 }
 
-/** One module (V8 trainingWorkspace): its result, its settings at its revision, Duplicate and Delete. */
-export function ModuleWorkspace({ profile, all, catalogVersion, offered, settings, seriesText, onBack, onDelete }: {
+/** One module (V8 trainingWorkspace): its test result, its settings at its revision with the test
+ *  run, its runs, Duplicate and Delete. `step` changes with every decided module or run request. */
+export function ModuleWorkspace({ profile, all, catalogVersion, offered, settings, seriesText, step, onBack, onDelete }: {
   profile: ProfileView; all: readonly ProfileView[]; catalogVersion: bigint; offered: readonly string[]; settings: StrategySettingsView;
-  seriesText: string; onBack: () => void; onDelete: () => void;
+  seriesText: string; step: string; onBack: () => void; onDelete: () => void;
 }) {
-  const { busy } = useSourceControl();
+  const { busy, receipt } = useSourceControl();
   const parsed = formOfValues(profile.values);
   const base: ModuleDraft = { name: profile.name, venues: profile.venues, form: parsed.form };
   const [draft, setDraft] = useState<ModuleDraft | null>(null);
   const d = draft ?? base;
-  const locked = profile.inUse;
+  // The runs: re-read per decided request and per Refresh; older pages by their cursors.
+  const [refresh, setRefresh] = useState(0);
+  const [cursors, setCursors] = useState<string[]>([""]);
+  const runStep = `${step}:${refresh}`;
+  const runs = useRuns(profile.id, runStep, cursors[cursors.length - 1] ?? "");
+  const newest = runs.newest.ok ? runs.newest.runs[0] : undefined;
+  const [picked, setPicked] = useState<string | null>(null);
+  // A start the owner applied while this module shows: its run in the hero, the newest page listed
+  // (a receipt from before the module opened picks nothing).
+  const shownReceipt = useRef(receipt?.id);
+  useEffect(() => {
+    if (!receipt || receipt.id === shownReceipt.current || receipt.origin !== RUN) return;
+    const started = appliedRun(receipt.detail);
+    if (started) { setPicked(started); setCursors([""]); }
+  }, [receipt]);
+  const shown = (picked && [...(runs.page.ok ? runs.page.runs : []), ...(runs.newest.ok ? runs.newest.runs : [])].find(r => r.id === picked)) || newest;
+  // In use: by the profile owner's word, or a run of this module its job still runs (the owner
+  // refuses an edit then; the lock only spares the request).
+  const running = newest?.active ? newest : undefined;
+  const locked = profile.inUse || !!running;
   const others = all.filter(p => p.id !== profile.id);
   const params = moduleParams(d, others, filterOrder(profile.values[FILTERS_KEY] ?? ""), settings.basis?.specs, settings.basis?.features);
   const changed = !sameDraft(d, base);
@@ -56,32 +80,33 @@ export function ModuleWorkspace({ profile, all, catalogVersion, offered, setting
   const duplicate = () => void profileCommand(PROFILE, "bsc.training.profile.clone", profile.id,
     v8Params("training_profile_clone_command", { sourceProfileId: profile.id, sourceRevision: profile.revision, name: copyName(profile.name, all) }),
     { case: "configVersion", value: catalogVersion }, `clone ${profile.id} revision ${profile.revision.toString()}`);
-  const status = profile.status === "ARCHIVED" ? "Archived" : locked ? `In use: ${profile.inUseReason || "a run or LIVE"}` : profile.runIds.length ? "Previously tested" : "Not yet tested";
+  const changedNote = changed ? "Save the module before its test: a test replays a saved revision." : undefined;
+  const blocked = profile.status === "ARCHIVED" ? "Archived: duplicate it to test it." : profile.inUse && !running ? `In use: ${profile.inUseReason || "a run or LIVE"}.` : changedNote;
+  const run = useRunControls(profile, newest, runStep, blocked);
   return <>
     <button type="button" className="workspace-back" onClick={onBack}>‹ All modules</button>
     <TopHeading title={profile.name} subtitle={`${venuesText(profile.venues)} · Paper trading · no real funds`}
       actions={<><button type="button" className="btn quiet" disabled={busy} onClick={duplicate} data-testid={`${PROFILE}-duplicate`}>Duplicate</button>
         <button type="button" className="btn quiet" disabled={busy || locked} title={locked ? "In use: duplicate it to change it" : undefined} onClick={onDelete} data-testid={`${PROFILE}-delete`}>Delete</button></>} />
-    <div className="card workspace-hero" data-testid={`${PROFILE}-result`}><div className="row"><h2>Test result</h2><Badge label={status} tone={profile.status === "ARCHIVED" ? "" : locked ? "warn" : ""} /></div>
-      <div className="workspace-metrics mt">
-        <div><small>Net result</small><b>—</b></div><div><small>Completed trades</small><b>—</b></div><div><small>Win rate</small><b>—</b></div>
-        <div><small>Launches checked</small><b>—</b></div><div><small>Rejected</small><b>—</b></div>
-      </div>
-      <p className="tiny mt">{NO_RUN_OWNER} Revision {profile.revision.toString()} · configuration <span className="mono">{profile.configSha256.slice(0, 12)}…</span></p>
-    </div>
+    <RunHero run={shown} text={runs.text} testId={`${PROFILE}-result`} />
+    <p className="tiny" style={{ margin: "8px 2px 0" }}>{profile.status === "ARCHIVED" ? "Archived · " : ""}Revision {profile.revision.toString()} · configuration <span className="mono">{profile.configSha256.slice(0, 12)}…</span></p>
     <section className="card editor-card mtl" data-testid={`${PROFILE}-settings`}>
-      <div className="editor-heading"><div><h2>Module settings</h2><p className="small">Edit settings and filters directly, with no extra menus.</p></div>{locked ? <Badge label="Locked: in use" tone="warn" /> : <Badge label="15 filters available" />}</div>
+      <div className="editor-heading"><div><h2>Module settings</h2><p className="small">Edit settings and filters directly, with no extra menus.</p></div>{locked ? <Badge label={running ? "Locked during test" : "Locked: in use"} tone="warn" /> : <Badge label="15 filters available" />}</div>
       <ModuleEditor draft={d} onChange={setDraft} offered={offered} settings={settings} disabled={locked || busy} idPrefix={PROFILE} />
       {parsed.filterError ? <p className="tiny v8-unavailable">Stored filters unreadable here: {parsed.filterError}</p> : null}
       <h3 style={{ fontSize: 14, margin: "22px 0 12px" }}>Test run</h3>
-      <div className="test-plan"><div className="module-run-meta">{NO_RUN_OWNER}</div></div>
-      <div className="editor-footer"><span className="small" data-testid={`${PROFILE}-state`}>{locked ? "In use: duplicate it to change it."
+      {run.fields(profile.status === "ARCHIVED")}
+      <div className="editor-footer"><span className="small" data-testid={`${PROFILE}-state`}>{running ? `Test ${running.status === "STOPPING" ? "stopping" : "running"} · stop to edit.` : locked ? "In use: duplicate it to change it."
         : !changed ? `Revision ${profile.revision.toString()} · changes apply to this module only.` : "error" in params ? params.error : `Saves revision ${(profile.revision + 1n).toString()} of this module.`}</span>
-        <div className="editor-actions"><button type="button" className="btn quiet" disabled={!draft} onClick={() => setDraft(null)}>Reset</button>
-          <button type="button" className="btn quiet" disabled={locked || busy || !changed || "error" in params} onClick={() => { save(); setDraft(null); }} data-testid={`${PROFILE}-save`}>Save</button>
-          <button type="button" className="btn primary" disabled title={NO_RUN_OWNER}>Start test</button></div></div>
+        <div className="editor-actions">{!locked ? <><button type="button" className="btn quiet" disabled={!draft} onClick={() => setDraft(null)}>Reset</button>
+          <button type="button" className="btn quiet" disabled={busy || !changed || "error" in params} onClick={() => { save(); setDraft(null); }} data-testid={`${PROFILE}-save`}>Save</button></> : null}
+          {run.button}</div></div>
       <Receipt testId={PROFILE} />
+      {run.receipt}
     </section>
+    <RunList runs={runs.page} text={runs.text} picked={shown?.id} onPick={setPicked} onRefresh={() => setRefresh(n => n + 1)} testId={`${PROFILE}-runs`}
+      onOlder={runs.page.ok && runs.page.hasMore && runs.page.nextCursor ? () => { const next = runs.page.ok ? runs.page.nextCursor : ""; setCursors(c => [...c, next]); } : undefined}
+      onNewer={cursors.length > 1 ? () => setCursors(c => c.slice(0, -1)) : undefined} />
     <section className="card pad mtl"><h2>Performance over time</h2><div className="empty">{seriesText}</div></section>
   </>;
 }
@@ -119,7 +144,7 @@ export function NewModuleDrawer({ all, catalogVersion, offered, settings, start,
     <p className="small">Configure a paper strategy. All filters are visible. It starts from the current Strategy C configuration.</p>
     <ModuleEditor draft={draft} onChange={setDraft} offered={offered} settings={settings} disabled={busy} idPrefix={`${PROFILE}-new`} />
     <h3 style={{ fontSize: 14, margin: "20px 0 12px" }}>Test run</h3>
-    <div className="test-plan"><div className="module-run-meta">{NO_RUN_OWNER}</div></div>
+    <div className="test-plan"><div className="module-run-meta">{RUN_AFTER_SAVE}</div></div>
   </Drawer>;
 }
 

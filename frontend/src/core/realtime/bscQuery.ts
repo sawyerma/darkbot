@@ -6,8 +6,8 @@ import { READ_TIMEOUT_MS, session } from "./bscControl";
 // V8 (BSC-V8-10): the one bounded, read-only BSC query (protocol/schemas/darkbot/bsc/v1/
 // query.proto): one POST per operator view or page step, never polling, never a STATE topic. The
 // gateway route is registered (session, origin and CSRF like a command; the deployed reporter's
-// `--query` answers): strategy_settings by its native owner, every other query NOT_IMPLEMENTED with
-// its missing BSC-V8 owner. A failed answer is UNAVAILABLE with its reason (503: no reporter
+// `--query` answers): strategy_settings, training_profiles, training_runs and replay_sources by
+// their native owners, every other query NOT_IMPLEMENTED with its missing BSC-V8 owner. A failed answer is UNAVAILABLE with its reason (503: no reporter
 // answer within its bound; a non-protobuf answer). A refused query (a stale or foreign cursor, a
 // limit above the owner's cap, a filter it does not accept) is UNAVAILABLE with the refusal, never
 // another page. Nothing here substitutes, caches or computes a value.

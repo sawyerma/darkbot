@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { readdirSync, readFileSync } from "node:fs";
 import { classify } from "@/core/realtime/bscQuery";
-import { Availability, DataQuality, ExitReason, QueryRefusal, ReplayVerdict, TimeSource, TradePlacement, TradeStatus, TransferStatus, TrainingRunStatus, TrainingRunStopKind, PolicyUnit, WalletRole, V8_CONTRACTS, decodeV8, encodeV8, type V8ContractName } from "./bscV8Adapter";
+import { PLAN_START, STOP_REASON, startParams } from "../model/training";
+import { Availability, DataQuality, ExitReason, QueryRefusal, ReplayVerdict, TimeSource, TradePlacement, TradeStatus, TransferStatus, TrainingRunMode, TrainingRunStatus, TrainingRunStopKind, PolicyUnit, WalletRole, V8_CONTRACTS, decodeV8, encodeV8, v8Params, type V8ContractName } from "./bscV8Adapter";
 
 // BSC-V8-09 / FE-V8-17: the prepared V8 contracts, Rust↔TS. gateway/tests/bsc_v8_goldens.rs
 // encodes the bytes with prost; here protobuf-es decodes them, the values survive exactly (u64
@@ -103,6 +104,15 @@ describe("prepared BSC V8 contracts (Rust golden bytes)", () => {
     expect([deleted.profileId, deleted.archive]).toEqual(["p000001", true]);
   });
 
+  it("starts a REPLAY of a module revision with exactly one bound and stops a run by its id (BSC-V8-02)", () => {
+    const params = startParams({ id: "p000001", venues: ["BSC_VENUE_FLAP", "BSC_VENUE_OPENFOUR"] }, { ...PLAN_START, hours: "1.5" }, "1794026420785");
+    if ("error" in params) throw new Error(params.error);
+    expect(Buffer.from(v8Params("training_run_start_command", params)).toString("hex")).toBe(Buffer.from(golden("training_run_start_command")).toString("hex"));
+    const start = decodeV8("training_run_start_command", golden("training_run_start_command"));
+    expect([start.mode, start.plan?.stopKind, start.plan?.durationMs, start.plan?.maxLaunches, start.replaySource]).toEqual([TrainingRunMode.REPLAY, TrainingRunStopKind.DURATION, 5_400_000n, undefined, "1794026420785"]);
+    expect(Buffer.from(v8Params("training_run_stop_command", { reason: STOP_REASON })).toString("hex")).toBe(Buffer.from(golden("training_run_stop_command")).toString("hex"));
+  });
+
   it("keeps an unknown transfer unknown and an absent fee absent", () => {
     const t = decodeV8("treasury_state", golden("treasury_state"));
     expect(t.profitPolicy?.lastTransfer?.status).toBe(TransferStatus.UNKNOWN);
@@ -169,7 +179,7 @@ describe("prepared BSC V8 contracts (Rust golden bytes)", () => {
     expect(p.runs[0]?.result?.configMatch).toBeUndefined();
     expect(p.runs[0]?.result?.cancelled).toBe(U64_MAX);
     const r = decodeV8("replay_source_page", golden("replay_source_page"));
-    expect(r.sources.map(x => [x.sourceId, x.kind, x.records])).toEqual([["rec-run-1", "RECORDED_RUN", U64_MAX]]);
+    expect(r.sources.map(x => [x.sourceId, x.kind, x.runId, x.records])).toEqual([["1794026420785", "MARKET_JOURNAL", "", U64_MAX]]);
   });
 
   it("reads NOT_IMPLEMENTED as such", () => {

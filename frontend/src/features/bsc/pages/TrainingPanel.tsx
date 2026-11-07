@@ -13,20 +13,24 @@ import { PerformanceMetric, PerformanceScope } from "../api/bscV8Adapter";
 import type { BscView } from "../BscPage";
 import { useNativeRecords } from "./useNativeRecords";
 import { useNowMs } from "./useNowMs";
-import { queryReason, useBscQuery } from "./useBscQuery";
+import { queryReason, useBscQuery, useKept } from "./useBscQuery";
 import { StrategyEditor } from "./StrategyEditor";
-import { DeleteModuleDialog, ModuleWorkspace, NewModuleDrawer, NO_RUN_OWNER, PROFILE } from "./TrainingModule";
+import { DeleteModuleDialog, ModuleWorkspace, NewModuleDrawer, PROFILE } from "./TrainingModule";
+import { RUN, useRuns } from "./TrainingRuns";
+import { runMetrics, statusBadge } from "../model/training";
 import { useStrategySettings } from "./useStrategySettings";
 import { PlacedSection } from "./PlacedSection";
 import { Badge, DetailLine, Icon, PanelHead, StateBadge, TopHeading, bnb } from "./V8";
 
 const NO_PROFILE_OWNER = "Training modules need their native profile owner (BSC-V8-01): nothing is stored in the browser.";
 const NATIVE_KEPT = "The runtime configuration is no saved module: it is edited in Live and never deleted.";
+const NATIVE_NO_RUN = "A test replays a saved module: Duplicate saves this configuration as one, then start its test there.";
 
 /** V8 Training (FE-V8-04…08). The module list shows the one native Strategy C configuration with
  *  its running PAPER/SHADOW results (the runtime status) and the native profile owner's modules
  *  (bsc/query TrainingProfiles: create, edit, duplicate, delete or archive at the owner's
- *  versions). Test runs and their results need the native run owner and stay disabled with it. */
+ *  versions), each with its newest test run (TrainingRuns); a module's test runs (REPLAY) start,
+ *  stop and show their results in the module (./TrainingRuns). */
 export function TrainingPanel({ goto }: { goto: (v: BscView) => void }) {
   useTopic(TopicId.BSC_MONITORING_STATE);
   const records = useNativeRecords();
@@ -38,17 +42,18 @@ export function TrainingPanel({ goto }: { goto: (v: BscView) => void }) {
   const [deleting, setDeleting] = useState<string | null>(null);
   const { busy, receipt } = useSourceControl();
   const [period, setPeriod] = useState<"7T" | "30T" | "All">("7T");
-  const [runMode, setRunMode] = useState<"duration" | "iterations" | "continuous">("duration");
-  // One catalog read per view and per decided module request (never while one is sent): no polling.
-  const decided = receipt && receipt.origin === PROFILE && receipt.phase !== "SENDING" ? `${receipt.id}:${receipt.phase}` : null;
+  // One catalog and run read per view and per decided module or run request (never while one is
+  // sent): no polling.
+  const decided = receipt && (receipt.origin === PROFILE || receipt.origin === RUN) && receipt.phase !== "SENDING" ? `${receipt.id}:${receipt.phase}` : null;
   const [step, setStep] = useState("");
   useEffect(() => { if (decided) setStep(decided); }, [decided]);
   const profiles = useBscQuery(`training_profiles:${step}`, { case: "trainingProfiles", value: { includeArchived: true } });
   // The last answered catalog stays shown while the next one loads (a save never closes the module).
-  const answered = useMemo(() => profilesOf(profiles), [profiles]);
-  const [kept, setKept] = useState<ProfilesView>({ ok: false });
-  useEffect(() => { if (profiles.kind !== "LOADING") setKept(answered); }, [answered, profiles.kind]);
-  const catalog = profiles.kind === "LOADING" && kept.ok ? kept : answered;
+  const catalog = useKept<ProfilesView>(useMemo(() => profilesOf(profiles), [profiles]), profiles.kind === "LOADING");
+  // The list's results: the newest runs of every module (its first page), only while the list shows.
+  const allRuns = useRuns(null, step, "", open === null).newest;
+  const newestOf = (id: string) => allRuns.ok ? allRuns.runs.find(r => r.profileId === id) : undefined;
+  const testing = allRuns.ok ? allRuns.runs.filter(r => r.active).length : 0;
   // A created or duplicated module opens once the owner applied it; a deleted one closes. Only a
   // request decided while this view is shown (an older receipt reopens nothing).
   const shownReceipt = useRef(receipt?.id);
@@ -86,7 +91,7 @@ export function TrainingPanel({ goto }: { goto: (v: BscView) => void }) {
 
   if (module && catalog.ok) return <>
     <ModuleWorkspace key={`${module.id}:${module.revision.toString()}`} profile={module} all={modules} catalogVersion={catalog.catalogVersion} offered={offered} settings={settings}
-      seriesText={seriesText} onBack={() => setOpen(null)} onDelete={() => setDeleting(module.id)} />
+      seriesText={seriesText} step={step} onBack={() => setOpen(null)} onDelete={() => setDeleting(module.id)} />
     {dialogs}
   </>;
 
@@ -109,17 +114,12 @@ export function TrainingPanel({ goto }: { goto: (v: BscView) => void }) {
     <section className="card editor-card mtl"><div className="editor-heading"><div><h2>Module settings</h2><p className="small">The one native Strategy C configuration; edit it in Live → Custom settings.</p></div><Badge label="15 filters available" /></div>
       <StrategyEditor form={form} onChange={() => undefined} disabled venues={venues} idPrefix="bsc-training" ranges={fieldRanges(settings)} features={featureHints(settings)} />
       <h3 style={{ fontSize: 14, margin: "22px 0 12px" }}>Test run</h3>
-      <div className="test-plan"><div className="test-plan-row">
-        <div className="field"><label htmlFor="bsc-run-mode">Stop test by</label><select id="bsc-run-mode" className="select" value={runMode} onChange={e => setRunMode(e.target.value as typeof runMode)}>
-          <option value="duration">Duration</option><option value="iterations">Number of launches</option><option value="continuous">Until stopped</option></select></div>
-        {runMode === "duration" ? <div className="field"><label>Duration · hours</label><input className="input" type="number" disabled /></div> : null}
-        {runMode === "iterations" ? <div className="field"><label>Maximum launches processed</label><input className="input" type="number" disabled /></div> : null}
-      </div><div className="module-run-meta">{NO_RUN_OWNER}</div></div>
+      <div className="test-plan"><div className="module-run-meta" data-testid="bsc-training-native-run">{NATIVE_NO_RUN}</div></div>
       <div className="v8-section-group" data-testid="bsc-training-native-record"><PlacedSection panel="live" section={10} records={records}>
         <DetailLine label="Settings generation" value={generationText(settings)} />
       </PlacedSection></div>
       <div className="editor-footer"><span className="small">{running ? "Strategy C runs in the runtime (its switch and the runtime mode, Settings)." : "Strategy C is not running."}</span>
-        <div className="editor-actions"><button type="button" className="btn quiet" onClick={() => goto("live")}>Edit in Live</button><button type="button" className="btn primary" disabled title={NO_RUN_OWNER} data-testid="bsc-training-start">Start test</button></div></div>
+        <div className="editor-actions"><button type="button" className="btn quiet" onClick={() => goto("live")}>Edit in Live</button><button type="button" className="btn primary" disabled title={NATIVE_NO_RUN} data-testid="bsc-training-start">Start test</button></div></div>
     </section>
     <section className="card pad mtl"><PanelHead title="Performance over time" extra={<div className="segment" role="group" aria-label="Time range">{([["7T", "7 days"], ["30T", "30 days"], ["All", "All time"]] as const).map(([v, t]) => <button key={v} type="button" className={period === v ? "active" : undefined} onClick={() => setPeriod(v)}>{t}</button>)}</div>} />
       <div className="empty">{seriesText}</div>
@@ -131,7 +131,7 @@ export function TrainingPanel({ goto }: { goto: (v: BscView) => void }) {
   return <>
     <TopHeading title="Training" subtitle="Modules for testing without real funds."
       actions={<button type="button" className="btn primary" disabled={!catalog.ok || busy} title={catalog.ok ? undefined : NO_PROFILE_OWNER} onClick={() => setCreating(true)} data-testid="bsc-training-new"><Icon name="plus" size="s" /> New module</button>} />
-    <div className="row" style={{ marginBottom: 14 }}><span className="small">1 native configuration{catalog.ok ? ` · ${modules.length} module${modules.length === 1 ? "" : "s"}` : ""} · {running ? "Strategy C running" : "No test running"}</span><span className="small">No real funds</span></div>
+    <div className="row" style={{ marginBottom: 14 }}><span className="small">1 native configuration{catalog.ok ? ` · ${modules.length} module${modules.length === 1 ? "" : "s"}` : ""} · {testing ? `${testing} test running` : "No test running"}{running ? " · Strategy C running" : ""}</span><span className="small">No real funds</span></div>
     <Receipt testId={PROFILE} />
     <div className="module-list">
       <div className="card module" data-testid="bsc-training-native">
@@ -141,13 +141,13 @@ export function TrainingPanel({ goto }: { goto: (v: BscView) => void }) {
         <div className="modactions"><button type="button" className="btn sm quiet" onClick={() => setOpen("native")}>Open <Icon name="chevron" size="s" /></button></div>
         <div className="module-quick-actions"><button type="button" className="square-action" disabled aria-label="Delete Strategy C module" title={NATIVE_KEPT}><Icon name="trash" size="s" /></button></div>
       </div>
-      {modules.map(p => <div className="card module" key={p.id} data-testid={`bsc-training-module-${p.id}`}>
-        <button type="button" className="module-card-open" aria-label={`Open ${p.name} module`} onClick={() => setOpen(p.id)}><span className={`symbol ${p.inUse ? "warn" : p.status === "ARCHIVED" ? "blue" : ""}`}><Icon name="training" /></span>
-          <span className="grow"><span className="modname">{p.name}</span><span className="modsub">{p.venues.map(venueName).join(", ")} · {p.status === "ARCHIVED" ? "Archived" : p.inUse ? `In use: ${p.inUseReason || "a run or LIVE"}` : p.runIds.length ? "Previously tested" : "Not yet tested"}</span></span></button>
-        <div className="modmetrics"><div className="metric"><b className="mono" title={NO_RUN_OWNER}>—</b><small>Result</small></div></div>
+      {modules.map(p => { const last = newestOf(p.id); const net = runMetrics(last).netWei; const using = p.inUse || !!last?.active; return <div className="card module" key={p.id} data-testid={`bsc-training-module-${p.id}`}>
+        <button type="button" className="module-card-open" aria-label={`Open ${p.name} module`} onClick={() => setOpen(p.id)}><span className={`symbol ${using ? "warn" : p.status === "ARCHIVED" ? "blue" : ""}`}><Icon name="training" /></span>
+          <span className="grow"><span className="modname">{p.name}</span><span className="modsub">{p.venues.map(venueName).join(", ")} · {p.status === "ARCHIVED" ? "Archived" : last?.active ? statusBadge(last.status).label : p.inUse ? `In use: ${p.inUseReason || "a run or LIVE"}` : last || p.runIds.length ? "Previously tested" : "Not yet tested"}</span></span></button>
+        <div className="modmetrics"><div className="metric"><b className={`mono ${net?.startsWith("-") ? "down" : net && net !== "0" ? "up" : ""}`} title={last ? `Run ${last.id}` : allRuns.ok ? "Not yet tested" : "Runs not read"}>{net === undefined ? "—" : bnb(net, 6)}</b><small>Result · BNB</small></div></div>
         <div className="modactions"><button type="button" className="btn sm quiet" onClick={() => setOpen(p.id)}>Open <Icon name="chevron" size="s" /></button></div>
-        <div className="module-quick-actions"><button type="button" className="square-action" disabled={busy || p.inUse} aria-label={`Delete ${p.name}`} title={p.inUse ? "In use: duplicate it to change it" : "Delete module"} onClick={() => setDeleting(p.id)}><Icon name="trash" size="s" /></button></div>
-      </div>)}
+        <div className="module-quick-actions"><button type="button" className="square-action" disabled={busy || using} aria-label={`Delete ${p.name}`} title={using ? "In use: duplicate it to change it" : "Delete module"} onClick={() => setDeleting(p.id)}><Icon name="trash" size="s" /></button></div>
+      </div>; })}
       {catalog.ok && modules.length ? null : <div className="card pad" data-testid="bsc-training-profiles"><div className="empty">{catalog.ok ? "No saved modules yet: New module saves one at the native profile owner." : catalogReason}</div></div>}
     </div>
     {dialogs}

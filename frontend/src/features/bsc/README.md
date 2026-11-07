@@ -15,7 +15,10 @@ under the owner's LIVE gate for the operator's granted scope, and the browser si
   `POST /api/v1/bsc/query`, the reporter's `--query`) answers natively the Strategy C settings state
   (`pages/useStrategySettings.ts`: the form basis = stored over the configuration file, the native bounds,
   the apply status) and the training profiles (`model/profiles.ts`, `pages/TrainingModule.tsx`: modules
-  created, edited as whole revisions, duplicated, deleted or archived at the owner's catalog/revision CAS);
+  created, edited as whole revisions, duplicated, deleted or archived at the owner's catalog/revision CAS)
+  and the training runs with the recorded runs they replay (`model/training.ts`, `pages/TrainingRuns.tsx`:
+  a REPLAY of the module's saved revision with exactly one bound, Stop, the result of a picked run, cursor
+  pages, re-read per decided request, page step or Refresh, never polled);
   every other query is NOT_IMPLEMENTED until its native owner exists, and the UI shows that function
   disabled with its reason, never data of its own.
 - **Wallets** (`pages/Wallet*.tsx`, `model/wallets.ts`): Accounts → Balances → Manual transfers → Automatic

@@ -26,3 +26,10 @@ export function queryReason(q: QueryState, owner: string): string {
   if (q.kind === "UNAVAILABLE") return `Unavailable: ${q.reason}.`;
   return "";
 }
+
+/** The last answered view while the next one loads (a re-read never empties the page). */
+export function useKept<T extends { ok: boolean }>(view: T, loading: boolean): T {
+  const [kept, setKept] = useState<T>(view);
+  useEffect(() => { if (!loading) setKept(view); }, [view, loading]);
+  return loading && kept.ok ? kept : view;
+}

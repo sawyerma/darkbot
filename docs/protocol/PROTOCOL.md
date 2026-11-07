@@ -1375,14 +1375,15 @@ atomic Strategy C configuration, or the custom settings; never a local draft.
 <a name="darkbot-bsc-v1-ReplaySource"></a>
 
 ### ReplaySource
-One recorded run or journal the owner can replay, named by its catalogue id only (never a path).
+One recorded runtime run the owner can replay, named by its catalogue id only (never a path); a
+run still recording (no manifest yet) is INCOMPLETE with NO_MANIFEST, its records unknown (0).
 
 
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
-| source_id | [string](#string) |  | The catalogue id a REPLAY start names. |
-| kind | [string](#string) |  | RECORDED_RUN or MARKET_JOURNAL. |
-| run_id | [string](#string) |  | The recorded training run, when it is one; empty otherwise. |
+| source_id | [string](#string) |  | The catalogue id a REPLAY start names (the recorded runtime run&#39;s id). |
+| kind | [string](#string) |  | MARKET_JOURNAL (a recorded runtime run&#39;s journal). |
+| run_id | [string](#string) |  | Reserved for a recorded training run; empty (every source is a runtime run). |
 | from_block | [uint64](#uint64) | optional | Its first block; absent when unknown. |
 | to_block | [uint64](#uint64) | optional | Its last block; absent when unknown. |
 | from | [SourcedTime](#darkbot-bsc-v1-SourcedTime) |  | Its first record&#39;s time. |
@@ -1629,7 +1630,7 @@ A named, versioned Strategy C configuration of the native owner (one strategy, m
 | updated_unix_ms | [uint64](#uint64) |  | Time of this revision, unix ms. |
 | status | [TrainingProfileStatus](#darkbot-bsc-v1-TrainingProfileStatus) |  | Its lifecycle. |
 | run_ids | [string](#string) | repeated | The runs that reference it, newest first (bounded; the run query has all). |
-| in_use | [bool](#bool) |  | Whether a running run or the LIVE selection uses it (edits then need a clone). |
+| in_use | [bool](#bool) |  | Whether a PENDING or RUNNING run or the LIVE selection uses it (edits then need a clone). |
 | in_use_reason | [string](#string) |  | What uses it; empty when not in use. |
 | values | [StrategyCSettableValues](#darkbot-bsc-v1-StrategyCSettableValues) |  | Every settable value of this revision. |
 | request_id | [string](#string) |  | The request that wrote this revision. |
@@ -1779,7 +1780,7 @@ how complete; net_wei stays absent while unresolved, never zero.
 | observable_ms | [uint64](#uint64) | optional | The observed market time with complete coverage, ms. |
 | lost_records | [uint64](#uint64) |  | Records lost by the capture. |
 | ingress_dropped | [uint64](#uint64) |  | Ingress messages dropped. |
-| quality | [DataQuality](#darkbot-bsc-v1-DataQuality) |  | How far these counts are proven (INCOMPLETE while the run&#39;s journal is not sealed or has gaps); a result the owner cannot read at all is the whole message absent. |
+| quality | [DataQuality](#darkbot-bsc-v1-DataQuality) |  | How far these counts are proven: INCOMPLETE with LOST_RECORDS, SOURCE_WITHOUT_MANIFEST, READ_ERROR, STOPPED_BEFORE_ITS_BOUND / JOURNAL_ENDED_BEFORE_ITS_BOUND (bounded plans only) or FOLLOWED_OR_UNRESOLVED_AT_END; a result the owner cannot read at all, or of a run still PENDING or RUNNING (its counts are its end&#39;s), is the whole message absent. |
 | quality_reasons | [string](#string) | repeated | Why the quality is not VERIFIED. |
 | slot_limit | [uint64](#uint64) |  | Entries refused because max_open slots were full. |
 | creator_sold | [uint64](#uint64) |  | Launches whose creator sold before the BUY filled. |
@@ -1817,10 +1818,10 @@ One training run of a profile revision.
 | started_unix_ms | [uint64](#uint64) | optional | Start, unix ms; absent before it started. |
 | ended_unix_ms | [uint64](#uint64) | optional | End, unix ms; absent while running. |
 | status | [TrainingRunStatus](#darkbot-bsc-v1-TrainingRunStatus) |  | Its lifecycle. |
-| stop_reason | [string](#string) |  | Why it ended (PLAN_DURATION, PLAN_LAUNCH_COUNT, STOP_REQUESTED, a failure); empty while running. |
-| launches_processed | [uint64](#uint64) |  | Qualified launches processed so far. |
-| result | [TrainingResult](#darkbot-bsc-v1-TrainingResult) |  | Its results so far. |
-| provenance | [OwnerProvenance](#darkbot-bsc-v1-OwnerProvenance) |  | The owner and journal the run was read from. |
+| stop_reason | [string](#string) |  | Why it ended: PLAN_DURATION, PLAN_LAUNCH_COUNT or JOURNAL_END (COMPLETED), STOP_REQUESTED[: &lt;reason&gt;] (STOPPED), the cut-off (INTERRUPTED), the failure text (FAILED); empty while running. |
+| launches_processed | [uint64](#uint64) |  | Decided launches (TrainingResult.evaluated): known at the run&#39;s end, 0 before. |
+| result | [TrainingResult](#darkbot-bsc-v1-TrainingResult) |  | Its results at its end; absent while PENDING or RUNNING. |
+| provenance | [OwnerProvenance](#darkbot-bsc-v1-OwnerProvenance) |  | The owner and the run&#39;s state record (INCOMPLETE &#34;RUNNING: its counts are its end&#39;s&#34; while PENDING or RUNNING). |
 | request_id | [string](#string) |  | The request that started it. |
 | replay_source | [string](#string) |  | REPLAY: the ReplaySource.source_id it replays (echo of the start); empty otherwise. |
 
@@ -1839,7 +1840,7 @@ One page of training runs, newest first, bound to one owner snapshot.
 | ----- | ---- | ----- | ----------- |
 | availability | [Availability](#darkbot-bsc-v1-Availability) |  | Whether the native owner answered. |
 | unavailable_reason | [string](#string) |  | Why it is not AVAILABLE. |
-| provenance | [OwnerProvenance](#darkbot-bsc-v1-OwnerProvenance) |  | The owner and the snapshot the cursor is bound to. |
+| provenance | [OwnerProvenance](#darkbot-bsc-v1-OwnerProvenance) |  | The owner and the snapshot the cursor is bound to (owner_version: the newest run&#39;s number). |
 | runs | [TrainingRun](#darkbot-bsc-v1-TrainingRun) | repeated | The runs. |
 | next_cursor | [string](#string) |  | The cursor of the next page; empty on the last one. |
 | has_more | [bool](#bool) |  | Whether another page follows. |
@@ -1852,15 +1853,17 @@ One page of training runs, newest first, bound to one owner snapshot.
 <a name="darkbot-bsc-v1-TrainingRunPlan"></a>
 
 ### TrainingRunPlan
-The bound of a training run: exactly the field its stop_kind names is set, the owner refuses any
-other combination.
+The bound of a training run: exactly the field its stop_kind names is set (a positive one, none for
+UNTIL_STOPPED), the owner refuses any other combination. A bounded run takes no launch past its
+bound and ends once every launch it took is decided and no position is open, or at the journal&#39;s
+end.
 
 
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
 | stop_kind | [TrainingRunStopKind](#darkbot-bsc-v1-TrainingRunStopKind) |  | What ends it. |
-| duration_ms | [uint64](#uint64) | optional | DURATION only: the run&#39;s length, milliseconds. |
-| max_launches | [uint64](#uint64) | optional | LAUNCH_COUNT only: the qualified launches (the engine&#39;s Decided outputs) it processes. |
+| duration_ms | [uint64](#uint64) | optional | DURATION only: the recorded run&#39;s time it replays, milliseconds. |
+| max_launches | [uint64](#uint64) | optional | LAUNCH_COUNT only: the decided launches (the engine&#39;s Decided outputs) it processes. |
 
 
 
@@ -1878,7 +1881,7 @@ A bounded, cursor-paged read of training runs.
 | profile_id | [string](#string) |  | Only runs of this profile; empty: every profile. |
 | statuses | [TrainingRunStatus](#darkbot-bsc-v1-TrainingRunStatus) | repeated | Only runs in these states; empty: every state. |
 | cursor | [string](#string) |  | The previous page&#39;s next_cursor; empty: the first page. |
-| limit | [uint32](#uint32) |  | At most this many runs; 0: the owner&#39;s default; above its cap: refused (LIMIT_EXCEEDED). |
+| limit | [uint32](#uint32) |  | At most this many runs; 0: the owner&#39;s default (BSC_QUERY_PAGE_DEFAULT); above its cap (BSC_QUERY_PAGE_MAX): refused (LIMIT_EXCEEDED). An unknown status is INVALID_FILTER, a cursor of another filter CURSOR_INVALID. |
 
 
 
@@ -1888,16 +1891,17 @@ A bounded, cursor-paged read of training runs.
 <a name="darkbot-bsc-v1-TrainingRunStartCommand"></a>
 
 ### TrainingRunStartCommand
-Params of `bsc.training.run.start` (prepared).
+Params of `bsc.training.run.start`: a REPLAY of one profile revision (CommandRequest.resource_id =
+profile_id, expected profile_version = its revision).
 
 
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
 | profile_id | [string](#string) |  | The profile. |
 | mode | [TrainingRunMode](#darkbot-bsc-v1-TrainingRunMode) |  | How it executes. |
-| venues | [string](#string) | repeated | The venues it trains on (a subset of the profile&#39;s). |
+| venues | [string](#string) | repeated | The venues it trains on (a subset of the profile&#39;s, never empty). |
 | plan | [TrainingRunPlan](#darkbot-bsc-v1-TrainingRunPlan) |  | Its bound. |
-| replay_source | [string](#string) |  | REPLAY: a ReplaySource.source_id of the owner&#39;s catalogue (never a path); empty for PAPER and SHADOW. |
+| replay_source | [string](#string) |  | A ReplaySource.source_id of the owner&#39;s catalogue (never a path). |
 
 
 
@@ -1907,12 +1911,14 @@ Params of `bsc.training.run.start` (prepared).
 <a name="darkbot-bsc-v1-TrainingRunStopCommand"></a>
 
 ### TrainingRunStopCommand
-Params of `bsc.training.run.stop` (prepared); CommandRequest.resource_id names the run.
+Params of `bsc.training.run.stop`: CommandRequest.resource_id names the run, no expected version
+(a stop changes none); a PENDING run stops at once, a RUNNING one is STOPPING until its job ends
+it (REJECTED_ENDED once it has ended).
 
 
 | Field | Type | Label | Description |
 | ----- | ---- | ----- | ----------- |
-| reason | [string](#string) |  | Why the operator stops it (free text, diagnostic only). |
+| reason | [string](#string) |  | Why the operator stops it (free text without control characters, diagnostic only). |
 
 
 
@@ -2000,9 +2006,9 @@ How a training run executes. Never with real funds or the LIVE wallet, nonce or 
 | Name | Number | Description |
 | ---- | ------ | ----------- |
 | TRAINING_RUN_MODE_UNSPECIFIED | 0 | Not set by any producer; never displayed as a value. |
-| TRAINING_RUN_MODE_PAPER | 1 | PAPER: the BSC_RUNTIME_MODE PAPER path on live market data to the PAPER sink, nothing sent. |
-| TRAINING_RUN_MODE_SHADOW | 2 | SHADOW: the engine&#39;s valuation only (decisions and exits valued by the exact curve), no sink. |
-| TRAINING_RUN_MODE_REPLAY | 3 | Offline replay of recorded journals (strategy-replay). |
+| TRAINING_RUN_MODE_PAPER | 1 | PAPER: the BSC_RUNTIME_MODE PAPER path on live market data to the PAPER sink, nothing sent (not yet: a start is REJECTED_INVALID). |
+| TRAINING_RUN_MODE_SHADOW | 2 | SHADOW: the engine&#39;s valuation only (decisions and exits valued by the exact curve), no sink (not yet: a start is REJECTED_INVALID). |
+| TRAINING_RUN_MODE_REPLAY | 3 | Offline replay of a recorded runtime run&#39;s journal (ReplaySource), away from the runtime. |
 
 
 
@@ -2016,12 +2022,12 @@ The lifecycle of a training run.
 | TRAINING_RUN_STATUS_UNSPECIFIED | 0 | Not set by any producer; never displayed as a value. |
 | TRAINING_RUN_STATUS_PENDING | 1 | Accepted, not started. |
 | TRAINING_RUN_STATUS_RUNNING | 2 | Running. |
-| TRAINING_RUN_STATUS_STOPPING | 3 | A stop was requested; the run seals its results. |
-| TRAINING_RUN_STATUS_COMPLETED | 4 | Ended by its plan (duration or launch count). |
-| TRAINING_RUN_STATUS_STOPPED | 5 | Ended by a stop request. |
+| TRAINING_RUN_STATUS_STOPPING | 3 | Running with a stop request its job has not taken up yet; the run then seals its results. |
+| TRAINING_RUN_STATUS_COMPLETED | 4 | Ended by its plan or the recorded run&#39;s end (PLAN_DURATION, PLAN_LAUNCH_COUNT, JOURNAL_END). |
+| TRAINING_RUN_STATUS_STOPPED | 5 | Ended by a stop request (STOP_REQUESTED[: &lt;reason&gt;]). |
 | TRAINING_RUN_STATUS_FAILED | 6 | Ended by a failure (stop_reason). |
 | TRAINING_RUN_STATUS_UNKNOWN | 7 | The owner cannot tell (state unreadable, crash before seal). |
-| TRAINING_RUN_STATUS_INTERRUPTED | 8 | The runtime ended or restarted under it: sealed up to its last journal record, never resumed. |
+| TRAINING_RUN_STATUS_INTERRUPTED | 8 | Its job was cut off or signalled without a stop request, or was gone: sealed up to its last record, never resumed. |
 
 
 
@@ -2033,9 +2039,9 @@ What ends a training run.
 | Name | Number | Description |
 | ---- | ------ | ----------- |
 | TRAINING_RUN_STOP_KIND_UNSPECIFIED | 0 | Not set by any producer; never displayed as a value. |
-| TRAINING_RUN_STOP_KIND_DURATION | 1 | After duration_ms. |
-| TRAINING_RUN_STOP_KIND_LAUNCH_COUNT | 2 | After max_launches qualified launches processed. |
-| TRAINING_RUN_STOP_KIND_UNTIL_STOPPED | 3 | Only by a stop request. |
+| TRAINING_RUN_STOP_KIND_DURATION | 1 | After duration_ms of the recorded run&#39;s own time. |
+| TRAINING_RUN_STOP_KIND_LAUNCH_COUNT | 2 | After max_launches decided launches. |
+| TRAINING_RUN_STOP_KIND_UNTIL_STOPPED | 3 | By a stop request or the recorded run&#39;s end. |
 
 
 

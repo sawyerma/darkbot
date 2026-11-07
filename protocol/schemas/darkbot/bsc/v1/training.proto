@@ -4,9 +4,10 @@ package darkbot.bsc.v1;
 import "darkbot/bsc/v1/common.proto";
 
 // V8 Training and Strategy C settings (BSC-V8-01…06, FE-V8-04…09, Bindings §14.1/§14.2/§14.4
-// M1–M3). Answered natively: StrategyCSettingsState and TrainingProfiles (POST /api/v1/bsc/query,
-// the reporter's `--query`), `bsc.strategy.set_all` and the four `bsc.training.profile.*` commands;
-// every other contract here is prepared (no producer yet).
+// M1–M3). Answered natively: StrategyCSettingsState, TrainingProfiles, TrainingRuns and
+// ReplaySources (POST /api/v1/bsc/query, the reporter's `--query`), `bsc.strategy.set_all`, the four
+// `bsc.training.profile.*` commands and `bsc.training.run.start/stop`; every other contract here is
+// prepared (no producer yet).
 // Strategy C stays the one BSC strategy; a profile is
 // a named, versioned Strategy C configuration, a training run executes it PAPER/SHADOW/REPLAY on
 // the one existing core, never with real funds. The ten settable keys exist natively
@@ -29,7 +30,7 @@ import "darkbot/bsc/v1/common.proto";
 // in every owner.
 //
 // Actions (POST /api/v1/command, CommandRequest.action). Registered: bsc.strategy.set_all (resource_id
-// empty) and bsc.training.profile.create/update/clone/delete. Prepared (NOT registered in the
+// empty), bsc.training.profile.create/update/clone/delete and bsc.training.run.start/stop. Prepared (NOT registered in the
 // gateway until the native owner implements them, the frontend keeps them disabled): every other one.
 //   bsc.strategy.set_all          StrategyCSettingsSetAllCommand  expected profile_version = stored revision
 //   bsc.training.profile.create   TrainingProfileCreateCommand    expected config_version = catalog_version
@@ -37,7 +38,7 @@ import "darkbot/bsc/v1/common.proto";
 //   bsc.training.profile.clone    TrainingProfileCloneCommand     expected config_version = catalog_version, resource_id = source_profile_id
 //   bsc.training.profile.delete   TrainingProfileDeleteCommand    expected profile_version = profile revision, resource_id = profile_id
 //   bsc.training.run.start        TrainingRunStartCommand         expected profile_version = profile revision, resource_id = profile_id
-//   bsc.training.run.stop         TrainingRunStopCommand          resource_id = run_id
+//   bsc.training.run.stop         TrainingRunStopCommand          resource_id = run_id, no expected version
 //   bsc.live.strategy.select      LiveStrategySelectCommand       expected profile_version = the bound revision, resource_id = profile_id
 // A profile revision records the request that wrote it (TrainingProfile.request_id). The profile
 // owner assigns the ids (p000001, …, never reused) and keeps at most BSC_STRATEGY_PROFILES_MAX
@@ -46,9 +47,15 @@ import "darkbot/bsc/v1/common.proto";
 // updated and cloned, not archived again; a deleted one is gone from every command and query.
 // A profile command's receipt detail line is `outcome=<APPLIED|REJECTED_STALE|REJECTED_INVALID|
 // REJECTED_NOT_FOUND|REJECTED_IN_USE> action=<CREATE|UPDATE|CLONE|ARCHIVE|DELETE> profile_id=<id|->
-// revision=<n|-> catalog=<n> request_id=<id>[ reason=<…>]`. One training
-// run at a time: a start while another runs is refused (TRAINING_RUN_ACTIVE), as is a start whose
-// mode conflicts with the runtime's BSC_RUNTIME_MODE (RUNTIME_MODE_CONFLICT). A LIVE selection writes
+// revision=<n|-> catalog=<n> request_id=<id>[ reason=<…>]`.
+// A training run is a REPLAY of a recorded runtime run (ReplaySource.source_id); PAPER and SHADOW are
+// refused (REJECTED_INVALID: they need the runtime's live inputs). One run at a time: a start while a
+// run's job runs is refused (REJECTED_ACTIVE); a run left behind by a gone job ends at the next start
+// (PENDING FAILED, RUNNING INTERRUPTED). A run command's receipt detail line is
+// `outcome=<APPLIED|REJECTED_STALE|REJECTED_INVALID|REJECTED_NOT_FOUND|REJECTED_ACTIVE|REJECTED_ENDED>
+// action=<START|STOP> run_id=<t000001|-> request_id=<id>[ reason=<…>]`. A profile with a PENDING or
+// RUNNING run is in use (update, archive and delete REJECTED_IN_USE). Another payload or CAS under a
+// request id is a FAILED command, never a second revision, run or stop. A LIVE selection writes
 // the revision's settable values as ONE settings generation (its compare-and-swap
 // expected_settings_generation); its receipt names profile_id and profile_revision.
 
@@ -282,7 +289,7 @@ message TrainingProfile {
   TrainingProfileStatus status = 9;
   // The runs that reference it, newest first (bounded; the run query has all).
   repeated string run_ids = 10;
-  // Whether a running run or the LIVE selection uses it (edits then need a clone).
+  // Whether a PENDING or RUNNING run or the LIVE selection uses it (edits then need a clone).
   bool in_use = 11;
   // What uses it; empty when not in use.
   string in_use_reason = 12;
@@ -372,11 +379,13 @@ message TrainingProfileDeleteCommand {
 enum TrainingRunMode {
   // Not set by any producer; never displayed as a value.
   TRAINING_RUN_MODE_UNSPECIFIED = 0;
-  // PAPER: the BSC_RUNTIME_MODE PAPER path on live market data to the PAPER sink, nothing sent.
+  // PAPER: the BSC_RUNTIME_MODE PAPER path on live market data to the PAPER sink, nothing sent (not
+  // yet: a start is REJECTED_INVALID).
   TRAINING_RUN_MODE_PAPER = 1;
-  // SHADOW: the engine's valuation only (decisions and exits valued by the exact curve), no sink.
+  // SHADOW: the engine's valuation only (decisions and exits valued by the exact curve), no sink (not
+  // yet: a start is REJECTED_INVALID).
   TRAINING_RUN_MODE_SHADOW = 2;
-  // Offline replay of recorded journals (strategy-replay).
+  // Offline replay of a recorded runtime run's journal (ReplaySource), away from the runtime.
   TRAINING_RUN_MODE_REPLAY = 3;
 }
 
@@ -384,22 +393,24 @@ enum TrainingRunMode {
 enum TrainingRunStopKind {
   // Not set by any producer; never displayed as a value.
   TRAINING_RUN_STOP_KIND_UNSPECIFIED = 0;
-  // After duration_ms.
+  // After duration_ms of the recorded run's own time.
   TRAINING_RUN_STOP_KIND_DURATION = 1;
-  // After max_launches qualified launches processed.
+  // After max_launches decided launches.
   TRAINING_RUN_STOP_KIND_LAUNCH_COUNT = 2;
-  // Only by a stop request.
+  // By a stop request or the recorded run's end.
   TRAINING_RUN_STOP_KIND_UNTIL_STOPPED = 3;
 }
 
-// The bound of a training run: exactly the field its stop_kind names is set, the owner refuses any
-// other combination.
+// The bound of a training run: exactly the field its stop_kind names is set (a positive one, none for
+// UNTIL_STOPPED), the owner refuses any other combination. A bounded run takes no launch past its
+// bound and ends once every launch it took is decided and no position is open, or at the journal's
+// end.
 message TrainingRunPlan {
   // What ends it.
   TrainingRunStopKind stop_kind = 1;
-  // DURATION only: the run's length, milliseconds.
+  // DURATION only: the recorded run's time it replays, milliseconds.
   optional uint64 duration_ms = 2;
-  // LAUNCH_COUNT only: the qualified launches (the engine's Decided outputs) it processes.
+  // LAUNCH_COUNT only: the decided launches (the engine's Decided outputs) it processes.
   optional uint64 max_launches = 3;
 }
 
@@ -411,17 +422,18 @@ enum TrainingRunStatus {
   TRAINING_RUN_STATUS_PENDING = 1;
   // Running.
   TRAINING_RUN_STATUS_RUNNING = 2;
-  // A stop was requested; the run seals its results.
+  // Running with a stop request its job has not taken up yet; the run then seals its results.
   TRAINING_RUN_STATUS_STOPPING = 3;
-  // Ended by its plan (duration or launch count).
+  // Ended by its plan or the recorded run's end (PLAN_DURATION, PLAN_LAUNCH_COUNT, JOURNAL_END).
   TRAINING_RUN_STATUS_COMPLETED = 4;
-  // Ended by a stop request.
+  // Ended by a stop request (STOP_REQUESTED[: <reason>]).
   TRAINING_RUN_STATUS_STOPPED = 5;
   // Ended by a failure (stop_reason).
   TRAINING_RUN_STATUS_FAILED = 6;
   // The owner cannot tell (state unreadable, crash before seal).
   TRAINING_RUN_STATUS_UNKNOWN = 7;
-  // The runtime ended or restarted under it: sealed up to its last journal record, never resumed.
+  // Its job was cut off or signalled without a stop request, or was gone: sealed up to its last
+  // record, never resumed.
   TRAINING_RUN_STATUS_INTERRUPTED = 8;
 }
 
@@ -484,8 +496,10 @@ message TrainingResult {
   uint64 lost_records = 20;
   // Ingress messages dropped.
   uint64 ingress_dropped = 21;
-  // How far these counts are proven (INCOMPLETE while the run's journal is not sealed or has gaps);
-  // a result the owner cannot read at all is the whole message absent.
+  // How far these counts are proven: INCOMPLETE with LOST_RECORDS, SOURCE_WITHOUT_MANIFEST,
+  // READ_ERROR, STOPPED_BEFORE_ITS_BOUND / JOURNAL_ENDED_BEFORE_ITS_BOUND (bounded plans only) or
+  // FOLLOWED_OR_UNRESOLVED_AT_END; a result the owner cannot read at all, or of a run still PENDING
+  // or RUNNING (its counts are its end's), is the whole message absent.
   DataQuality quality = 22;
   // Why the quality is not VERIFIED.
   repeated string quality_reasons = 23;
@@ -537,13 +551,15 @@ message TrainingRun {
   optional uint64 ended_unix_ms = 9;
   // Its lifecycle.
   TrainingRunStatus status = 10;
-  // Why it ended (PLAN_DURATION, PLAN_LAUNCH_COUNT, STOP_REQUESTED, a failure); empty while running.
+  // Why it ended: PLAN_DURATION, PLAN_LAUNCH_COUNT or JOURNAL_END (COMPLETED), STOP_REQUESTED[: <reason>]
+  // (STOPPED), the cut-off (INTERRUPTED), the failure text (FAILED); empty while running.
   string stop_reason = 11;
-  // Qualified launches processed so far.
+  // Decided launches (TrainingResult.evaluated): known at the run's end, 0 before.
   uint64 launches_processed = 12;
-  // Its results so far.
+  // Its results at its end; absent while PENDING or RUNNING.
   TrainingResult result = 13;
-  // The owner and journal the run was read from.
+  // The owner and the run's state record (INCOMPLETE "RUNNING: its counts are its end's" while
+  // PENDING or RUNNING).
   OwnerProvenance provenance = 14;
   // The request that started it.
   string request_id = 15;
@@ -551,24 +567,26 @@ message TrainingRun {
   string replay_source = 16;
 }
 
-// Params of `bsc.training.run.start` (prepared).
+// Params of `bsc.training.run.start`: a REPLAY of one profile revision (CommandRequest.resource_id =
+// profile_id, expected profile_version = its revision).
 message TrainingRunStartCommand {
   // The profile.
   string profile_id = 1;
   // How it executes.
   TrainingRunMode mode = 2;
-  // The venues it trains on (a subset of the profile's).
+  // The venues it trains on (a subset of the profile's, never empty).
   repeated string venues = 3;
   // Its bound.
   TrainingRunPlan plan = 4;
-  // REPLAY: a ReplaySource.source_id of the owner's catalogue (never a path); empty for PAPER and
-  // SHADOW.
+  // A ReplaySource.source_id of the owner's catalogue (never a path).
   string replay_source = 5;
 }
 
-// Params of `bsc.training.run.stop` (prepared); CommandRequest.resource_id names the run.
+// Params of `bsc.training.run.stop`: CommandRequest.resource_id names the run, no expected version
+// (a stop changes none); a PENDING run stops at once, a RUNNING one is STOPPING until its job ends
+// it (REJECTED_ENDED once it has ended).
 message TrainingRunStopCommand {
-  // Why the operator stops it (free text, diagnostic only).
+  // Why the operator stops it (free text without control characters, diagnostic only).
   string reason = 1;
 }
 
@@ -600,7 +618,9 @@ message TrainingRunQuery {
   repeated TrainingRunStatus statuses = 2;
   // The previous page's next_cursor; empty: the first page.
   string cursor = 3;
-  // At most this many runs; 0: the owner's default; above its cap: refused (LIMIT_EXCEEDED).
+  // At most this many runs; 0: the owner's default (BSC_QUERY_PAGE_DEFAULT); above its cap
+  // (BSC_QUERY_PAGE_MAX): refused (LIMIT_EXCEEDED). An unknown status is INVALID_FILTER, a cursor of
+  // another filter CURSOR_INVALID.
   uint32 limit = 4;
 }
 
@@ -610,7 +630,7 @@ message TrainingRunPage {
   Availability availability = 1;
   // Why it is not AVAILABLE.
   string unavailable_reason = 2;
-  // The owner and the snapshot the cursor is bound to.
+  // The owner and the snapshot the cursor is bound to (owner_version: the newest run's number).
   OwnerProvenance provenance = 3;
   // The runs.
   repeated TrainingRun runs = 4;
@@ -628,13 +648,14 @@ message ReplaySourceQuery {
   uint32 limit = 2;
 }
 
-// One recorded run or journal the owner can replay, named by its catalogue id only (never a path).
+// One recorded runtime run the owner can replay, named by its catalogue id only (never a path); a
+// run still recording (no manifest yet) is INCOMPLETE with NO_MANIFEST, its records unknown (0).
 message ReplaySource {
-  // The catalogue id a REPLAY start names.
+  // The catalogue id a REPLAY start names (the recorded runtime run's id).
   string source_id = 1;
-  // RECORDED_RUN or MARKET_JOURNAL.
+  // MARKET_JOURNAL (a recorded runtime run's journal).
   string kind = 2;
-  // The recorded training run, when it is one; empty otherwise.
+  // Reserved for a recorded training run; empty (every source is a runtime run).
   string run_id = 3;
   // Its first block; absent when unknown.
   optional uint64 from_block = 4;

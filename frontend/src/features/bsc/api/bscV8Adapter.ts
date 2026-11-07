@@ -5,6 +5,7 @@ import { TradeDetailSchema } from "@/core/generated/darkbot/bsc/v1/history_pb";
 import {
   LiveStrategySelectCommandSchema, ReplaySourcePageSchema, StrategyCSettingsSetAllCommandSchema, StrategyCSettingsStateSchema, TrainingProfileCloneCommandSchema,
   TrainingProfileCreateCommandSchema, TrainingProfileDeleteCommandSchema, TrainingProfilesSchema, TrainingProfileUpdateCommandSchema, TrainingRunPageSchema, TrainingRunStartCommandSchema,
+  TrainingRunStopCommandSchema,
 } from "@/core/generated/darkbot/bsc/v1/training_pb";
 import {
   MainPayoutPolicySetCommandSchema, ProfitTransferPolicySetCommandSchema, WalletDestinationConfirmCommandSchema, WalletDestinationSetCommandSchema, WalletHistoryPageSchema,
@@ -14,8 +15,9 @@ import { BscWatchStateSchema } from "@/core/generated/darkbot/bsc/v1/watch_pb";
 
 // V8 (BSC-V8-09, FE-V8-17): the V8 contracts of protocol/schemas/darkbot/bsc/v1/
 // {common,training,history,wallet,watch,query}.proto, decoded in one place (the generated types
-// stay behind adapters). Answered natively: StrategyCSettingsState and TrainingProfiles (bsc/query),
-// `bsc.strategy.set_all` and the four `bsc.training.profile.*` commands; every other one is prepared, and the frontend shows it NOT_IMPLEMENTED
+// stay behind adapters). Answered natively: StrategyCSettingsState, TrainingProfiles, TrainingRuns and
+// ReplaySources (bsc/query), `bsc.strategy.set_all`, the four `bsc.training.profile.*` commands and
+// `bsc.training.run.start/stop`; every other one is prepared, and the frontend shows it NOT_IMPLEMENTED
 // or UNAVAILABLE until its native owner answers (core/realtime/bscQuery.ts).
 
 export { Availability, DataQuality, TimeSource, PerformanceMetric, PerformanceScope } from "@/core/generated/darkbot/bsc/v1/common_pb";
@@ -24,7 +26,7 @@ export { TradeStatus, ExitReason, ExitReasonSource, TradePlacement, TradeSort } 
 export type { TradeRow, TradeDetail, TradeHistoryPage } from "@/core/generated/darkbot/bsc/v1/history_pb";
 export { QueryRefusal } from "@/core/generated/darkbot/bsc/v1/query_pb";
 export { CreatorSoldBeforeFill, CreatorSellExit, ReplayVerdict, SettingsApplyStatus, TrainingProfileStatus, TrainingRunMode, TrainingRunStatus, TrainingRunStopKind } from "@/core/generated/darkbot/bsc/v1/training_pb";
-export type { StrategyCSettings, StrategyCSettingsState, TrainingProfile, TrainingProfiles, TrainingRun, TrainingRunPage } from "@/core/generated/darkbot/bsc/v1/training_pb";
+export type { ReplaySource, ReplaySourcePage, StrategyCSettings, StrategyCSettingsState, TrainingProfile, TrainingProfiles, TrainingResult, TrainingRun, TrainingRunPage } from "@/core/generated/darkbot/bsc/v1/training_pb";
 export { ChainTxStatus, PolicyUnit, TransferStatus, WalletMovementKind, WalletRole } from "@/core/generated/darkbot/bsc/v1/wallet_pb";
 export type {
   FiatQuote, MainPayoutPolicy, PolicyAmount, ProfitTransferPolicy, WalletAccount, WalletAuthorization, WalletAuthorizationBounds, WalletDestination, WalletHistoryPage,
@@ -47,6 +49,7 @@ export const V8_CONTRACTS = {
   training_profile_delete_command: TrainingProfileDeleteCommandSchema,
   training_run_page: TrainingRunPageSchema,
   training_run_start_command: TrainingRunStartCommandSchema,
+  training_run_stop_command: TrainingRunStopCommandSchema,
   live_strategy_select_command: LiveStrategySelectCommandSchema,
   replay_source_page: ReplaySourcePageSchema,
   wallet_history_page: WalletHistoryPageSchema,

@@ -578,7 +578,7 @@ export type TrainingProfile = Message<"darkbot.bsc.v1.TrainingProfile"> & {
   runIds: string[];
 
   /**
-   * Whether a running run or the LIVE selection uses it (edits then need a clone).
+   * Whether a PENDING or RUNNING run or the LIVE selection uses it (edits then need a clone).
    *
    * @generated from field: bool in_use = 11;
    */
@@ -844,8 +844,10 @@ export const TrainingProfileDeleteCommandSchema: GenMessage<TrainingProfileDelet
   messageDesc(file_darkbot_bsc_v1_training, 13);
 
 /**
- * The bound of a training run: exactly the field its stop_kind names is set, the owner refuses any
- * other combination.
+ * The bound of a training run: exactly the field its stop_kind names is set (a positive one, none for
+ * UNTIL_STOPPED), the owner refuses any other combination. A bounded run takes no launch past its
+ * bound and ends once every launch it took is decided and no position is open, or at the journal's
+ * end.
  *
  * @generated from message darkbot.bsc.v1.TrainingRunPlan
  */
@@ -858,14 +860,14 @@ export type TrainingRunPlan = Message<"darkbot.bsc.v1.TrainingRunPlan"> & {
   stopKind: TrainingRunStopKind;
 
   /**
-   * DURATION only: the run's length, milliseconds.
+   * DURATION only: the recorded run's time it replays, milliseconds.
    *
    * @generated from field: optional uint64 duration_ms = 2;
    */
   durationMs?: bigint;
 
   /**
-   * LAUNCH_COUNT only: the qualified launches (the engine's Decided outputs) it processes.
+   * LAUNCH_COUNT only: the decided launches (the engine's Decided outputs) it processes.
    *
    * @generated from field: optional uint64 max_launches = 3;
    */
@@ -1034,8 +1036,10 @@ export type TrainingResult = Message<"darkbot.bsc.v1.TrainingResult"> & {
   ingressDropped: bigint;
 
   /**
-   * How far these counts are proven (INCOMPLETE while the run's journal is not sealed or has gaps);
-   * a result the owner cannot read at all is the whole message absent.
+   * How far these counts are proven: INCOMPLETE with LOST_RECORDS, SOURCE_WITHOUT_MANIFEST,
+   * READ_ERROR, STOPPED_BEFORE_ITS_BOUND / JOURNAL_ENDED_BEFORE_ITS_BOUND (bounded plans only) or
+   * FOLLOWED_OR_UNRESOLVED_AT_END; a result the owner cannot read at all, or of a run still PENDING
+   * or RUNNING (its counts are its end's), is the whole message absent.
    *
    * @generated from field: darkbot.bsc.v1.DataQuality quality = 22;
    */
@@ -1217,28 +1221,30 @@ export type TrainingRun = Message<"darkbot.bsc.v1.TrainingRun"> & {
   status: TrainingRunStatus;
 
   /**
-   * Why it ended (PLAN_DURATION, PLAN_LAUNCH_COUNT, STOP_REQUESTED, a failure); empty while running.
+   * Why it ended: PLAN_DURATION, PLAN_LAUNCH_COUNT or JOURNAL_END (COMPLETED), STOP_REQUESTED[: <reason>]
+   * (STOPPED), the cut-off (INTERRUPTED), the failure text (FAILED); empty while running.
    *
    * @generated from field: string stop_reason = 11;
    */
   stopReason: string;
 
   /**
-   * Qualified launches processed so far.
+   * Decided launches (TrainingResult.evaluated): known at the run's end, 0 before.
    *
    * @generated from field: uint64 launches_processed = 12;
    */
   launchesProcessed: bigint;
 
   /**
-   * Its results so far.
+   * Its results at its end; absent while PENDING or RUNNING.
    *
    * @generated from field: darkbot.bsc.v1.TrainingResult result = 13;
    */
   result?: TrainingResult;
 
   /**
-   * The owner and journal the run was read from.
+   * The owner and the run's state record (INCOMPLETE "RUNNING: its counts are its end's" while
+   * PENDING or RUNNING).
    *
    * @generated from field: darkbot.bsc.v1.OwnerProvenance provenance = 14;
    */
@@ -1267,7 +1273,8 @@ export const TrainingRunSchema: GenMessage<TrainingRun> = /*@__PURE__*/
   messageDesc(file_darkbot_bsc_v1_training, 16);
 
 /**
- * Params of `bsc.training.run.start` (prepared).
+ * Params of `bsc.training.run.start`: a REPLAY of one profile revision (CommandRequest.resource_id =
+ * profile_id, expected profile_version = its revision).
  *
  * @generated from message darkbot.bsc.v1.TrainingRunStartCommand
  */
@@ -1287,7 +1294,7 @@ export type TrainingRunStartCommand = Message<"darkbot.bsc.v1.TrainingRunStartCo
   mode: TrainingRunMode;
 
   /**
-   * The venues it trains on (a subset of the profile's).
+   * The venues it trains on (a subset of the profile's, never empty).
    *
    * @generated from field: repeated string venues = 3;
    */
@@ -1301,8 +1308,7 @@ export type TrainingRunStartCommand = Message<"darkbot.bsc.v1.TrainingRunStartCo
   plan?: TrainingRunPlan;
 
   /**
-   * REPLAY: a ReplaySource.source_id of the owner's catalogue (never a path); empty for PAPER and
-   * SHADOW.
+   * A ReplaySource.source_id of the owner's catalogue (never a path).
    *
    * @generated from field: string replay_source = 5;
    */
@@ -1317,13 +1323,15 @@ export const TrainingRunStartCommandSchema: GenMessage<TrainingRunStartCommand> 
   messageDesc(file_darkbot_bsc_v1_training, 17);
 
 /**
- * Params of `bsc.training.run.stop` (prepared); CommandRequest.resource_id names the run.
+ * Params of `bsc.training.run.stop`: CommandRequest.resource_id names the run, no expected version
+ * (a stop changes none); a PENDING run stops at once, a RUNNING one is STOPPING until its job ends
+ * it (REJECTED_ENDED once it has ended).
  *
  * @generated from message darkbot.bsc.v1.TrainingRunStopCommand
  */
 export type TrainingRunStopCommand = Message<"darkbot.bsc.v1.TrainingRunStopCommand"> & {
   /**
-   * Why the operator stops it (free text, diagnostic only).
+   * Why the operator stops it (free text without control characters, diagnostic only).
    *
    * @generated from field: string reason = 1;
    */
@@ -1430,7 +1438,9 @@ export type TrainingRunQuery = Message<"darkbot.bsc.v1.TrainingRunQuery"> & {
   cursor: string;
 
   /**
-   * At most this many runs; 0: the owner's default; above its cap: refused (LIMIT_EXCEEDED).
+   * At most this many runs; 0: the owner's default (BSC_QUERY_PAGE_DEFAULT); above its cap
+   * (BSC_QUERY_PAGE_MAX): refused (LIMIT_EXCEEDED). An unknown status is INVALID_FILTER, a cursor of
+   * another filter CURSOR_INVALID.
    *
    * @generated from field: uint32 limit = 4;
    */
@@ -1465,7 +1475,7 @@ export type TrainingRunPage = Message<"darkbot.bsc.v1.TrainingRunPage"> & {
   unavailableReason: string;
 
   /**
-   * The owner and the snapshot the cursor is bound to.
+   * The owner and the snapshot the cursor is bound to (owner_version: the newest run's number).
    *
    * @generated from field: darkbot.bsc.v1.OwnerProvenance provenance = 3;
    */
@@ -1529,27 +1539,28 @@ export const ReplaySourceQuerySchema: GenMessage<ReplaySourceQuery> = /*@__PURE_
   messageDesc(file_darkbot_bsc_v1_training, 23);
 
 /**
- * One recorded run or journal the owner can replay, named by its catalogue id only (never a path).
+ * One recorded runtime run the owner can replay, named by its catalogue id only (never a path); a
+ * run still recording (no manifest yet) is INCOMPLETE with NO_MANIFEST, its records unknown (0).
  *
  * @generated from message darkbot.bsc.v1.ReplaySource
  */
 export type ReplaySource = Message<"darkbot.bsc.v1.ReplaySource"> & {
   /**
-   * The catalogue id a REPLAY start names.
+   * The catalogue id a REPLAY start names (the recorded runtime run's id).
    *
    * @generated from field: string source_id = 1;
    */
   sourceId: string;
 
   /**
-   * RECORDED_RUN or MARKET_JOURNAL.
+   * MARKET_JOURNAL (a recorded runtime run's journal).
    *
    * @generated from field: string kind = 2;
    */
   kind: string;
 
   /**
-   * The recorded training run, when it is one; empty otherwise.
+   * Reserved for a recorded training run; empty (every source is a runtime run).
    *
    * @generated from field: string run_id = 3;
    */
@@ -1850,21 +1861,23 @@ export enum TrainingRunMode {
   UNSPECIFIED = 0,
 
   /**
-   * PAPER: the BSC_RUNTIME_MODE PAPER path on live market data to the PAPER sink, nothing sent.
+   * PAPER: the BSC_RUNTIME_MODE PAPER path on live market data to the PAPER sink, nothing sent (not
+   * yet: a start is REJECTED_INVALID).
    *
    * @generated from enum value: TRAINING_RUN_MODE_PAPER = 1;
    */
   PAPER = 1,
 
   /**
-   * SHADOW: the engine's valuation only (decisions and exits valued by the exact curve), no sink.
+   * SHADOW: the engine's valuation only (decisions and exits valued by the exact curve), no sink (not
+   * yet: a start is REJECTED_INVALID).
    *
    * @generated from enum value: TRAINING_RUN_MODE_SHADOW = 2;
    */
   SHADOW = 2,
 
   /**
-   * Offline replay of recorded journals (strategy-replay).
+   * Offline replay of a recorded runtime run's journal (ReplaySource), away from the runtime.
    *
    * @generated from enum value: TRAINING_RUN_MODE_REPLAY = 3;
    */
@@ -1891,21 +1904,21 @@ export enum TrainingRunStopKind {
   UNSPECIFIED = 0,
 
   /**
-   * After duration_ms.
+   * After duration_ms of the recorded run's own time.
    *
    * @generated from enum value: TRAINING_RUN_STOP_KIND_DURATION = 1;
    */
   DURATION = 1,
 
   /**
-   * After max_launches qualified launches processed.
+   * After max_launches decided launches.
    *
    * @generated from enum value: TRAINING_RUN_STOP_KIND_LAUNCH_COUNT = 2;
    */
   LAUNCH_COUNT = 2,
 
   /**
-   * Only by a stop request.
+   * By a stop request or the recorded run's end.
    *
    * @generated from enum value: TRAINING_RUN_STOP_KIND_UNTIL_STOPPED = 3;
    */
@@ -1946,21 +1959,21 @@ export enum TrainingRunStatus {
   RUNNING = 2,
 
   /**
-   * A stop was requested; the run seals its results.
+   * Running with a stop request its job has not taken up yet; the run then seals its results.
    *
    * @generated from enum value: TRAINING_RUN_STATUS_STOPPING = 3;
    */
   STOPPING = 3,
 
   /**
-   * Ended by its plan (duration or launch count).
+   * Ended by its plan or the recorded run's end (PLAN_DURATION, PLAN_LAUNCH_COUNT, JOURNAL_END).
    *
    * @generated from enum value: TRAINING_RUN_STATUS_COMPLETED = 4;
    */
   COMPLETED = 4,
 
   /**
-   * Ended by a stop request.
+   * Ended by a stop request (STOP_REQUESTED[: <reason>]).
    *
    * @generated from enum value: TRAINING_RUN_STATUS_STOPPED = 5;
    */
@@ -1981,7 +1994,8 @@ export enum TrainingRunStatus {
   UNKNOWN = 7,
 
   /**
-   * The runtime ended or restarted under it: sealed up to its last journal record, never resumed.
+   * Its job was cut off or signalled without a stop request, or was gone: sealed up to its last
+   * record, never resumed.
    *
    * @generated from enum value: TRAINING_RUN_STATUS_INTERRUPTED = 8;
    */

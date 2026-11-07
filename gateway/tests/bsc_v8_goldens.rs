@@ -1,7 +1,7 @@
 //! Rust↔TS golden bytes of the prepared BSC V8 contracts (BSC-V8-09, FE-V8-17): training,
 //! Strategy C settings, trade history, wallets, WATCH and the bounded query envelope. These bytes
 //! pin the wire shape the native owners and the browser share (answered natively so far: the
-//! settings state, `bsc.strategy.set_all` and the training profiles; the rest prepared): u64/i64
+//! settings state, `bsc.strategy.set_all`, the training profiles and runs; the rest prepared): u64/i64
 //! limits, signed and >u128 decimal wei, absent vs present-zero optionals, enums and oneofs.
 //! frontend/src/features/bsc/api/bsc-v8-golden.test.ts decodes the same bytes and re-encodes
 //! them byte for byte.
@@ -21,12 +21,13 @@ use darkbot_gateway::proto::bsc::v1::{
     TrainingProfileCreateCommand, TrainingProfileDeleteCommand, TrainingProfileStatus,
     TrainingProfileUpdateCommand, TrainingProfiles, TrainingResult, TrainingRun, TrainingRunMode,
     TrainingRunPage, TrainingRunPlan, TrainingRunStartCommand, TrainingRunStatus,
-    TrainingRunStopKind, TransferStatus, WalletAccount, WalletAuthorization,
-    WalletAuthorizationBounds, WalletAuthorizationScope, WalletBalanceSnapshot, WalletDestination,
-    WalletDestinationConfirmCommand, WalletDestinationSetCommand, WalletFundTradingCommand,
-    WalletHistoryPage, WalletMovement, WalletMovementKind, WalletPayoutCommand, WalletRole,
-    WalletTransferAuthorizeCommand, WalletTransferPrepareCommand, WalletTransferReceipt,
-    WalletTransferState, WalletTreasuryState, WatchSubjectKind, WatchSubjectState, WatchVerdict,
+    TrainingRunStopCommand, TrainingRunStopKind, TransferStatus, WalletAccount,
+    WalletAuthorization, WalletAuthorizationBounds, WalletAuthorizationScope,
+    WalletBalanceSnapshot, WalletDestination, WalletDestinationConfirmCommand,
+    WalletDestinationSetCommand, WalletFundTradingCommand, WalletHistoryPage, WalletMovement,
+    WalletMovementKind, WalletPayoutCommand, WalletRole, WalletTransferAuthorizeCommand,
+    WalletTransferPrepareCommand, WalletTransferReceipt, WalletTransferState, WalletTreasuryState,
+    WatchSubjectKind, WatchSubjectState, WatchVerdict,
 };
 use prost::Message;
 use std::{fs, path::PathBuf};
@@ -628,15 +629,23 @@ fn bsc_v8_contract_golden_bytes() {
     check(
         "training_run_start_command",
         TrainingRunStartCommand {
-            profile_id: "p1".into(),
-            mode: TrainingRunMode::Shadow as i32,
-            venues: vec!["BSC_VENUE_FOUR_CLASSIC".into()],
+            profile_id: "p000001".into(),
+            mode: TrainingRunMode::Replay as i32,
+            venues: vec!["BSC_VENUE_FLAP".into(), "BSC_VENUE_OPENFOUR".into()],
             plan: Some(TrainingRunPlan {
-                stop_kind: TrainingRunStopKind::LaunchCount as i32,
-                duration_ms: None,
-                max_launches: Some(100),
+                stop_kind: TrainingRunStopKind::Duration as i32,
+                duration_ms: Some(5_400_000),
+                max_launches: None,
             }),
-            replay_source: String::new(),
+            replay_source: "1794026420785".into(),
+        }
+        .encode_to_vec(),
+    );
+    // A stop names the run as resource, without a version; its reason is diagnostic only.
+    check(
+        "training_run_stop_command",
+        TrainingRunStopCommand {
+            reason: "operator stop (Training module)".into(),
         }
         .encode_to_vec(),
     );
@@ -655,11 +664,11 @@ fn bsc_v8_contract_golden_bytes() {
         ReplaySourcePage {
             availability: Availability::Available as i32,
             unavailable_reason: String::new(),
-            provenance: provenance("bsc_runtime training runs", DataQuality::Verified),
+            provenance: provenance("bsc_runtime journal", DataQuality::Verified),
             sources: vec![ReplaySource {
-                source_id: "rec-run-1".into(),
-                kind: "RECORDED_RUN".into(),
-                run_id: "run-1".into(),
+                source_id: "1794026420785".into(),
+                kind: "MARKET_JOURNAL".into(),
+                run_id: String::new(),
                 from_block: Some(0),
                 to_block: Some(u64::MAX),
                 from: block_time(Some(0), Some(0)),
@@ -667,7 +676,7 @@ fn bsc_v8_contract_golden_bytes() {
                 records: u64::MAX,
                 config_sha256: "01".repeat(32),
                 quality: DataQuality::Incomplete as i32,
-                quality_reasons: vec!["JOURNAL_GAP".into()],
+                quality_reasons: vec!["NO_MANIFEST: a run still recording or cut off".into()],
             }],
             next_cursor: String::new(),
             has_more: false,

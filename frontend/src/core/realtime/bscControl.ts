@@ -295,13 +295,20 @@ export async function profileCommand(origin: string, action: ProfileAction, reso
   version: { case: "configVersion" | "profileVersion"; value: bigint }, detail: string): Promise<void> {
   await ownerSend(origin, action, resourceId, params, version, detail);
 }
-async function ownerSend(origin: string, action: OwnerAction | ProfileAction | "bsc.live.grant" | "bsc.strategy.set" | "bsc.strategy.set_all" | LiveDecision["action"], resourceId: string, params: Uint8Array,
-  version: { case: "walletPolicyVersion" | "configVersion" | "profileVersion"; value: bigint }, detail: string): Promise<void> {
+/** V8 Training (BSC-V8-02/03): a training run at its native run owner. A start names the profile
+ *  (resource) at its revision (`profileVersion`); a stop names the run and carries no version (a
+ *  stop changes none). The params are the adapter's encoding of the training.proto command. */
+export type TrainingAction = "bsc.training.run.start" | "bsc.training.run.stop";
+export async function trainingCommand(origin: string, action: TrainingAction, resourceId: string, params: Uint8Array, revision: bigint | null, detail: string): Promise<void> {
+  await ownerSend(origin, action, resourceId, params, revision === null ? null : { case: "profileVersion", value: revision }, detail);
+}
+async function ownerSend(origin: string, action: OwnerAction | ProfileAction | TrainingAction | "bsc.live.grant" | "bsc.strategy.set" | "bsc.strategy.set_all" | LiveDecision["action"], resourceId: string, params: Uint8Array,
+  version: { case: "walletPolicyVersion" | "configVersion" | "profileVersion"; value: bigint } | null, detail: string): Promise<void> {
   if (useSourceControl.getState().busy) return;
   const requestId = crypto.randomUUID();
   useSourceControl.setState({ busy: true, receipt: { id: requestId, phase: "SENDING", detail, origin } });
   // The decided phase arrives with the response; its receipt line is the ledger detail.
-  const o = await send({ requestId, action, resourceId, params, expected: { version } }, true);
+  const o = await send({ requestId, action, resourceId, params, expected: version ? { version } : undefined }, true);
   const busy = o.kind === "UNKNOWN" || (o.kind === "DECIDED" && (o.phase === CommandPhase.PENDING || o.phase === CommandPhase.PENDING_RECONCILE));
   const phase = o.kind === "DECIDED" ? CommandPhase[o.phase] ?? "UNKNOWN" : o.kind;
   useSourceControl.setState({ busy, receipt: { id: requestId, phase, detail: o.detail, origin } });

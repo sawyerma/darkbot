@@ -3,12 +3,13 @@ import { readFileSync } from "node:fs";
 import { create, fromBinary, toBinary, type MessageInitShape } from "@bufbuild/protobuf";
 import { BscLiveStateSchema, BscMonitoringStateSchema } from "../src/core/generated/darkbot/bsc/v1/status_pb";
 import { BscQueryResponseSchema } from "../src/core/generated/darkbot/bsc/v1/query_pb";
-import { Availability } from "../src/core/generated/darkbot/bsc/v1/common_pb";
+import { Availability, DataQuality } from "../src/core/generated/darkbot/bsc/v1/common_pb";
 import { BscQueryRequestSchema } from "../src/core/generated/darkbot/bsc/v1/query_pb";
 import {
   CreatorSellExit, CreatorSoldBeforeFill, SettingsApplyStatus, StrategyCSettingsSetAllCommandSchema, StrategyCSettingsStateSchema, TrainingProfileCloneCommandSchema,
   TrainingProfileCreateCommandSchema, TrainingProfileDeleteCommandSchema, TrainingProfileSchema, TrainingProfileStatus, TrainingProfileUpdateCommandSchema, TrainingProfilesSchema,
-  type TrainingProfile,
+  ReplaySourcePageSchema, ReplaySourceSchema, TrainingResultSchema, TrainingRunMode, TrainingRunPageSchema, TrainingRunSchema, TrainingRunStartCommandSchema, TrainingRunStatus,
+  TrainingRunStopCommandSchema, TrainingRunStopKind, type ReplaySource, type TrainingProfile, type TrainingRun,
 } from "../src/core/generated/darkbot/bsc/v1/training_pb";
 import { createHash } from "node:crypto";
 import {
@@ -674,12 +675,17 @@ test("Live takes the owner's settings state over bsc/query: the file's values, n
   expect(errors).toEqual([]);
 });
 
-/** A stand-in of the native profile owner (TEST_ONLY, BSC_v2's V8-01 contract): its catalog over
- *  bsc/query (with the settings state), its four commands at /api/v1/command, each decided with
- *  the owner's receipt line `outcome=… action=… profile_id=… revision=… catalog=… request_id=…`. */
-async function profileOwner(page: Page, seed: TrainingProfile[]): Promise<{ sent: CommandRequest[]; asked: string[] }> {
+/** A stand-in of the native profile and run owners (TEST_ONLY, BSC_v2's V8-01/02/03 contract):
+ *  the catalog, the runs (newest first, `pageSize` per page, cursor `<filter>.<run_id>`) and the
+ *  recorded runs over bsc/query (with the settings state), their commands at /api/v1/command, each
+ *  decided with the owner's receipt line (`outcome=… action=… profile_id=…|run_id=… request_id=…`).
+ *  A started run is RUNNING (its job took it up), a stopped one STOPPING until the test ends it. */
+async function profileOwner(page: Page, seed: TrainingProfile[], owner: { runs?: TrainingRun[]; sources?: ReplaySource[]; pageSize?: number } = {}):
+  Promise<{ sent: CommandRequest[]; asked: string[]; runs: TrainingRun[] }> {
   const sent: CommandRequest[] = [], asked: string[] = [];
   const profiles = [...seed];
+  const runs = [...owner.runs ?? []];
+  const pageSize = owner.pageSize ?? 50;
   let catalog = 1n, next = profiles.length + 1, detail = "";
   const proto = (bytes: Uint8Array) => ({ body: Buffer.from(bytes), contentType: "application/x-protobuf" });
   await page.route("**/api/v1/command**", async (r) => {
@@ -712,13 +718,40 @@ async function profileOwner(page: Page, seed: TrainingProfile[]): Promise<{ sent
       const at = profiles.findIndex(x => x.profileId === d.profileId);
       if (d.archive) profiles[at]!.status = TrainingProfileStatus.ARCHIVED; else profiles.splice(at, 1);
       detail = line(d.archive ? "ARCHIVE" : "DELETE", d.profileId, "-");
+    } else if (req.action === "bsc.training.run.start") {
+      const c = fromBinary(TrainingRunStartCommandSchema, req.params);
+      const p = profiles.find(x => x.profileId === req.resourceId)!;
+      const id = `t${String(runs.length + 1).padStart(6, "0")}`;
+      runs.unshift(create(TrainingRunSchema, { runId: id, profileId: p.profileId, profileRevision: p.revision, configSha256: p.configSha256, mode: c.mode, venues: c.venues, plan: c.plan,
+        startedUnixMs: now, status: TrainingRunStatus.RUNNING, requestId: req.requestId, replaySource: c.replaySource,
+        provenance: { owner: "bsc_runtime training runs", quality: DataQuality.INCOMPLETE, qualityReasons: ["RUNNING: its counts are its end's"], provenance: "NATIVE_CREATED" } }));
+      detail = `outcome=APPLIED action=START run_id=${id} request_id=${req.requestId}\nrun=${id} status=PENDING`;
+    } else if (req.action === "bsc.training.run.stop") {
+      runs.find(x => x.runId === req.resourceId)!.status = TrainingRunStatus.STOPPING;
+      detail = `outcome=APPLIED action=STOP run_id=${req.resourceId} request_id=${req.requestId}`;
     }
     return r.fulfill(proto(toBinary(CommandResponseSchema, create(CommandResponseSchema, { status: CommandStatus.ACCEPTED, commandId: req.requestId, requestId: req.requestId, phase: CommandPhase.COMPLETED }))));
   });
   await page.route("**/api/v1/bsc/query", async (r) => {
     const q = fromBinary(BscQueryRequestSchema, r.request().postDataBuffer()!);
     asked.push(q.query.case ?? "");
-    const answer = q.query.case === "trainingProfiles"
+    const ok = { requestId: q.requestId, availability: Availability.AVAILABLE };
+    const runPage = () => {
+      if (q.query.case !== "trainingRuns") return undefined;
+      const f = q.query.value;
+      const list = runs.filter(r => !f.profileId || r.profileId === f.profileId);
+      const start = f.cursor ? list.findIndex(r => `f${f.profileId}.${r.runId}` === f.cursor) + 1 : 0;
+      const shown = list.slice(start, start + (f.limit || pageSize));
+      const more = start + shown.length < list.length;
+      return create(TrainingRunPageSchema, { availability: Availability.AVAILABLE, runs: shown, hasMore: more, nextCursor: more ? `f${f.profileId}.${shown.at(-1)!.runId}` : "",
+        provenance: { owner: "bsc_runtime training runs", provenance: "NATIVE_CREATED" } });
+    };
+    const answer = q.query.case === "trainingRuns"
+      ? create(BscQueryResponseSchema, { ...ok, result: { case: "trainingRuns", value: runPage()! } })
+      : q.query.case === "replaySources"
+      ? create(BscQueryResponseSchema, { ...ok, result: { case: "replaySources", value: create(ReplaySourcePageSchema, { availability: Availability.AVAILABLE, sources: owner.sources ?? [],
+        provenance: { owner: "bsc_runtime journal", provenance: "NATIVE_CREATED" } }) } })
+      : q.query.case === "trainingProfiles"
       ? create(BscQueryResponseSchema, { requestId: q.requestId, availability: Availability.AVAILABLE, result: { case: "trainingProfiles", value: create(TrainingProfilesSchema,
         { availability: Availability.AVAILABLE, catalogVersion: catalog, profiles, provenance: { owner: "bsc_runtime strategy profiles", provenance: "NATIVE_CREATED" } }) } })
       : q.query.case === "strategySettings"
@@ -726,7 +759,7 @@ async function profileOwner(page: Page, seed: TrainingProfile[]): Promise<{ sent
         : create(BscQueryResponseSchema, { requestId: q.requestId, availability: Availability.NOT_IMPLEMENTED, unavailableReason: "BSC-V8-02" });
     return r.fulfill(proto(toBinary(BscQueryResponseSchema, answer)));
   });
-  return { sent, asked };
+  return { sent, asked, runs };
 }
 
 test("Training modules at the native profile owner: create, edit, duplicate and delete at its versions (FE-V8-04, BSC-V8-01)", async ({ page }) => {
@@ -794,6 +827,100 @@ test("Training modules at the native profile owner: create, edit, duplicate and 
   expect(fromBinary(TrainingProfileDeleteCommandSchema, sent[3]!.params)).toMatchObject({ profileId: "p000002", archive: false });
   // One catalog read per view and per decided request, never polled.
   expect(asked.filter(q => q === "trainingProfiles")).toHaveLength(5);
+  expect(errors).toEqual([]);
+});
+
+test("Training runs at the native run owner: a REPLAY of the saved revision, its result per run, stop and refresh (FE-V8-07/08, BSC-V8-02/03)", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  // TEST_ONLY: one module at revision 3 with three ended runs (two per page) and two recordings.
+  const flap = create(TrainingProfileSchema, { profileId: "p000001", name: "Flap fast", revision: 3n, configSha256: "ab".repeat(32), venues: ["BSC_VENUE_FLAP", "BSC_VENUE_OPENFOUR"],
+    status: TrainingProfileStatus.ACTIVE, values: settingsState().effective });
+  const ended = (id: string, revision: bigint, status: TrainingRunStatus, stopKind: TrainingRunStopKind, result: MessageInitShape<typeof TrainingResultSchema>, stopReason: string) =>
+    create(TrainingRunSchema, { runId: id, profileId: "p000001", profileRevision: revision, mode: TrainingRunMode.REPLAY, venues: ["BSC_VENUE_FLAP"], status, stopReason,
+      plan: { stopKind, maxLaunches: stopKind === TrainingRunStopKind.LAUNCH_COUNT ? 100n : undefined }, startedUnixMs: 1793000000000n, endedUnixMs: 1793000600000n,
+      launchesProcessed: result.evaluated ?? 0n, replaySource: "1794015832137", result, provenance: { owner: "bsc_runtime training runs", quality: DataQuality.VERIFIED, provenance: "NATIVE_CREATED" } });
+  const { sent, asked, runs } = await profileOwner(page, [flap], { pageSize: 2,
+    runs: [
+      ended("t000003", 3n, TrainingRunStatus.STOPPED, TrainingRunStopKind.UNTIL_STOPPED, { evaluated: 7n, quality: DataQuality.INCOMPLETE, qualityReasons: ["FOLLOWED_OR_UNRESOLVED_AT_END: 1 followed, 0 unresolved"] }, "STOP_REQUESTED"),
+      ended("t000002", 3n, TrainingRunStatus.FAILED, TrainingRunStopKind.UNTIL_STOPPED, { quality: DataQuality.INCOMPLETE, qualityReasons: ["READ_ERROR: segment 2"] }, "the journal does not read"),
+      ended("t000001", 2n, TrainingRunStatus.COMPLETED, TrainingRunStopKind.LAUNCH_COUNT, { evaluated: 100n, rejected: 60n, wins: 3n, losses: 1n, exitsTarget: 3n, exitsStop: 1n,
+        gainWei: "20000000000000000", lossWei: "7655000000000000", netWei: "12345000000000000", quality: DataQuality.VERIFIED }, "PLAN_LAUNCH_COUNT"),
+    ],
+    sources: [
+      create(ReplaySourceSchema, { sourceId: "1794050866992", kind: "MARKET_JOURNAL", from: { unixMs: 1794050866992n }, records: 0n, quality: DataQuality.INCOMPLETE, qualityReasons: ["NO_MANIFEST: a run still recording or cut off"] }),
+      create(ReplaySourceSchema, { sourceId: "1794026420785", kind: "MARKET_JOURNAL", from: { unixMs: 1794026420785n }, to: { unixMs: 1794036420785n }, records: 5000n, quality: DataQuality.VERIFIED }),
+    ] });
+  await feed(page, liveOf({}), strategyMonitoring([], [["generation", "0"]], [["strategy[0].state", "OFF"]]));
+  await page.goto("/bsc");
+  await area(page, "Training");
+  // The list: the newest run's result (unresolved: no net) and the module tested before.
+  await expect(page.getByTestId("bsc-training-module-p000001")).toContainText("Previously tested");
+  await page.getByRole("button", { name: "Open Flap fast module" }).click();
+  const id = (k: string) => page.getByTestId(`bsc-training-profile-${k}`);
+  const run = (k: string) => page.getByTestId(`bsc-training-run-${k}`);
+  // The newest run in the hero: stopped, its net unresolved, why it is incomplete.
+  await expect(id("result-status")).toHaveText("Stopped");
+  await expect(id("result")).toContainText("Net result—");
+  await expect(id("result-detail")).toContainText("Incomplete: FOLLOWED_OR_UNRESOLVED_AT_END: 1 followed, 0 unresolved");
+  // An older page by its cursor; picking a run changes every value.
+  await expect(id("runs-row-t000001")).toHaveCount(0);
+  await id("runs-older").click();
+  await id("runs-row-t000001").getByRole("button", { name: "t000001" }).click();
+  await expect(id("result-status")).toHaveText("Test completed");
+  await expect(id("result")).toContainText("Net result0.012345 BNB");
+  await expect(id("result")).toContainText("Completed trades4");
+  await expect(id("result")).toContainText("Win rate75.0 %");
+  await expect(id("result")).toContainText("Launches checked100");
+  await expect(id("result")).toContainText("Rejected60");
+  await expect(id("result-detail")).toContainText("revision 2 · 100 launches");
+  // The plan: REPLAY only, the newest complete recording offered first; hours exactly in ms.
+  await expect(page.getByLabel("Mode")).toHaveValue("REPLAY");
+  await expect(run("source")).toHaveValue("1794026420785");
+  await expect(run("source").locator("option").first()).toContainText("still recording, records unknown · incomplete");
+  await run("hours").fill("0.000001");
+  await expect(run("run-state")).toHaveText("Duration is no whole number of milliseconds");
+  await expect(run("start")).toBeDisabled();
+  await run("hours").fill("1.5");
+  await expect(run("run-state")).toContainText("Start test replays revision 3 on 2 markets over recorded run 1794026420785");
+  // An unsaved edit: the test replays a saved revision.
+  await id("maxOpen").fill("9");
+  await expect(run("start")).toBeDisabled();
+  await page.getByRole("button", { name: "Reset" }).click();
+  await run("start").click();
+  await expect(run("receipt")).toContainText("outcome=APPLIED action=START run_id=t000004");
+  // The started run: no counts until its end, the module locked, Stop instead of Start.
+  await expect(id("result-status")).toHaveText("Test running");
+  await expect(id("result-detail")).toContainText("Counts come at the run's end");
+  await expect(id("state")).toHaveText("Test running · stop to edit.");
+  await expect(id("save")).toHaveCount(0);
+  await expect(id("delete")).toBeDisabled();
+  await run("stop").click();
+  await expect(run("receipt")).toContainText("outcome=APPLIED action=STOP run_id=t000004");
+  await expect(run("stop")).toHaveText("Stopping…");
+  await expect(id("result-status")).toHaveText("Stopping");
+  // The job ends the run; the owner publishes no topic: Refresh reads it once.
+  const before = asked.filter(q => q === "trainingRuns").length;
+  await page.waitForTimeout(1200);
+  expect(asked.filter(q => q === "trainingRuns")).toHaveLength(before);
+  Object.assign(runs[0]!, { status: TrainingRunStatus.STOPPED, stopReason: "STOP_REQUESTED: operator stop (Training module)", endedUnixMs: 1793000900000n, launchesProcessed: 2n,
+    result: create(TrainingResultSchema, { evaluated: 2n, rejected: 2n, netWei: "0", quality: DataQuality.VERIFIED }) });
+  await id("runs-refresh").click();
+  await expect(id("result-status")).toHaveText("Stopped");
+  await expect(id("result")).toContainText("Launches checked2");
+  await expect(run("start")).toBeEnabled();
+  // Phone width: the runs table scrolls inside its card, the page never sideways.
+  await page.setViewportSize({ width: 390, height: 900 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  const runCommands = sent.filter(r => r.action.startsWith("bsc.training.run."));
+  expect(runCommands.map(r => [r.action, r.resourceId, r.expected?.version])).toEqual([
+    ["bsc.training.run.start", "p000001", { case: "profileVersion", value: 3n }],
+    ["bsc.training.run.stop", "t000004", undefined],
+  ]);
+  const start = fromBinary(TrainingRunStartCommandSchema, runCommands[0]!.params);
+  expect([start.profileId, start.mode, start.venues, start.plan?.stopKind, start.plan?.durationMs, start.plan?.maxLaunches, start.replaySource])
+    .toEqual(["p000001", TrainingRunMode.REPLAY, ["BSC_VENUE_FLAP", "BSC_VENUE_OPENFOUR"], TrainingRunStopKind.DURATION, 5_400_000n, undefined, "1794026420785"]);
+  expect(fromBinary(TrainingRunStopCommandSchema, runCommands[1]!.params).reason).toBe("operator stop (Training module)");
   expect(errors).toEqual([]);
 });
 
